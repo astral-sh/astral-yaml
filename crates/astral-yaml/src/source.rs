@@ -35,30 +35,38 @@ impl<'a> Source<'a> {
     /// # Errors
     /// Returns a decoding error located in the original bytes, or a size-limit error.
     pub fn with_limit(bytes: &'a [u8], max_bytes: usize) -> Result<Self, Error> {
+        enum CodeUnit {
+            Utf16,
+            Utf32,
+        }
         if bytes.len() > max_bytes {
             return Err(error(0, 0, "input byte limit exceeded"));
         }
         let encoding = detect(bytes);
-        if encoding == Encoding::Utf8 {
-            let text = std::str::from_utf8(bytes).map_err(|e| {
-                error(
-                    e.valid_up_to(),
-                    e.valid_up_to() + e.error_len().unwrap_or(bytes.len() - e.valid_up_to()),
-                    "invalid UTF-8",
-                )
-            })?;
-            return Ok(Self {
-                bytes,
-                text: Cow::Borrowed(text),
-                encoding,
-            });
-        }
+        let unit = match encoding {
+            Encoding::Utf16Be | Encoding::Utf16Le => CodeUnit::Utf16,
+            Encoding::Utf32Be | Encoding::Utf32Le => CodeUnit::Utf32,
+            Encoding::Utf8 => {
+                let text = std::str::from_utf8(bytes).map_err(|e| {
+                    error(
+                        e.valid_up_to(),
+                        e.valid_up_to() + e.error_len().unwrap_or(bytes.len() - e.valid_up_to()),
+                        "invalid UTF-8",
+                    )
+                })?;
+                return Ok(Self {
+                    bytes,
+                    text: Cow::Borrowed(text),
+                    encoding,
+                });
+            }
+        };
         let mut text = String::with_capacity(bytes.len());
         let mut offset = 0;
         while offset < bytes.len() {
             let start = offset;
-            let c = match encoding {
-                Encoding::Utf16Be | Encoding::Utf16Le => {
+            let c = match unit {
+                CodeUnit::Utf16 => {
                     let first = word(bytes, offset, encoding)?;
                     offset += 2;
                     let value = if (0xd800..=0xdbff).contains(&first) {
@@ -74,7 +82,7 @@ impl<'a> Source<'a> {
                     char::from_u32(value)
                         .ok_or_else(|| error(start, offset, "unpaired UTF-16 surrogate"))?
                 }
-                Encoding::Utf32Be | Encoding::Utf32Le => {
+                CodeUnit::Utf32 => {
                     let Some(chunk) = bytes.get(offset..offset + 4) else {
                         return Err(error(offset, bytes.len(), "truncated UTF-32 code point"));
                     };
@@ -88,7 +96,6 @@ impl<'a> Source<'a> {
                     char::from_u32(value)
                         .ok_or_else(|| error(start, offset, "invalid UTF-32 code point"))?
                 }
-                Encoding::Utf8 => unreachable!("UTF-8 is handled before decoding"),
             };
             if text.len() + c.len_utf8() > max_bytes {
                 return Err(error(start, offset, "decoded byte limit exceeded"));

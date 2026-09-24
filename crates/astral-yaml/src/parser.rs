@@ -496,7 +496,7 @@ impl<'a> Parser<'a> {
         let content_start = self.pos;
         let kind = match self.byte() {
             Some(b'|' | b'>') => self.block_scalar(parent)?,
-            _ => self.inline_kind(false, parent, depth, false)?,
+            _ => self.inline_kind(false, parent, depth)?,
         };
         if matches!(kind, NodeKind::Alias { .. })
             && (self.nodes[id.0].anchor.is_some() || self.nodes[id.0].tag.is_some())
@@ -650,7 +650,7 @@ impl<'a> Parser<'a> {
                 self.empty(self.pos)?
             } else {
                 let before = self.pos;
-                let key = self.inline(false, signed(indent), depth + 1, true)?;
+                let key = self.inline(false, signed(indent), depth + 1)?;
                 if self.source[before..self.pos].chars().count() > 1024
                     || self.source[before..self.pos].contains(['\r', '\n'])
                 {
@@ -814,11 +814,11 @@ impl<'a> Parser<'a> {
         }
         Ok(())
     }
-    fn inline(&mut self, flow: bool, parent: isize, depth: usize, key: bool) -> Result<NodeId> {
+    fn inline(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeId> {
         self.check_depth(depth)?;
         let id = self.empty(self.pos)?;
         self.properties(id, flow, parent)?;
-        let kind = self.inline_kind(flow, parent, depth, key)?;
+        let kind = self.inline_kind(flow, parent, depth)?;
         if matches!(kind, NodeKind::Alias { .. })
             && (self.nodes[id.0].tag.is_some() || self.nodes[id.0].anchor.is_some())
         {
@@ -828,13 +828,7 @@ impl<'a> Parser<'a> {
         self.nodes[id.0].span.end = self.pos;
         Ok(id)
     }
-    fn inline_kind(
-        &mut self,
-        flow: bool,
-        parent: isize,
-        depth: usize,
-        key: bool,
-    ) -> Result<NodeKind<'a>> {
+    fn inline_kind(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
         match self.byte() {
             None | Some(b'\r' | b'\n' | b'#' | b',' | b']' | b'}') => {
                 Ok(NodeKind::Scalar(Scalar {
@@ -862,7 +856,7 @@ impl<'a> Parser<'a> {
             }
             Some(b'[') => self.flow_sequence(parent, depth),
             Some(b'{') => self.flow_mapping(parent, depth),
-            Some(b'\'' | b'"') => self.quoted(parent, key),
+            Some(b'\'' | b'"') => self.quoted(parent),
             Some(b'*') => {
                 self.pos += 1;
                 let start = self.pos;
@@ -880,7 +874,7 @@ impl<'a> Parser<'a> {
                     .ok_or_else(|| self.error("unknown alias"))?;
                 Ok(NodeKind::Alias { name, target })
             }
-            _ => self.plain(flow, parent, key),
+            _ => self.plain(flow, parent),
         }
     }
     fn flow_sequence(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
@@ -900,7 +894,7 @@ impl<'a> Parser<'a> {
             if self.byte() == Some(b',') {
                 return Err(self.error("empty flow sequence entry"));
             }
-            let key = self.inline(true, parent, depth + 1, false)?;
+            let key = self.inline(true, parent, depth + 1)?;
             self.flow_space(parent)?;
             if self.byte() == Some(b':') || explicit {
                 if !explicit
@@ -915,7 +909,7 @@ impl<'a> Parser<'a> {
                     if matches!(self.byte(), Some(b',' | b']')) {
                         self.empty(self.pos)?
                     } else {
-                        self.inline(true, parent, depth + 1, false)?
+                        self.inline(true, parent, depth + 1)?
                     }
                 } else {
                     self.empty(self.pos)?
@@ -970,7 +964,7 @@ impl<'a> Parser<'a> {
             let key = if self.byte() == Some(b':') {
                 self.empty(self.pos)?
             } else {
-                self.inline(true, parent, depth + 1, false)?
+                self.inline(true, parent, depth + 1)?
             };
             self.flow_space(parent)?;
             let value = if self.byte() == Some(b':') {
@@ -979,7 +973,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.byte(), Some(b',' | b'}')) {
                     self.empty(self.pos)?
                 } else {
-                    self.inline(true, parent, depth + 1, false)?
+                    self.inline(true, parent, depth + 1)?
                 }
             } else {
                 self.empty(self.pos)?
@@ -1008,17 +1002,16 @@ impl<'a> Parser<'a> {
             style: CollectionStyle::Flow,
         })
     }
-    fn plain(&mut self, flow: bool, parent: isize, key: bool) -> Result<NodeKind<'a>> {
+    fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'a>> {
         let start = self.pos;
-        if let Some(b) = self.byte() {
-            if b"@`|>!&*%{}[],\"'".contains(&b)
-                || (b"-?:".contains(&b)
-                    && self
-                        .next_byte()
-                        .is_none_or(|b| is_space(b) || (flow && b"[]{},".contains(&b))))
-            {
-                return Err(self.error("invalid plain scalar start"));
-            }
+        let b = self.byte().expect("plain scalar has a first byte");
+        if b"@`|>!&*%{}[],\"'".contains(&b)
+            || (b"-?:".contains(&b)
+                && self
+                    .next_byte()
+                    .is_none_or(|b| is_space(b) || (flow && b"[]{},".contains(&b))))
+        {
+            return Err(self.error("invalid plain scalar start"));
         }
         let mut end = start;
         let mut value: Option<String> = None;
@@ -1027,9 +1020,6 @@ impl<'a> Parser<'a> {
             match self.byte() {
                 None => break,
                 Some(b'\r' | b'\n') => {
-                    if key {
-                        break;
-                    }
                     let save = self.pos;
                     let mut breaks = 0;
                     while self.newline() {
@@ -1087,20 +1077,13 @@ impl<'a> Parser<'a> {
                 Cow::Owned(text)
             },
         );
-        if start == end
-            && self
-                .byte()
-                .is_some_and(|b| !is_space(b) && !b"#,:]}".contains(&b))
-        {
-            return Err(self.error("expected a node"));
-        }
         Ok(NodeKind::Scalar(Scalar {
             value,
             style: ScalarStyle::Plain,
             span: Span { start, end },
         }))
     }
-    fn quoted(&mut self, parent: isize, key: bool) -> Result<NodeKind<'a>> {
+    fn quoted(&mut self, parent: isize) -> Result<NodeKind<'a>> {
         let start = self.pos;
         let quote = self.byte().unwrap_or(b'"');
         self.pos += 1;
@@ -1147,9 +1130,6 @@ impl<'a> Parser<'a> {
                     text.push_str(&self.source[segment..self.pos]);
                     self.pos += 1;
                     if self.newline() {
-                        if key {
-                            return Err(self.error("implicit keys cannot span lines"));
-                        }
                         self.spaces();
                         while self.newline() {
                             text.push('\n');
@@ -1164,9 +1144,6 @@ impl<'a> Parser<'a> {
                     segment = self.pos;
                 }
                 Some(b'\r' | b'\n') => {
-                    if key {
-                        return Err(self.error("implicit keys cannot span lines"));
-                    }
                     let text = output.get_or_insert_with(String::new);
                     text.push_str(self.source[segment..self.pos].trim_end_matches([' ', '\t']));
                     let mut breaks = 0;
@@ -1265,7 +1242,7 @@ impl<'a> Parser<'a> {
         }
         let base = usize::try_from(parent).unwrap_or(0);
         let mut indent = increment.map(|n| base + n);
-        let mut lines: Vec<(&str, bool, bool)> = Vec::new();
+        let mut lines: Vec<(&str, bool)> = Vec::new();
         let mut end = self.pos;
         let mut leading_indent = 0;
         while self.byte().is_some() {
@@ -1286,7 +1263,7 @@ impl<'a> Parser<'a> {
                     self.pos = line_start;
                     break;
                 }
-                if lines.iter().all(|(s, _, _)| s.is_empty()) && leading_indent > required {
+                if lines.iter().all(|(s, _)| s.is_empty()) && leading_indent > required {
                     return Err(self.error("leading empty line is over-indented"));
                 }
             } else if indent.is_none() {
@@ -1295,8 +1272,8 @@ impl<'a> Parser<'a> {
             let text_start = line_start + indent.unwrap_or(spaces).min(spaces);
             let text = &self.source[text_start..line_end];
             self.pos = line_end;
-            let newline = self.newline() || self.byte().is_none();
-            lines.push((text, text.starts_with([' ', '\t']), newline));
+            self.newline();
+            lines.push((text, text.starts_with([' ', '\t'])));
             end = self.pos;
         }
         let value = fold_block_lines(&lines, folded, chomp);
@@ -1360,15 +1337,12 @@ fn signed(value: usize) -> isize {
     isize::try_from(value).unwrap_or(isize::MAX)
 }
 
-fn fold_block_lines(lines: &[(&str, bool, bool)], folded: bool, chomp: u8) -> String {
+fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: u8) -> String {
     let mut value = String::new();
-    for (i, &(text, more, newline)) in lines.iter().enumerate() {
+    for (i, &(text, more)) in lines.iter().enumerate() {
         value.push_str(text);
-        if !newline {
-            continue;
-        }
         if folded && !text.is_empty() && !more {
-            if let Some(&(next, next_more, _)) = lines.get(i + 1) {
+            if let Some(&(next, next_more)) = lines.get(i + 1) {
                 if !next.is_empty() && !next_more {
                     value.push(' ');
                     continue;
@@ -1376,8 +1350,8 @@ fn fold_block_lines(lines: &[(&str, bool, bool)], folded: bool, chomp: u8) -> St
                 if next.is_empty()
                     && lines[i + 1..]
                         .iter()
-                        .find(|(s, _, _)| !s.is_empty())
-                        .is_some_and(|(_, more, _)| !more)
+                        .find(|(s, _)| !s.is_empty())
+                        .is_some_and(|(_, more)| !more)
                 {
                     continue;
                 }

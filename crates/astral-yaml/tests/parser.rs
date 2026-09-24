@@ -3,6 +3,18 @@ use std::borrow::Cow;
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
 #[test]
+fn prefix_boms_and_multiple_restricted_quoted_characters() {
+    let stream = parse("# prefix\n\u{feff}").unwrap();
+    assert!(stream.documents().is_empty());
+    assert_eq!(stream.byte_order_marks().len(), 1);
+    let stream = parse("[\"\u{7f}\", '\u{80}']").unwrap();
+    assert_eq!(stream.nodes().len(), 3);
+    let source = "[\"\u{7f}\", \u{80}]";
+    let error = parse(source).unwrap_err();
+    assert_eq!(error.span.slice(source), Some("\u{80}"));
+}
+
+#[test]
 fn spans_comments_and_locations() {
     let source = "# lead\r\nkey: &a \"v\\n\" # tail\r\ncopy: *a\n";
     let stream = parse(source).unwrap();
