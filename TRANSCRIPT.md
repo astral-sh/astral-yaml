@@ -23,11 +23,17 @@ The project is complete only when all of these gates have evidence:
 
 ## Current state
 
-- Initialized an empty directory as a Git repository and Rust workspace.
-- Established core, serde, and development-tool crate boundaries and lint policy.
-- Toolchain available: Rust 1.98.1; nightly installed. Coverage and cargo-fuzz tools
-  still need installation.
-- Compatibility, coverage, fuzzing, serde behavior, and performance are unproven.
+- Core parser implements block/flow collections, all scalar styles, stream markers,
+  directives, tags, anchors/aliases, comments, byte spans, and core-schema classification.
+- Official YAML Test Suite: **402/402** cases pass (308 valid, 94 invalid), pinned
+  at `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events are compared and span
+  invariants checked; no expected-failure list or case exclusions.
+- `cargo test --workspace`: eight focused tests plus the complete corpus pass.
+- Resource guards cover input length, node count, and nesting (default 64, hard
+  maximum 128). Deep block/flow tests reject 1,000/10,000 nested collections.
+- Parser runtime dependencies: none. Serde crate is still a placeholder.
+- Full compatibility is not established by corpus success alone. Coverage,
+  fuzzing, real-world fixtures, serde, and performance remain unproven.
 
 ## Design
 
@@ -39,5 +45,9 @@ semantic nodes, plus spans on syntax properties and stream/document boundaries.
 
 ## Next work
 
-Implement the source model and parser, pin the official suite, and establish a
-conformance runner that reports every mismatch without an expected-failure filter.
+Run coverage and corpus-seeded fuzzing; fix findings and preserve regressions.
+Implement and test the serde adapter, add pinned real-world fixtures and equivalent
+`yaml_serde` benchmarks. Audit spec requirements beyond corpus coverage, including
+byte-input encodings and BOMs, complete tag URI validation, key uniqueness during
+composition, and behavior at all configured limits. Do not declare completion from
+corpus success alone.
