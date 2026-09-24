@@ -44,8 +44,13 @@ The project is complete only when all of these gates have evidence:
   key-uniqueness validation, and complete tag checks remain open.
 - `cargo fmt --all --check`, strict workspace clippy, and workspace tests pass.
   The adapter dependency tree contains only core and the serde/proc-macro stack.
-- Full compatibility is not established by corpus success alone. Coverage,
-  fuzzing, real-world fixtures, serde, and performance remain unproven.
+- Three pinned real-world inputs match `yaml_serde` values and round-trip through
+  our emitter. A release benchmark with equivalent value construction and drop
+  measured 1.88×, 1.93×, and 1.88× speedups on uv CI, Kubernetes Guestbook, and
+  OpenAPI Petstore respectively (Rust 1.98.1, macOS arm64). Details and reproduction
+  commands are in `benchmarks/README.md`; remeasure after correctness changes.
+- Full compatibility is not established by corpus success alone. Complete
+  coverage, adapter fuzzing, and the remaining spec audit are still required.
 
 ## Design
 

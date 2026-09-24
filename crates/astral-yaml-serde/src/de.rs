@@ -27,9 +27,21 @@ pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
 /// # Errors
 /// Returns a type error, a document-count error, or a resource-limit error.
 pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> {
-    let [doc] = stream.documents() else {
+    if stream.documents().len() != 1 {
         return Err(Error::at("expected exactly one document", stream.span()));
-    };
+    }
+    from_document(stream, 0)
+}
+
+/// Deserializes a document by its zero-based index in a parsed stream.
+///
+/// # Errors
+/// Returns an error for an invalid index, a type mismatch, or an exceeded limit.
+pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usize) -> Result<T> {
+    let doc = stream
+        .documents()
+        .get(index)
+        .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
     let budget = Cell::new(1_000_000usize);
     T::deserialize(Deserializer {
         stream,

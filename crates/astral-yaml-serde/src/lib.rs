@@ -2,7 +2,7 @@
 mod de;
 mod error;
 mod ser;
-pub use de::{from_str, from_stream};
+pub use de::{from_document, from_str, from_stream};
 pub use error::Error;
 
 pub use ser::to_string;

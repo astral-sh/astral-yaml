@@ -1,0 +1,29 @@
+[
+  {
+    "file": "uv-ci.yaml",
+    "repository": "astral-sh/uv",
+    "revision": "30de9e2cc92018c7c16a1ab66bb9b8341fbf0eff",
+    "path": ".github/workflows/ci.yml",
+    "license": "LICENSE-uv",
+    "sha256": "2e3935b89113c0d075925d19d1ee2ab7a3dc6007f5e4b1da7c94944cfcea4028",
+    "bytes": 11602
+  },
+  {
+    "file": "kubernetes-guestbook.yaml",
+    "repository": "kubernetes/examples",
+    "revision": "d6b8cd27eacb51e651a1aa6f7c190a28713eff6e",
+    "path": "web/guestbook/all-in-one/guestbook-all-in-one.yaml",
+    "license": "LICENSE-kubernetes",
+    "sha256": "fe751e47f95f3bc48dd63401ce30688fbe148c7df413aea3c2dab2bbcf58b0a5",
+    "bytes": 3366
+  },
+  {
+    "file": "openapi-petstore.yaml",
+    "repository": "OAI/OpenAPI-Specification",
+    "revision": "447c479c9c7136918e80a57a258fd6c84f369c7c",
+    "path": "_archive_/schemas/v3.0/pass/petstore-expanded.yaml",
+    "license": "LICENSE-openapi",
+    "sha256": "b1633b6309c065c43d56be7c659b0f2c4be03be5a4013b7c3f74b32bd33f62eb",
+    "bytes": 5479
+  }
+]
