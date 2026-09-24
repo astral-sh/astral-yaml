@@ -38,6 +38,11 @@ impl Span {
     pub fn slice(self, source: &str) -> Option<&str> {
         source.get(self.start..self.end)
     }
+    /// Slices an encoded input using a span returned by `Source::original_span`.
+    #[must_use]
+    pub fn slice_bytes(self, source: &[u8]) -> Option<&[u8]> {
+        source.get(self.start..self.end)
+    }
 }
 
 /// An index into one parsed stream's node arena.
@@ -69,7 +74,8 @@ pub struct Scalar<'a> {
     pub span: Span,
 }
 
-/// A node property, with its lexical range and decoded value.
+/// An anchor name or expanded tag, with its lexical range.
+/// Percent escapes in tag URIs retain their original spelling.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Property<'a> {
     pub value: Cow<'a, str>,
@@ -143,6 +149,7 @@ pub struct Stream<'a> {
     pub(crate) nodes: Vec<Node<'a>>,
     pub(crate) documents: Vec<Document<'a>>,
     pub(crate) comments: Vec<Comment<'a>>,
+    pub(crate) byte_order_marks: Vec<Span>,
 }
 
 impl<'a> Stream<'a> {
@@ -168,6 +175,11 @@ impl<'a> Stream<'a> {
     #[must_use]
     pub fn nodes(&self) -> &[Node<'a>] {
         &self.nodes
+    }
+    /// Byte order marks at document boundaries, excluding any inside scalar content.
+    #[must_use]
+    pub fn byte_order_marks(&self) -> &[Span] {
+        &self.byte_order_marks
     }
     /// Returns a node when the ID lies within this stream's arena.
     #[must_use]

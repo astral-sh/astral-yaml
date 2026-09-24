@@ -54,7 +54,7 @@ pub fn events(stream: &Stream<'_>) -> String {
                         write!(out, " &{}", anchor.value).unwrap();
                     }
                     if let Some(tag) = &node.tag {
-                        write!(out, " <{}>", tag.value).unwrap();
+                        write!(out, " <{}>", event_tag(&tag.value)).unwrap();
                     }
                     match &node.kind {
                         NodeKind::Scalar(scalar) => {
@@ -162,6 +162,14 @@ pub fn validate_spans(stream: &Stream<'_>) -> Result<(), String> {
             contains(doc.span, directive.span)?;
         }
     }
+    let mut bom_end = 0;
+    for &span in stream.byte_order_marks() {
+        valid(span)?;
+        if span.start() < bom_end || span.slice(stream.source()) != Some("\u{feff}") {
+            return Err("invalid byte order mark span".to_owned());
+        }
+        bom_end = span.end();
+    }
     let mut end = 0;
     for comment in stream.comments() {
         valid(comment.span)?;
@@ -177,4 +185,25 @@ pub fn validate_spans(stream: &Stream<'_>) -> Result<(), String> {
         end = comment.span.end();
     }
     Ok(())
+}
+
+// The suite's event convention decodes URI escapes (e.g. 6CK3). The parser's
+// public tag value preserves them as required by YAML 1.2.2 section 5.6.
+fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
+    let mut bytes = tag.bytes();
+    let mut decoded = Vec::new();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let Some(high) = bytes.next().and_then(|b| char::from(b).to_digit(16)) else {
+                return tag.into();
+            };
+            let Some(low) = bytes.next().and_then(|b| char::from(b).to_digit(16)) else {
+                return tag.into();
+            };
+            decoded.push(u8::try_from(high * 16 + low).expect("hex pair fits in u8"));
+        } else {
+            decoded.push(b);
+        }
+    }
+    String::from_utf8(decoded).map_or_else(|_| tag.into(), std::borrow::Cow::Owned)
 }

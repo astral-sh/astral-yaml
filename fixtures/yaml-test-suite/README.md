@@ -8,7 +8,10 @@ main revision `da267a5c4782e7361e82889e76c0dc7df0e1e870`.
 
 The conformance runner compares complete event streams for valid inputs and
 requires an error for each invalid input. No cases are excluded. Source-span
-invariants are checked on every successfully parsed case.
+invariants are checked on every successfully parsed case. Event formatting decodes
+tag URI escapes to match the suite's event convention (case `6CK3`); the core AST
+preserves the escaped tag spelling as required by YAML 1.2.2 section 5.6. Focused
+regression tests independently verify that preservation.
 
 ```sh
 cargo run -p astral-yaml-dev -- conformance

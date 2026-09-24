@@ -141,3 +141,170 @@ fn block_scalar_ranges_exclude_following_node() {
         .unwrap();
     assert_eq!(scalar.span.slice(source), Some("|\n  text\n"));
 }
+
+#[test]
+fn json_compatible_quoted_characters() {
+    for c in [
+        '\u{7f}', '\u{80}', '\u{9f}', '\u{fffe}', '\u{ffff}', '\u{feff}',
+    ] {
+        for quote in ['\'', '"'] {
+            let source = format!("{quote}a{c}b{quote}");
+            let stream = parse(&source).unwrap();
+            let NodeKind::Scalar(s) = &stream.nodes()[0].kind else {
+                panic!("scalar")
+            };
+            assert_eq!(s.value, format!("a{c}b"));
+        }
+        assert!(parse(&format!("a{c}b")).is_err());
+        assert!(parse(&format!("# a{c}b")).is_err());
+    }
+    assert!(parse("\"\u{1f}\"").is_err());
+}
+
+#[test]
+fn document_byte_order_marks() {
+    for source in [
+        "\u{feff}---\nx\n",
+        "x\n...\n\u{feff}---\ny\n",
+        "x\n\u{feff}---\ny\n",
+        "\u{feff}# comment\n",
+    ] {
+        let stream = parse(source).unwrap();
+        assert_eq!(stream.byte_order_marks().len(), 1);
+        assert_eq!(stream.byte_order_marks()[0].slice(source), Some("\u{feff}"));
+    }
+    assert!(parse("- x\n\u{feff}- y\n").is_err());
+    assert!(parse("[x,\u{feff}y]").is_err());
+}
+
+#[test]
+fn metadata_respects_the_element_budget() {
+    let options = ParseOptions {
+        max_nodes: 2,
+        ..ParseOptions::default()
+    };
+    for source in ["# a\n# b\n# c\n", "%A\n%B\n%C\n---\n", "# a\n[a,b]"] {
+        assert_eq!(
+            parse_with_options(source, options).unwrap_err().message,
+            "syntax element limit exceeded"
+        );
+    }
+    assert!(parse_with_options("# a\n# b\n", options).is_ok());
+}
+
+#[test]
+fn invalid_directives_properties_and_keys() {
+    for source in [
+        "%TAG invalid x\n--- x",
+        "%TAG !e! x\n%TAG !e! y\n--- x",
+        "%TAG !e! %GG\n--- x",
+        "%\n--- x",
+        "& x",
+        "[&a &b x]",
+        "[!a !b x]",
+        "!<> x",
+        "!<%GG> x",
+        "!a%GG x",
+        "!!str!x x",
+        "%TAG !e! x\n--- !e! x",
+        "!a\n!b x",
+        "&a\n*a",
+        "{",
+        "{,}",
+        "\"\\",
+        "\"\\q\"",
+    ] {
+        assert!(parse(source).is_err(), "accepted {source:?}");
+    }
+    assert!(parse(&format!("{}: x", "a".repeat(1025))).is_err());
+}
+
+#[test]
+fn escape_repertoire_and_empty_pairs() {
+    let source = "\"\\0\\a\\b\\t\\n\\v\\f\\r\\e\\ \\\"\\/\\\\\\N\\_\\L\\P\\x41\\u03bb\\U0001F30D\"";
+    let stream = parse(source).unwrap();
+    let NodeKind::Scalar(s) = &stream.nodes()[0].kind else {
+        panic!("scalar")
+    };
+    assert_eq!(
+        s.value,
+        "\0\u{7}\u{8}\t\n\u{b}\u{c}\r\u{1b} \"/\\\u{85}\u{a0}\u{2028}\u{2029}Aλ🌍"
+    );
+    for source in ["[? a]", "[a: ]", "[? : ]", "?\n: a\n", "\"a\\\n\n  b\""] {
+        assert!(parse(source).is_ok(), "{source:?}");
+    }
+}
+
+#[test]
+fn tag_uris_preserve_percent_escapes() {
+    for (source, tag) in [
+        ("!local%21 value", "!local%21"),
+        (
+            "!<tag:example.com,2000:%c3%a9> value",
+            "tag:example.com,2000:%c3%a9",
+        ),
+        (
+            "%TAG !e! tag:example:%FF\n--- !e!suffix value",
+            "tag:example:%FFsuffix",
+        ),
+    ] {
+        let stream = parse(source).unwrap();
+        assert_eq!(
+            stream
+                .node(stream.documents()[0].root)
+                .unwrap()
+                .tag
+                .as_ref()
+                .unwrap()
+                .value,
+            tag
+        );
+    }
+    for source in [
+        "!é x",
+        "!<tag:a|b> x",
+        "!<!> x",
+        "!<$:?> x",
+        "!<relative> x",
+        "%TAG !e! relative\n--- !e!path x",
+    ] {
+        assert!(parse(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn multiline_properties_preserve_anchor_identity() {
+    for source in [
+        "!!seq\n&a [*a]",
+        "&a\n!!seq [*a]",
+        "&a\n- *a",
+        "!!seq\n&a\n- *a",
+    ] {
+        let stream = parse(source).unwrap();
+        let root = stream.documents()[0].root;
+        assert_eq!(stream.nodes().len(), 2, "{source}");
+        let NodeKind::Sequence { items, .. } = &stream.node(root).unwrap().kind else {
+            panic!("sequence")
+        };
+        assert!(
+            matches!(stream.node(items[0]).unwrap().kind, NodeKind::Alias { target, .. } if target == root)
+        );
+    }
+}
+
+#[test]
+fn empty_scalar_span_follows_properties() {
+    let source = "- &a\n- x\n";
+    let stream = parse(source).unwrap();
+    let node = stream
+        .nodes()
+        .iter()
+        .find(|node| node.anchor.is_some())
+        .unwrap();
+    let NodeKind::Scalar(scalar) = &node.kind else {
+        panic!("scalar")
+    };
+    assert_eq!(scalar.span.start(), source.find('\n').unwrap());
+    assert!(scalar.span.is_empty());
+    assert_eq!(node.span.slice(source), Some("&a"));
+}

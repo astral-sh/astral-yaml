@@ -12,7 +12,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct ParseOptions {
     /// Maximum collection nesting, between 1 and 128.
     pub max_depth: usize,
-    /// Maximum number of syntax nodes in a stream.
+    /// Maximum number of nodes, comments, and directives in a stream.
     pub max_nodes: usize,
     /// Maximum UTF-8 input length in bytes.
     pub max_input_bytes: usize,
@@ -51,19 +51,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
     if source.len() > options.max_input_bytes {
         return Err(error("input byte limit exceeded"));
     }
-    for (offset, c) in source.char_indices() {
-        if !matches!(c, '\t' | '\r' | '\n' | '\u{20}'..='\u{7e}' | '\u{85}' | '\u{a0}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
-        {
-            return Err(Error {
-                span: Span {
-                    start: offset,
-                    end: offset + c.len_utf8(),
-                },
-                message: "non-printable character",
-            });
-        }
-    }
-    Parser {
+    let stream = Parser {
         source,
         pos: 0,
         options,
@@ -72,8 +60,12 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         comments: Vec::new(),
         anchors: HashMap::new(),
         tags: HashMap::new(),
+        byte_order_marks: Vec::new(),
+        elements: 0,
     }
-    .stream()
+    .stream()?;
+    validate_characters(&stream)?;
+    Ok(stream)
 }
 
 struct Parser<'a> {
@@ -85,6 +77,8 @@ struct Parser<'a> {
     comments: Vec<Comment<'a>>,
     anchors: HashMap<&'a str, NodeId>,
     tags: HashMap<&'a str, String>,
+    byte_order_marks: Vec<Span>,
+    elements: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -107,9 +101,11 @@ impl<'a> Parser<'a> {
         self.source.as_bytes().get(self.pos + 1).copied()
     }
     fn column(&self) -> usize {
-        self.source[..self.pos]
+        let line_start = self.source[..self.pos]
             .rfind(['\r', '\n'])
-            .map_or(self.pos, |n| self.pos - n - 1)
+            .map_or(0, |n| n + 1);
+        let prefix = &self.source[line_start..self.pos];
+        prefix.strip_prefix('\u{feff}').unwrap_or(prefix).len()
     }
     fn line_end(&self) -> usize {
         self.rest()
@@ -137,7 +133,15 @@ impl<'a> Parser<'a> {
             _ => false,
         }
     }
-    fn comment(&mut self) {
+    fn reserve_element(&mut self) -> Result<()> {
+        if self.elements == self.options.max_nodes {
+            return Err(self.error("syntax element limit exceeded"));
+        }
+        self.elements += 1;
+        Ok(())
+    }
+    fn comment(&mut self) -> Result<()> {
+        self.reserve_element()?;
         let start = self.pos;
         self.pos = self.line_end();
         self.comments.push(Comment {
@@ -147,13 +151,14 @@ impl<'a> Parser<'a> {
             },
             text: &self.source[start + 1..self.pos],
         });
+        Ok(())
     }
     /// Advances to the next nonempty block line, preserving comments.
     fn block_space(&mut self) -> Result<()> {
         loop {
             self.spaces();
             if self.byte() == Some(b'#') {
-                self.comment();
+                self.comment()?;
             }
             if self.newline() {
                 continue;
@@ -169,7 +174,7 @@ impl<'a> Parser<'a> {
                 if self.pos > 0 && !is_space(self.source.as_bytes()[self.pos - 1]) {
                     return Err(self.error("comments must be separated by whitespace"));
                 }
-                self.comment();
+                self.comment()?;
             }
             if !self.newline() {
                 break;
@@ -189,7 +194,10 @@ impl<'a> Parser<'a> {
             .count()
     }
     fn document_boundary(&self) -> bool {
-        self.byte().is_none() || self.marker("---") || self.marker("...")
+        self.byte().is_none()
+            || self.marker("---")
+            || self.marker("...")
+            || (self.column() == 0 && self.rest().starts_with('\u{feff}'))
     }
     fn finish_line(&mut self) -> Result<()> {
         let before = self.pos;
@@ -198,7 +206,7 @@ impl<'a> Parser<'a> {
             if before == self.pos {
                 return Err(self.error("a comment must be separated from its node"));
             }
-            self.comment();
+            self.comment()?;
         }
         if self.newline() {
             self.block_space()
@@ -221,15 +229,10 @@ impl<'a> Parser<'a> {
                 .is_none_or(|b| is_space(*b))
     }
     fn boundary(&self) -> bool {
-        self.byte().is_none()
-            || self.marker("---")
-            || self.marker("...")
-            || (self.column() == 0 && self.byte() == Some(b'%'))
+        self.document_boundary() || (self.column() == 0 && self.byte() == Some(b'%'))
     }
     fn empty(&mut self, offset: usize) -> Result<NodeId> {
-        if self.nodes.len() >= self.options.max_nodes {
-            return Err(self.error("node limit exceeded"));
-        }
+        self.reserve_element()?;
         let id = NodeId(self.nodes.len());
         let span = Span {
             start: offset,
@@ -254,13 +257,25 @@ impl<'a> Parser<'a> {
             Ok(())
         }
     }
-    fn stream(mut self) -> Result<Stream<'a>> {
-        if self.rest().starts_with('\u{feff}') {
+    fn consume_bom(&mut self) {
+        if self.column() == 0 && self.rest().starts_with('\u{feff}') {
+            self.byte_order_marks.push(Span {
+                start: self.pos,
+                end: self.pos + 3,
+            });
             self.pos += 3;
         }
+    }
+    fn stream(mut self) -> Result<Stream<'a>> {
+        self.consume_bom();
         self.block_space()?;
         let mut previous_ended = true;
         while self.byte().is_some() {
+            self.consume_bom();
+            self.block_space()?;
+            if self.byte().is_none() {
+                break;
+            }
             if self.marker("...") {
                 self.pos += 3;
                 self.finish_line()?;
@@ -284,7 +299,7 @@ impl<'a> Parser<'a> {
                 self.pos += 3;
                 self.spaces();
                 if self.byte() == Some(b'#') {
-                    self.comment();
+                    self.comment()?;
                 }
                 if self.newline() {
                     self.block_space()?;
@@ -340,6 +355,7 @@ impl<'a> Parser<'a> {
             nodes: self.nodes,
             documents: self.documents,
             comments: self.comments,
+            byte_order_marks: self.byte_order_marks,
         })
     }
     fn directives(&mut self) -> Result<Vec<Directive<'a>>> {
@@ -347,6 +363,7 @@ impl<'a> Parser<'a> {
         let mut version = false;
         let mut handles = Vec::new();
         while self.column() == 0 && self.byte() == Some(b'%') {
+            self.reserve_element()?;
             let start = self.pos;
             let end = self.line_end();
             self.pos += 1;
@@ -395,8 +412,7 @@ impl<'a> Parser<'a> {
                         return Err(self.error("duplicate TAG directive"));
                     }
                     handles.push(words[0]);
-                    let prefix =
-                        decode_uri(words[1]).ok_or_else(|| self.error("invalid tag URI"))?;
+                    let prefix = tag_uri(words[1]).ok_or_else(|| self.error("invalid tag URI"))?;
                     self.tags.insert(words[0], prefix);
                 }
                 "" => return Err(self.error("empty directive name")),
@@ -408,7 +424,7 @@ impl<'a> Parser<'a> {
                 arguments: args,
             });
             if self.byte() == Some(b'#') {
-                self.comment();
+                self.comment()?;
             }
             if self.newline() {
                 self.block_space()?;
@@ -417,6 +433,15 @@ impl<'a> Parser<'a> {
         Ok(directives)
     }
     fn block(&mut self, parent: isize, depth: usize, indentless: bool) -> Result<NodeId> {
+        self.block_into(parent, depth, indentless, None)
+    }
+    fn block_into(
+        &mut self,
+        parent: isize,
+        depth: usize,
+        indentless: bool,
+        existing: Option<NodeId>,
+    ) -> Result<NodeId> {
         self.check_depth(depth)?;
         let start = self.pos;
         let indent = self.column();
@@ -433,15 +458,19 @@ impl<'a> Parser<'a> {
         }
         // A property preceding a mapping key belongs to that key, not the mapping.
         if self.indicator(b'-') {
-            return self.block_sequence(indent, depth);
+            return self.block_sequence(indent, depth, existing);
         }
         if self.indicator(b'?') || self.indicator(b':') || self.simple_colon().is_some() {
-            return self.block_mapping(indent, depth);
+            return self.block_mapping(indent, depth, existing);
         }
-        let id = self.empty(start)?;
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            self.empty(start)?
+        };
         self.properties(id, false, parent)?;
         if self.byte() == Some(b'#') {
-            self.comment();
+            self.comment()?;
         }
         let property_end = self.pos;
         if self.newline() {
@@ -450,25 +479,18 @@ impl<'a> Parser<'a> {
                 && (signed(self.column()) > parent
                     || (indentless && signed(self.column()) == parent && self.indicator(b'-')))
             {
-                let child = self.block(parent, depth + 1, indentless)?;
-                let node = self.nodes[child.0].clone();
-                if let Some(anchor) = node.anchor {
-                    if self.nodes[id.0].anchor.is_some() {
-                        return Err(self.error("duplicate anchor property"));
-                    }
-                    self.nodes[id.0].anchor = Some(anchor);
-                }
-                if let Some(tag) = node.tag {
-                    if self.nodes[id.0].tag.is_some() {
-                        return Err(self.error("duplicate tag property"));
-                    }
-                    self.nodes[id.0].tag = Some(tag);
-                }
-                self.nodes[id.0].kind = node.kind;
-                self.nodes[id.0].span.end = node.span.end;
-            } else {
-                self.nodes[id.0].span.end = property_end;
+                return self.block_into(parent, depth + 1, indentless, Some(id));
             }
+            let span = Span {
+                start: property_end,
+                end: property_end,
+            };
+            self.nodes[id.0].span.end = property_end;
+            self.nodes[id.0].kind = NodeKind::Scalar(Scalar {
+                value: Cow::Borrowed(""),
+                style: ScalarStyle::Plain,
+                span,
+            });
             return Ok(id);
         }
         let content_start = self.pos;
@@ -499,8 +521,17 @@ impl<'a> Parser<'a> {
         }
         Ok(id)
     }
-    fn block_sequence(&mut self, indent: usize, depth: usize) -> Result<NodeId> {
-        let id = self.empty(self.pos)?;
+    fn block_sequence(
+        &mut self,
+        indent: usize,
+        depth: usize,
+        existing: Option<NodeId>,
+    ) -> Result<NodeId> {
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            self.empty(self.pos)?
+        };
         let mut items = Vec::new();
         let mut end = self.pos;
         loop {
@@ -509,7 +540,7 @@ impl<'a> Parser<'a> {
             let empty_at = self.pos;
             let item = if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
                 if self.byte() == Some(b'#') {
-                    self.comment();
+                    self.comment()?;
                 }
                 self.newline();
                 self.block_space()?;
@@ -578,8 +609,17 @@ impl<'a> Parser<'a> {
         }
         None
     }
-    fn block_mapping(&mut self, indent: usize, depth: usize) -> Result<NodeId> {
-        let id = self.empty(self.pos)?;
+    fn block_mapping(
+        &mut self,
+        indent: usize,
+        depth: usize,
+        existing: Option<NodeId>,
+    ) -> Result<NodeId> {
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            self.empty(self.pos)?
+        };
         let mut entries = Vec::new();
         let mut end = self.pos;
         loop {
@@ -591,7 +631,7 @@ impl<'a> Parser<'a> {
                 let at = self.pos;
                 if matches!(self.byte(), None | Some(b'\n' | b'\r' | b'#')) {
                     if self.byte() == Some(b'#') {
-                        self.comment();
+                        self.comment()?;
                     }
                     self.newline();
                     self.block_space()?;
@@ -627,7 +667,7 @@ impl<'a> Parser<'a> {
                 let at = self.pos;
                 if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
                     if self.byte() == Some(b'#') {
-                        self.comment();
+                        self.comment()?;
                     }
                     self.newline();
                     self.block_space()?;
@@ -715,9 +755,12 @@ impl<'a> Parser<'a> {
                     if self.byte() != Some(b'>') || self.pos == uri_start {
                         return Err(self.error("invalid verbatim tag"));
                     }
-                    let value = decode_uri(&self.source[uri_start..self.pos])
+                    let value = tag_uri(&self.source[uri_start..self.pos])
                         .ok_or_else(|| self.error("invalid tag URI"))?;
                     self.pos += 1;
+                    if !complete_tag(&value) {
+                        return Err(self.error("invalid verbatim tag URI"));
+                    }
                     value
                 } else {
                     while self
@@ -741,8 +784,12 @@ impl<'a> Parser<'a> {
                             return Err(self.error("invalid tag suffix"));
                         }
                         let decoded =
-                            decode_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
-                        format!("{prefix}{decoded}")
+                            tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
+                        let expanded = format!("{prefix}{decoded}");
+                        if !complete_tag(&expanded) {
+                            return Err(self.error("invalid expanded tag URI"));
+                        }
+                        expanded
                     }
                 };
                 self.nodes[id.0].tag = Some(Property {
@@ -1208,7 +1255,7 @@ impl<'a> Parser<'a> {
         let before = self.pos;
         self.spaces();
         if self.byte() == Some(b'#') && before != self.pos {
-            self.comment();
+            self.comment()?;
         }
         if self.byte().is_some() && !self.newline() {
             return Err(self.error("invalid block scalar header"));
@@ -1275,19 +1322,35 @@ fn valid_handle(s: &str) -> bool {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-'))
 }
-fn decode_uri(s: &str) -> Option<String> {
-    let mut result = Vec::with_capacity(s.len());
+fn tag_uri(s: &str) -> Option<String> {
     let mut bytes = s.bytes();
     while let Some(b) = bytes.next() {
         if b == b'%' {
-            let high = char::from(bytes.next()?).to_digit(16)?;
-            let low = char::from(bytes.next()?).to_digit(16)?;
-            result.push(u8::try_from(high * 16 + low).ok()?);
-        } else {
-            result.push(b);
+            if !bytes.next()?.is_ascii_hexdigit() || !bytes.next()?.is_ascii_hexdigit() {
+                return None;
+            }
+        } else if !b.is_ascii_alphanumeric() && !b"-#;/?:@&=+$,_.!~*'()[]".contains(&b) {
+            return None;
         }
     }
-    String::from_utf8(result).ok()
+    // URI escapes are part of tag identity, not scalar-style escapes (YAML 1.2.2 §5.6).
+    Some(s.to_owned())
+}
+
+fn complete_tag(s: &str) -> bool {
+    if let Some(local) = s.strip_prefix('!') {
+        return !local.is_empty();
+    }
+    let Some((scheme, _)) = s.split_once(':') else {
+        return false;
+    };
+    scheme
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphabetic)
+        && scheme
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
 }
 
 fn signed(value: usize) -> isize {
@@ -1327,4 +1390,51 @@ fn fold_block_lines(lines: &[(&str, bool, bool)], folded: bool, chomp: u8) -> St
         }
     }
     value
+}
+
+// JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.
+fn validate_characters(stream: &Stream<'_>) -> Result<()> {
+    let mut restricted = stream.source().char_indices().filter(|&(_, c)| {
+        c == '\u{feff}' || !matches!(c, '\t' | '\r' | '\n' | '\u{20}'..='\u{7e}' | '\u{85}' | '\u{a0}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
+    });
+    let Some(first) = restricted.next() else {
+        return Ok(());
+    };
+    let mut allowed: Vec<_> = stream
+        .nodes()
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Scalar(s)
+                if matches!(
+                    s.style,
+                    ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+                ) =>
+            {
+                Some(s.span)
+            }
+            _ => None,
+        })
+        .chain(stream.byte_order_marks().iter().copied())
+        .collect();
+    allowed.sort_unstable_by_key(|span| span.start);
+    let mut index = 0;
+    for (offset, c) in std::iter::once(first).chain(restricted) {
+        while allowed.get(index).is_some_and(|span| span.end <= offset) {
+            index += 1;
+        }
+        if c < ' '
+            || !allowed
+                .get(index)
+                .is_some_and(|span| span.start <= offset && offset < span.end)
+        {
+            return Err(Error {
+                span: Span {
+                    start: offset,
+                    end: offset + c.len_utf8(),
+                },
+                message: "character is not allowed in this context",
+            });
+        }
+    }
+    Ok(())
 }

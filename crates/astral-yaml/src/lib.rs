@@ -7,6 +7,7 @@ mod error;
 mod model;
 mod parser;
 pub mod schema;
+mod source;
 
 pub use error::Error;
 pub use model::{
@@ -14,3 +15,5 @@ pub use model::{
     ScalarStyle, Span, Stream,
 };
 pub use parser::{ParseOptions, parse, parse_with_options};
+
+pub use source::{Encoding, Source};

@@ -26,3 +26,8 @@ refer to arena node IDs; aliases are not expanded by the parser.
 Use `astral_yaml_serde::from_str::<T>(source)` for a `Deserialize` type and
 `astral_yaml_serde::to_string(&value)` for a `Serialize` value. The emitter uses flow
 style and quotes strings to preserve their type under YAML 1.2 core resolution.
+
+For encoded byte input, use `astral_yaml::Source::from_bytes(&bytes)` and parse its
+decoded text. UTF-8 is borrowed; UTF-16 and UTF-32 in either byte order are decoded
+with size limits. `Source::original_span` maps a parsed UTF-8 span back to the
+original encoded bytes.
