@@ -1,87 +1,78 @@
 # Engineering status
 
-## Requirements and completion evidence
+## Implementation
 
-The project is complete only when all of these gates have evidence:
+The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
+(serialization/deserialization), and `astral-yaml-dev` (validation and benchmarks).
+The core has no runtime dependencies. The adapter adds only serde and its proc-macro
+stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
-- Strict YAML 1.2 syntax and semantics: pinned official corpus, spec-derived edge
-  cases, malformed-input rejection, and real-world fixtures.
-- Source ranges for every parsed element, including comments: invariant tests
-  across the corpus and fuzz inputs.
-- `astral-yaml-serde`: serialization/deserialization tests, including derived types,
-  YAML 1.2 scalar resolution, tags, aliases, and error locations.
-- Safe, idiomatic Rust: workspace-wide unsafe prohibition, rustfmt, strict clippy.
-- Core runtime dependencies limited to std; adapter dependencies limited to the
-  serde/proc-macro stack: verified dependency trees.
-- 100% test coverage: reproducible coverage measurement with no uncovered parser
-  or adapter code; fuzz targets and bounded recorded fuzz runs.
-- Better performance than `yaml_serde` on real-world inputs: pinned fixtures,
-  equivalent workloads, reproducible release benchmarks with recorded results.
-- Malformed-input resilience: explicit resource budgets, adversarial regression
-  tests, and fuzz evidence.
-- Logical crates, incremental commits, and this trimmed engineering reference.
+The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
+tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
+Every node and metadata element retains a source range, including standalone
+end markers. `Source::original_span` converts UTF-8 ranges to original encoded bytes.
+See [conformance and limits](docs/conformance.md) for the spec audit and API scope.
 
-## Current state
+Flat arena ownership avoids recursive destruction and preserves alias identity.
+Input bytes, elements, and nesting are bounded. Serde also limits visits and inspected
+scalar bytes, validates core tags and duplicate keys (including ignored fields), and
+bounds recursive newtype visitors. A cached line range prevents repeated prefix
+scans in large flow collections. A 30,000-item array CLI diagnostic improved from
+about 1.6 s to 0.02 s on warm runs on the same host.
 
-- Implemented the core parser and serde adapter, with no core runtime dependencies
-  and only the serde/proc-macro stack in the adapter. Workspace code forbids unsafe.
-- Core supports block/flow collections, scalar styles, streams, directives, tags,
-  anchors/aliases, comments, spans, core-schema classification, and UTF-8/16/32.
-  `Source::original_span` maps decoded spans to original encoded bytes.
-- Official corpus: **402/402** (308 valid, 94 invalid), pinned at
+## Validation evidence (2026-09-24)
+
+- **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
-  checked without excluded cases. Event formatting decodes tag URI escapes to
-  match `6CK3`; AST tags preserve the original escaping per spec section 5.6,
-  independently checked by regression tests.
-- `cargo test --workspace` and `cargo +1.85.1 test --workspace --locked`: **30 tests
-  pass**, including the entire corpus and three real-world fixture comparisons.
-  Rustfmt and strict clippy pass. Fixture checksums and dependency trees checked.
-- Parser limits cover input bytes, syntax elements (including comments/directives),
-  and nesting (default 64, maximum configurable value 128). Serde also limits visits
-  and inspected scalar bytes, rejects duplicate keys using core-schema identity,
-  validates collection tags, and rejects recursive alias expansion.
-- Multiline properties reuse the same arena node, preserving anchor identity.
-  Focused tests cover BOMs, JSON-compatible quoted characters, URI escaping,
-  implicit keys, scalar folding/continuation, machine numeric limits, and cycles.
-- Latest fuzz campaigns on current code: parser **1,212,122**, serde **338,806**,
-  decoder **971,775** executions; each completed in 31 seconds without findings.
-  Seeds include all official inputs, two saved regressions, and the three real-world
-  fixtures (407 source inputs), plus all five encodings for the decoder. Limits:
-  64 KiB mutations, 2-second per-input timeout, 2 GiB RSS per process. Earlier
-  campaigns found and fixed two scalar-slicing panics. Source fuzz coverage has
-  **not yet been quantified**; execution counts are not a coverage claim.
-- Latest line coverage: parser **98.73%**, source decoding **99.09%**, core model,
-  errors, and schema **100%**; serde deserializer **90.96%**, serializer **95.34%**,
-  serde errors **87.50%**. Whole workspace **95.31%**. **100% remains unmet.**
-- Current release benchmark vs pinned `yaml_serde` 0.10.7: **1.63× / 1.58× / 1.55×**
-  speedups on uv CI / Kubernetes Guestbook / OpenAPI Petstore, with equivalent
-  value construction and destruction. See `benchmarks/README.md` for methodology,
-  latency values, and reproduction. Fixtures match reference values and round-trip.
+  checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
+- **55 tests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three pinned real-world
+  fixtures match the reference values and round-trip through serde.
+- `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
+  clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
+  The report covers 2,693 lines and 279 functions. LLVM region coverage is **97.30%**;
+  the 100% claim is specifically line and function coverage, not branch coverage.
+  Strict clippy also passes for the separate fuzz workspace.
+- Dependency trees confirm the runtime dependency constraints.
+- A spec audit added regressions for characters, encodings, tag URI/prefix rules,
+  implicit keys, continuation indentation, flow value separation, document
+  transitions, metadata ranges, and serde type/visitor semantics.
+- The suite event convention decodes URI escapes in case `6CK3`; AST tags preserve
+  their spelling per spec §5.6. `yaml_serde` rejects some valid 1.2 leading-colon
+  keys; those cases use grammar-derived assertions instead of that comparator.
 
-## Design and tooling
+## Fuzzing evidence
 
-Flat arena ownership avoids recursive drop and alias expansion. Byte spans refer to
-UTF-8 source; encoded input retains the original bytes for range conversion. Scalar
-resolution is separate from parsing. Serde supports borrowed unescaped scalars,
-derived types and enums, and emits flow-style YAML with quoted strings.
+Latest campaigns on the final implementation used nightly
+`1.100.0-nightly (cea272fa3 2026-09-07)`, cargo-fuzz 0.13.2, and these bounds:
+31 seconds elapsed per target, 2-second input timeout, 64 KiB mutations, 2 GiB RSS.
+All four completed without findings: **3,896,794 executions** in total.
 
-Coverage: `cargo llvm-cov --workspace --summary-only`; add `--show-missing-lines`
-when generating a report. Fuzz reproduction commands are in `fuzz/README.md`.
-Locally installed tools are in `/Users/ww/.cache/astral-yaml-tools/{coverage,fuzz}/bin`.
-No Docker containers were used. All test and fuzz sessions above finished.
+| Target | Executions | Relevant source line coverage from corpus replay |
+| --- | ---: | --- |
+| parse | 1,200,210 | Parser 98.10% |
+| serde | 675,102 | Parser 98.93%; generic serde does not exercise typed methods |
+| decode | 764,051 | Parser 99.51%; decoder 88.29% |
+| typed | 1,257,431 | Deserializer 95.06%; serializer 98.30%; schema 100% |
 
-## Remaining work (goal remains active)
+Seeds include 407 official/regression/real-world source files, all five encodings,
+and 24 serde type selections with boundary examples. Earlier campaigns exposed two
+scalar-slicing panics; saved regressions cover both fixes. The typed target checks
+canonical round-trips, including NaN and signed zero.
 
-1. Reach measured 100% test coverage. Add meaningful tests for typed serde paths,
-   byte visitors, map protocols, resource-limit boundaries, and CLI error paths.
-   Refactor genuinely unreachable defensive branches by strengthening internal
-   types; do not hide code with coverage exclusions or lower the gate.
-2. Quantify fuzz source coverage and extend targets for typed serde methods that
-   arbitrary `Value` deserialization does not exercise. Run and record new campaigns.
-3. Complete the spec audit beyond the official corpus: particularly syntax rejection
-   at context boundaries, exact implicit-key restrictions, tag URI/prefix rules,
-   document transitions, and key validation inside ignored serde fields. Add
-   regression cases for each uncovered requirement. Corpus success alone is not
-   proof of full compatibility.
-4. Re-run all gates, dependency checks, and release benchmarks after remaining
-   correctness changes. Keep this reference current and commit logical work units.
+`fuzz/README.md` gives reproduction commands. `scripts/fuzz-coverage.py` generates
+per-target reports and `fuzz/coverage/summary.json` from matching binaries/profiles.
+Optimized harness profiles are reported separately to avoid incompatible shared
+symbol versions. Fuzz coverage is independent of test coverage and is not 100%.
+
+## Performance and reproduction
+
+Final release medians versus pinned `yaml_serde` 0.10.7 are **1.61× / 1.62× / 1.62×**
+faster on uv CI / Kubernetes Guestbook / OpenAPI Petstore. Both sides construct and
+drop the same `Vec<yaml_serde::Value>`; equality is checked before timing. See
+[benchmarks/README.md](benchmarks/README.md) for values and methodology.
+
+Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
+campaigns/replays, and `cargo bench -p astral-yaml-dev --bench real_world` after
+substantive changes. Locally installed tools are under
+`/Users/ww/.cache/astral-yaml-tools/{coverage,fuzz}/bin`.
+No Docker containers were used. All validation, fuzz, and benchmark processes finished.

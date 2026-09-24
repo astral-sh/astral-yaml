@@ -11,13 +11,18 @@ The implementation targets the [YAML 1.2.2 specification](https://yaml.org/spec/
 and [YAML Test Suite](https://github.com/yaml/yaml-test-suite). YAML 1.1 schema
 compatibility is outside the scope of this project.
 
-See [TRANSCRIPT.md](TRANSCRIPT.md) for measured progress and outstanding work.
+See [conformance and limits](docs/conformance.md) for supported behavior and
+[TRANSCRIPT.md](TRANSCRIPT.md) for measured engineering status.
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+With `cargo-llvm-cov` installed, `scripts/check.sh` also checks fixture hashes and
+enforces 100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
+cover corpus seeding, bounded campaigns, and source-coverage reports.
 
 Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte
 ranges, comments, scalar styles, tags, and anchors. Collection children and aliases
