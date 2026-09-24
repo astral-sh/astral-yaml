@@ -317,6 +317,25 @@ fn mapping_key_uniqueness_uses_core_types() {
 }
 
 #[test]
+fn mapping_key_uniqueness_across_mapping_sizes() {
+    for count in [1, 7, 8, 9, 64] {
+        let mut source = String::new();
+
+        for key in 0..count {
+            writeln!(source, "{key}: value").unwrap();
+        }
+
+        let mapping = from_str::<BTreeMap<u64, String>>(&source).unwrap();
+        assert_eq!(mapping.len(), count);
+
+        source.push_str("0x00: duplicate\n");
+        let error = from_str::<BTreeMap<u64, String>>(&source).unwrap_err();
+        assert_eq!(error.message, "duplicate mapping key");
+        assert_eq!(error.span.unwrap().slice(&source), Some("0x00"));
+    }
+}
+
+#[test]
 fn collection_tags_must_match_the_requested_type() {
     for source in ["!!str []", "!!int {}", "!!map []", "!!seq {}"] {
         assert!(from_str::<Anything>(source).is_err(), "{source}");

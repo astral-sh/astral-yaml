@@ -140,11 +140,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             None => ScalarType::String,
         };
 
-        if kind != ScalarType::String
-            && classify(&s.value) != kind
-            && !(kind == ScalarType::Float && classify(&s.value) == ScalarType::Int)
-        {
-            return Err(Error::at("scalar does not match its tag", s.span));
+        if tag.is_some() && kind != ScalarType::String {
+            let actual = classify(&s.value);
+            if actual != kind && !(kind == ScalarType::Float && actual == ScalarType::Int) {
+                return Err(Error::at("scalar does not match its tag", s.span));
+            }
         }
 
         Ok((s, kind))
@@ -152,8 +152,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
     fn text<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, _) = self.scalar()?;
+        Self::visit_text(s, visitor)
+    }
 
-        match &s.value {
+    fn visit_text<V: Visitor<'de>>(scalar: &Scalar<'de>, visitor: V) -> Result<V::Value> {
+        match &scalar.value {
             Cow::Borrowed(s) => visitor.visit_borrowed_str(s),
             Cow::Owned(s) => visitor.visit_str(s),
         }
@@ -280,6 +283,32 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
     }
 
+    fn check_mapping_keys(self, entries: &[Entry], span: Span) -> Result<()> {
+        // Small mappings need only a few comparisons. Keep their canonical keys
+        // on the stack; larger mappings retain a hash set to bound lookup work.
+        let mut small_keys = [const { Key::Null }; 8];
+        let mut large_keys =
+            (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));
+
+        for (index, entry) in entries.iter().enumerate() {
+            let key = self.child(entry.key).key()?;
+            let unique = if let Some(keys) = &mut large_keys {
+                keys.insert(key)
+            } else {
+                let duplicate = small_keys[..index].contains(&key);
+                small_keys[index] = key;
+                !duplicate
+            };
+
+            if !unique {
+                let span = self.stream.node(entry.key).map_or(span, |key| key.span);
+                return Err(Error::at("duplicate mapping key", span));
+            }
+        }
+
+        Ok(())
+    }
+
     fn map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
         let NodeKind::Mapping { entries, .. } = &node.kind else {
@@ -288,17 +317,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
         self.collection_tag(node, "tag:yaml.org,2002:map")?;
 
-        let mut keys = HashSet::with_capacity(entries.len());
-
-        for entry in entries {
-            if !keys.insert(self.child(entry.key).key()?) {
-                let span = self
-                    .stream
-                    .node(entry.key)
-                    .map_or(node.span, |key| key.span);
-                return Err(Error::at("duplicate mapping key", span));
-            }
-        }
+        self.check_mapping_keys(entries, node.span)?;
 
         let mut access = Mapping {
             de: self,
@@ -382,7 +401,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                     ScalarType::Bool => {
                         visitor.visit_bool(matches!(s.value.as_ref(), "true" | "True" | "TRUE"))
                     }
-                    ScalarType::String => self.text(visitor),
+                    ScalarType::String => Self::visit_text(s, visitor),
                     ScalarType::Float => visitor.visit_f64(self.float()?),
                     ScalarType::Int => {
                         let (value, radix, span) = self.integer()?;
