@@ -17,12 +17,14 @@ fn cases(path: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
             out.push(path);
         }
     }
+
     Ok(())
 }
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "conformance".to_owned());
+
     if command == "events" {
         let source = fs::read_to_string(args.next().ok_or("expected a file path")?)?;
         let stream = parse(&source)?;
@@ -30,21 +32,26 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         print!("{}", events(&stream));
         return Ok(ExitCode::SUCCESS);
     }
+
     if command != "conformance" {
         return Err("usage: astral-yaml-dev [conformance [suite-dir] | events file]".into());
     }
+
     let root = PathBuf::from(
         args.next()
             .unwrap_or_else(|| "fixtures/yaml-test-suite".to_owned()),
     );
+
     let mut paths = Vec::new();
     cases(&root, &mut paths)?;
     paths.sort();
     if paths.is_empty() {
         return Err("test suite contains no cases".into());
     }
+
     let mut passed = 0;
     let mut invalid = 0;
+
     for path in &paths {
         let dir = path.parent().ok_or("case has no directory")?;
         let id = dir.strip_prefix(&root)?.display();
@@ -53,6 +60,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         if expect_error {
             invalid += 1;
         }
+
         match parse(&source) {
             Err(_) if expect_error => passed += 1,
             Err(e) => println!("FAIL {id}: {e}"),
@@ -62,6 +70,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     println!("FAIL {id}: accepted malformed input");
                     continue;
                 }
+
                 let actual = events(&stream);
                 let expected = fs::read_to_string(dir.join("test.event"))?;
                 if actual == expected {
@@ -72,6 +81,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         .zip(expected.lines())
                         .position(|(a, b)| a != b)
                         .unwrap_or_else(|| actual.lines().count().min(expected.lines().count()));
+
                     println!(
                         "FAIL {id}: event {}: got {:?}, expected {:?}",
                         line + 1,
@@ -82,6 +92,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
     }
+
     println!(
         "{passed}/{} cases passed ({} valid, {invalid} invalid)",
         paths.len(),

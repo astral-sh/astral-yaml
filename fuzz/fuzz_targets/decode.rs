@@ -10,6 +10,7 @@ fuzz_target!(|data: &[u8]| {
         Ok(source) => match source.parse() {
             Ok(stream) => {
                 validate_spans(&stream).unwrap();
+
                 for node in stream.nodes() {
                     assert!(
                         source

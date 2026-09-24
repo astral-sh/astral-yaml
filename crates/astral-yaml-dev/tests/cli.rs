@@ -6,6 +6,7 @@ use std::{
 };
 
 struct Directory(PathBuf);
+
 impl Directory {
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -17,9 +18,11 @@ impl Directory {
         fs::create_dir(&path).unwrap();
         Self(path)
     }
+
     fn write(&self, name: &str, content: &str) {
         fs::write(self.0.join(name), content).unwrap();
     }
+
     fn run(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_astral-yaml-dev"))
             .args(args)
@@ -28,6 +31,7 @@ impl Directory {
             .unwrap()
     }
 }
+
 impl Drop for Directory {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.0).unwrap();
@@ -44,7 +48,9 @@ fn events_and_command_errors() {
         String::from_utf8(output.stdout).unwrap(),
         "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
     );
+
     directory.write("invalid.yaml", "[");
+
     for args in [
         vec!["events"],
         vec!["events", "missing"],
@@ -67,12 +73,15 @@ fn conformance_reports_rejections_acceptance_and_event_differences() {
     let output = directory.run(&["conformance", "."]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("FAIL"));
+
     directory.write("in.yaml", "abc");
     directory.write("error", "");
     let output = directory.run(&["conformance", "."]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("accepted malformed input"));
+
     fs::remove_file(directory.0.join("error")).unwrap();
+
     for expected in [
         "wrong\n",
         "+STR\n",
@@ -83,6 +92,7 @@ fn conformance_reports_rejections_acceptance_and_event_differences() {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stdout).contains("event"));
     }
+
     fs::remove_file(directory.0.join("test.event")).unwrap();
     assert!(!directory.run(&["conformance", "."]).status.success());
 }

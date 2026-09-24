@@ -15,14 +15,18 @@ pub fn events(stream: &Stream<'_>) -> String {
         Node(NodeId),
         End(&'static str),
     }
+
     let mut out = String::from("+STR\n");
+
     for doc in stream.documents() {
         out.push_str(if doc.start_marker.is_some() {
             "+DOC ---\n"
         } else {
             "+DOC\n"
         });
+
         let mut stack = vec![Event::Node(doc.root)];
+
         while let Some(event) = stack.pop() {
             match event {
                 Event::End(s) => {
@@ -36,10 +40,12 @@ pub fn events(stream: &Stream<'_>) -> String {
                         if let Some(anchor) = &node.anchor {
                             write!(out, " &{}", anchor.value).unwrap();
                         }
+
                         if let Some(tag) = &node.tag {
                             write!(out, " <{}>", event_tag(&tag.value)).unwrap();
                         }
                     };
+
                     match &node.kind {
                         NodeKind::Scalar(scalar) => {
                             header(&mut out, "=VAL");
@@ -51,6 +57,7 @@ pub fn events(stream: &Stream<'_>) -> String {
                                 ScalarStyle::Literal => '|',
                                 ScalarStyle::Folded => '>',
                             });
+
                             for c in scalar.value.chars() {
                                 match c {
                                     '\\' => out.push_str("\\\\"),
@@ -85,6 +92,7 @@ pub fn events(stream: &Stream<'_>) -> String {
                                 },
                             );
                             stack.push(Event::End("-MAP"));
+
                             for entry in entries.iter().rev() {
                                 stack.push(Event::Node(entry.value));
                                 stack.push(Event::Node(entry.key));
@@ -92,16 +100,19 @@ pub fn events(stream: &Stream<'_>) -> String {
                         }
                         NodeKind::Alias { name, .. } => write!(out, "=ALI *{name}").unwrap(),
                     }
+
                     out.push('\n');
                 }
             }
         }
+
         out.push_str(if doc.end_marker.is_some() {
             "-DOC ...\n"
         } else {
             "-DOC\n"
         });
     }
+
     out.push_str("-STR\n");
     out
 }
@@ -138,6 +149,7 @@ fn validate_parts<'a: 's, 's>(
             Err(format!("invalid span: {span:?}"))
         }
     };
+
     let contains = |outer: Span, inner: Span| -> Result<(), String> {
         valid(inner)?;
         if outer.start() <= inner.start() && inner.end() <= outer.end() {
@@ -146,11 +158,14 @@ fn validate_parts<'a: 's, 's>(
             Err(format!("span {inner:?} outside parent {outer:?}"))
         }
     };
+
     for current in nodes {
         valid(current.span)?;
+
         for p in current.anchor.iter().chain(current.tag.iter()) {
             contains(current.span, p.span)?;
         }
+
         match &current.kind {
             NodeKind::Scalar(s) => contains(current.span, s.span)?,
             NodeKind::Sequence { items, .. } => {
@@ -170,30 +185,38 @@ fn validate_parts<'a: 's, 's>(
             }
         }
     }
+
     for doc in documents {
         valid(doc.span)?;
         contains(doc.span, node(doc.root).ok_or("invalid root ID")?.span)?;
+
         for &marker in doc.start_marker.iter().chain(doc.end_marker.iter()) {
             contains(doc.span, marker)?;
         }
+
         for directive in &doc.directives {
             contains(doc.span, directive.span)?;
         }
     }
+
     for (spans, expected) in [
         (byte_order_marks, "\u{feff}"),
         (document_end_markers, "..."),
     ] {
         let mut end = 0;
+
         for &span in spans {
             valid(span)?;
             if span.start() < end || span.slice(source) != Some(expected) {
                 return Err(format!("invalid {expected:?} marker span"));
             }
+
             end = span.end();
         }
     }
+
     let mut end = 0;
+
     for comment in comments {
         valid(comment.span)?;
         if comment.span.start() < end
@@ -201,8 +224,10 @@ fn validate_parts<'a: 's, 's>(
         {
             return Err(format!("invalid comment: {comment:?}"));
         }
+
         end = comment.span.end();
     }
+
     Ok(())
 }
 
@@ -211,6 +236,7 @@ fn validate_parts<'a: 's, 's>(
 fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
     let mut bytes = tag.bytes();
     let mut decoded = Vec::new();
+
     while let Some(b) = bytes.next() {
         if b == b'%' {
             // Tags only come from the parser, which validates percent escapes.
@@ -260,13 +286,16 @@ mod tests {
             .unwrap_err();
             assert!(error.contains("ID"));
         }
+
         let stream = parse("{a: b}").unwrap();
         let mut value = None;
+
         for node in stream.nodes() {
             if let astral_yaml::NodeKind::Mapping { entries, .. } = &node.kind {
                 value = Some(entries[0].value);
             }
         }
+
         let value = value.unwrap();
         assert_eq!(
             validate_parts(stream.source(), stream.nodes(), &[], &[], &[], &[], &|id| {
@@ -304,6 +333,7 @@ mod tests {
             lookup,
         )
         .unwrap();
+
         let mut nodes = stream.nodes().to_vec();
         nodes[0].span = Span::new(0, 10).unwrap();
         assert!(
@@ -311,6 +341,7 @@ mod tests {
                 .unwrap_err()
                 .contains("invalid span")
         );
+
         nodes[0].span = Span::new(0, 1).unwrap();
         assert!(
             validate_parts(stream.source(), &nodes, &[], &[], &[], &[], lookup)
@@ -323,6 +354,7 @@ mod tests {
     fn validator_checks_comments_and_byte_order_marks() {
         let stream = parse("\u{feff}# one\n# two\n%YAML 1.2\n---\nx\n...\n").unwrap();
         validate_spans(&stream).unwrap();
+
         let check = |boms: &[Span], comments: &[astral_yaml::Comment<'_>]| {
             validate_parts(
                 stream.source(),
@@ -334,12 +366,15 @@ mod tests {
                 &|id| stream.node(id),
             )
         };
+
         let bom = stream.byte_order_marks()[0];
         assert!(check(&[bom, bom], &[]).is_err());
         assert!(check(&[Span::new(3, 4).unwrap()], &[]).is_err());
+
         let mut comments = stream.comments().to_vec();
         comments.reverse();
         assert!(check(&[], &comments).is_err());
+
         comments[0].text = "different text";
         assert!(check(&[], &comments[..1]).is_err());
     }

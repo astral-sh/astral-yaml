@@ -9,8 +9,10 @@ fuzz_target!(|data: &[u8]| {
     let Ok(source) = std::str::from_utf8(data) else {
         return;
     };
+
     let quoted = to_string(source).unwrap();
     assert_eq!(from_str::<String>(&quoted).unwrap(), source);
+
     match from_str::<Value>(source) {
         Ok(value) => {
             if let Ok(encoded) = to_string(&value) {

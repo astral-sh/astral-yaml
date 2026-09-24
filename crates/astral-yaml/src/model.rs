@@ -22,22 +22,27 @@ impl Span {
     pub const fn start(self) -> usize {
         self.start
     }
+
     #[must_use]
     pub const fn end(self) -> usize {
         self.end
     }
+
     #[must_use]
     pub const fn len(self) -> usize {
         self.end - self.start
     }
+
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
     }
+
     #[must_use]
     pub fn slice(self, source: &str) -> Option<&str> {
         source.get(self.start..self.end)
     }
+
     /// Slices an encoded input using a span returned by `Source::original_span`.
     #[must_use]
     pub fn slice_bytes(self, source: &[u8]) -> Option<&[u8]> {
@@ -158,6 +163,7 @@ impl<'a> Stream<'a> {
     pub fn source(&self) -> &'a str {
         self.source
     }
+
     #[must_use]
     pub fn span(&self) -> Span {
         Span {
@@ -165,33 +171,40 @@ impl<'a> Stream<'a> {
             end: self.source.len(),
         }
     }
+
     #[must_use]
     pub fn documents(&self) -> &[Document<'a>] {
         &self.documents
     }
+
     #[must_use]
     pub fn comments(&self) -> &[Comment<'a>] {
         &self.comments
     }
+
     #[must_use]
     pub fn nodes(&self) -> &[Node<'a>] {
         &self.nodes
     }
+
     /// Byte order marks at document boundaries, excluding any inside scalar content.
     #[must_use]
     pub fn byte_order_marks(&self) -> &[Span] {
         &self.byte_order_marks
     }
+
     /// Every explicit document end marker, including standalone stream suffixes.
     #[must_use]
     pub fn document_end_markers(&self) -> &[Span] {
         &self.document_end_markers
     }
+
     /// Returns a node when the ID lies within this stream's arena.
     #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node<'a>> {
         self.nodes.get(id.0)
     }
+
     /// Resolves a source offset to a one-based line and Unicode column.
     #[must_use]
     pub fn location(&self, offset: usize) -> Option<(usize, usize)> {
@@ -199,6 +212,7 @@ impl<'a> Stream<'a> {
         let mut line = 1;
         let mut column = 1;
         let mut cr = false;
+
         for c in prefix.chars() {
             match c {
                 '\n' if cr => {}
@@ -208,8 +222,10 @@ impl<'a> Stream<'a> {
                 }
                 _ => column += 1,
             }
+
             cr = c == '\r';
         }
+
         Some((line, column))
     }
 }

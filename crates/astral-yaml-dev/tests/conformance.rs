@@ -20,6 +20,7 @@ fn official_yaml_test_suite() {
 #[test]
 fn fuzz_regressions() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/regressions");
+
     for entry in std::fs::read_dir(root).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|ext| ext == "yaml") {
@@ -36,6 +37,7 @@ fn every_corpus_prefix_has_valid_spans() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yaml-test-suite");
     let mut directories = vec![root];
     let mut inputs = 0;
+
     while let Some(directory) = directories.pop() {
         for entry in std::fs::read_dir(directory).unwrap() {
             let path = entry.unwrap().path();
@@ -44,8 +46,10 @@ fn every_corpus_prefix_has_valid_spans() {
             } else if path.file_name().is_some_and(|name| name == "in.yaml") {
                 inputs += 1;
                 let source = std::fs::read_to_string(&path).unwrap();
+
                 for end in source.char_indices().map(|(i, _)| i).chain([source.len()]) {
                     let prefix = &source[..end];
+
                     match astral_yaml::parse(prefix) {
                         Ok(stream) => {
                             astral_yaml_dev::validate_spans(&stream).unwrap_or_else(|e| {
@@ -62,6 +66,7 @@ fn every_corpus_prefix_has_valid_spans() {
             }
         }
     }
+
     assert_eq!(inputs, 402);
 }
 

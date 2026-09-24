@@ -22,6 +22,7 @@ pub struct Source<'a> {
     text: Cow<'a, str>,
     encoding: Encoding,
 }
+
 impl<'a> Source<'a> {
     /// Decodes UTF-8, UTF-16, or UTF-32, with or without a byte order mark.
     ///
@@ -30,6 +31,7 @@ impl<'a> Source<'a> {
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
         Self::with_limit(bytes, ParseOptions::default().max_input_bytes)
     }
+
     /// Decodes input, bounding both the original and decoded byte lengths.
     ///
     /// # Errors
@@ -39,9 +41,11 @@ impl<'a> Source<'a> {
             Utf16,
             Utf32,
         }
+
         if bytes.len() > max_bytes {
             return Err(error(0, 0, "input byte limit exceeded"));
         }
+
         let encoding = detect(bytes);
         let unit = match encoding {
             Encoding::Utf16Be | Encoding::Utf16Le => CodeUnit::Utf16,
@@ -54,6 +58,7 @@ impl<'a> Source<'a> {
                         "invalid UTF-8",
                     )
                 })?;
+
                 return Ok(Self {
                     bytes,
                     text: Cow::Borrowed(text),
@@ -61,8 +66,10 @@ impl<'a> Source<'a> {
                 });
             }
         };
+
         let mut text = String::with_capacity(bytes.len());
         let mut offset = 0;
+
         while offset < bytes.len() {
             let start = offset;
             let c = match unit {
@@ -79,6 +86,7 @@ impl<'a> Source<'a> {
                     } else {
                         u32::from(first)
                     };
+
                     char::from_u32(value)
                         .ok_or_else(|| error(start, offset, "unpaired UTF-16 surrogate"))?
                 }
@@ -86,6 +94,7 @@ impl<'a> Source<'a> {
                     let Some(chunk) = bytes.get(offset..offset + 4) else {
                         return Err(error(offset, bytes.len(), "truncated UTF-32 code point"));
                     };
+
                     let array = [chunk[0], chunk[1], chunk[2], chunk[3]];
                     let value = if encoding == Encoding::Utf32Be {
                         u32::from_be_bytes(array)
@@ -97,29 +106,36 @@ impl<'a> Source<'a> {
                         .ok_or_else(|| error(start, offset, "invalid UTF-32 code point"))?
                 }
             };
+
             if text.len() + c.len_utf8() > max_bytes {
                 return Err(error(start, offset, "decoded byte limit exceeded"));
             }
+
             text.push(c);
         }
+
         Ok(Self {
             bytes,
             text: Cow::Owned(text),
             encoding,
         })
     }
+
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
+
     #[must_use]
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }
+
     #[must_use]
     pub const fn encoding(&self) -> Encoding {
         self.encoding
     }
+
     /// Parses the decoded text. Returned spans, including error spans, use UTF-8 offsets.
     ///
     /// # Errors
@@ -127,6 +143,7 @@ impl<'a> Source<'a> {
     pub fn parse(&self) -> Result<Stream<'_>, Error> {
         parse(&self.text)
     }
+
     /// Converts a decoded-text span into a span of the original bytes.
     ///
     /// For UTF-16/32 this scans the text prefix. Invalid UTF-8 boundaries return `None`.
@@ -139,6 +156,7 @@ impl<'a> Source<'a> {
             Encoding::Utf16Be | Encoding::Utf16Le => s.encode_utf16().count() * 2,
             Encoding::Utf32Be | Encoding::Utf32Le => s.chars().count() * 4,
         };
+
         let start = length(before);
         Some(Span {
             start,
@@ -146,10 +164,12 @@ impl<'a> Source<'a> {
         })
     }
 }
+
 fn word(bytes: &[u8], offset: usize, encoding: Encoding) -> Result<u16, Error> {
     let Some(chunk) = bytes.get(offset..offset + 2) else {
         return Err(error(offset, bytes.len(), "truncated UTF-16 code unit"));
     };
+
     let array = [chunk[0], chunk[1]];
     Ok(if encoding == Encoding::Utf16Be {
         u16::from_be_bytes(array)
@@ -157,12 +177,14 @@ fn word(bytes: &[u8], offset: usize, encoding: Encoding) -> Result<u16, Error> {
         u16::from_le_bytes(array)
     })
 }
+
 fn error(start: usize, end: usize, message: &'static str) -> Error {
     Error {
         span: Span { start, end },
         message,
     }
 }
+
 fn detect(bytes: &[u8]) -> Encoding {
     match bytes {
         [0, 0, 0xfe, 0xff, ..] | [0, 0, 0, _, ..] => Encoding::Utf32Be,

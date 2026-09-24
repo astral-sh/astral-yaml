@@ -30,6 +30,7 @@ pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> 
     if stream.documents().len() != 1 {
         return Err(Error::at("expected exactly one document", stream.span()));
     }
+
     from_document(stream, 0)
 }
 
@@ -42,8 +43,10 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         .documents()
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
+
     let budget = Cell::new(1_000_000usize);
     let scalar_budget = Cell::new(64 * 1024 * 1024usize);
+
     T::deserialize(Deserializer {
         stream,
         id: doc.root,
@@ -64,6 +67,7 @@ struct Deserializer<'s, 'de> {
     scalar_budget: &'s Cell<usize>,
     ignore_tag: bool,
 }
+
 impl<'s, 'de> Deserializer<'s, 'de> {
     fn raw_node(self) -> Result<&'s Node<'de>> {
         let node = self
@@ -76,6 +80,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 node.span,
             ));
         }
+
         self.budget.set(self.budget.get() - 1);
         if let NodeKind::Scalar(scalar) = &node.kind {
             let remaining = self
@@ -85,8 +90,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span))?;
             self.scalar_budget.set(remaining);
         }
+
         Ok(node)
     }
+
     fn node(self) -> Result<&'s Node<'de>> {
         let node = self.raw_node()?;
         if let NodeKind::Alias { target, .. } = node.kind {
@@ -100,6 +107,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             Ok(node)
         }
     }
+
     fn child(self, id: NodeId) -> Self {
         Self {
             id,
@@ -108,16 +116,19 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             ..self
         }
     }
+
     fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
         let node = self.node()?;
         let NodeKind::Scalar(s) = &node.kind else {
             return Err(Error::at("expected a scalar", node.span));
         };
+
         let tag = if self.ignore_tag {
             None
         } else {
             node.tag.as_ref().map(|t| t.value.as_ref())
         };
+
         let kind = match tag {
             Some("tag:yaml.org,2002:str" | "!") => ScalarType::String,
             Some("tag:yaml.org,2002:null") => ScalarType::Null,
@@ -128,26 +139,32 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             None if s.style == ScalarStyle::Plain => classify(&s.value),
             None => ScalarType::String,
         };
+
         if kind != ScalarType::String
             && classify(&s.value) != kind
             && !(kind == ScalarType::Float && classify(&s.value) == ScalarType::Int)
         {
             return Err(Error::at("scalar does not match its tag", s.span));
         }
+
         Ok((s, kind))
     }
+
     fn text<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, _) = self.scalar()?;
+
         match &s.value {
             Cow::Borrowed(s) => visitor.visit_borrowed_str(s),
             Cow::Owned(s) => visitor.visit_str(s),
         }
     }
+
     fn integer(self) -> Result<(&'s str, u32, Span)> {
         let (s, kind) = self.scalar()?;
         if kind != ScalarType::Int {
             return Err(Error::at("expected an integer", s.span));
         }
+
         let (value, radix) = if let Some(s) = s.value.strip_prefix("0x") {
             (s, 16)
         } else if let Some(s) = s.value.strip_prefix("0o") {
@@ -155,13 +172,16 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         } else {
             (s.value.as_ref(), 10)
         };
+
         Ok((value, radix, s.span))
     }
+
     fn float(self) -> Result<f64> {
         let (s, kind) = self.scalar()?;
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
             return Err(Error::at("expected a number", s.span));
         }
+
         let unsigned = s.value.trim_start_matches(['+', '-']);
         if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
             return Ok(if s.value.starts_with('-') {
@@ -170,21 +190,26 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 f64::INFINITY
             });
         }
+
         if matches!(unsigned, ".nan" | ".NaN" | ".NAN") {
             return Ok(f64::NAN);
         }
+
         if kind == ScalarType::Int && (s.value.starts_with("0x") || s.value.starts_with("0o")) {
             let (value, radix, span) = self.integer()?;
             let value = u128::from_str_radix(value, radix)
                 .map_err(|_| Error::at("integer out of range", span))?;
+
             // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
             #[allow(clippy::cast_precision_loss)]
             return Ok(value as f64);
         }
+
         s.value
             .parse()
             .map_err(|_| Error::at("invalid float", s.span))
     }
+
     fn collection_tag(self, node: &Node<'_>, expected: &str) -> Result<()> {
         if !self.ignore_tag
             && node
@@ -194,10 +219,13 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         {
             return Err(Error::at("tag does not match collection type", node.span));
         }
+
         Ok(())
     }
+
     fn key(self) -> Result<Key<'s>> {
         let node = self.raw_node()?;
+
         match &node.kind {
             NodeKind::Scalar(_) => {
                 let (scalar, kind) = self.scalar()?;
@@ -245,18 +273,23 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 if pairs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
                     return Err(Error::at("duplicate mapping key", node.span));
                 }
+
                 Ok(Key::Mapping(pairs))
             }
             NodeKind::Alias { target, .. } => self.child(*target).key(),
         }
     }
+
     fn map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
         let NodeKind::Mapping { entries, .. } = &node.kind else {
             return Err(Error::at("expected a mapping", node.span));
         };
+
         self.collection_tag(node, "tag:yaml.org,2002:map")?;
+
         let mut keys = HashSet::with_capacity(entries.len());
+
         for entry in entries {
             if !keys.insert(self.child(entry.key).key()?) {
                 let span = self
@@ -266,37 +299,45 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 return Err(Error::at("duplicate mapping key", span));
             }
         }
+
         let mut access = Mapping {
             de: self,
             entries,
             index: 0,
             pending: None,
         };
+
         let result = visitor
             .visit_map(&mut access)
             .map_err(|error: Error| error.located(node.span))?;
         if access.index != entries.len() || access.pending.is_some() {
             return Err(Error::at("mapping was not fully consumed", node.span));
         }
+
         Ok(result)
     }
+
     fn seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
         let NodeKind::Sequence { items, .. } = &node.kind else {
             return Err(Error::at("expected a sequence", node.span));
         };
+
         self.collection_tag(node, "tag:yaml.org,2002:seq")?;
+
         let mut access = Sequence {
             de: self,
             items,
             index: 0,
         };
+
         let result = visitor
             .visit_seq(&mut access)
             .map_err(|error: Error| error.located(node.span))?;
         if access.index != items.len() {
             return Err(Error::at("sequence was not fully consumed", node.span));
         }
+
         Ok(result)
     }
 }
@@ -313,23 +354,29 @@ enum Key<'a> {
 }
 
 macro_rules! signed {
-    ($($method:ident => $visit:ident : $ty:ty),* $(,)?) => {$ (
-        fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-            let (value, radix, span) = self.integer()?;
-            let number = <$ty>::from_str_radix(value, radix).map_err(|_| Error::at("integer out of range", span))?;
-            visitor.$visit(number)
-        }
-    )*};
+    ($($method:ident => $visit:ident : $ty:ty),* $(,)?) => {
+        $(
+            fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+                let (value, radix, span) = self.integer()?;
+                let number = <$ty>::from_str_radix(value, radix)
+                    .map_err(|_| Error::at("integer out of range", span))?;
+
+                visitor.$visit(number)
+            }
+        )*
+    };
 }
 
 impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     type Error = Error;
+
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match &self.raw_node()?.kind {
             NodeKind::Sequence { .. } => self.seq(visitor),
             NodeKind::Mapping { .. } => self.map(visitor),
             NodeKind::Scalar(_) => {
                 let (s, kind) = self.scalar()?;
+
                 match kind {
                     ScalarType::Null => visitor.visit_unit(),
                     ScalarType::Bool => {
@@ -362,54 +409,72 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             NodeKind::Alias { target, .. } => self.child(*target).deserialize_any(visitor),
         }
     }
+
     signed! {
-        deserialize_i8 => visit_i8: i8, deserialize_i16 => visit_i16: i16,
-        deserialize_i32 => visit_i32: i32, deserialize_i64 => visit_i64: i64,
+        deserialize_i8 => visit_i8: i8,
+        deserialize_i16 => visit_i16: i16,
+        deserialize_i32 => visit_i32: i32,
+        deserialize_i64 => visit_i64: i64,
         deserialize_i128 => visit_i128: i128,
-        deserialize_u8 => visit_u8: u8, deserialize_u16 => visit_u16: u16,
-        deserialize_u32 => visit_u32: u32, deserialize_u64 => visit_u64: u64,
+        deserialize_u8 => visit_u8: u8,
+        deserialize_u16 => visit_u16: u16,
+        deserialize_u32 => visit_u32: u32,
+        deserialize_u64 => visit_u64: u64,
         deserialize_u128 => visit_u128: u128,
     }
+
     fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_f64(visitor)
     }
+
     fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         visitor.visit_f64(self.float()?)
     }
+
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, kind) = self.scalar()?;
         if kind != ScalarType::Bool {
             return Err(Error::at("expected a boolean", s.span));
         }
+
         visitor.visit_bool(matches!(s.value.as_ref(), "true" | "True" | "TRUE"))
     }
+
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.text(visitor)
     }
+
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.text(visitor)
     }
+
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, _) = self.scalar()?;
         let mut chars = s.value.chars();
+
         match (chars.next(), chars.next()) {
             (Some(c), None) => visitor.visit_char(c),
             _ => Err(Error::at("expected one character", s.span)),
         }
     }
+
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         if matches!(self.node()?.kind, NodeKind::Sequence { .. }) {
             return self.seq(visitor);
         }
+
         let (s, _) = self.scalar()?;
+
         match &s.value {
             Cow::Borrowed(s) => visitor.visit_borrowed_bytes(s.as_bytes()),
             Cow::Owned(s) => visitor.visit_bytes(s.as_bytes()),
         }
     }
+
     fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_bytes(visitor)
     }
+
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         if matches!(self.node()?.kind, NodeKind::Scalar(_)) && self.scalar()?.1 == ScalarType::Null
         {
@@ -418,13 +483,16 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             visitor.visit_some(self.child(self.id))
         }
     }
+
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, kind) = self.scalar()?;
         if kind != ScalarType::Null {
             return Err(Error::at("expected null", s.span));
         }
+
         visitor.visit_unit()
     }
+
     fn deserialize_unit_struct<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -432,6 +500,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     ) -> Result<V::Value> {
         self.deserialize_unit(visitor)
     }
+
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -440,12 +509,15 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         self.node()?;
         visitor.visit_newtype_struct(self.child(self.id))
     }
+
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.seq(visitor)
     }
+
     fn deserialize_tuple<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         self.seq(visitor)
     }
+
     fn deserialize_tuple_struct<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -454,9 +526,11 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     ) -> Result<V::Value> {
         self.seq(visitor)
     }
+
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.map(visitor)
     }
+
     fn deserialize_struct<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -465,6 +539,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     ) -> Result<V::Value> {
         self.map(visitor)
     }
+
     fn deserialize_enum<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -486,6 +561,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 });
             }
         }
+
         match &node.kind {
             NodeKind::Scalar(_) => {
                 let (scalar, _) = self.scalar()?;
@@ -512,9 +588,11 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             )),
         }
     }
+
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.text(visitor)
     }
+
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_any(de::IgnoredAny)?;
         visitor.visit_unit()
@@ -526,38 +604,48 @@ struct Sequence<'s, 'de> {
     items: &'s [NodeId],
     index: usize,
 }
+
 impl<'de> SeqAccess<'de> for &mut Sequence<'_, 'de> {
     type Error = Error;
+
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
         let Some(&id) = self.items.get(self.index) else {
             return Ok(None);
         };
+
         self.index += 1;
         seed.deserialize(self.de.child(id)).map(Some)
     }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.items.len() - self.index)
     }
 }
+
 struct Mapping<'s, 'de> {
     de: Deserializer<'s, 'de>,
     entries: &'s [Entry],
     index: usize,
     pending: Option<NodeId>,
 }
+
 impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
     type Error = Error;
+
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
         if self.pending.is_some() {
             return Err(Error::new("mapping value was not consumed"));
         }
+
         let Some(entry) = self.entries.get(self.index) else {
             return Ok(None);
         };
+
         self.pending = Some(entry.value);
         self.index += 1;
         seed.deserialize(self.de.child(entry.key)).map(Some)
     }
+
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
         let id = self
             .pending
@@ -565,26 +653,32 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
             .ok_or_else(|| Error::new("mapping value requested before key"))?;
         seed.deserialize(self.de.child(id))
     }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.entries.len() - self.index)
     }
 }
+
 struct Enumeration<'s, 'de> {
     de: Deserializer<'s, 'de>,
     variant: &'s str,
     value: Option<NodeId>,
     tagged: bool,
 }
+
 impl<'de> EnumAccess<'de> for Enumeration<'_, 'de> {
     type Error = Error;
     type Variant = Self;
+
     fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self)> {
         let variant = seed.deserialize(de::value::StrDeserializer::<Error>::new(self.variant))?;
         Ok((variant, self))
     }
 }
+
 impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
     type Error = Error;
+
     fn unit_variant(self) -> Result<()> {
         match self.value {
             None => Ok(()),
@@ -599,6 +693,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
             Some(id) => <()>::deserialize(self.de.child(id)),
         }
     }
+
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         let id = self
             .value
@@ -608,6 +703,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
             ..self.de.child(id)
         })
     }
+
     fn tuple_variant<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         let id = self
             .value
@@ -618,6 +714,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         }
         .seq(visitor)
     }
+
     fn struct_variant<V: Visitor<'de>>(
         self,
         _: &'static [&'static str],
@@ -651,6 +748,7 @@ mod tests {
             scalar_budget: &bytes,
             ignore_tag: false,
         };
+
         de.node().unwrap();
         assert_eq!((visits.get(), bytes.get()), (1, 0));
         assert_eq!(
@@ -662,15 +760,18 @@ mod tests {
             "deserialization resource limit exceeded"
         );
     }
+
     #[test]
     fn aliases_charge_the_target_and_preserve_the_tag_policy() {
         let stream = astral_yaml::parse("[&a !custom abc, *a]").unwrap();
         let mut alias = None;
+
         for node in stream.nodes() {
             if let astral_yaml::NodeKind::Sequence { items, .. } = &node.kind {
                 alias = items.last().copied();
             }
         }
+
         let visits = Cell::new(4);
         let bytes = Cell::new(6);
         let de = Deserializer {
@@ -681,6 +782,7 @@ mod tests {
             scalar_budget: &bytes,
             ignore_tag: true,
         };
+
         assert_eq!(de.scalar().unwrap().0.value, "abc");
         assert_eq!((visits.get(), bytes.get()), (2, 3));
         assert_eq!(

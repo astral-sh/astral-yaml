@@ -32,7 +32,9 @@ fn encodings_and_original_spans() {
             assert_eq!(source.text(), text);
             assert_eq!(source.encoding(), encoding);
             assert_eq!(source.bytes(), bytes);
+
             let stream = source.parse().unwrap();
+
             for span in stream
                 .nodes()
                 .iter()
@@ -46,6 +48,7 @@ fn encodings_and_original_spans() {
                     encode(span.slice(&text).unwrap(), encoding)
                 );
             }
+
             let inside = text.find('🌍').unwrap() + 1;
             assert!(
                 source
@@ -73,8 +76,10 @@ fn invalid_encodings_and_limits() {
         let error = Source::from_bytes(bytes).unwrap_err();
         assert!(error.span.slice_bytes(bytes).is_some());
     }
+
     assert!(Source::with_limit(b"abc", 2).is_err());
     assert!(Source::with_limit(&[0xfe, 0xff], 2).is_err());
+
     assert_eq!(Source::from_bytes(b"").unwrap().text(), "");
     assert!(Source::from_bytes(b"[").unwrap().parse().is_err());
 }

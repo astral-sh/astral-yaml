@@ -19,22 +19,26 @@ pub fn classify(value: &str) -> ScalarType {
         ".nan" | ".NaN" | ".NAN" => return ScalarType::Float,
         _ => {}
     }
+
     let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
     if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
         return ScalarType::Float;
     }
+
     if digits(unsigned, 10)
         || value.strip_prefix("0o").is_some_and(|s| digits(s, 8))
         || value.strip_prefix("0x").is_some_and(|s| digits(s, 16))
     {
         return ScalarType::Int;
     }
+
     let (mantissa, exponent) = unsigned.find(['e', 'E']).map_or((unsigned, None), |i| {
         (&unsigned[..i], Some(&unsigned[i + 1..]))
     });
     if exponent.is_some_and(|s| !digits(s.strip_prefix(['+', '-']).unwrap_or(s), 10)) {
         return ScalarType::String;
     }
+
     let valid = mantissa.find('.').map_or_else(
         || digits(mantissa, 10),
         |i| {
@@ -58,6 +62,7 @@ fn digits(value: &str, radix: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{ScalarType, classify};
+
     #[test]
     fn core_schema() {
         for (kind, values) in [

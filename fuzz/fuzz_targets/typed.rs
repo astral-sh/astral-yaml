@@ -11,10 +11,13 @@ use std::{collections::BTreeMap, fmt};
 
 #[derive(Deserialize, Serialize)]
 struct Newtype(u64);
+
 #[derive(Deserialize, Serialize)]
 struct Pair(i16, String);
+
 #[derive(Deserialize, Serialize)]
 struct Unit;
+
 #[derive(Deserialize, Serialize)]
 enum Kind {
     Unit,
@@ -22,6 +25,7 @@ enum Kind {
     Tuple(u8, bool),
     Struct { value: i32 },
 }
+
 #[derive(Deserialize, Serialize)]
 struct Configuration {
     #[serde(default)]
@@ -31,30 +35,39 @@ struct Configuration {
 }
 
 struct Bytes(Vec<u8>);
+
 impl Serialize for Bytes {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(&self.0)
     }
 }
+
 impl<'de> Deserialize<'de> for Bytes {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct BytesVisitor;
+
         impl<'de> Visitor<'de> for BytesVisitor {
             type Value = Bytes;
+
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("bytes")
             }
+
             fn visit_bytes<E: de::Error>(self, bytes: &[u8]) -> Result<Bytes, E> {
                 Ok(Bytes(bytes.to_vec()))
             }
+
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Bytes, A::Error> {
                 let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+
                 while let Some(byte) = seq.next_element()? {
                     bytes.push(byte);
                 }
+
                 Ok(Bytes(bytes))
             }
         }
+
         deserializer.deserialize_byte_buf(BytesVisitor)
     }
 }
@@ -64,6 +77,7 @@ fn check<T: DeserializeOwned + Serialize>(source: &str, stream: &astral_yaml::St
         Ok(value) => {
             if let Ok(encoded) = to_string(&value) {
                 let decoded: T = from_str(&encoded).unwrap();
+
                 // Canonical output also compares NaN values and the sign of zero.
                 assert_eq!(to_string(&decoded).unwrap(), encoded);
             }
@@ -79,12 +93,15 @@ fuzz_target!(|data: &[u8]| {
     let Some((&selector, input)) = data.split_first() else {
         return;
     };
+
     let Ok(source) = std::str::from_utf8(input) else {
         return;
     };
+
     let Ok(stream) = astral_yaml::parse(source) else {
         return;
     };
+
     match selector % 24 {
         0 => check::<i8>(source, &stream),
         1 => check::<i16>(source, &stream),
