@@ -79,6 +79,36 @@ fn scalar_borrowing_and_unicode() {
 }
 
 #[test]
+fn plain_scalars_preserve_unicode_and_embedded_indicators() {
+    let source = "café:λ 中#文 🌍{x,y}  \n";
+    let stream = parse(source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar")
+    };
+
+    assert_eq!(scalar.value, "café:λ 中#文 🌍{x,y}");
+    assert_eq!(scalar.span.slice(source), Some(scalar.value.as_ref()));
+    assert!(matches!(scalar.value, Cow::Borrowed(_)));
+
+    let source = "[café:λ, 中#文, 🌍, fin]";
+    let stream = parse(source).unwrap();
+    let NodeKind::Sequence { items, .. } = &stream.nodes()[0].kind else {
+        panic!("expected sequence")
+    };
+
+    for (&id, expected) in items.iter().zip(["café:λ", "中#文", "🌍", "fin"]) {
+        let NodeKind::Scalar(scalar) = &stream.node(id).unwrap().kind else {
+            panic!("expected scalar")
+        };
+
+        assert_eq!(scalar.value, expected);
+        assert_eq!(scalar.span.slice(source), Some(expected));
+    }
+
+    assert_eq!(items.len(), 4);
+}
+
+#[test]
 fn span_construction() {
     assert!(Span::new(2, 1).is_none());
 

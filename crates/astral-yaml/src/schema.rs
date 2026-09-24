@@ -21,6 +21,13 @@ pub fn classify(value: &str) -> ScalarType {
     }
 
     let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
+
+    // Numeric scalars begin with a digit or a dot after their optional sign.
+    // Most configuration values are strings, so avoid scanning their contents.
+    if !matches!(unsigned.as_bytes().first(), Some(b'0'..=b'9' | b'.')) {
+        return ScalarType::String;
+    }
+
     if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
         return ScalarType::Float;
     }
@@ -92,6 +99,10 @@ mod tests {
             (
                 ScalarType::String,
                 &[
+                    "+",
+                    "-",
+                    "+true",
+                    "-null",
                     "yes",
                     "on",
                     "No",

@@ -550,15 +550,16 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         let indent = self.column();
         let prefix = &self.source[self.pos - indent..self.pos];
-        let block_collection = self.indicator(b'-')
-            || self.indicator(b'?')
-            || self.indicator(b':')
-            || self.simple_colon().is_some();
-        if prefix.contains('\t')
-            && (block_collection
-                || (prefix.bytes().all(is_space) && signed(self.leading_spaces()) <= parent))
-        {
-            return Err(self.error("tab in block indentation"));
+        if prefix.contains('\t') {
+            let block_collection = self.indicator(b'-')
+                || self.indicator(b'?')
+                || self.indicator(b':')
+                || self.simple_colon().is_some();
+            if block_collection
+                || (prefix.bytes().all(is_space) && signed(self.leading_spaces()) <= parent)
+            {
+                return Err(self.error("tab in block indentation"));
+            }
         }
 
         // A property preceding a mapping key belongs to that key, not the mapping.
@@ -1279,11 +1280,21 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 Some(b',' | b'[' | b']' | b'{' | b'}') if flow => break,
-                Some(b) => {
-                    self.pos += self.rest().chars().next().map_or(0, char::len_utf8);
-                    if !matches!(b, b' ' | b'\t') {
-                        end = self.pos;
-                    }
+                Some(b' ' | b'\t') => self.pos += 1,
+                Some(_) => {
+                    // Consume a run of content bytes. Every stopping character is
+                    // ASCII, so the next position is also a UTF-8 boundary.
+                    self.pos += 1;
+                    let remaining = &self.source.as_bytes()[self.pos..];
+                    let length = remaining
+                        .iter()
+                        .position(|&b| {
+                            matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'#' | b':')
+                                || (flow && b",[]{}".contains(&b))
+                        })
+                        .unwrap_or(remaining.len());
+                    self.pos += length;
+                    end = self.pos;
                 }
             }
         }
@@ -1628,6 +1639,14 @@ fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: u8) -> String {
 
 // JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.
 fn validate_characters(stream: &Stream<'_>) -> Result<()> {
+    if stream
+        .source()
+        .bytes()
+        .all(|b| matches!(b, b'\t' | b'\r' | b'\n' | b' '..=b'~'))
+    {
+        return Ok(());
+    }
+
     let mut restricted = stream.source().char_indices().filter(|&(_, c)| {
         c == '\u{feff}'
             || !matches!(
