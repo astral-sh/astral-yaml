@@ -1,0 +1,10 @@
+[package]
+name = "astral-yaml"
+description = "A safe, span-aware YAML 1.2 parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
