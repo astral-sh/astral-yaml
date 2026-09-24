@@ -81,6 +81,7 @@ fn derived_types() {
         Kind::Struct { value: -2 }
     );
     assert_eq!(from_str::<Kind>("!Unit").unwrap(), Kind::Unit);
+    assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
 }
 
 #[test]

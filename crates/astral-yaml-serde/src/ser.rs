@@ -151,7 +151,8 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
         let mut seq = self.compound(false)?;
         for byte in value {
-            seq.serialize_element(byte)?;
+            seq.separator();
+            seq.serializer.number(byte);
         }
         SerializeSeq::end(seq)
     }

@@ -65,37 +65,40 @@ struct Deserializer<'s, 'de> {
     ignore_tag: bool,
 }
 impl<'s, 'de> Deserializer<'s, 'de> {
-    fn node(self) -> Result<&'s Node<'de>> {
-        let mut id = self.id;
-        for _ in 0..128 {
-            let node = self
-                .stream
-                .node(id)
-                .ok_or_else(|| Error::new("invalid node ID"))?;
-            if self.depth >= 64 || self.budget.get() == 0 {
-                return Err(Error::at(
-                    "deserialization resource limit exceeded",
-                    node.span,
-                ));
-            }
-            self.budget.set(self.budget.get() - 1);
-            if let NodeKind::Alias { target, .. } = node.kind {
-                id = target;
-            } else {
-                if let NodeKind::Scalar(scalar) = &node.kind {
-                    let remaining = self
-                        .scalar_budget
-                        .get()
-                        .checked_sub(scalar.value.len())
-                        .ok_or_else(|| {
-                            Error::at("expanded scalar byte limit exceeded", node.span)
-                        })?;
-                    self.scalar_budget.set(remaining);
-                }
-                return Ok(node);
-            }
+    fn raw_node(self) -> Result<&'s Node<'de>> {
+        let node = self
+            .stream
+            .node(self.id)
+            .expect("ID belongs to this stream");
+        if self.depth >= 64 || self.budget.get() == 0 {
+            return Err(Error::at(
+                "deserialization resource limit exceeded",
+                node.span,
+            ));
         }
-        Err(Error::new("alias chain limit exceeded"))
+        self.budget.set(self.budget.get() - 1);
+        if let NodeKind::Scalar(scalar) = &node.kind {
+            let remaining = self
+                .scalar_budget
+                .get()
+                .checked_sub(scalar.value.len())
+                .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span))?;
+            self.scalar_budget.set(remaining);
+        }
+        Ok(node)
+    }
+    fn node(self) -> Result<&'s Node<'de>> {
+        let node = self.raw_node()?;
+        if let NodeKind::Alias { target, .. } = node.kind {
+            Self {
+                id: target,
+                depth: self.depth + 1,
+                ..self
+            }
+            .node()
+        } else {
+            Ok(node)
+        }
     }
     fn child(self, id: NodeId) -> Self {
         Self {
@@ -174,11 +177,9 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             let (value, radix, span) = self.integer()?;
             let value = u128::from_str_radix(value, radix)
                 .map_err(|_| Error::at("integer out of range", span))?;
-            // Parsing the decimal representation gives the same rounded conversion as other numbers.
-            return value
-                .to_string()
-                .parse()
-                .map_err(|_| Error::at("invalid float", span));
+            // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
+            #[allow(clippy::cast_precision_loss)]
+            return Ok(value as f64);
         }
         s.value
             .parse()
@@ -196,7 +197,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Ok(())
     }
     fn key(self) -> Result<Key<'s>> {
-        let node = self.node()?;
+        let node = self.raw_node()?;
         match &node.kind {
             NodeKind::Scalar(_) => {
                 let (scalar, kind) = self.scalar()?;
@@ -246,7 +247,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 }
                 Ok(Key::Mapping(pairs))
             }
-            NodeKind::Alias { .. } => Err(Error::at("unresolved key alias", node.span)),
+            NodeKind::Alias { target, .. } => self.child(*target).key(),
         }
     }
     fn map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -324,7 +325,7 @@ macro_rules! signed {
 impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     type Error = Error;
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        match &self.node()?.kind {
+        match &self.raw_node()?.kind {
             NodeKind::Sequence { .. } => self.seq(visitor),
             NodeKind::Mapping { .. } => self.map(visitor),
             NodeKind::Scalar(_) => {
@@ -358,7 +359,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                     }
                 }
             }
-            NodeKind::Alias { .. } => Err(Error::new("unresolved alias")),
+            NodeKind::Alias { target, .. } => self.child(*target).deserialize_any(visitor),
         }
     }
     signed! {
@@ -436,6 +437,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         _: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
+        self.node()?;
         visitor.visit_newtype_struct(self.child(self.id))
     }
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -510,6 +512,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         self.text(visitor)
     }
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        self.deserialize_any(de::IgnoredAny)?;
         visitor.visit_unit()
     }
 }
@@ -582,11 +585,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         match self.value {
             None => Ok(()),
             Some(id) if self.tagged => {
-                let node = self
-                    .de
-                    .stream
-                    .node(id)
-                    .ok_or_else(|| Error::new("invalid enum ID"))?;
+                let node = self.de.child(id).node()?;
                 if matches!(&node.kind, NodeKind::Scalar(s) if s.value.is_empty()) {
                     Ok(())
                 } else {
@@ -628,5 +627,67 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
             ..self.de.child(id)
         }
         .map(visitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cell, Deserializer};
+
+    #[test]
+    fn scalar_and_visit_budgets_stop_at_the_boundary() {
+        let stream = astral_yaml::parse("abc").unwrap();
+        let visits = Cell::new(2);
+        let bytes = Cell::new(3);
+        let de = Deserializer {
+            stream: &stream,
+            id: stream.documents()[0].root,
+            depth: 0,
+            budget: &visits,
+            scalar_budget: &bytes,
+            ignore_tag: false,
+        };
+        de.node().unwrap();
+        assert_eq!((visits.get(), bytes.get()), (1, 0));
+        assert_eq!(
+            de.node().unwrap_err().message,
+            "expanded scalar byte limit exceeded"
+        );
+        assert_eq!(
+            de.node().unwrap_err().message,
+            "deserialization resource limit exceeded"
+        );
+    }
+    #[test]
+    fn aliases_charge_the_target_and_preserve_the_tag_policy() {
+        let stream = astral_yaml::parse("[&a !custom abc, *a]").unwrap();
+        let mut alias = None;
+        for node in stream.nodes() {
+            if let astral_yaml::NodeKind::Sequence { items, .. } = &node.kind {
+                alias = items.last().copied();
+            }
+        }
+        let visits = Cell::new(4);
+        let bytes = Cell::new(6);
+        let de = Deserializer {
+            stream: &stream,
+            id: alias.unwrap(),
+            depth: 0,
+            budget: &visits,
+            scalar_budget: &bytes,
+            ignore_tag: true,
+        };
+        assert_eq!(de.scalar().unwrap().0.value, "abc");
+        assert_eq!((visits.get(), bytes.get()), (2, 3));
+        assert_eq!(
+            Deserializer {
+                ignore_tag: false,
+                ..de
+            }
+            .scalar()
+            .unwrap_err()
+            .message,
+            "unsupported scalar tag"
+        );
     }
 }
