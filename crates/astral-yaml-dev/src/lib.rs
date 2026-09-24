@@ -116,6 +116,7 @@ pub fn validate_spans(stream: &Stream<'_>) -> Result<(), String> {
         stream.nodes(),
         stream.documents(),
         stream.byte_order_marks(),
+        stream.document_end_markers(),
         stream.comments(),
         &|id| stream.node(id),
     )
@@ -126,6 +127,7 @@ fn validate_parts<'a: 's, 's>(
     nodes: &[Node<'a>],
     documents: &[Document<'a>],
     byte_order_marks: &[Span],
+    document_end_markers: &[Span],
     comments: &[Comment<'a>],
     node: &dyn Fn(NodeId) -> Option<&'s Node<'a>>,
 ) -> Result<(), String> {
@@ -178,13 +180,18 @@ fn validate_parts<'a: 's, 's>(
             contains(doc.span, directive.span)?;
         }
     }
-    let mut bom_end = 0;
-    for &span in byte_order_marks {
-        valid(span)?;
-        if span.start() < bom_end || span.slice(source) != Some("\u{feff}") {
-            return Err("invalid byte order mark span".to_owned());
+    for (spans, expected) in [
+        (byte_order_marks, "\u{feff}"),
+        (document_end_markers, "..."),
+    ] {
+        let mut end = 0;
+        for &span in spans {
+            valid(span)?;
+            if span.start() < end || span.slice(source) != Some(expected) {
+                return Err(format!("invalid {expected:?} marker span"));
+            }
+            end = span.end();
         }
-        bom_end = span.end();
     }
     let mut end = 0;
     for comment in comments {
@@ -247,6 +254,7 @@ mod tests {
                 stream.documents(),
                 &[],
                 &[],
+                &[],
                 &|_| None,
             )
             .unwrap_err();
@@ -261,7 +269,7 @@ mod tests {
         }
         let value = value.unwrap();
         assert_eq!(
-            validate_parts(stream.source(), stream.nodes(), &[], &[], &[], &|id| {
+            validate_parts(stream.source(), stream.nodes(), &[], &[], &[], &[], &|id| {
                 if id == value { None } else { stream.node(id) }
             })
             .unwrap_err(),
@@ -274,6 +282,7 @@ mod tests {
             validate_parts(
                 stream.source(),
                 std::slice::from_ref(alias),
+                &[],
                 &[],
                 &[],
                 &[],
@@ -291,19 +300,20 @@ mod tests {
             stream.documents(),
             &[],
             &[],
+            &[],
             lookup,
         )
         .unwrap();
         let mut nodes = stream.nodes().to_vec();
         nodes[0].span = Span::new(0, 10).unwrap();
         assert!(
-            validate_parts(stream.source(), &nodes, &[], &[], &[], lookup)
+            validate_parts(stream.source(), &nodes, &[], &[], &[], &[], lookup)
                 .unwrap_err()
                 .contains("invalid span")
         );
         nodes[0].span = Span::new(0, 1).unwrap();
         assert!(
-            validate_parts(stream.source(), &nodes, &[], &[], &[], lookup)
+            validate_parts(stream.source(), &nodes, &[], &[], &[], &[], lookup)
                 .unwrap_err()
                 .contains("outside parent")
         );
@@ -319,6 +329,7 @@ mod tests {
                 stream.nodes(),
                 stream.documents(),
                 boms,
+                stream.document_end_markers(),
                 comments,
                 &|id| stream.node(id),
             )

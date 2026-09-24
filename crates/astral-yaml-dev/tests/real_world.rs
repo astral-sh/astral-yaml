@@ -24,3 +24,14 @@ fn real_world_documents_match_reference_and_roundtrip() {
         );
     }
 }
+
+#[test]
+fn flow_key_and_value_separation_matches_reference() {
+    for source in ["{a: [b]}", "{'a':[b]}", "{[]:value}"] {
+        assert_eq!(
+            support::astral(source),
+            support::reference(source),
+            "{source}"
+        );
+    }
+}

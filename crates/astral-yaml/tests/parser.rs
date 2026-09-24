@@ -344,3 +344,95 @@ fn implicit_key_must_end_at_the_mapping_separator() {
         );
     }
 }
+
+#[test]
+fn tag_prefixes_obey_the_first_character_rule() {
+    for prefix in [",tag:example", "[tag:example", "]tag:example"] {
+        let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
+        assert_eq!(
+            parse(&source).unwrap_err().message,
+            "invalid global tag prefix"
+        );
+    }
+    for prefix in ["!", "![]", "tag:example,[prefix]", "%74ag:example,"] {
+        let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
+        parse(&source).unwrap();
+    }
+}
+
+#[test]
+fn standalone_document_end_markers_retain_spans_and_use_the_budget() {
+    let source = "...\n---\nvalue\n...\n... # suffix\n";
+    let stream = parse(source).unwrap();
+    assert_eq!(stream.documents().len(), 1);
+    assert_eq!(
+        stream
+            .document_end_markers()
+            .iter()
+            .map(|span| span.slice(source))
+            .collect::<Vec<_>>(),
+        [Some("..."), Some("..."), Some("...")]
+    );
+    assert_eq!(
+        stream.documents()[0].end_marker,
+        Some(stream.document_end_markers()[1])
+    );
+    for source in ["...\n...", "\u{feff}\n\u{feff}"] {
+        let options = ParseOptions {
+            max_nodes: 1,
+            ..ParseOptions::default()
+        };
+        assert_eq!(
+            parse_with_options(source, options).unwrap_err().message,
+            "syntax element limit exceeded"
+        );
+    }
+}
+
+#[test]
+fn flow_values_require_separation_after_yaml_keys() {
+    for source in ["{a:[]}", "[a:[]]", "{:[]}", "[:[]]", "[&a x, {*a :value}]"] {
+        assert!(parse(source).is_err(), "{source}");
+    }
+    for source in [
+        "{:foo}",
+        "{? :foo}",
+        "[:foo]",
+        "{: foo}",
+        "{a: [b]}",
+        "{'a':[b]}",
+        "{[]:value}",
+    ] {
+        parse(source).unwrap();
+    }
+    let stream = parse("{:foo}").unwrap();
+    let scalars: Vec<_> = stream
+        .nodes()
+        .iter()
+        .filter_map(|node| {
+            if let NodeKind::Scalar(s) = &node.kind {
+                Some(s.value.as_ref())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(scalars, [":foo", ""]);
+}
+
+#[test]
+fn large_flow_collections_and_line_backtracking() {
+    let source = format!("[{}]", "0,".repeat(30_000));
+    let stream = parse(&source).unwrap();
+    assert_eq!(stream.nodes().len(), 30_001);
+    for ending in ["\n", "\r", "\r\n"] {
+        let source = format!(
+            "a: >{ending}  one{ending}  two{ending}b: [x,{ending}    y]{ending}c: plain{ending}  continued{ending}"
+        );
+        let stream = parse(&source).unwrap();
+        assert_eq!(stream.documents().len(), 1);
+        for node in stream.nodes() {
+            assert!(node.span.slice(&source).is_some());
+        }
+    }
+}

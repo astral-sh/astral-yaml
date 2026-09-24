@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, cell::Cell, collections::HashMap};
 
 use crate::{
     CollectionStyle, Comment, Directive, Document, Entry, Error, Node, NodeId, NodeKind, Property,
@@ -12,7 +12,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct ParseOptions {
     /// Maximum collection nesting, between 1 and 128.
     pub max_depth: usize,
-    /// Maximum number of nodes, comments, and directives in a stream.
+    /// Maximum number of nodes, comments, directives, BOMs, and end markers in a stream.
     pub max_nodes: usize,
     /// Maximum UTF-8 input length in bytes.
     pub max_input_bytes: usize,
@@ -61,7 +61,9 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         anchors: HashMap::new(),
         tags: HashMap::new(),
         byte_order_marks: Vec::new(),
+        document_end_markers: Vec::new(),
         elements: 0,
+        line_bounds: Cell::new((0, 0)),
     }
     .stream()?;
     validate_characters(&stream)?;
@@ -78,7 +80,9 @@ struct Parser<'a> {
     anchors: HashMap<&'a str, NodeId>,
     tags: HashMap<&'a str, String>,
     byte_order_marks: Vec<Span>,
+    document_end_markers: Vec<Span>,
     elements: usize,
+    line_bounds: Cell<(usize, usize)>,
 }
 
 impl<'a> Parser<'a> {
@@ -101,10 +105,16 @@ impl<'a> Parser<'a> {
         self.source.as_bytes().get(self.pos + 1).copied()
     }
     fn column(&self) -> usize {
-        let line_start = self.source[..self.pos]
-            .rfind(['\r', '\n'])
-            .map_or(0, |n| n + 1);
-        let prefix = &self.source[line_start..self.pos];
+        let (mut start, end) = self.line_bounds.get();
+        if self.pos < start || self.pos > end {
+            start = self.source[..self.pos]
+                .rfind(['\r', '\n'])
+                .map_or(0, |n| n + 1);
+            self.line_bounds.set((start, self.line_end()));
+        }
+        // Reuse line bounds across flow entries; repeated prefix scans are quadratic
+        // on long lines. The range check also handles scalar-parser backtracking.
+        let prefix = &self.source[start..self.pos];
         prefix.strip_prefix('\u{feff}').unwrap_or(prefix).len()
     }
     fn line_end(&self) -> usize {
@@ -257,28 +267,40 @@ impl<'a> Parser<'a> {
             Ok(())
         }
     }
-    fn consume_bom(&mut self) {
+    fn consume_bom(&mut self) -> Result<()> {
         if self.column() == 0 && self.rest().starts_with('\u{feff}') {
+            self.reserve_element()?;
             self.byte_order_marks.push(Span {
                 start: self.pos,
                 end: self.pos + 3,
             });
             self.pos += 3;
         }
+        Ok(())
+    }
+    fn end_marker(&mut self) -> Result<Span> {
+        self.reserve_element()?;
+        let span = Span {
+            start: self.pos,
+            end: self.pos + 3,
+        };
+        self.document_end_markers.push(span);
+        self.pos += 3;
+        self.finish_line()?;
+        Ok(span)
     }
     fn stream(mut self) -> Result<Stream<'a>> {
-        self.consume_bom();
+        self.consume_bom()?;
         self.block_space()?;
         let mut previous_ended = true;
         while self.byte().is_some() {
-            self.consume_bom();
+            self.consume_bom()?;
             self.block_space()?;
             if self.byte().is_none() {
                 break;
             }
             if self.marker("...") {
-                self.pos += 3;
-                self.finish_line()?;
+                self.end_marker()?;
                 previous_ended = true;
                 continue;
             }
@@ -328,13 +350,7 @@ impl<'a> Parser<'a> {
             };
             let content_end = self.nodes[root.0].span.end;
             let end_marker = if self.marker("...") {
-                let span = Span {
-                    start: self.pos,
-                    end: self.pos + 3,
-                };
-                self.pos += 3;
-                self.finish_line()?;
-                Some(span)
+                Some(self.end_marker()?)
             } else {
                 None
             };
@@ -356,6 +372,7 @@ impl<'a> Parser<'a> {
             documents: self.documents,
             comments: self.comments,
             byte_order_marks: self.byte_order_marks,
+            document_end_markers: self.document_end_markers,
         })
     }
     fn directives(&mut self) -> Result<Vec<Directive<'a>>> {
@@ -413,6 +430,9 @@ impl<'a> Parser<'a> {
                     }
                     handles.push(words[0]);
                     let prefix = tag_uri(words[1]).ok_or_else(|| self.error("invalid tag URI"))?;
+                    if prefix.starts_with([',', '[', ']']) {
+                        return Err(self.error("invalid global tag prefix"));
+                    }
                     self.tags.insert(words[0], prefix);
                 }
                 "" => return Err(self.error("empty directive name")),
@@ -877,6 +897,26 @@ impl<'a> Parser<'a> {
             _ => self.plain(flow, parent),
         }
     }
+    fn flow_value_start(&mut self, key: NodeId) -> Result<()> {
+        self.pos += 1;
+        let json_key = matches!(
+            &self.nodes[key.0].kind,
+            NodeKind::Sequence { .. }
+                | NodeKind::Mapping { .. }
+                | NodeKind::Scalar(Scalar {
+                    style: ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+                    ..
+                })
+        );
+        if !json_key
+            && self
+                .byte()
+                .is_some_and(|b| !is_space(b) && !b",]}".contains(&b))
+        {
+            return Err(self.error("a flow value after a YAML key must be separated by whitespace"));
+        }
+        Ok(())
+    }
     fn flow_sequence(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
         self.pos += 1;
         self.flow_space(parent)?;
@@ -904,7 +944,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error("invalid implicit flow pair key"));
                 }
                 let value = if self.byte() == Some(b':') {
-                    self.pos += 1;
+                    self.flow_value_start(key)?;
                     self.flow_space(parent)?;
                     if matches!(self.byte(), Some(b',' | b']')) {
                         self.empty(self.pos)?
@@ -961,14 +1001,10 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 self.flow_space(parent)?;
             }
-            let key = if self.byte() == Some(b':') {
-                self.empty(self.pos)?
-            } else {
-                self.inline(true, parent, depth + 1)?
-            };
+            let key = self.inline(true, parent, depth + 1)?;
             self.flow_space(parent)?;
             let value = if self.byte() == Some(b':') {
-                self.pos += 1;
+                self.flow_value_start(key)?;
                 self.flow_space(parent)?;
                 if matches!(self.byte(), Some(b',' | b'}')) {
                     self.empty(self.pos)?

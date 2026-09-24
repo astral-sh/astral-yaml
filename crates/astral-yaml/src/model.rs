@@ -150,6 +150,7 @@ pub struct Stream<'a> {
     pub(crate) documents: Vec<Document<'a>>,
     pub(crate) comments: Vec<Comment<'a>>,
     pub(crate) byte_order_marks: Vec<Span>,
+    pub(crate) document_end_markers: Vec<Span>,
 }
 
 impl<'a> Stream<'a> {
@@ -180,6 +181,11 @@ impl<'a> Stream<'a> {
     #[must_use]
     pub fn byte_order_marks(&self) -> &[Span] {
         &self.byte_order_marks
+    }
+    /// Every explicit document end marker, including standalone stream suffixes.
+    #[must_use]
+    pub fn document_end_markers(&self) -> &[Span] {
+        &self.document_end_markers
     }
     /// Returns a node when the ID lies within this stream's arena.
     #[must_use]
