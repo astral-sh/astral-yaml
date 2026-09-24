@@ -25,11 +25,11 @@ about 1.6 s to 0.02 s on warm runs on the same host.
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **55 tests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three pinned real-world
+- **57 tests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three pinned real-world
   fixtures match the reference values and round-trip through serde.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
-  The report covers 2,693 lines and 279 functions. LLVM region coverage is **97.30%**;
+  The report covers 2,739 lines and 284 functions. LLVM region coverage is **97.42%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Dependency trees confirm the runtime dependency constraints.
@@ -44,15 +44,15 @@ about 1.6 s to 0.02 s on warm runs on the same host.
 
 Latest campaigns on the final implementation used nightly
 `1.100.0-nightly (cea272fa3 2026-09-07)`, cargo-fuzz 0.13.2, and these bounds:
-31 seconds elapsed per target, 2-second input timeout, 64 KiB mutations, 2 GiB RSS.
-All four completed without findings: **3,896,794 executions** in total.
+61 seconds elapsed per target, 2-second input timeout, 64 KiB mutations, 2 GiB RSS.
+All four completed without findings: **7,132,929 executions** in total.
 
 | Target | Executions | Relevant source line coverage from corpus replay |
 | --- | ---: | --- |
-| parse | 1,200,210 | Parser 98.10% |
-| serde | 675,102 | Parser 98.93%; generic serde does not exercise typed methods |
-| decode | 764,051 | Parser 99.51%; decoder 88.29% |
-| typed | 1,257,431 | Deserializer 95.06%; serializer 98.30%; schema 100% |
+| parse | 2,270,594 | Parser 98.14% |
+| serde | 1,142,347 | Parser 98.95%; generic serde does not exercise typed methods |
+| decode | 1,541,102 | Parser 99.51%; decoder 88.29% |
+| typed | 2,178,886 | Deserializer 96.19%; serializer 98.32%; schema 100% |
 
 Seeds include 407 official/regression/real-world source files, all five encodings,
 and 24 serde type selections with boundary examples. Earlier campaigns exposed two
@@ -66,10 +66,13 @@ symbol versions. Fuzz coverage is independent of test coverage and is not 100%.
 
 ## Performance and reproduction
 
-Final release medians versus pinned `yaml_serde` 0.10.7 are **1.61× / 1.62× / 1.62×**
-faster on uv CI / Kubernetes Guestbook / OpenAPI Petstore. Both sides construct and
-drop the same `Vec<yaml_serde::Value>`; equality is checked before timing. See
-[benchmarks/README.md](benchmarks/README.md) for values and methodology.
+Three consecutive release benchmark runs versus pinned `yaml_serde` 0.10.7 measure
+**2.18–2.20× / 2.06–2.07× / 2.08–2.09×** faster on uv CI / Kubernetes Guestbook /
+OpenAPI Petstore. Every fixture in every run exceeds the 1.98× target. The fresh
+baseline at `31bd945` was 1.63–1.65×. Both sides construct and drop the same
+`Vec<yaml_serde::Value>`; equality is checked before timing. See
+[benchmarks/README.md](benchmarks/README.md) for the changes, recorded run medians,
+and unchanged measurement methodology.
 
 Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
 campaigns/replays, and `cargo bench -p astral-yaml-dev --bench real_world` after
