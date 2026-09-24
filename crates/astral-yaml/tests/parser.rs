@@ -308,3 +308,17 @@ fn empty_scalar_span_follows_properties() {
     assert!(scalar.span.is_empty());
     assert_eq!(node.span.slice(source), Some("&a"));
 }
+
+#[test]
+fn continuation_indentation_uses_spaces() {
+    for source in [
+        "a: plain\n\tcontinued",
+        "a: \"first\\\nsecond\"",
+        "\"first\\\n---\nsecond\"",
+    ] {
+        assert!(parse(source).is_err(), "{source:?}");
+    }
+    for source in ["a: plain\n \tcontinued", "a: \"first\\\n \tsecond\""] {
+        assert!(parse(source).is_ok(), "{source:?}");
+    }
+}

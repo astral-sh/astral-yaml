@@ -1038,7 +1038,7 @@ impl<'a> Parser<'a> {
                     }
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
-                        || signed(self.column()) <= parent
+                        || signed(self.leading_spaces()) <= parent
                         || (self.byte() == Some(b':')
                             && self
                                 .next_byte()
@@ -1154,6 +1154,9 @@ impl<'a> Parser<'a> {
                         while self.newline() {
                             text.push('\n');
                             self.spaces();
+                        }
+                        if self.document_boundary() || signed(self.leading_spaces()) <= parent {
+                            return Err(self.error("invalid continuation of quoted scalar"));
                         }
                     } else {
                         text.push(self.escape()?);
