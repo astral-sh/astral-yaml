@@ -15,15 +15,15 @@ The comparator is pinned to `yaml_serde` 0.10.7. Fixtures, revisions, hashes, an
 licenses are in `fixtures/real-world`. The workspace lockfile pins transitive
 dependencies; the release profile uses thin LTO and one codegen unit.
 
-Initial local result, 2026-09-24, Rust 1.98.1, macOS arm64:
+Current local result, 2026-09-24, Rust 1.98.1, macOS arm64 (including key-uniqueness and resource checks):
 
 | Fixture | Bytes | astral (µs) | yaml_serde (µs) | Speedup |
 | --- | ---: | ---: | ---: | ---: |
-| uv CI workflow | 11,602 | 78.19 | 147.08 | 1.88× |
-| Kubernetes Guestbook | 3,366 | 30.84 | 59.50 | 1.93× |
-| OpenAPI Petstore | 5,479 | 39.35 | 73.93 | 1.88× |
+| uv CI workflow | 11,602 | 88.41 | 144.44 | 1.63× |
+| Kubernetes Guestbook | 3,366 | 37.09 | 58.49 | 1.58× |
+| OpenAPI Petstore | 5,479 | 47.44 | 73.40 | 1.55× |
 
-These are initial measurements on one host, without CPU isolation or frequency
+These are measurements on one host, without CPU isolation or frequency
 control. Re-run after parser or adapter changes; they do not establish performance
 on other workloads or platforms. Completion still requires the remaining
 correctness and coverage gates in `TRANSCRIPT.md`.
