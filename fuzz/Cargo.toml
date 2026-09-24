@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde = { version = "1.0", features = ["derive"] }
 astral-yaml = { path = "../crates/astral-yaml" }
 astral-yaml-serde = { path = "../crates/astral-yaml-serde" }
 yaml_serde = "=0.10.7"
@@ -31,6 +32,13 @@ bench = false
 [[bin]]
 name = "decode"
 path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "typed"
+path = "fuzz_targets/typed.rs"
 test = false
 doc = false
 bench = false
