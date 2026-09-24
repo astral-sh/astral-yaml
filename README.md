@@ -18,3 +18,11 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte
+ranges, comments, scalar styles, tags, and anchors. Collection children and aliases
+refer to arena node IDs; aliases are not expanded by the parser.
+
+Use `astral_yaml_serde::from_str::<T>(source)` for a `Deserialize` type and
+`astral_yaml_serde::to_string(&value)` for a `Serialize` value. The emitter uses flow
+style and quotes strings to preserve their type under YAML 1.2 core resolution.

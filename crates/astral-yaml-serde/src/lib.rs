@@ -1,1 +1,8 @@
-//! Serde support for astral-yaml.
+//! Serde support for YAML 1.2, with source-located errors and bounded alias expansion.
+mod de;
+mod error;
+mod ser;
+pub use de::{from_str, from_stream};
+pub use error::Error;
+
+pub use ser::to_string;

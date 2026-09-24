@@ -38,7 +38,12 @@ The project is complete only when all of these gates have evidence:
   per-input timeout 2 seconds, 2 GiB RSS limit, seeds from all official cases).
 - Initial coverage before adapter implementation: parser 96.11% lines, core model,
   errors, and schema 100% lines. Workspace 94.83% lines. **100% is not yet met.**
-- Serde adapter is in progress; its completion gates remain open.
+- Serde `from_str`, `from_stream`, and `to_string` support derived types, enums,
+  borrowed scalars, core-schema numeric resolution, complex keys, and bounded
+  recursive/expanding aliases. Six adapter test groups pass. Adapter fuzzing,
+  key-uniqueness validation, and complete tag checks remain open.
+- `cargo fmt --all --check`, strict workspace clippy, and workspace tests pass.
+  The adapter dependency tree contains only core and the serde/proc-macro stack.
 - Full compatibility is not established by corpus success alone. Coverage,
   fuzzing, real-world fixtures, serde, and performance remain unproven.
 
@@ -53,7 +58,7 @@ semantic nodes, plus spans on syntax properties and stream/document boundaries.
 ## Next work
 
 Run coverage and corpus-seeded fuzzing; fix findings and preserve regressions.
-Implement and test the serde adapter, add pinned real-world fixtures and equivalent
+Extend adapter validation and fuzzing, add pinned real-world fixtures and equivalent
 `yaml_serde` benchmarks. Audit spec requirements beyond corpus coverage, including
 byte-input encodings and BOMs, complete tag URI validation, key uniqueness during
 composition, and behavior at all configured limits. Do not declare completion from
