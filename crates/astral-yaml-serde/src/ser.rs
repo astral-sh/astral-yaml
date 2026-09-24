@@ -31,7 +31,7 @@ struct Serializer {
 }
 impl Serializer {
     fn enter(&mut self) -> Result<()> {
-        if self.depth >= 64 {
+        if self.depth >= 63 {
             return Err(Error::new("serialization nesting limit exceeded"));
         }
         self.depth += 1;

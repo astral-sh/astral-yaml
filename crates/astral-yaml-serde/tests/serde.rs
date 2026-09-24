@@ -251,3 +251,34 @@ fn serialization_recursion_limit() {
             .contains("nesting")
     );
 }
+
+#[test]
+fn mapping_key_uniqueness_uses_core_types() {
+    for source in [
+        "{a: 1, a: 2}",
+        "{1: a, 01: b}",
+        "{0: a, -0: b}",
+        "{true: a, TRUE: b}",
+        "{null: a, ~: b}",
+        "{1.0: a, 1e0: b}",
+        "{.nan: a, .NaN: b}",
+        "{0.0: a, -0.0: b}",
+        "{[a, b]: 1, [a, b]: 2}",
+        "{{a: 1, b: 2}: x, {b: 2, a: 1}: y}",
+        "{&a key: 1, *a : 2}",
+        "{{a: 1, a: 2}: x}",
+    ] {
+        let error = from_str::<Anything>(source).unwrap_err();
+        assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
+        assert!(error.span.is_some());
+    }
+    from_str::<Anything>("{1: a, '1': b, true: c, 'true': d}").unwrap();
+}
+
+#[test]
+fn collection_tags_must_match_the_requested_type() {
+    for source in ["!!str []", "!!int {}", "!!map []", "!!seq {}"] {
+        assert!(from_str::<Anything>(source).is_err(), "{source}");
+    }
+    from_str::<Anything>("!!map {a: !!seq [1]}").unwrap();
+}

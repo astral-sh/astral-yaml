@@ -6,7 +6,7 @@ use astral_yaml::{
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
 };
-use std::{borrow::Cow, cell::Cell};
+use std::{borrow::Cow, cell::Cell, collections::HashSet};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -43,11 +43,13 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
     let budget = Cell::new(1_000_000usize);
+    let scalar_budget = Cell::new(64 * 1024 * 1024usize);
     T::deserialize(Deserializer {
         stream,
         id: doc.root,
         depth: 0,
         budget: &budget,
+        scalar_budget: &scalar_budget,
         ignore_tag: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
@@ -59,6 +61,7 @@ struct Deserializer<'s, 'de> {
     id: NodeId,
     depth: usize,
     budget: &'s Cell<usize>,
+    scalar_budget: &'s Cell<usize>,
     ignore_tag: bool,
 }
 impl<'s, 'de> Deserializer<'s, 'de> {
@@ -79,6 +82,16 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             if let NodeKind::Alias { target, .. } = node.kind {
                 id = target;
             } else {
+                if let NodeKind::Scalar(scalar) = &node.kind {
+                    let remaining = self
+                        .scalar_budget
+                        .get()
+                        .checked_sub(scalar.value.len())
+                        .ok_or_else(|| {
+                            Error::at("expanded scalar byte limit exceeded", node.span)
+                        })?;
+                    self.scalar_budget.set(remaining);
+                }
                 return Ok(node);
             }
         }
@@ -171,11 +184,87 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             .parse()
             .map_err(|_| Error::at("invalid float", s.span))
     }
+    fn collection_tag(self, node: &Node<'_>, expected: &str) -> Result<()> {
+        if !self.ignore_tag
+            && node
+                .tag
+                .as_ref()
+                .is_some_and(|tag| tag.value != expected && tag.value != "!")
+        {
+            return Err(Error::at("tag does not match collection type", node.span));
+        }
+        Ok(())
+    }
+    fn key(self) -> Result<Key<'s>> {
+        let node = self.node()?;
+        match &node.kind {
+            NodeKind::Scalar(_) => {
+                let (scalar, kind) = self.scalar()?;
+                Ok(match kind {
+                    ScalarType::Null => Key::Null,
+                    ScalarType::Bool => {
+                        Key::Bool(matches!(scalar.value.as_ref(), "true" | "True" | "TRUE"))
+                    }
+                    ScalarType::String => Key::String(&scalar.value),
+                    ScalarType::Int => {
+                        let (value, radix, span) = self.integer()?;
+                        let magnitude =
+                            u128::from_str_radix(value.trim_start_matches(['+', '-']), radix)
+                                .map_err(|_| Error::at("integer key out of range", span))?;
+                        Key::Integer(value.starts_with('-') && magnitude != 0, magnitude)
+                    }
+                    ScalarType::Float => {
+                        let value = self.float()?;
+                        let bits = value.to_bits();
+                        Key::Float(if value.is_nan() {
+                            f64::NAN.to_bits()
+                        } else if bits << 1 == 0 {
+                            0
+                        } else {
+                            bits
+                        })
+                    }
+                })
+            }
+            NodeKind::Sequence { items, .. } => {
+                self.collection_tag(node, "tag:yaml.org,2002:seq")?;
+                items
+                    .iter()
+                    .map(|&id| self.child(id).key())
+                    .collect::<Result<Vec<_>>>()
+                    .map(Key::Sequence)
+            }
+            NodeKind::Mapping { entries, .. } => {
+                self.collection_tag(node, "tag:yaml.org,2002:map")?;
+                let mut pairs = entries
+                    .iter()
+                    .map(|entry| Ok((self.child(entry.key).key()?, self.child(entry.value).key()?)))
+                    .collect::<Result<Vec<_>>>()?;
+                pairs.sort();
+                if pairs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                    return Err(Error::at("duplicate mapping key", node.span));
+                }
+                Ok(Key::Mapping(pairs))
+            }
+            NodeKind::Alias { .. } => Err(Error::at("unresolved key alias", node.span)),
+        }
+    }
     fn map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
         let NodeKind::Mapping { entries, .. } = &node.kind else {
             return Err(Error::at("expected a mapping", node.span));
         };
+        self.collection_tag(node, "tag:yaml.org,2002:map")?;
+        let mut keys = HashSet::with_capacity(entries.len());
+        for entry in entries {
+            if !keys.insert(self.child(entry.key).key()?) {
+                let span = self
+                    .stream
+                    .node(entry.key)
+                    .map_or(node.span, |key| key.span);
+                return Err(Error::at("duplicate mapping key", span));
+            }
+        }
         let mut access = Mapping {
             de: self,
             entries,
@@ -195,6 +284,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         let NodeKind::Sequence { items, .. } = &node.kind else {
             return Err(Error::at("expected a sequence", node.span));
         };
+        self.collection_tag(node, "tag:yaml.org,2002:seq")?;
         let mut access = Sequence {
             de: self,
             items,
@@ -208,6 +298,17 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
         Ok(result)
     }
+}
+
+#[derive(Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum Key<'a> {
+    Null,
+    Bool(bool),
+    String(&'a str),
+    Integer(bool, u128),
+    Float(u64),
+    Sequence(Vec<Self>),
+    Mapping(Vec<(Self, Self)>),
 }
 
 macro_rules! signed {
@@ -508,7 +609,11 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         let id = self
             .value
             .ok_or_else(|| Error::new("expected a variant payload"))?;
-        self.de.child(id).seq(visitor)
+        Deserializer {
+            ignore_tag: self.tagged,
+            ..self.de.child(id)
+        }
+        .seq(visitor)
     }
     fn struct_variant<V: Visitor<'de>>(
         self,
@@ -518,6 +623,10 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         let id = self
             .value
             .ok_or_else(|| Error::new("expected a variant payload"))?;
-        self.de.child(id).map(visitor)
+        Deserializer {
+            ignore_tag: self.tagged,
+            ..self.de.child(id)
+        }
+        .map(visitor)
     }
 }
