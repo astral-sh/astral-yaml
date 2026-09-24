@@ -487,13 +487,17 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             }
         }
         match &node.kind {
-            NodeKind::Scalar(s) => visitor.visit_enum(Enumeration {
-                de: self,
-                variant: &s.value,
-                value: None,
-                tagged: false,
-            }),
+            NodeKind::Scalar(_) => {
+                let (scalar, _) = self.scalar()?;
+                visitor.visit_enum(Enumeration {
+                    de: self,
+                    variant: &scalar.value,
+                    value: None,
+                    tagged: false,
+                })
+            }
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
+                self.collection_tag(node, "tag:yaml.org,2002:map")?;
                 let (key, _) = self.child(entries[0].key).scalar()?;
                 visitor.visit_enum(Enumeration {
                     de: self,

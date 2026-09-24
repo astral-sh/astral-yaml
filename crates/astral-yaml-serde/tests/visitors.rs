@@ -142,7 +142,15 @@ fn enum_payloads_and_aliases() {
         from_str::<Vec<Variant>>("[&a !Unit, *a]").unwrap(),
         [Variant::Unit, Variant::Unit]
     );
-    for source in ["Tuple", "Struct", "{Unit: 1}", "!Unit []", "{[a]: b}"] {
+    for source in [
+        "Tuple",
+        "Struct",
+        "{Unit: 1}",
+        "!Unit []",
+        "{[a]: b}",
+        "!!bool Unit",
+        "!!str {Unit: null}",
+    ] {
         assert!(from_str::<Variant>(source).is_err(), "{source}");
     }
 }
