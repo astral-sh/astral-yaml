@@ -31,7 +31,14 @@ The project is complete only when all of these gates have evidence:
 - `cargo test --workspace`: eight focused tests plus the complete corpus pass.
 - Resource guards cover input length, node count, and nesting (default 64, hard
   maximum 128). Deep block/flow tests reject 1,000/10,000 nested collections.
-- Parser runtime dependencies: none. Serde crate is still a placeholder.
+- Parser runtime dependencies: none; verified with `cargo tree`.
+- Initial parser fuzz campaign found two malformed multiline-scalar slicing panics;
+  both are fixed, with checked-in regressions. A subsequent AddressSanitizer run
+  completed 3,536,992 executions in 31 seconds with no findings (8 KiB max input,
+  per-input timeout 2 seconds, 2 GiB RSS limit, seeds from all official cases).
+- Initial coverage before adapter implementation: parser 96.11% lines, core model,
+  errors, and schema 100% lines. Workspace 94.83% lines. **100% is not yet met.**
+- Serde adapter is in progress; its completion gates remain open.
 - Full compatibility is not established by corpus success alone. Coverage,
   fuzzing, real-world fixtures, serde, and performance remain unproven.
 

@@ -992,9 +992,11 @@ impl<'a> Parser<'a> {
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
                         || signed(self.column()) <= parent
-                        || (flow
-                            && (self.byte().is_some_and(|b| b",]}".contains(&b))
-                                || self.indicator(b':')))
+                        || (self.byte() == Some(b':')
+                            && self
+                                .next_byte()
+                                .is_none_or(|b| is_space(b) || (flow && b",[]{}".contains(&b))))
+                        || (flow && self.byte().is_some_and(|b| b",[]{}".contains(&b)))
                     {
                         self.pos = save;
                         break;
