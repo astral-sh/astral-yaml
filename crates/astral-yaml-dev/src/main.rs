@@ -57,10 +57,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Err(_) if expect_error => passed += 1,
             Err(e) => println!("FAIL {id}: {e}"),
             Ok(stream) => {
-                if let Err(e) = validate_spans(&stream) {
-                    println!("FAIL {id}: {e}");
-                    continue;
-                }
+                validate_spans(&stream)?;
                 if expect_error {
                     println!("FAIL {id}: accepted malformed input");
                     continue;

@@ -334,3 +334,13 @@ fn continuation_indentation_uses_spaces() {
         assert!(parse(source).is_ok(), "{source:?}");
     }
 }
+
+#[test]
+fn implicit_key_must_end_at_the_mapping_separator() {
+    for source in ["\"a\" extra: b", "[a] extra: b", "{a: b} extra: c"] {
+        assert_eq!(
+            parse(source).unwrap_err().message,
+            "expected ':' after mapping key"
+        );
+    }
+}

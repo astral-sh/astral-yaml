@@ -64,3 +64,11 @@ fn every_corpus_prefix_has_valid_spans() {
     }
     assert_eq!(inputs, 402);
 }
+
+#[test]
+fn events_preserve_escaped_controls_and_opaque_tag_bytes() {
+    let stream = astral_yaml::parse("!<tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\"").unwrap();
+    assert!(
+        astral_yaml_dev::events(&stream).contains("=VAL <tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\n")
+    );
+}
