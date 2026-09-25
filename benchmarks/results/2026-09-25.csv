@@ -5,3 +5,6 @@ spanned,openapi-petstore,5479,35.85,75.11,2.09
 comments,uv-ci,11602,68.28,148.51,2.17
 comments,kubernetes-guestbook,3366,29.23,59.77,2.04
 comments,openapi-petstore,5479,36.78,75.93,2.06
+optimized,uv-ci,11602,50.64,145.10,2.87
+optimized,kubernetes-guestbook,3366,22.30,59.30,2.66
+optimized,openapi-petstore,5479,27.47,74.50,2.71

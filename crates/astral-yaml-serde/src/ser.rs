@@ -41,10 +41,18 @@ impl Serializer {
         Ok(())
     }
 
-    fn quoted(&mut self, value: &str) {
+    fn quoted(&mut self, mut value: &str) {
         self.output.push('"');
 
-        for c in value.chars() {
+        // Copy ordinary text together, including UTF-8. Only C2, E2, and EF
+        // can begin a non-ASCII character that needs escaping below. Stopping
+        // at ASCII or a leading byte preserves character boundaries.
+        while let Some(index) = value.bytes().position(|byte| {
+            byte < b' ' || matches!(byte, b'"' | b'\\' | 0x7f | 0xc2 | 0xe2 | 0xef)
+        }) {
+            self.output.push_str(&value[..index]);
+            let c = value[index..].chars().next().unwrap();
+
             match c {
                 '"' => self.output.push_str("\\\""),
                 '\\' => self.output.push_str("\\\\"),
@@ -62,8 +70,11 @@ impl Serializer {
                 }
                 c => self.output.push(c),
             }
+
+            value = &value[index + c.len_utf8()..];
         }
 
+        self.output.push_str(value);
         self.output.push('"');
     }
 
@@ -140,9 +151,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_f32(self, value: f32) -> Result<()> {
         if value.is_finite() {
-            let text = value.to_string();
-            self.output.push_str(&text);
-            if !text.contains(['.', 'e', 'E']) {
+            let start = self.output.len();
+            self.number(value);
+            if !self.output[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0");
             }
 
@@ -162,9 +173,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
                 ".inf"
             });
         } else {
-            let text = value.to_string();
-            self.output.push_str(&text);
-            if !text.contains(['.', 'e', 'E']) {
+            let start = self.output.len();
+            self.number(value);
+            if !self.output[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0");
             }
         }

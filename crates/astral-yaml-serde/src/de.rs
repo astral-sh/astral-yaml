@@ -45,54 +45,61 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
 
-    let budget = Cell::new(1_000_000usize);
-    let scalar_budget = Cell::new(64 * 1024 * 1024usize);
-    let comments = CommentCache::new(index);
+    let context = Context {
+        stream,
+        budget: Cell::new(1_000_000),
+        scalar_budget: Cell::new(64 * 1024 * 1024),
+        comments: CommentCache::new(index),
+    };
 
     T::deserialize(Deserializer {
-        stream,
+        context: &context,
         id: doc.root,
         depth: 0,
-        budget: &budget,
-        scalar_budget: &scalar_budget,
-        comments: &comments,
         ignore_tag: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
 }
 
+struct Context<'s, 'de> {
+    stream: &'s Stream<'de>,
+    budget: Cell<usize>,
+    scalar_budget: Cell<usize>,
+    comments: CommentCache<'de>,
+}
+
 #[derive(Clone, Copy)]
 struct Deserializer<'s, 'de> {
-    stream: &'s Stream<'de>,
+    context: &'s Context<'s, 'de>,
     id: NodeId,
     depth: usize,
-    budget: &'s Cell<usize>,
-    scalar_budget: &'s Cell<usize>,
-    comments: &'s CommentCache<'de>,
     ignore_tag: bool,
 }
 
 impl<'s, 'de> Deserializer<'s, 'de> {
+    #[inline]
     fn raw_node(self) -> Result<&'s Node<'de>> {
         let node = self
+            .context
             .stream
             .node(self.id)
             .expect("ID belongs to this stream");
-        if self.depth >= 64 || self.budget.get() == 0 {
+        if self.depth >= 64 || self.context.budget.get() == 0 {
             return Err(Error::at(
                 "deserialization resource limit exceeded",
                 node.span,
             ));
         }
 
-        self.budget.set(self.budget.get() - 1);
+        self.context.budget.set(self.context.budget.get() - 1);
         if let NodeKind::Scalar(scalar) = &node.kind {
             let remaining = self
+                .context
                 .scalar_budget
                 .get()
                 .checked_sub(scalar.value.len())
                 .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span))?;
-            self.scalar_budget.set(remaining);
+            self.context.scalar_budget.set(remaining);
         }
 
         Ok(node)
@@ -143,18 +150,22 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-        let comments = self.comments.get(self.stream, self.id, self.budget)?;
+        let comments =
+            self.context
+                .comments
+                .get(self.context.stream, self.id, &self.context.budget)?;
         let remaining = self
+            .context
             .budget
             .get()
             .checked_sub(comments.len())
             .ok_or_else(|| {
                 Error::at(
                     "deserialization resource limit exceeded",
-                    self.stream.node(self.id).unwrap().span,
+                    self.context.stream.node(self.id).unwrap().span,
                 )
             })?;
-        self.budget.set(remaining);
+        self.context.budget.set(remaining);
 
         let mut ordered: Vec<_> = comments.iter().collect();
         ordered.sort_unstable_by_key(|comment| comment.comment.span.start());
@@ -166,7 +177,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
-        let node = self.node()?;
+        self.scalar_value(self.node()?)
+    }
+
+    #[inline]
+    fn scalar_value(self, node: &'s Node<'de>) -> Result<(&'s Scalar<'de>, ScalarType)> {
         let NodeKind::Scalar(s) = &node.kind else {
             return Err(Error::at("expected a scalar", node.span));
         };
@@ -211,7 +226,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn integer(self) -> Result<(&'s str, u32, Span)> {
-        let (s, kind) = self.scalar()?;
+        let (scalar, kind) = self.scalar()?;
+        Self::integer_value(scalar, kind)
+    }
+
+    fn integer_value<'a>(s: &'a Scalar<'_>, kind: ScalarType) -> Result<(&'a str, u32, Span)> {
         if kind != ScalarType::Int {
             return Err(Error::at("expected an integer", s.span));
         }
@@ -228,7 +247,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn float(self) -> Result<f64> {
-        let (s, kind) = self.scalar()?;
+        let (scalar, kind) = self.scalar()?;
+        Self::float_value(scalar, kind)
+    }
+
+    fn float_value(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
             return Err(Error::at("expected a number", s.span));
         }
@@ -247,7 +270,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
 
         if kind == ScalarType::Int && (s.value.starts_with("0x") || s.value.starts_with("0o")) {
-            let (value, radix, span) = self.integer()?;
+            let (value, radix, span) = Self::integer_value(s, kind)?;
             let value = u128::from_str_radix(value, radix)
                 .map_err(|_| Error::at("integer out of range", span))?;
 
@@ -279,7 +302,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
         match &node.kind {
             NodeKind::Scalar(_) => {
-                let (scalar, kind) = self.scalar()?;
+                let (scalar, kind) = self.scalar_value(node)?;
                 Ok(match kind {
                     ScalarType::Null => Key::Null,
                     ScalarType::Bool => {
@@ -287,14 +310,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                     }
                     ScalarType::String => Key::String(&scalar.value),
                     ScalarType::Int => {
-                        let (value, radix, span) = self.integer()?;
+                        let (value, radix, span) = Self::integer_value(scalar, kind)?;
                         let magnitude =
                             u128::from_str_radix(value.trim_start_matches(['+', '-']), radix)
                                 .map_err(|_| Error::at("integer key out of range", span))?;
                         Key::Integer(value.starts_with('-') && magnitude != 0, magnitude)
                     }
                     ScalarType::Float => {
-                        let value = self.float()?;
+                        let value = Self::float_value(scalar, kind)?;
                         let bits = value.to_bits();
                         Key::Float(if value.is_nan() {
                             f64::NAN.to_bits()
@@ -332,6 +355,39 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn check_mapping_keys(self, entries: &[Entry], span: Span) -> Result<()> {
+        // Most configuration mappings have a few string keys. Their borrowed
+        // text is sufficient for uniqueness; avoid constructing and dropping
+        // the larger canonical-key representation in that common case.
+        if entries.len() > 8 {
+            return self.check_general_keys(entries, span);
+        }
+
+        let mut strings = [""; 8];
+
+        for (index, entry) in entries.iter().enumerate() {
+            let de = self.child(entry.key);
+            let node = de.raw_node()?;
+            if !matches!(node.kind, NodeKind::Scalar(_)) {
+                return self.check_general_keys(entries, span);
+            }
+
+            let (scalar, kind) = de.scalar_value(node)?;
+            if kind != ScalarType::String {
+                return self.check_general_keys(entries, span);
+            }
+
+            let key = scalar.value.as_ref();
+            if strings[..index].contains(&key) {
+                return Err(Error::at("duplicate mapping key", node.span));
+            }
+
+            strings[index] = key;
+        }
+
+        Ok(())
+    }
+
+    fn check_general_keys(self, entries: &[Entry], span: Span) -> Result<()> {
         // Small mappings need only a few comparisons. Keep their canonical keys
         // on the stack; larger mappings retain a hash set to bound lookup work.
         let mut small_keys = [const { Key::Null }; 8];
@@ -349,7 +405,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             };
 
             if !unique {
-                let span = self.stream.node(entry.key).map_or(span, |key| key.span);
+                let span = self
+                    .context
+                    .stream
+                    .node(entry.key)
+                    .map_or(span, |key| key.span);
                 return Err(Error::at("duplicate mapping key", span));
             }
         }
@@ -358,7 +418,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let node = self.node()?;
+        self.map_node(self.node()?, visitor)
+    }
+
+    fn map_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
         let NodeKind::Mapping { entries, .. } = &node.kind else {
             return Err(Error::at("expected a mapping", node.span));
         };
@@ -385,7 +448,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let node = self.node()?;
+        self.seq_node(self.node()?, visitor)
+    }
+
+    fn seq_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
         let NodeKind::Sequence { items, .. } = &node.kind else {
             return Err(Error::at("expected a sequence", node.span));
         };
@@ -438,11 +504,13 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        match &self.raw_node()?.kind {
-            NodeKind::Sequence { .. } => self.seq(visitor),
-            NodeKind::Mapping { .. } => self.map(visitor),
+        let node = self.raw_node()?;
+
+        match &node.kind {
+            NodeKind::Sequence { .. } => self.seq_node(node, visitor),
+            NodeKind::Mapping { .. } => self.map_node(node, visitor),
             NodeKind::Scalar(_) => {
-                let (s, kind) = self.scalar()?;
+                let (s, kind) = self.scalar_value(node)?;
 
                 match kind {
                     ScalarType::Null => visitor.visit_unit(),
@@ -450,9 +518,9 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                         visitor.visit_bool(matches!(s.value.as_ref(), "true" | "True" | "TRUE"))
                     }
                     ScalarType::String => Self::visit_text(s, visitor),
-                    ScalarType::Float => visitor.visit_f64(self.float()?),
+                    ScalarType::Float => visitor.visit_f64(Self::float_value(s, kind)?),
                     ScalarType::Int => {
-                        let (value, radix, span) = self.integer()?;
+                        let (value, radix, span) = Self::integer_value(s, kind)?;
                         if value.starts_with('-') {
                             let n = i128::from_str_radix(value, radix)
                                 .map_err(|_| Error::at("integer out of range", span))?;
@@ -879,7 +947,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, Deserializer};
+    use super::{Cell, Context, Deserializer};
     use serde::{Deserialize, de::SeqAccess};
 
     #[test]
@@ -890,12 +958,14 @@ mod tests {
             let visits = Cell::new(budget);
             let bytes = Cell::new(100);
             let de = Deserializer {
-                stream: &stream,
+                context: &Context {
+                    stream: &stream,
+                    budget: visits,
+                    scalar_budget: bytes,
+                    comments: crate::comments::CommentCache::new(0),
+                },
                 id: stream.documents()[0].root,
                 depth: 0,
-                budget: &visits,
-                scalar_budget: &bytes,
-                comments: &crate::comments::CommentCache::new(0),
                 ignore_tag: false,
             };
 
@@ -904,7 +974,7 @@ mod tests {
                 let value = result.unwrap();
                 assert_eq!(value.comments.len(), 2);
                 assert_eq!(value.comments, value.value.comments);
-                assert_eq!(visits.get(), 0);
+                assert_eq!(de.context.budget.get(), 0);
             } else {
                 let error = result.unwrap_err();
                 assert_eq!(error.message, "deserialization resource limit exceeded");
@@ -990,17 +1060,22 @@ mod tests {
         let visits = Cell::new(2);
         let bytes = Cell::new(3);
         let de = Deserializer {
-            stream: &stream,
+            context: &Context {
+                stream: &stream,
+                budget: visits,
+                scalar_budget: bytes,
+                comments: crate::comments::CommentCache::new(0),
+            },
             id: stream.documents()[0].root,
             depth: 0,
-            budget: &visits,
-            scalar_budget: &bytes,
-            comments: &crate::comments::CommentCache::new(0),
             ignore_tag: false,
         };
 
         de.node().unwrap();
-        assert_eq!((visits.get(), bytes.get()), (1, 0));
+        assert_eq!(
+            (de.context.budget.get(), de.context.scalar_budget.get()),
+            (1, 0)
+        );
         assert_eq!(
             de.node().unwrap_err().message,
             "expanded scalar byte limit exceeded"
@@ -1025,17 +1100,22 @@ mod tests {
         let visits = Cell::new(4);
         let bytes = Cell::new(6);
         let de = Deserializer {
-            stream: &stream,
+            context: &Context {
+                stream: &stream,
+                budget: visits,
+                scalar_budget: bytes,
+                comments: crate::comments::CommentCache::new(0),
+            },
             id: alias.unwrap(),
             depth: 0,
-            budget: &visits,
-            scalar_budget: &bytes,
-            comments: &crate::comments::CommentCache::new(0),
             ignore_tag: true,
         };
 
         assert_eq!(de.scalar().unwrap().0.value, "abc");
-        assert_eq!((visits.get(), bytes.get()), (2, 3));
+        assert_eq!(
+            (de.context.budget.get(), de.context.scalar_budget.get()),
+            (2, 3)
+        );
         assert_eq!(
             Deserializer {
                 ignore_tag: false,

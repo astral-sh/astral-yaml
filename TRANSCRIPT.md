@@ -46,11 +46,11 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **85 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
+- **86 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
   pinned real-world fixtures match the reference values and round-trip through serde.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
-  The report covers 3,320 lines and 349 functions. LLVM region coverage is **97.66%**;
+  The report covers 3,426 lines and 364 functions. LLVM region coverage is **97.68%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit
@@ -60,6 +60,9 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
   placement, complex keys, properties, scalar headers, flow delimiters, document
   boundaries, BOMs, encodings, alias cycles, and index/output resource limits.
   Compile-fail doctests enforce input lifetimes and the `DeserializeOwned` boundary.
+- Performance regressions check exact string-escape spelling, mixed canonical key
+  types, and duplicate string keys across the small-mapping threshold. Parser
+  lookahead and byte scans also pass all official cases and corpus-prefix checks.
 - Dependency trees confirm the runtime dependency constraints.
 - A spec audit added regressions for characters, encodings, tag URI/prefix rules,
   implicit keys, continuation indentation, flow value separation, document
@@ -68,7 +71,26 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
   their spelling per spec §5.6. `yaml_serde` rejects some valid 1.2 leading-colon
   keys; those cases use grammar-derived assertions instead of that comparator.
 
-## Span and comment fuzzing (2026-09-25)
+## Optimization fuzzing (2026-09-25)
+
+Final bounded campaigns completed **8,371,834 executions** without findings.
+Each target ran for 61 seconds with a 2-second input timeout, 64 KiB mutation
+limit, and 2 GiB RSS limit, using nightly `1.100.0-nightly (cea272fa3 2026-09-07)`
+and cargo-fuzz 0.13.2. All four final corpora were replayed with matching coverage
+binaries and profiles:
+
+| Target | Executions | Relevant source line coverage from corpus replay |
+| --- | ---: | --- |
+| parse | 3,078,457 | Parser 98.20% |
+| serde | 1,184,711 | Parser 98.98%; generic serde does not exercise typed methods |
+| decode | 2,129,596 | Parser 99.53%; decoder 88.29% |
+| typed | 1,979,070 | Deserializer 92.92%; serializer 98.37%; comments 98.67%; wrapper 59.02% |
+
+The serializer campaigns include the final UTF-8 copying optimization. Earlier
+campaigns during this pass are excluded from these totals. Test coverage remains
+100% for lines and functions; corpus coverage is a separate measurement.
+
+## Span and comment fuzzing (2026-09-25, before optimization)
 
 The typed target wraps all 29 type selections in `Spanned<'_, T>`, checks root
 spans, comment completeness, source order, exact slices, and borrowed text pointers,
@@ -111,7 +133,7 @@ symbol versions. Fuzz coverage is independent of test coverage and is not 100%.
 
 ## Performance and reproduction
 
-Three consecutive release benchmark runs versus pinned `yaml_serde` 0.10.7 measure
+Three release benchmark runs on 2026-09-24 versus pinned `yaml_serde` 0.10.7 measured
 **2.18–2.20× / 2.06–2.07× / 2.08–2.09×** faster on uv CI / Kubernetes Guestbook /
 OpenAPI Petstore. Every fixture in every run exceeds the 1.98× target. The fresh
 baseline at `31bd945` was 1.63–1.65×. Both sides construct and drop the same
@@ -125,6 +147,16 @@ borrowed descendant comments, the same workload measured **2.17× / 2.04× / 2.0
 still above the 1.98× target for every fixture. Both runs are recorded in
 [the new results](benchmarks/results/2026-09-25.csv); neither measures the cost of
 opting into metadata.
+
+The next optimization pass compares against `66c9da9`, the new benchmark harness
+with the same implementation as `9ec4ce8`. Three alternating runs on all three
+fixtures show **21.16–22.82% less time for ordinary deserialization**,
+**21.65–22.90% for root wrappers**, **22.12–22.56% for root and field wrappers**,
+and **23.41–48.60% for serialization**. Every one of the 36 individual paired
+measurements exceeds a 20% reduction. The unchanged reference benchmark measures
+**2.87× / 2.66× / 2.71×** speedups after this pass. The
+[benchmark notes](benchmarks/README.md#comparing-implementation-revisions) document
+the workloads, changes, reproduction commands, and raw results.
 
 Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
 campaigns/replays, and `cargo bench -p xtask --bench real_world` after

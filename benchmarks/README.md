@@ -83,3 +83,33 @@ than a separate acceptance requirement.
 For focused measurements, set `ASTRAL_BENCH_FIXTURE` and `ASTRAL_BENCH_MODE` to
 the names in the CSV output. Setting `ASTRAL_BENCH_PROFILE=1` runs each selected
 operation for 20 seconds for use with a CPU profiler.
+
+The baseline for the latest optimization is `66c9da9`, which adds this harness
+without changing the implementation at `9ec4ce8`. Both executables use the same
+fixtures, Rust 1.98.1, and release settings on macOS arm64. The changes reduce work
+in several places:
+
+- Cache implicit-key lookahead and line boundaries; scan ordinary scalar text in
+  byte runs. Default tag prefixes no longer require per-document allocations.
+- Share deserializer state and reuse nodes and scalar classifications already
+  resolved by the caller. Small string-key mappings compare borrowed text directly.
+- Store comment-index slots and line information in flat vectors, and omit empty
+  comment ranges from the lookup table.
+- Copy ordinary UTF-8 text into serialized output in chunks and format floats
+  directly into the output buffer.
+
+Three alternating runs on 2026-09-25 produced these median reductions in elapsed
+time versus that baseline:
+
+| Fixture | Unspanned | Root span | Root and field spans | Serialization |
+| --- | ---: | ---: | ---: | ---: |
+| uv CI workflow | 22.82% | 22.90% | 22.56% | 48.60% |
+| Kubernetes Guestbook | 21.16% | 21.65% | 22.53% | 23.41% |
+| OpenAPI Petstore | 22.36% | 22.54% | 22.12% | 45.81% |
+
+All twelve workloads exceed the 20% target. Every individual paired measurement
+also exceeded 20%; the smallest reduction was 20.08%.
+[Raw measurements](results/2026-09-25-throughput.csv) preserve all 36 pairs.
+The unchanged reference benchmark now measures **2.87× / 2.66× / 2.71×** faster
+than `yaml_serde`, recorded as `optimized` in
+[the reference results](results/2026-09-25.csv).

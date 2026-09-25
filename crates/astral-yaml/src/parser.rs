@@ -68,7 +68,8 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
-        line_bounds: Cell::new((0, 0)),
+        line_bounds: Cell::new((usize::MAX, 0)),
+        colon_cache: Cell::new((usize::MAX, None)),
     }
     .stream()?;
 
@@ -89,6 +90,7 @@ struct Parser<'a> {
     document_end_markers: Vec<Span>,
     elements: usize,
     line_bounds: Cell<(usize, usize)>,
+    colon_cache: Cell<(usize, Option<usize>)>,
 }
 
 impl<'a> Parser<'a> {
@@ -114,11 +116,13 @@ impl<'a> Parser<'a> {
         self.source.as_bytes().get(self.pos + 1).copied()
     }
 
+    #[inline]
     fn column(&self) -> usize {
         let (mut start, end) = self.line_bounds.get();
         if self.pos < start || self.pos > end {
-            start = self.source[..self.pos]
-                .rfind(['\r', '\n'])
+            start = self.source.as_bytes()[..self.pos]
+                .iter()
+                .rposition(|b| matches!(b, b'\r' | b'\n'))
                 .map_or(0, |n| n + 1);
             self.line_bounds.set((start, self.line_end()));
         }
@@ -130,8 +134,14 @@ impl<'a> Parser<'a> {
     }
 
     fn line_end(&self) -> usize {
-        self.rest()
-            .find(['\r', '\n'])
+        let (start, end) = self.line_bounds.get();
+        if start <= self.pos && self.pos <= end {
+            return end;
+        }
+
+        self.source.as_bytes()[self.pos..]
+            .iter()
+            .position(|b| matches!(b, b'\r' | b'\n'))
             .map_or(self.source.len(), |n| self.pos + n)
     }
 
@@ -239,7 +249,7 @@ impl<'a> Parser<'a> {
         self.byte().is_none()
             || self.marker("---")
             || self.marker("...")
-            || (self.column() == 0 && self.rest().starts_with('\u{feff}'))
+            || (self.rest().starts_with('\u{feff}') && self.column() == 0)
     }
 
     fn finish_line(&mut self) -> Result<()> {
@@ -267,8 +277,8 @@ impl<'a> Parser<'a> {
     }
 
     fn marker(&self, marker: &str) -> bool {
-        self.column() == 0
-            && self.rest().starts_with(marker)
+        self.rest().starts_with(marker)
+            && self.column() == 0
             && self
                 .source
                 .as_bytes()
@@ -277,7 +287,7 @@ impl<'a> Parser<'a> {
     }
 
     fn boundary(&self) -> bool {
-        self.document_boundary() || (self.column() == 0 && self.byte() == Some(b'%'))
+        self.document_boundary() || (self.byte() == Some(b'%') && self.column() == 0)
     }
 
     fn empty(&mut self, offset: usize) -> Result<NodeId> {
@@ -310,7 +320,7 @@ impl<'a> Parser<'a> {
     }
 
     fn consume_bom(&mut self) -> Result<()> {
-        if self.column() == 0 && self.rest().starts_with('\u{feff}') {
+        if self.rest().starts_with('\u{feff}') && self.column() == 0 {
             self.reserve_element()?;
             self.byte_order_marks.push(Span {
                 start: self.pos,
@@ -356,8 +366,6 @@ impl<'a> Parser<'a> {
 
             self.anchors.clear();
             self.tags.clear();
-            self.tags.insert("!", "!".to_owned());
-            self.tags.insert("!!", "tag:yaml.org,2002:".to_owned());
 
             let start = self.pos;
             if !previous_ended && self.byte() == Some(b'%') {
@@ -694,6 +702,17 @@ impl<'a> Parser<'a> {
 
     /// Finds a same-line implicit key separator outside quotes and flow brackets.
     fn simple_colon(&self) -> Option<usize> {
+        let (at, result) = self.colon_cache.get();
+        if at == self.pos {
+            return result;
+        }
+
+        let result = self.find_simple_colon();
+        self.colon_cache.set((self.pos, result));
+        result
+    }
+
+    fn find_simple_colon(&self) -> Option<usize> {
         let bytes = self.source.as_bytes();
         let mut i = self.pos;
 
@@ -709,6 +728,27 @@ impl<'a> Parser<'a> {
         }
 
         let plain = bytes.get(i).is_some_and(|b| !b"[{'\"".contains(b));
+        if plain {
+            // Plain keys cannot open quoted or flow syntax. Skip their content
+            // in runs, checking only separators, comments, and line endings.
+            loop {
+                let remaining = &bytes[i..];
+                i += remaining
+                    .iter()
+                    .position(|b| matches!(b, b':' | b'#' | b'\r' | b'\n'))
+                    .unwrap_or(remaining.len());
+
+                match bytes.get(i) {
+                    None | Some(b'\r' | b'\n') => return None,
+                    Some(b'#') if i == self.pos || is_space(bytes[i - 1]) => return None,
+                    Some(b':') if bytes.get(i + 1).is_none_or(|b| is_space(*b)) => {
+                        return Some(i);
+                    }
+                    _ => i += 1,
+                }
+            }
+        }
+
         let mut quote = None;
         let mut level = 0usize;
 
@@ -728,9 +768,9 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 match b {
-                    b'\'' | b'"' if !plain => quote = Some(b),
-                    b'[' | b'{' if !plain => level += 1,
-                    b']' | b'}' if !plain => level = level.saturating_sub(1),
+                    b'\'' | b'"' => quote = Some(b),
+                    b'[' | b'{' => level += 1,
+                    b']' | b'}' => level = level.saturating_sub(1),
                     b'#' if i == self.pos || is_space(bytes[i - 1]) => break,
                     b':' if level == 0 && bytes.get(i + 1).is_none_or(|b| is_space(*b)) => {
                         return Some(i);
@@ -862,6 +902,14 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
+    fn tag_prefix(&self, handle: &str) -> Option<&str> {
+        self.tags.get(handle).map(String::as_str).or(match handle {
+            "!" => Some("!"),
+            "!!" => Some("tag:yaml.org,2002:"),
+            _ => None,
+        })
+    }
+
     fn properties(&mut self, id: NodeId, flow: bool, parent: isize) -> Result<()> {
         while matches!(self.byte(), Some(b'&' | b'!')) {
             let start = self.pos;
@@ -934,8 +982,7 @@ impl<'a> Parser<'a> {
                             .find('!')
                             .map_or(("!", &raw[1..]), |n| (&raw[..n + 2], &raw[n + 2..]));
                         let prefix = self
-                            .tags
-                            .get(handle)
+                            .tag_prefix(handle)
                             .ok_or_else(|| self.error("undefined tag handle"))?;
                         if suffix.is_empty() || suffix.contains('!') {
                             return Err(self.error("invalid tag suffix"));
@@ -1402,7 +1449,17 @@ impl<'a> Parser<'a> {
                     segment = self.pos;
                 }
                 _ => {
-                    self.pos += self.rest().chars().next().map_or(0, char::len_utf8);
+                    // Quotes, escapes, and line breaks are ASCII, so a byte
+                    // scan also stops at a UTF-8 character boundary.
+                    let remaining = &self.source.as_bytes()[self.pos..];
+                    self.pos += remaining
+                        .iter()
+                        .position(|&byte| {
+                            byte == quote
+                                || matches!(byte, b'\r' | b'\n')
+                                || (quote == b'"' && byte == b'\\')
+                        })
+                        .unwrap_or(remaining.len());
                 }
             }
         }
@@ -1639,11 +1696,12 @@ fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: u8) -> String {
 
 // JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.
 fn validate_characters(stream: &Stream<'_>) -> Result<()> {
-    if stream
-        .source()
-        .bytes()
-        .all(|b| matches!(b, b'\t' | b'\r' | b'\n' | b' '..=b'~'))
-    {
+    // A full reduction lets the compiler vectorize this common ASCII check.
+    // Unicode and restricted bytes still receive the contextual checks below.
+    let ascii = stream.source().bytes().fold(true, |valid, byte| {
+        valid & matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~')
+    });
+    if ascii {
         return Ok(());
     }
 

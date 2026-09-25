@@ -87,6 +87,7 @@ impl<'de> CommentIndex<'de> {
             lines: Lines::new(stream.source(), start..end, budget)?,
             budget,
             nodes: Vec::new(),
+            slots: Vec::new(),
         };
         tree.push(stream, doc.root)?;
 
@@ -140,6 +141,7 @@ impl<'de> CommentIndex<'de> {
                 let end = owned.partition_point(|(owner, _)| *owner < node.end);
                 (node.id, start..end)
             })
+            .filter(|(_, range)| !range.is_empty())
             .collect();
 
         Ok(Self {
@@ -159,9 +161,10 @@ struct Node {
 struct Collection {
     start: usize,
     flow: bool,
-    slots: Vec<Slot>,
+    slots: Range<usize>,
 }
 
+#[derive(Default)]
 struct Slot {
     start: usize,
     end: usize,
@@ -175,6 +178,7 @@ struct Tree<'a, 'b> {
     lines: Lines,
     budget: &'b Cell<usize>,
     nodes: Vec<Node>,
+    slots: Vec<Slot>,
 }
 
 impl Tree<'_, '_> {
@@ -200,21 +204,23 @@ impl Tree<'_, '_> {
 
         let collection = match &node.kind {
             NodeKind::Mapping { entries, style } => {
-                let mut slots = Vec::with_capacity(entries.len());
+                // Reserve the parent's slots before appending any child slots.
+                let slots = self.slots.len()..self.slots.len() + entries.len();
+                self.slots.resize_with(slots.end, Slot::default);
 
-                for entry in entries {
+                for (offset, entry) in entries.iter().enumerate() {
                     let key = self.push(stream, entry.key)?;
                     let value = self.push(stream, entry.value)?;
                     let separator = skip_trivia(self.source, self.nodes[key].span.end());
                     let colon =
                         (self.source.as_bytes().get(separator) == Some(&b':')).then_some(separator);
-                    slots.push(Slot {
+                    self.slots[slots.start + offset] = Slot {
                         start: entry.span.start(),
                         end: entry.span.end(),
                         key: Some(key),
                         colon,
                         value,
-                    });
+                    };
                 }
 
                 Some(Collection {
@@ -224,10 +230,11 @@ impl Tree<'_, '_> {
                 })
             }
             NodeKind::Sequence { items, style } => {
-                let mut slots = Vec::with_capacity(items.len());
+                let slots = self.slots.len()..self.slots.len() + items.len();
+                self.slots.resize_with(slots.end, Slot::default);
                 let mut previous_end = start;
 
-                for &item in items {
+                for (offset, &item) in items.iter().enumerate() {
                     let value = self.push(stream, item)?;
                     let span = self.nodes[value].span;
                     let header = if *style == CollectionStyle::Block {
@@ -235,13 +242,13 @@ impl Tree<'_, '_> {
                     } else {
                         span.start()
                     };
-                    slots.push(Slot {
+                    self.slots[slots.start + offset] = Slot {
                         start: header,
                         end: span.end(),
                         key: None,
                         colon: None,
                         value,
-                    });
+                    };
                     previous_end = span.end();
                 }
 
@@ -275,15 +282,16 @@ impl Tree<'_, '_> {
             return (index, self.placement(node.span, comment));
         }
 
-        let next = collection.slots.partition_point(|slot| slot.start <= at);
-        let previous = next.checked_sub(1).map(|i| &collection.slots[i]);
+        let slots = &self.slots[collection.slots.clone()];
+        let next = slots.partition_point(|slot| slot.start <= at);
+        let previous = next.checked_sub(1).map(|i| &slots[i]);
         if let Some(slot) = previous {
             if at < slot.end || (inline && self.lines.line(slot.end) == self.lines.line(at)) {
                 return self.slot_owner(slot, comment);
             }
         }
 
-        let following = collection.slots.get(next);
+        let following = slots.get(next);
         if let Some(slot) = following {
             if !inline
                 && (collection.flow || self.lines.column(at) == self.lines.column(collection.start))
@@ -370,23 +378,24 @@ fn skip_trivia(source: &str, mut at: usize) -> usize {
     at
 }
 
+struct Line {
+    start: usize,
+    column: usize,
+    content: usize,
+    // Number of blank lines before this line.
+    blanks: usize,
+}
+
 struct Lines {
-    starts: Vec<usize>,
-    columns: Vec<usize>,
-    content: Vec<usize>,
-    blanks: Vec<usize>,
+    lines: Vec<Line>,
 }
 
 impl Lines {
     fn new(source: &str, range: Range<usize>, budget: &Cell<usize>) -> Result<Self, Error> {
         let bytes = &source.as_bytes()[..range.end];
-        let mut result = Self {
-            starts: Vec::new(),
-            columns: Vec::new(),
-            content: Vec::new(),
-            blanks: vec![0],
-        };
+        let mut result = Self { lines: Vec::new() };
         let mut start = range.start;
+        let mut blanks = 0;
 
         loop {
             charge(budget, Span::new(start, start).unwrap())?;
@@ -406,12 +415,13 @@ impl Lines {
                     .iter()
                     .take_while(|b| matches!(b, b' ' | b'\t'))
                     .count();
-            result.starts.push(start);
-            result.columns.push(column_start);
-            result.content.push(content);
-            result
-                .blanks
-                .push(result.blanks.last().unwrap() + usize::from(content == end));
+            result.lines.push(Line {
+                start,
+                column: column_start,
+                content,
+                blanks,
+            });
+            blanks += usize::from(content == end);
 
             if end == bytes.len() {
                 break;
@@ -427,21 +437,21 @@ impl Lines {
     }
 
     fn line(&self, at: usize) -> usize {
-        self.starts.partition_point(|start| *start <= at) - 1
+        self.lines.partition_point(|line| line.start <= at) - 1
     }
 
     fn column(&self, at: usize) -> usize {
-        at.saturating_sub(self.columns[self.line(at)])
+        at.saturating_sub(self.lines[self.line(at)].column)
     }
 
     fn inline(&self, at: usize) -> bool {
-        self.content[self.line(at)] < at
+        self.lines[self.line(at)].content < at
     }
 
     fn blank_between(&self, before: usize, after: usize) -> bool {
         let before = self.line(before);
         let after = self.line(after);
-        after > before && self.blanks[after] > self.blanks[before + 1]
+        after > before && self.lines[after].blanks > self.lines[before + 1].blanks
     }
 }
 

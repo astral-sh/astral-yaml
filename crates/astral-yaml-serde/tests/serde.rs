@@ -174,6 +174,27 @@ fn all_string_characters_and_complex_keys() {
 }
 
 #[test]
+fn serialization_preserves_text_and_escape_spelling() {
+    for (value, expected) in [
+        ("", "\"\"\n"),
+        ("plain ASCII", "\"plain ASCII\"\n"),
+        ("é — 中 🌍\u{a0}", "\"é — 中 🌍\u{a0}\"\n"),
+        ("é \"quoted\" 🌍\\\n", "\"é \\\"quoted\\\" 🌍\\\\\\n\"\n"),
+        (
+            "\u{7f}\u{85}\u{2028}\0",
+            "\"\\u007F\\u0085\\u2028\\u0000\"\n",
+        ),
+    ] {
+        assert_eq!(to_string(value).unwrap(), expected);
+    }
+
+    assert_eq!(
+        to_string(&[1.0, -0.0, 1.25]).unwrap(),
+        "[1.0, -0.0, 1.25]\n"
+    );
+}
+
+#[test]
 fn located_failures_and_document_count() {
     for source in ["", "---\n---\n", "[", "256"] {
         let error = from_str::<u8>(source).unwrap_err();
@@ -307,6 +328,9 @@ fn mapping_key_uniqueness_uses_core_types() {
         "{{a: 1, b: 2}: x, {b: 2, a: 1}: y}",
         "{&a key: 1, *a : 2}",
         "{{a: 1, a: 2}: x}",
+        "{first: 0, 1: a, 01: b}",
+        "{first: 0, [a]: 1, [a]: 2}",
+        "{!!str true: a, 'true': b}",
     ] {
         let error = from_str::<Anything>(source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
@@ -332,6 +356,20 @@ fn mapping_key_uniqueness_across_mapping_sizes() {
         let error = from_str::<BTreeMap<u64, String>>(&source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key");
         assert_eq!(error.span.unwrap().slice(&source), Some("0x00"));
+
+        let mut source = String::new();
+
+        for key in 0..count {
+            writeln!(source, "key{key}: value").unwrap();
+        }
+
+        let mapping = from_str::<BTreeMap<String, String>>(&source).unwrap();
+        assert_eq!(mapping.len(), count);
+
+        source.push_str("key0: duplicate\n");
+        let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
+        assert_eq!(error.message, "duplicate mapping key");
+        assert_eq!(error.span.unwrap().slice(&source), Some("key0"));
     }
 }
 
