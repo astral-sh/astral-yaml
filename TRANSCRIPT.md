@@ -3,18 +3,17 @@
 ## Implementation
 
 The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
-(serialization/deserialization), and `xtask` (inspection, fuzzing, and benchmarks).
+(serialization/deserialization), and `xtask` (fuzzing and benchmarks).
 The core has no runtime dependencies. The adapter adds only serde and its proc-macro
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
-The Cargo alias in `.cargo/config.toml` provides `cargo xtask events file`, which
-prints a parsed event stream. The unpublished `xtask/` workspace member contains
-command tests and benchmarks. Parser conformance and fixture tests live under
+The Cargo alias in `.cargo/config.toml` runs the unpublished `xtask/` workspace
+member, which contains the fuzz command, its tests, and benchmarks.
+Parser conformance and fixture tests live under
 `crates/astral-yaml/tests`; serde comparisons live under `crates/astral-yaml-serde/tests`.
 `cargo test -p astral-yaml --test conformance` runs the bundled suite directly
 against the parser API. Shared validation helpers live in the parser's test
-support and are reused by the CLI and fuzz targets.
-Input paths for the events command are relative to the caller.
+support and are imported directly by the fuzz targets.
 
 `cargo xtask fuzz` prepares the locked uv development environment, seeds the
 corpora, installs nightly if missing, and ensures its Rust source and LLVM tools
@@ -69,8 +68,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
-  The report covers 3,209 lines and 347 functions, excluding integration-test
-  support. LLVM region coverage is **97.78%**;
+  The report covers 3,196 lines and 345 functions, excluding integration-test
+  support. LLVM region coverage is **97.79%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit

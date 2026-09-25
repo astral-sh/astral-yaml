@@ -1,9 +1,12 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
+#[path = "../../crates/astral-yaml/tests/support/spans.rs"]
+mod spans;
+
 use astral_yaml::{ParseOptions, parse_with_options};
 use libfuzzer_sys::fuzz_target;
-use xtask::validate_spans;
+use spans::validate_spans;
 
 fuzz_target!(|data: &[u8]| {
     let Ok(source) = std::str::from_utf8(data) else {

@@ -13,7 +13,6 @@ serde = { version = "1.0", features = ["derive"] }
 astral-yaml = { path = "../crates/astral-yaml" }
 astral-yaml-serde = { path = "../crates/astral-yaml-serde" }
 yaml_serde = "=0.10.7"
-xtask = { path = "../xtask" }
 
 [[bin]]
 name = "parse"

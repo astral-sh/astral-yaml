@@ -1,12 +1,9 @@
 //! Development tooling for astral-yaml.
 mod fuzz;
 
-use std::{env, fs, process::ExitCode};
+use std::{env, process::ExitCode};
 
-use astral_yaml::parse;
-use xtask::{events, validate_spans};
-
-const USAGE: &str = "usage: cargo xtask <events file | fuzz [cargo-fuzz arguments...]>\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.";
+const USAGE: &str = "usage: cargo xtask fuzz [cargo-fuzz arguments...]\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.";
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1);
@@ -20,20 +17,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    if command == "fuzz" {
-        return Ok(fuzz::run(args.collect())?);
-    }
-
-    if command != "events" {
+    if command != "fuzz" {
         return Err(USAGE.into());
     }
 
-    let source = fs::read_to_string(args.next().ok_or("expected a file path")?)?;
-    let stream = parse(&source)?;
-    validate_spans(&stream)?;
-    print!("{}", events(&stream));
-
-    Ok(ExitCode::SUCCESS)
+    Ok(fuzz::run(args.collect())?)
 }
 
 fn main() -> ExitCode {

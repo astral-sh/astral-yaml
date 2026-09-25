@@ -23,6 +23,7 @@ impl Directory {
         Self(path)
     }
 
+    #[cfg(unix)]
     fn write(&self, name: &str, content: &str) {
         fs::write(self.0.join(name), content).unwrap();
     }
@@ -46,28 +47,17 @@ impl Drop for Directory {
 }
 
 #[test]
-fn events_and_command_errors() {
+fn unknown_commands_fail() {
     let directory = Directory::new();
-    directory.write("valid.yaml", "[a, b]");
-    let output = directory.run(&["events", "valid.yaml"]);
-    assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
-    );
 
-    directory.write("invalid.yaml", "[");
-
-    for args in [
-        vec!["events"],
-        vec!["events", "missing"],
-        vec!["events", "invalid.yaml"],
-        vec!["unknown"],
-        vec!["conformance"],
-    ] {
-        let output = directory.run(&args);
-        assert!(!output.status.success(), "{args:?}");
-        assert!(!output.stderr.is_empty(), "{args:?}");
+    for command in ["events", "conformance", "unknown"] {
+        let output = directory.run(&[command]);
+        assert_eq!(output.status.code(), Some(1), "{command}");
+        assert!(output.stdout.is_empty(), "{command}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with("usage: cargo xtask fuzz"),
+            "{command}"
+        );
     }
 }
 
@@ -80,7 +70,7 @@ fn help_works_outside_the_repository_root() {
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "usage: cargo xtask <events file | fuzz [cargo-fuzz arguments...]>\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.\n"
+            "usage: cargo xtask fuzz [cargo-fuzz arguments...]\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.\n"
         );
     }
 }
