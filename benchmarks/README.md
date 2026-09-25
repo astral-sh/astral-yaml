@@ -70,7 +70,7 @@ Preserve the executable printed by `cargo bench --no-run` for each revision, the
 compare them without rebuilding between measurements:
 
 ```sh
-python3 scripts/compare-throughput.py /path/to/baseline /path/to/candidate \
+uv run --script scripts/compare-throughput.py /path/to/baseline /path/to/candidate \
   --runs 3 --output /tmp/throughput.csv
 ```
 

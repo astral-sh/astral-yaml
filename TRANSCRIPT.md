@@ -18,16 +18,22 @@ formatting, span validation, and benchmark helpers. Parser tests and xtask
 benchmarks use it as a development dependency; the separate fuzz workspace
 depends on it directly. Modules use standard Rust directory layouts.
 
-`cargo xtask fuzz` prepares the locked uv development environment, seeds the
-corpora, installs nightly if missing, and ensures its Rust source and LLVM tools
-are available. It runs all four targets for 60 seconds each with the documented
-timeout, input-size, and memory bounds. Explicit arguments pass through to
-cargo-fuzz after setup. Subprocesses run from the repository root; failures stop
-the sequence and propagate a failing exit code. CLI tests use stub executables
+`cargo xtask fuzz` seeds the corpora through a PEP 723 script, installs nightly if
+missing, ensures its Rust source and LLVM tools are available, and uses the locked
+uv development environment to run cargo-fuzz. It runs all four targets for 60
+seconds each with the documented timeout, input-size, and memory bounds. Explicit
+arguments pass through to cargo-fuzz after setup. Subprocesses run from the
+repository root; failures stop the sequence and propagate a failing exit code.
+CLI tests use stub executables
 to verify setup order, argument preservation, missing-tool errors, and failures.
 An end-to-end run of the default command completed 6,293,732 executions without
 findings: 2,336,872 parser, 504,187 serde, 2,104,724 decoder, and 1,347,949 typed
 serde executions. Each target stopped after 61 seconds with the 60-second limit.
+
+All Python scripts declare PEP 723 metadata, including explicit empty dependency
+lists for standard-library-only scripts. They use typed functions and guarded
+entry points. The locked development environment supplies Ruff, ty, and PyYAML
+type stubs; `scripts/check.sh` checks formatting, annotations, imports, and types.
 
 The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
 tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
@@ -68,10 +74,10 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
   with invalid indentation has a pinned rejection expectation. The separate
   PyYAML oracle test also passes; it runs in `scripts/check.sh` and is ignored by
   ordinary `cargo test` because it requires `uv`.
-- `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
-  clippy, tests, fixture hashes, independent parser comparisons,
-  and enforced **100% line / 100% function coverage**.
-  The report covers 3,380 lines and 362 functions, including the shared development
+- `scripts/check.sh` passes: Ruff formatting and linting, ty, rustfmt (workspace and
+  fuzz targets), strict workspace clippy, tests, fixture hashes, independent parser
+  comparisons, and enforced **100% line / 100% function coverage**.
+  The report covers 3,370 lines and 362 functions, including the shared development
   helpers and excluding integration-test support. LLVM region coverage is **97.71%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.

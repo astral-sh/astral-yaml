@@ -42,9 +42,14 @@ cargo bench -p xtask --bench real_world
 for 60 seconds each. Extra arguments are forwarded to cargo-fuzz;
 see [fuzzing instructions](fuzz/README.md).
 
-With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` also checks fixture
-hashes, compares real-world syntax and spans with independent parsers, and enforces
-100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
+Python scripts use PEP 723 metadata and run with `uv run --script scripts/<name>.py`.
+Each declares its Python requirement and dependencies, including an empty list
+for scripts that only use the standard library.
+
+With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` checks Python formatting,
+linting, and types with Ruff and ty, verifies fixture hashes, compares real-world
+syntax and spans with independent parsers, and enforces 100% line and function
+coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
 
 The parser's integration tests use inline `insta` snapshots of readable syntax

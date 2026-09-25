@@ -5,11 +5,11 @@ use super::Directory;
 // These stand-ins record real subprocess arguments without installing tools or
 // fuzzing during `cargo test`. They need only POSIX shell builtins.
 const TOOL: &str = r#"#!/bin/sh
-case "${0##*/}:$1:$4" in
-    uv:run:python) step=seed ;;
-    uv:run:rustup) step=fuzz ;;
-    rustup:run:rustc) step=nightly ;;
-    rustup:component:nightly) step=components ;;
+case "${0##*/}:$1:$2:$4" in
+    uv:run:--script:) step=seed ;;
+    uv:run:--only-dev:rustup) step=fuzz ;;
+    rustup:run:--install:rustc) step=nightly ;;
+    rustup:component:add:nightly) step=components ;;
     *) exit 99 ;;
 esac
 
@@ -75,16 +75,7 @@ fn fuzz_sets_up_and_runs_all_targets_with_limits() {
     let calls = calls(&directory);
     assert_eq!(calls.len(), 7);
     assert_eq!(calls[0][0], "seed");
-    assert_eq!(
-        &calls[0][4..],
-        [
-            "run",
-            "--only-dev",
-            "--locked",
-            "python",
-            "scripts/seed-fuzz.py"
-        ]
-    );
+    assert_eq!(&calls[0][4..], ["run", "--script", "scripts/seed-fuzz.py"]);
     assert_eq!(calls[1][0], "nightly");
     assert_eq!(
         &calls[1][4..],

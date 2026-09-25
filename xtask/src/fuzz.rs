@@ -36,17 +36,7 @@ fn execute(command: &mut Command) -> io::Result<ExitCode> {
 pub(crate) fn run(args: Vec<OsString>) -> io::Result<ExitCode> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut setup = [
-        command(
-            &root,
-            "uv",
-            &[
-                "run",
-                "--only-dev",
-                "--locked",
-                "python",
-                "scripts/seed-fuzz.py",
-            ],
-        ),
+        command(&root, "uv", &["run", "--script", "scripts/seed-fuzz.py"]),
         command(
             &root,
             "rustup",

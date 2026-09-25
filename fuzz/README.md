@@ -52,7 +52,7 @@ tools during setup:
 for target in parse serde decode typed; do
   cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
-uv run --only-dev --locked python scripts/fuzz-coverage.py
+uv run --script scripts/fuzz-coverage.py
 ```
 
 The script reports core and adapter source coverage separately for each target
