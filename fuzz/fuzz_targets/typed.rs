@@ -1,7 +1,7 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use astral_yaml_serde::{from_str, from_stream, to_string};
+use astral_yaml_serde::{Spanned, from_str, from_stream, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::{
     Deserialize, Serialize,
@@ -19,9 +19,9 @@ struct Pair(i16, String);
 struct Unit;
 
 #[derive(Deserialize, Serialize)]
-enum Kind {
+enum Kind<T> {
     Unit,
-    Newtype(String),
+    Newtype(T),
     Tuple(u8, bool),
     Struct { value: i32 },
 }
@@ -73,10 +73,14 @@ impl<'de> Deserialize<'de> for Bytes {
 }
 
 fn check<T: DeserializeOwned + Serialize>(source: &str, stream: &astral_yaml::Stream<'_>) {
-    match from_stream::<T>(stream) {
+    match from_stream::<Spanned<T>>(stream) {
         Ok(value) => {
+            let root = stream.node(stream.documents()[0].root).unwrap();
+            assert_eq!(value.span, root.span);
+            assert!(value.span.slice(source).is_some());
+
             if let Ok(encoded) = to_string(&value) {
-                let decoded: T = from_str(&encoded).unwrap();
+                let decoded: Spanned<T> = from_str(&encoded).unwrap();
 
                 // Canonical output also compares NaN values and the sign of zero.
                 assert_eq!(to_string(&decoded).unwrap(), encoded);
@@ -102,7 +106,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    match selector % 24 {
+    match selector % 28 {
         0 => check::<i8>(source, &stream),
         1 => check::<i16>(source, &stream),
         2 => check::<i32>(source, &stream),
@@ -123,9 +127,13 @@ fuzz_target!(|data: &[u8]| {
         17 => check::<Newtype>(source, &stream),
         18 => check::<Pair>(source, &stream),
         19 => check::<Unit>(source, &stream),
-        20 => check::<Kind>(source, &stream),
+        20 => check::<Kind<String>>(source, &stream),
         21 => check::<BTreeMap<String, u8>>(source, &stream),
         22 => check::<Bytes>(source, &stream),
-        _ => check::<Configuration>(source, &stream),
+        23 => check::<Configuration>(source, &stream),
+        24 => check::<Vec<Spanned<u64>>>(source, &stream),
+        25 => check::<BTreeMap<String, Spanned<String>>>(source, &stream),
+        26 => check::<Spanned<Option<String>>>(source, &stream),
+        _ => check::<Kind<Spanned<String>>>(source, &stream),
     }
 });

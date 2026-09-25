@@ -1,10 +1,11 @@
-use crate::Error;
+use crate::{Error, spanned};
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
     schema::{ScalarType, classify},
 };
 use serde::de::{
-    self, Deserialize, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
+    self, Deserialize, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
+    VariantAccess, Visitor,
 };
 use std::{borrow::Cow, cell::Cell, collections::HashSet};
 
@@ -115,6 +116,27 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             ignore_tag: false,
             ..self
         }
+    }
+
+    fn spanned<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        let span = self.raw_node()?.span;
+        let mut access = SpannedAccess {
+            de: Self {
+                depth: self.depth + 1,
+                ..self
+            },
+            span,
+            index: 0,
+        };
+
+        let value = visitor
+            .visit_seq(&mut access)
+            .map_err(|error| error.located(span))?;
+        if access.index != 3 {
+            return Err(Error::at("spanned value was not fully consumed", span));
+        }
+
+        Ok(value)
     }
 
     fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
@@ -425,7 +447,12 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                     }
                 }
             }
-            NodeKind::Alias { target, .. } => self.child(*target).deserialize_any(visitor),
+            NodeKind::Alias { target, .. } => Self {
+                id: *target,
+                depth: self.depth + 1,
+                ..self
+            }
+            .deserialize_any(visitor),
         }
     }
 
@@ -499,7 +526,10 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         {
             visitor.visit_none()
         } else {
-            visitor.visit_some(self.child(self.id))
+            visitor.visit_some(Self {
+                depth: self.depth + 1,
+                ..self
+            })
         }
     }
 
@@ -522,11 +552,18 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
     fn deserialize_newtype_struct<V: Visitor<'de>>(
         self,
-        _: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value> {
+        if name == spanned::NAME {
+            return self.spanned(visitor);
+        }
+
         self.node()?;
-        visitor.visit_newtype_struct(self.child(self.id))
+        visitor.visit_newtype_struct(Self {
+            depth: self.depth + 1,
+            ..self
+        })
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -615,6 +652,32 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_any(de::IgnoredAny)?;
         visitor.visit_unit()
+    }
+}
+
+struct SpannedAccess<'s, 'de> {
+    de: Deserializer<'s, 'de>,
+    span: Span,
+    index: usize,
+}
+
+impl<'de> SeqAccess<'de> for &mut SpannedAccess<'_, 'de> {
+    type Error = Error;
+
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
+        let value = match self.index {
+            0 => seed.deserialize(self.span.start().into_deserializer()),
+            1 => seed.deserialize(self.span.end().into_deserializer()),
+            2 => seed.deserialize(self.de),
+            _ => return Ok(None),
+        }?;
+
+        self.index += 1;
+        Ok(Some(value))
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(3 - self.index)
     }
 }
 

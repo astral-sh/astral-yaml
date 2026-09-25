@@ -17,7 +17,7 @@ Additional regressions cover requirements that the corpus does not exhaust:
 | Block nodes (§8) | Implicit-key length and line limits, scalar folding/chomping, indentation, compact collections, comment separation |
 | Streams (§9) | Document transitions, directive scope, explicit and standalone end-marker ranges |
 | Core schema (§10.3) | Decimal leading zeros, radix integers, floats, null/bool spellings, 1.1-only forms remaining strings |
-| Serde | All numeric widths, derived types, bytes, enums, aliases, duplicate-key identity, ignored fields, visitor protocols, resource limits |
+| Serde | All numeric widths, derived types, bytes, enums, aliases, optional source spans, duplicate-key identity, ignored fields, visitor protocols, resource limits |
 
 `yaml_serde` is a performance comparator and a useful check on shared syntax;
 it is not the conformance authority. For example, it rejects the valid YAML 1.2
@@ -31,6 +31,13 @@ mapping keys, and recognizes local tags as enum variants when an enum is
 requested. Other application-specific tags remain available in the AST but are
 not constructed by the adapter. YAML 1.1 merge keys, timestamps, and boolean
 spellings have no special behavior.
+
+`astral_yaml_serde::Spanned<T>` retains the UTF-8 source span of a deserialized
+node and dereferences to `T`. Wrappers compose with borrowed values, fields,
+collections, and enum payloads. Alias spans identify the use site; spans of
+children within an aliased collection identify their definitions. Serialization
+emits the value alone. Serde buffering for `untagged` and `flatten` loses source
+spans; wrap the containing enum or struct instead of fields decoded from a buffer.
 
 Default parser limits are 64 MiB of UTF-8 input, 64 levels of nesting, and one
 million syntax elements. `ParseOptions` can change these limits; nesting has a

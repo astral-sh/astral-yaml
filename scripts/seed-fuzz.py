@@ -37,10 +37,12 @@ examples = [
     "!Newtype abc", "!Tuple [1, false]", "!Struct {value: -1}",
     "{name: 'example', count: 1, unknown: [1, 2]}",
     "{unknown: {a: 1, a: 2}}", "&a [*a]",
+    "[&number 42, *number]", "[&items [1, 2], *items]",
+    "[&value !Newtype abc, *value]", "{empty: }", "---\n",
 ]
 typed_sources = [path.read_bytes() for path in inputs] + [example.encode() for example in examples]
-for selector in range(24):
+for selector in range(28):
     for source in typed_sources:
         data = bytes([selector]) + source
         (typed / sha256(data).hexdigest()).write_bytes(data)
-print("Seeded all 24 typed serde paths")
+print("Seeded all 28 typed serde paths")

@@ -20,18 +20,28 @@ bounds recursive newtype visitors. A cached line range prevents repeated prefix
 scans in large flow collections. A 30,000-item array CLI diagnostic improved from
 about 1.6 s to 0.02 s on warm runs on the same host.
 
-## Validation evidence (2026-09-24)
+The adapter exposes `Spanned<T>` with public `value` and `span` fields, `Deref`,
+`DerefMut`, and `into_inner`. Serialization emits only the value. Wrappers retain
+borrowing and support fields, keys, collections, options, and enum payloads.
+Span offsets follow the core's decoded UTF-8 convention, including node properties;
+aliases use their occurrence span. Serde's `untagged` and `flatten` buffers lose
+spans, so the wrapper must surround values decoded through those buffers.
+
+## Validation evidence (2026-09-25)
 
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **57 tests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three pinned real-world
-  fixtures match the reference values and round-trip through serde.
+- **69 tests and one doctest pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
+  pinned real-world fixtures match the reference values and round-trip through serde.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
-  The report covers 2,739 lines and 284 functions. LLVM region coverage is **97.42%**;
+  The report covers 2,823 lines and 298 functions. LLVM region coverage is **97.35%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
+- Span regressions cover borrowing, scalar syntax, nested collections, implicit
+  nulls, aliases, enum tags through transparent wrappers, document offsets,
+  original-byte mapping, serialization, buffering limits, and visitor failures.
 - Dependency trees confirm the runtime dependency constraints.
 - A spec audit added regressions for characters, encodings, tag URI/prefix rules,
   implicit keys, continuation indentation, flow value separation, document
@@ -40,9 +50,23 @@ about 1.6 s to 0.02 s on warm runs on the same host.
   their spelling per spec §5.6. `yaml_serde` rejects some valid 1.2 leading-colon
   keys; those cases use grammar-derived assertions instead of that comparator.
 
-## Fuzzing evidence
+## Span-aware fuzzing (2026-09-25)
 
-Latest campaigns on the final implementation used nightly
+The typed target now wraps all 28 type selections in `Spanned<T>`, checks the root
+span against the parsed node, and includes nested wrappers in collections, options,
+and enum payloads. Its final campaign completed **2,065,643 executions** in 61 seconds
+without findings. A generic-serde regression campaign also passed **1,041,114
+executions** in 61 seconds. Both used the nightly toolchain and bounds listed below.
+
+Replaying the final typed corpus reached **95.05%** deserializer, **98.32%** serializer,
+and **47.37%** wrapper line coverage. Tests cover the wrapper's mutation/extraction
+methods and malformed protocol paths; workspace test coverage remains 100% for
+lines and functions. The parser and decoder campaigns below are retained as the
+pre-span baseline, not claimed as fresh runs.
+
+## Fuzzing evidence (2026-09-24 baseline)
+
+Campaigns before the span wrapper was added used nightly
 `1.100.0-nightly (cea272fa3 2026-09-07)`, cargo-fuzz 0.13.2, and these bounds:
 61 seconds elapsed per target, 2-second input timeout, 64 KiB mutations, 2 GiB RSS.
 All four completed without findings: **7,132,929 executions** in total.
@@ -73,6 +97,10 @@ baseline at `31bd945` was 1.63–1.65×. Both sides construct and drop the same
 `Vec<yaml_serde::Value>`; equality is checked before timing. See
 [benchmarks/README.md](benchmarks/README.md) for the changes, recorded run medians,
 and unchanged measurement methodology.
+
+The 2026-09-25 regression run after adding `Spanned<T>` retained
+**2.20× / 2.06× / 2.09×** speedups for the existing unwrapped workload. Its medians
+are recorded in [the new results](benchmarks/results/2026-09-25.csv).
 
 Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
 campaigns/replays, and `cargo bench -p astral-yaml-dev --bench real_world` after

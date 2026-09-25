@@ -30,6 +30,11 @@ The baseline at `31bd945` measured 1.63–1.65× on the same host before this pa
 runs. Every final fixture result exceeds the 1.98× target. The harness, fixtures,
 comparator, dependencies, and release profile are unchanged.
 
+After adding optional `Spanned<T>` support, a 2026-09-25 regression run measured
+**2.20× / 2.06× / 2.09×** on the same fixtures with ordinary, unwrapped values.
+[Run medians](results/2026-09-25.csv) record that check using the same host,
+toolchain, and methodology. This run does not measure the cost of opting into spans.
+
 The improvements remove repeated work:
 
 - Skip numeric scans for ordinary strings and reuse resolved scalar values in
