@@ -32,20 +32,49 @@ requested. Other application-specific tags remain available in the AST but are
 not constructed by the adapter. YAML 1.1 merge keys, timestamps, and boolean
 spellings have no special behavior.
 
-`astral_yaml_serde::Spanned<T>` retains the UTF-8 source span of a deserialized
-node and dereferences to `T`. Wrappers compose with borrowed values, fields,
-collections, and enum payloads. Alias spans identify the use site; spans of
-children within an aliased collection identify their definitions. Serialization
-emits the value alone. Serde buffering for `untagged` and `flatten` loses source
-spans; wrap the containing enum or struct instead of fields decoded from a buffer.
+`astral_yaml_serde::Spanned<'a, T>` retains the UTF-8 source span of a deserialized
+node, borrows its comments, and dereferences to `T`. Wrappers compose with fields,
+collections, and enum payloads. Their lifetime is tied to the input even when `T`
+is owned; ordinary owned types continue to satisfy `DeserializeOwned`. Serialization
+emits the value alone. Serde buffering for `untagged` and `flatten` loses metadata;
+wrap the containing enum or struct instead of fields decoded from a buffer.
+
+Comments have one direct syntax owner, independent of the application's Rust type.
+A wrapper collects its own and its syntax descendants' comments, including keys
+and ignored fields, once per wrapper in source order. Nested wrapper lists overlap.
+Placement always describes the relationship to the direct owner:
+
+- Adjacent standalone comments lead the next field's value or sequence item at
+  the same block indentation, or within the current flow collection.
+- Same-line comments follow the preceding node. Comments after colons, sequence
+  dashes, properties, and block-scalar headers belong to the corresponding value.
+  Comments within or immediately following explicit keys belong to those keys.
+- Comments after the final child belong to the enclosing collection. Comments
+  after closing flow delimiters belong to that collection.
+- Blank-line-separated comments and comments inside empty collections belong to
+  the enclosing collection or document root as detached comments.
+
+Stream-leading comments enter the first document's attachment context. Gaps
+between documents and the stream suffix belong to the preceding document; directive
+and marker comments belong to their document root. Comment-only streams retain
+their comments through `Stream::comments()`. Text excludes `#` and preserves its
+whitespace; spans include `#` and exclude line breaks. Attaching comments does not
+expand node spans, so a comment can lie outside its owner's span.
+
+Aliases are leaves for aggregation. Alias spans and comments identify the use
+site; wrapped children of aliased collections retain definition-site metadata.
+Aggregation does not follow alias references, including cyclic references.
 
 Default parser limits are 64 MiB of UTF-8 input, 64 levels of nesting, and one
 million syntax elements. `ParseOptions` can change these limits; nesting has a
 hard maximum of 128. Nodes, comments, directives, BOMs, and document end markers
 consume the element budget. Encoded input bounds both original and decoded byte
 lengths. Serde additionally bounds node visits and inspected scalar bytes,
-including alias expansion and ignored values. Cyclic aliases remain representable
-in the syntax arena and produce a resource error if deserialization expands them.
+including alias expansion and ignored values. Comment indexing is lazy and charges
+each indexed line, node, and ownership record against the same work budget. Every
+comment emitted into a wrapper is charged again, including parent/child overlap.
+Cyclic aliases remain representable in the syntax arena and produce a resource
+error if deserialization expands them.
 Serialization also bounds nesting. Numeric construction is limited by the requested
 Rust type; lexical scalar classification does not impose a machine integer limit.
 

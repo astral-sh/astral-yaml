@@ -13,9 +13,12 @@ cargo +nightly fuzz run typed -- -max_total_time=60 -timeout=2 -max_len=65536 -r
 The serde target checks string and arbitrary-value round trips and error ranges.
 The typed target covers all integer widths, floating point, booleans, characters,
 strings, options, tuples, newtypes, enums, maps, byte visitors, and ignored fields.
-Every type is wrapped in `Spanned<T>` to check its source range; additional paths
-cover nested wrappers in collections, options, and enum payloads. Its first input
-byte selects one of 28 types; the remaining bytes are YAML.
+Every type is wrapped in `Spanned<'a, T>` to check its source range, complete
+comment aggregation, source ordering, and borrowed comment text. Additional paths
+cover nested wrappers in collections, options, and enum payloads. A syntax-only
+value exercises comment indexing for arbitrary tags and cyclic aliases without
+expanding their values. The first input byte selects one of 29 types; the remaining
+bytes are YAML.
 The decoding target exercises all five encodings and checks original-byte spans.
 The parser target checks successful-stream source ranges, arena references,
 comment ordering, and error ranges. It uses all official cases as seeds.

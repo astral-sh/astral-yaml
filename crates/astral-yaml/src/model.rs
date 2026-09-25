@@ -123,7 +123,7 @@ pub struct Node<'a> {
 }
 
 /// A comment, excluding its line break and including the `#` indicator.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Comment<'a> {
     pub span: Span,
     pub text: &'a str,

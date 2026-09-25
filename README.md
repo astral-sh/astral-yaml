@@ -32,28 +32,40 @@ Use `astral_yaml_serde::from_str::<T>(source)` for a `Deserialize` type and
 `astral_yaml_serde::to_string(&value)` for a `Serialize` value. The emitter uses flow
 style and quotes strings to preserve their type under YAML 1.2 core resolution.
 
-Wrap a value or field in `astral_yaml_serde::Spanned<T>` to retain its source range:
+Wrap a value or field in `astral_yaml_serde::Spanned<'a, T>` to retain its source
+range and borrow its comments:
 
 ```rust
 use astral_yaml_serde::{Spanned, from_str};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-struct Config {
-    timeout: Spanned<u64>,
+struct Config<'a> {
+    #[serde(borrow)]
+    timeout: Spanned<'a, u64>,
 }
 
-let source = "timeout: 30\n";
-let config: Config = from_str(source).unwrap();
+let source = "timeout: 30 # seconds\n";
+let config: Config<'_> = from_str(source).unwrap();
 assert_eq!(*config.timeout, 30);
 assert_eq!(config.timeout.span.slice(source), Some("30"));
+assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 ```
 
-`Spanned<T>` exposes `value` and `span`, implements `Deref` and `DerefMut` for `T`,
-and serializes as the value alone. It supports borrowed values and nested wrappers.
+`Spanned<'a, T>` exposes `value`, `span`, and `comments`, implements `Deref` and
+`DerefMut` for `T`, and serializes as the value alone. Its comments include syntax
+descendants, once per wrapper, in source order; parent and child lists overlap.
+Each `AttachedComment` contains a borrowed core `Comment` and a `CommentPlacement`:
+`Leading`, `Inline`, `Trailing`, or `Detached`. Placement describes the direct
+owner, including when a comment appears in an ancestor's list.
+
+The input must outlive the wrapper, even when `T` is owned. This makes the wrapper
+incompatible with `DeserializeOwned`; ordinary owned types still work with the
+existing deserialization APIs. `Spanned` remains `Clone`, but is no longer `Copy`.
 Spans include node properties and delimiters; an alias uses its `*name` occurrence.
-Serde buffering for `untagged` and `flatten` discards spans, so wrap the containing
-enum or struct instead of fields decoded from a buffer.
+Alias wrappers collect use-site comments without importing target comments.
+Serde buffering for `untagged` and `flatten` discards metadata, so wrap the
+containing enum or struct instead of fields decoded from a buffer.
 
 For encoded byte input, use `astral_yaml::Source::from_bytes(&bytes)` and parse its
 decoded text. UTF-8 is borrowed; UTF-16 and UTF-32 in either byte order are decoded

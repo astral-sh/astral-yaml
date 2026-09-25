@@ -39,10 +39,15 @@ examples = [
     "{unknown: {a: 1, a: 2}}", "&a [*a]",
     "[&number 42, *number]", "[&items [1, 2], *items]",
     "[&value !Newtype abc, *value]", "{empty: }", "---\n",
+    "# leading\n42 # inline\n\n# detached\n",
+    "nested: # header\n  # child\n  value: 1 # inline\n  # tail\n# root tail\n",
+    "[ # opening\n # item\n 1,\n # trailing\n] # closing\n",
+    "? [a, # key child\n b] # key\n: 1 # value\n",
+    "&self [*self # cycle\n]", "\ufeff# BOM\nvalue: 1\r\n",
 ]
 typed_sources = [path.read_bytes() for path in inputs] + [example.encode() for example in examples]
-for selector in range(28):
+for selector in range(29):
     for source in typed_sources:
         data = bytes([selector]) + source
         (typed / sha256(data).hexdigest()).write_bytes(data)
-print("Seeded all 28 typed serde paths")
+print("Seeded all 29 typed serde paths")

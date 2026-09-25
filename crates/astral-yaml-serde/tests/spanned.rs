@@ -21,16 +21,16 @@ fn scalars_retain_their_lexical_spans() {
             ">-\n  hello\n  world\n",
         ),
     ] {
-        let spanned: Spanned<String> = from_str(source).unwrap();
+        let spanned: Spanned<'_, String> = from_str(source).unwrap();
         assert_eq!(*spanned, value);
         assert_eq!(spanned.span.slice(source), Some(lexeme));
     }
 
-    let number: Spanned<u16> = from_str("0xff").unwrap();
+    let number: Spanned<'_, u16> = from_str("0xff").unwrap();
     assert_eq!(*number, 255);
     assert_eq!(number.span, Span::new(0, 4).unwrap());
 
-    let mut text: Spanned<String> = from_str("hello").unwrap();
+    let mut text: Spanned<'_, String> = from_str("hello").unwrap();
     text.push_str(" world");
     assert_eq!(text.span, Span::new(0, 5).unwrap());
     assert_eq!(text.into_inner(), "hello world");
@@ -39,16 +39,18 @@ fn scalars_retain_their_lexical_spans() {
 #[derive(Debug, Deserialize, Serialize)]
 struct Config<'a> {
     #[serde(borrow)]
-    name: Spanned<&'a str>,
-    counts: Spanned<Vec<Spanned<u8>>>,
+    name: Spanned<'a, &'a str>,
+    #[serde(borrow)]
+    counts: Spanned<'a, Vec<Spanned<'a, u8>>>,
     enabled: bool,
-    optional: Option<Spanned<String>>,
+    #[serde(borrow)]
+    optional: Option<Spanned<'a, String>>,
 }
 
 #[test]
 fn wrappers_compose_with_structs_collections_and_borrowing() {
     let source = "{name: 'é🌍', counts: [1, 2], enabled: true}";
-    let config: Spanned<Config<'_>> = from_str(source).unwrap();
+    let config: Spanned<'_, Config<'_>> = from_str(source).unwrap();
     assert_eq!(config.span.slice(source), Some(source));
     assert_eq!(*config.name, "é🌍");
     assert_eq!(config.name.span.slice(source), Some("'é🌍'"));
@@ -67,14 +69,15 @@ fn wrappers_compose_with_structs_collections_and_borrowing() {
     assert!(config.optional.is_none());
 
     let source = "{é: [3, 4]}";
-    let mapping: HashMap<Spanned<String>, Spanned<Vec<Spanned<u8>>>> = from_str(source).unwrap();
+    let mapping: HashMap<Spanned<'_, String>, Spanned<'_, Vec<Spanned<'_, u8>>>> =
+        from_str(source).unwrap();
     let (key, values) = mapping.iter().next().unwrap();
     assert_eq!(key.value, "é");
     assert_eq!(key.span, Span::new(1, 3).unwrap());
     assert_eq!(values.span.slice(source), Some("[3, 4]"));
     assert_eq!(values[0].span.slice(source), Some("3"));
 
-    let bytes: Spanned<&[u8]> = from_str("'abc'").unwrap();
+    let bytes: Spanned<'_, &[u8]> = from_str("'abc'").unwrap();
     assert_eq!(*bytes, b"abc");
     assert_eq!(bytes.span, Span::new(0, 5).unwrap());
 }
@@ -82,24 +85,28 @@ fn wrappers_compose_with_structs_collections_and_borrowing() {
 #[test]
 fn options_and_nested_wrappers_keep_the_same_node_span() {
     for source in ["null", "~", "---\n"] {
-        let value: Spanned<Option<u8>> = from_str(source).unwrap();
+        let value: Spanned<'_, Option<u8>> = from_str(source).unwrap();
         assert!(value.is_none());
         assert_eq!(
             value.span.slice(source),
             Some(source.trim_start_matches("---\n"))
         );
-        assert!(from_str::<Option<Spanned<u8>>>(source).unwrap().is_none());
+        assert!(
+            from_str::<Option<Spanned<'_, u8>>>(source)
+                .unwrap()
+                .is_none()
+        );
     }
 
-    let value: Option<Spanned<u8>> = from_str("42").unwrap();
+    let value: Option<Spanned<'_, u8>> = from_str("42").unwrap();
     assert_eq!(value.unwrap().value, 42);
 
-    let value: Spanned<Spanned<Option<u8>>> = from_str("42").unwrap();
+    let value: Spanned<'_, Spanned<'_, Option<u8>>> = from_str("42").unwrap();
     assert_eq!(value.span, value.value.span);
     assert_eq!(**value, Some(42));
 
     let source = "{empty: }";
-    let mapping: BTreeMap<String, Spanned<Option<u8>>> = from_str(source).unwrap();
+    let mapping: BTreeMap<String, Spanned<'_, Option<u8>>> = from_str(source).unwrap();
     assert!(mapping["empty"].is_none());
     assert!(mapping["empty"].span.is_empty());
     assert_eq!(mapping["empty"].span.slice(source), Some(""));
@@ -108,40 +115,43 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
 #[test]
 fn aliases_use_the_occurrence_span_and_children_use_definition_spans() {
     let source = "[&number 42, *number]";
-    let values: Vec<Spanned<u8>> = from_str(source).unwrap();
+    let values: Vec<Spanned<'_, u8>> = from_str(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
     assert_eq!(values[0].span.slice(source), Some("&number 42"));
     assert_eq!(values[1].span.slice(source), Some("*number"));
 
     let source = "[&items [1, 2], *items]";
-    let values: Vec<Spanned<Vec<Spanned<u8>>>> = from_str(source).unwrap();
+    let values: Vec<Spanned<'_, Vec<Spanned<'_, u8>>>> = from_str(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
     assert_eq!(values[1].span.slice(source), Some("*items"));
     assert_eq!(values[1][0].span.slice(source), Some("1"));
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Newtype(Option<Spanned<u8>>);
+struct Newtype<'a>(#[serde(borrow)] Option<Spanned<'a, u8>>);
 
 #[derive(Debug, Deserialize, PartialEq)]
-enum Kind {
+enum Kind<'a> {
     Unit,
-    Newtype(Spanned<Newtype>),
-    Tuple(Spanned<u8>, bool),
-    Struct { value: Spanned<u8> },
-    Map(Spanned<BTreeMap<String, Spanned<u8>>>),
+    Newtype(#[serde(borrow)] Spanned<'a, Newtype<'a>>),
+    Tuple(#[serde(borrow)] Spanned<'a, u8>, bool),
+    Struct {
+        #[serde(borrow)]
+        value: Spanned<'a, u8>,
+    },
+    Map(#[serde(borrow)] Spanned<'a, BTreeMap<String, Spanned<'a, u8>>>),
 }
 
 #[test]
 fn enum_tags_are_consumed_once_through_transparent_wrappers() {
     for source in ["Unit", "!Unit", "{Unit: null}"] {
-        let value: Spanned<Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_str(source).unwrap();
         assert_eq!(*value, Kind::Unit);
         assert_eq!(value.span.slice(source), Some(source));
     }
 
     for source in ["!Newtype 42", "{Newtype: 42}"] {
-        let value: Spanned<Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_str(source).unwrap();
         let Kind::Newtype(payload) = value.value else {
             panic!("expected a newtype variant");
         };
@@ -164,7 +174,7 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
         "!Struct {value: 42}",
         "!Map {value: 42}",
     ] {
-        let value: Spanned<Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_str(source).unwrap();
         let number = match value.value {
             Kind::Tuple(number, false) | Kind::Struct { value: number } => number,
             Kind::Map(mut values) => values.remove("value").unwrap(),
@@ -176,7 +186,7 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
     }
 
     let source = "[&value !Newtype 42, *value]";
-    let values: Vec<Spanned<Kind>> = from_str(source).unwrap();
+    let values: Vec<Spanned<'_, Kind>> = from_str(source).unwrap();
     assert_eq!(values[1].span.slice(source), Some("*value"));
     let Kind::Newtype(payload) = &values[1].value else {
         panic!("expected a newtype variant");
@@ -187,6 +197,7 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
         Spanned {
             value: 42,
             span: values[1].span,
+            comments: Vec::new(),
         }
     );
 }
@@ -195,7 +206,7 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
 fn document_offsets_and_encoded_sources_use_the_core_span_convention() {
     let source = "---\nfirst\n...\n---\n'é🌍'\n";
     let stream = astral_yaml::parse(source).unwrap();
-    let value: Spanned<&str> = from_document(&stream, 1).unwrap();
+    let value: Spanned<'_, &str> = from_document(&stream, 1).unwrap();
     assert_eq!(*value, "é🌍");
     assert_eq!(value.span.start(), source.find('\'').unwrap());
     assert_eq!(value.span.slice(source), Some("'é🌍'"));
@@ -206,7 +217,7 @@ fn document_offsets_and_encoded_sources_use_the_core_span_convention() {
         .collect();
     let source = Source::from_bytes(&bytes).unwrap();
     let stream = source.parse().unwrap();
-    let values: BTreeMap<String, Spanned<&str>> = from_stream(&stream).unwrap();
+    let values: BTreeMap<String, Spanned<'_, &str>> = from_stream(&stream).unwrap();
     let span = values["name"].span;
     assert_eq!(span.slice(source.text()), Some("'é🌍'"));
     let original = source.original_span(span).unwrap();
@@ -217,7 +228,7 @@ fn document_offsets_and_encoded_sources_use_the_core_span_convention() {
 #[test]
 fn serialization_emits_only_the_value() {
     let source = "{name: 'é🌍', counts: [1, 2], enabled: true}";
-    let config: Spanned<Config<'_>> = from_str(source).unwrap();
+    let config: Spanned<'_, Config<'_>> = from_str(source).unwrap();
     assert_eq!(
         to_string(&config).unwrap(),
         to_string(&config.value).unwrap()
@@ -233,19 +244,23 @@ fn serialization_emits_only_the_value() {
 #[test]
 fn wrapping_preserves_validation_and_located_errors() {
     #[derive(Debug, Deserialize)]
-    struct Recursive(#[allow(dead_code)] Spanned<Box<Recursive>>);
+    struct Recursive<'a>(
+        #[allow(dead_code)]
+        #[serde(borrow)]
+        Spanned<'a, Box<Recursive<'a>>>,
+    );
 
     for source in ["256", "!!bool yes", "[]"] {
         let plain = from_str::<u8>(source).unwrap_err();
-        let wrapped = from_str::<Spanned<u8>>(source).unwrap_err();
+        let wrapped = from_str::<Spanned<'_, u8>>(source).unwrap_err();
         assert_eq!(plain, wrapped);
     }
 
-    let error = from_str::<BTreeMap<String, Spanned<u8>>>("count: 256").unwrap_err();
+    let error = from_str::<BTreeMap<String, Spanned<'_, u8>>>("count: 256").unwrap_err();
     assert_eq!(error.span.unwrap().slice("count: 256"), Some("256"));
 
     for source in ["{a: 1, a: 2}", "&a [*a]", "!!str []"] {
-        let error = from_str::<Spanned<de::IgnoredAny>>(source).unwrap_err();
+        let error = from_str::<Spanned<'_, de::IgnoredAny>>(source).unwrap_err();
         assert!(error.span.unwrap().slice(source).is_some());
     }
 
@@ -264,8 +279,12 @@ fn buffered_serde_values_require_wrapping_outside_the_buffer() {
 
     #[derive(Debug, Deserialize)]
     #[serde(untagged)]
-    enum Buffered {
-        Number(#[allow(dead_code)] Spanned<u8>),
+    enum Buffered<'a> {
+        Number(
+            #[allow(dead_code)]
+            #[serde(borrow)]
+            Spanned<'a, u8>,
+        ),
     }
 
     #[derive(Debug, Deserialize)]
@@ -274,17 +293,17 @@ fn buffered_serde_values_require_wrapping_outside_the_buffer() {
         fields: BTreeMap<String, T>,
     }
 
-    let value: Spanned<Untagged> = from_str("42").unwrap();
+    let value: Spanned<'_, Untagged> = from_str("42").unwrap();
     assert_eq!(*value, Untagged::Number(42));
     assert_eq!(value.span, Span::new(0, 2).unwrap());
 
     assert!(from_str::<Buffered>("42").is_err());
 
     let source = "{count: 42}";
-    let flattened: Spanned<Flattened<u8>> = from_str(source).unwrap();
+    let flattened: Spanned<'_, Flattened<u8>> = from_str(source).unwrap();
     assert_eq!(flattened.fields["count"], 42);
     assert_eq!(flattened.span.slice(source), Some(source));
-    assert!(from_str::<Flattened<Spanned<u8>>>(source).is_err());
+    assert!(from_str::<Flattened<Spanned<'_, u8>>>(source).is_err());
 
     let error = Spanned::<u8>::deserialize(de::value::U8Deserializer::<de::value::Error>::new(42))
         .unwrap_err();
@@ -293,14 +312,14 @@ fn buffered_serde_values_require_wrapping_outside_the_buffer() {
             .to_string()
             .contains("source-spanned value from astral-yaml-serde")
     );
-    assert!(from_str::<Spanned<u8>>("{start: 0, end: 1, value: 42}").is_err());
+    assert!(from_str::<Spanned<'_, u8>>("{start: 0, end: 1, value: 42}").is_err());
 }
 
 #[test]
 fn ignored_tagged_payloads_preserve_alias_spans() {
     #[derive(Debug, Deserialize)]
-    enum Ignored {
-        Value(Spanned<de::IgnoredAny>),
+    enum Ignored<'a> {
+        Value(#[serde(borrow)] Spanned<'a, de::IgnoredAny>),
     }
 
     let source = "[&a !Value 42, *a]";
@@ -312,6 +331,28 @@ fn ignored_tagged_payloads_preserve_alias_spans() {
 mod protocol {
     use serde::de::{self, Deserialize, SeqAccess, Visitor};
     use std::fmt;
+
+    enum Field {
+        Number,
+        Comments,
+    }
+
+    impl<'de> de::DeserializeSeed<'de> for Field {
+        type Value = usize;
+
+        fn deserialize<D: de::Deserializer<'de>>(
+            self,
+            deserializer: D,
+        ) -> Result<Self::Value, D::Error> {
+            match self {
+                Self::Number => usize::deserialize(deserializer),
+                Self::Comments => {
+                    de::IgnoredAny::deserialize(deserializer)?;
+                    Ok(0)
+                }
+            }
+        }
+    }
 
     #[derive(Debug)]
     struct SpanProtocol;
@@ -335,17 +376,19 @@ mod protocol {
                 }
 
                 fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                    assert_eq!(seq.size_hint(), Some(4));
+                    let start: usize = seq.next_element_seed(Field::Number)?.unwrap();
                     assert_eq!(seq.size_hint(), Some(3));
-                    let start: usize = seq.next_element()?.unwrap();
+                    let end: usize = seq.next_element_seed(Field::Number)?.unwrap();
                     assert_eq!(seq.size_hint(), Some(2));
-                    let end: usize = seq.next_element()?.unwrap();
-                    assert_eq!(seq.size_hint(), Some(1));
 
                     if end - start > 1 {
-                        let _: usize = seq.next_element()?.unwrap();
+                        let _: usize = seq.next_element_seed(Field::Number)?.unwrap();
+                        assert_eq!(seq.size_hint(), Some(1));
+                        let _ = seq.next_element_seed(Field::Comments)?.unwrap();
                         assert_eq!(seq.size_hint(), Some(0));
-                        assert!(seq.next_element::<usize>()?.is_none());
-                        assert!(seq.next_element::<usize>()?.is_none());
+                        assert!(seq.next_element_seed(Field::Number)?.is_none());
+                        assert!(seq.next_element_seed(Field::Number)?.is_none());
                     }
 
                     Ok(SpanProtocol)
@@ -358,7 +401,7 @@ mod protocol {
 
     #[test]
     fn spanned_visitors_must_consume_the_value() {
-        astral_yaml_serde::from_str::<SpanProtocol>("42").unwrap();
+        astral_yaml_serde::from_str::<SpanProtocol>("42 # comment").unwrap();
 
         let error = astral_yaml_serde::from_str::<SpanProtocol>("1").unwrap_err();
         assert_eq!(error.message, "spanned value was not fully consumed");
@@ -375,26 +418,94 @@ mod protocol {
         assert!(error.message.contains("a spanned value"));
     }
 
+    #[derive(Debug)]
+    enum Wire {
+        Number(u64),
+        Text(&'static str),
+        Owned(String),
+        Sequence(Vec<Self>),
+    }
+
+    impl de::IntoDeserializer<'_, de::value::Error> for Wire {
+        type Deserializer = Self;
+
+        fn into_deserializer(self) -> Self {
+            self
+        }
+    }
+
+    impl<'de> de::Deserializer<'de> for Wire {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+            match self {
+                Self::Number(value) => visitor.visit_u64(value),
+                Self::Text(value) => visitor.visit_borrowed_str(value),
+                Self::Owned(value) => visitor.visit_string(value),
+                Self::Sequence(values) => {
+                    visitor.visit_seq(de::value::SeqDeserializer::new(values.into_iter()))
+                }
+            }
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct enum identifier ignored_any
+        }
+    }
+
     #[test]
     fn span_envelopes_require_ordered_offsets_and_exactly_one_value() {
+        use Wire::{Number as N, Sequence as S, Text};
         use astral_yaml_serde::Spanned;
-        use serde::de::value::SeqDeserializer;
 
         for (values, expected) in [
             (vec![], "invalid length 0"),
-            (vec![0], "invalid length 1"),
-            (vec![0, 1], "invalid length 2"),
-            (vec![0, 1, 42, 99], "invalid length 4"),
-            (vec![2, 1, 42], "span starts after its end"),
+            (vec![N(0)], "invalid length 1"),
+            (vec![N(0), N(1)], "invalid length 2"),
+            (vec![N(0), N(1), N(42)], "invalid length 3"),
+            (
+                vec![N(0), N(1), N(42), S(vec![]), N(99)],
+                "invalid length 5",
+            ),
+            (vec![N(2), N(1), N(42)], "span starts after its end"),
         ] {
-            let envelope = SeqDeserializer::<_, de::value::Error>::new(values.into_iter());
-            let error = Spanned::<usize>::deserialize(envelope).unwrap_err();
+            let error = Spanned::<usize>::deserialize(S(values)).unwrap_err();
             assert!(error.to_string().contains(expected), "{error}");
         }
 
-        let envelope = SeqDeserializer::<_, de::value::Error>::new(vec![0, 2, 42].into_iter());
-        let value = Spanned::<usize>::deserialize(envelope).unwrap();
-        assert_eq!(value.value, 42);
-        assert_eq!(value.span, astral_yaml::Span::new(0, 2).unwrap());
+        for placement in 0..4 {
+            let envelope = S(vec![
+                N(0),
+                N(2),
+                N(42),
+                S(vec![S(vec![N(3), N(8), Text("note"), N(placement)])]),
+            ]);
+            let value = Spanned::<usize>::deserialize(envelope).unwrap();
+            assert_eq!(value.value, 42);
+            assert_eq!(value.span, astral_yaml::Span::new(0, 2).unwrap());
+            assert_eq!(value.comments[0].comment.text, "note");
+        }
+
+        for (record, expected) in [
+            (
+                vec![N(8), N(3), Text("note"), N(0)],
+                "comment span starts after its end",
+            ),
+            (
+                vec![N(3), N(8), Text("note"), N(4)],
+                "invalid comment placement",
+            ),
+            (
+                vec![N(3), N(8), Wire::Owned("note".into()), N(0)],
+                "borrowed string",
+            ),
+        ] {
+            let error =
+                Spanned::<usize>::deserialize(S(vec![N(0), N(2), N(42), S(vec![S(record)])]))
+                    .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
     }
 }

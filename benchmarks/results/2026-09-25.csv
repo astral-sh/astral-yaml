@@ -2,3 +2,6 @@ run,fixture,bytes,astral_us,yaml_serde_us,speedup
 spanned,uv-ci,11602,66.80,147.09,2.20
 spanned,kubernetes-guestbook,3366,28.71,59.22,2.06
 spanned,openapi-petstore,5479,35.85,75.11,2.09
+comments,uv-ci,11602,68.28,148.51,2.17
+comments,kubernetes-guestbook,3366,29.23,59.77,2.04
+comments,openapi-petstore,5479,36.78,75.93,2.06

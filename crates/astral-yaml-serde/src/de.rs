@@ -1,4 +1,4 @@
-use crate::{Error, spanned};
+use crate::{AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned};
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
     schema::{ScalarType, classify},
@@ -47,6 +47,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
 
     let budget = Cell::new(1_000_000usize);
     let scalar_budget = Cell::new(64 * 1024 * 1024usize);
+    let comments = CommentCache::new(index);
 
     T::deserialize(Deserializer {
         stream,
@@ -54,6 +55,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         depth: 0,
         budget: &budget,
         scalar_budget: &scalar_budget,
+        comments: &comments,
         ignore_tag: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
@@ -66,6 +68,7 @@ struct Deserializer<'s, 'de> {
     depth: usize,
     budget: &'s Cell<usize>,
     scalar_budget: &'s Cell<usize>,
+    comments: &'s CommentCache<'de>,
     ignore_tag: bool,
 }
 
@@ -132,11 +135,34 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         let value = visitor
             .visit_seq(&mut access)
             .map_err(|error| error.located(span))?;
-        if access.index != 3 {
+        if access.index != 4 {
             return Err(Error::at("spanned value was not fully consumed", span));
         }
 
         Ok(value)
+    }
+
+    fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
+        let comments = self.comments.get(self.stream, self.id, self.budget)?;
+        let remaining = self
+            .budget
+            .get()
+            .checked_sub(comments.len())
+            .ok_or_else(|| {
+                Error::at(
+                    "deserialization resource limit exceeded",
+                    self.stream.node(self.id).unwrap().span,
+                )
+            })?;
+        self.budget.set(remaining);
+
+        let mut ordered: Vec<_> = comments.iter().collect();
+        ordered.sort_unstable_by_key(|comment| comment.comment.span.start());
+        let records = ordered.into_iter().map(|comment| {
+            de::value::SeqAccessDeserializer::new(CommentAccess { comment, index: 0 })
+        });
+
+        seed.deserialize(de::value::SeqDeserializer::new(records))
     }
 
     fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
@@ -669,6 +695,7 @@ impl<'de> SeqAccess<'de> for &mut SpannedAccess<'_, 'de> {
             0 => seed.deserialize(self.span.start().into_deserializer()),
             1 => seed.deserialize(self.span.end().into_deserializer()),
             2 => seed.deserialize(self.de),
+            3 => self.de.comments(seed),
             _ => return Ok(None),
         }?;
 
@@ -677,7 +704,44 @@ impl<'de> SeqAccess<'de> for &mut SpannedAccess<'_, 'de> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(3 - self.index)
+        Some(4 - self.index)
+    }
+}
+
+struct CommentAccess<'s, 'de> {
+    comment: &'s AttachedComment<'de>,
+    index: usize,
+}
+
+impl<'de> SeqAccess<'de> for CommentAccess<'_, 'de> {
+    type Error = Error;
+
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
+        let value = match self.index {
+            0 => seed.deserialize(self.comment.comment.span.start().into_deserializer()),
+            1 => seed.deserialize(self.comment.comment.span.end().into_deserializer()),
+            2 => seed.deserialize(de::value::BorrowedStrDeserializer::<Error>::new(
+                self.comment.comment.text,
+            )),
+            3 => {
+                let placement = match self.comment.placement {
+                    CommentPlacement::Leading => 0u8,
+                    CommentPlacement::Inline => 1,
+                    CommentPlacement::Trailing => 2,
+                    CommentPlacement::Detached => 3,
+                };
+
+                seed.deserialize(placement.into_deserializer())
+            }
+            _ => return Ok(None),
+        }?;
+
+        self.index += 1;
+        Ok(Some(value))
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(4 - self.index)
     }
 }
 
@@ -816,6 +880,109 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
 #[cfg(test)]
 mod tests {
     use super::{Cell, Deserializer};
+    use serde::{Deserialize, de::SeqAccess};
+
+    #[test]
+    fn nested_comment_lists_charge_each_emitted_record() {
+        let stream = astral_yaml::parse("# leading\n42 # inline").unwrap();
+
+        for budget in [2, 11, 12] {
+            let visits = Cell::new(budget);
+            let bytes = Cell::new(100);
+            let de = Deserializer {
+                stream: &stream,
+                id: stream.documents()[0].root,
+                depth: 0,
+                budget: &visits,
+                scalar_budget: &bytes,
+                comments: &crate::comments::CommentCache::new(0),
+                ignore_tag: false,
+            };
+
+            let result = crate::Spanned::<crate::Spanned<'_, u8>>::deserialize(de);
+            if budget == 12 {
+                let value = result.unwrap();
+                assert_eq!(value.comments.len(), 2);
+                assert_eq!(value.comments, value.value.comments);
+                assert_eq!(visits.get(), 0);
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.message, "deserialization resource limit exceeded");
+                assert!(error.span.unwrap().slice(stream.source()).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn comment_access_checks_types_and_reports_remaining_elements() {
+        struct Seed(bool);
+
+        impl<'de> serde::de::DeserializeSeed<'de> for Seed {
+            type Value = serde::de::IgnoredAny;
+
+            fn deserialize<D: serde::Deserializer<'de>>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error> {
+                if self.0 {
+                    return Err(serde::de::Error::custom("seed failure"));
+                }
+
+                Deserialize::deserialize(deserializer)
+            }
+        }
+
+        let comment = crate::AttachedComment {
+            comment: astral_yaml::Comment {
+                span: astral_yaml::Span::new(0, 6).unwrap(),
+                text: " text",
+            },
+            placement: crate::CommentPlacement::Inline,
+        };
+        let mut access = super::CommentAccess {
+            comment: &comment,
+            index: 0,
+        };
+        assert_eq!(access.size_hint(), Some(4));
+        assert_eq!(access.next_element::<usize>().unwrap(), Some(0));
+        assert_eq!(access.size_hint(), Some(3));
+        assert_eq!(access.next_element::<usize>().unwrap(), Some(6));
+        assert_eq!(access.size_hint(), Some(2));
+        assert!(access.next_element::<usize>().is_err());
+        assert_eq!(access.next_element::<&str>().unwrap(), Some(" text"));
+        assert_eq!(access.size_hint(), Some(1));
+        assert_eq!(access.next_element::<u8>().unwrap(), Some(1));
+        assert_eq!(access.size_hint(), Some(0));
+        assert!(access.next_element::<usize>().unwrap().is_none());
+        assert!(access.next_element::<usize>().unwrap().is_none());
+
+        for placement in [
+            crate::CommentPlacement::Leading,
+            crate::CommentPlacement::Inline,
+            crate::CommentPlacement::Trailing,
+            crate::CommentPlacement::Detached,
+        ] {
+            let comment = crate::AttachedComment {
+                placement,
+                ..comment.clone()
+            };
+            let mut access = super::CommentAccess {
+                comment: &comment,
+                index: 0,
+            };
+            assert_eq!(
+                access.next_element_seed(Seed(true)).unwrap_err().message,
+                "seed failure"
+            );
+            let mut count = 0;
+
+            while access.next_element_seed(Seed(false)).unwrap().is_some() {
+                count += 1;
+            }
+
+            assert_eq!(count, 4);
+        }
+    }
 
     #[test]
     fn scalar_and_visit_budgets_stop_at_the_boundary() {
@@ -828,6 +995,7 @@ mod tests {
             depth: 0,
             budget: &visits,
             scalar_budget: &bytes,
+            comments: &crate::comments::CommentCache::new(0),
             ignore_tag: false,
         };
 
@@ -862,6 +1030,7 @@ mod tests {
             depth: 0,
             budget: &visits,
             scalar_budget: &bytes,
+            comments: &crate::comments::CommentCache::new(0),
             ignore_tag: true,
         };
 
