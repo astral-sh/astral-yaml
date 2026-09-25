@@ -2,11 +2,9 @@ use std::{
     hint::black_box,
     time::{Duration, Instant},
 };
-use yaml_serde::Value;
 
-#[path = "../tests/support/mod.rs"]
-mod support;
-use support::{FIXTURES, astral, reference};
+use astral_yaml_dev::benchmarks::{FIXTURES, astral, reference};
+use yaml_serde::Value;
 
 fn sample(source: &str, parse: fn(&str) -> Vec<Value>) -> f64 {
     let start = Instant::now();

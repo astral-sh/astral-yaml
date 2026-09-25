@@ -1,12 +1,9 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-#[path = "../../crates/astral-yaml/tests/support/spans.rs"]
-mod spans;
-
 use astral_yaml::Source;
+use astral_yaml_dev::validate_spans;
 use libfuzzer_sys::fuzz_target;
-use spans::validate_spans;
 
 fuzz_target!(|data: &[u8]| {
     match Source::with_limit(data, 65_536) {

@@ -1,4 +1,4 @@
-use crate::checks::{event_tag, events, spans::validate_parts, validate_spans};
+use crate::{events, events::event_tag, spans::validate_parts, validate_spans};
 use astral_yaml::{Span, parse};
 
 #[test]

@@ -5,6 +5,7 @@ serde support lives in a separate crate. Workspace code forbids unsafe Rust.
 
 - `astral-yaml`: syntax, source spans, comments, and parsing.
 - `astral-yaml-serde`: serialization and deserialization.
+- `astral-yaml-dev`: shared test, fuzz, and benchmark helpers (not published).
 - `xtask/`: development commands and benchmarks (not published).
 
 The implementation targets the [YAML 1.2.2 specification](https://yaml.org/spec/1.2.2/)
@@ -22,6 +23,8 @@ cargo test --workspace
 
 Conformance tests live in the parser crate and run directly against its API:
 `cargo test -p astral-yaml --test conformance`.
+Tests and benchmarks share helpers through the `astral-yaml-dev` development
+dependency. The separate fuzz workspace also depends on this unpublished crate.
 
 The workspace uses the [xtask pattern](https://github.com/matklad/cargo-xtask) for
 development commands:

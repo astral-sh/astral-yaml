@@ -6,7 +6,6 @@ use std::{
 };
 
 #[cfg(unix)]
-#[path = "cli/fuzz.rs"]
 mod fuzz;
 
 struct Directory(PathBuf);

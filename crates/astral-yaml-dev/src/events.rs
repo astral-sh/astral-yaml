@@ -1,19 +1,15 @@
-//! Shared development checks and YAML Test Suite event formatting.
-
-pub(crate) mod spans;
+//! YAML Test Suite event formatting.
 
 use std::fmt::Write;
 
 use astral_yaml::{CollectionStyle, NodeId, NodeKind, ScalarStyle, Stream};
-
-pub(crate) use spans::validate_spans;
 
 /// Formats semantic events using the YAML Test Suite notation.
 ///
 /// # Panics
 /// Panics if passed an internally inconsistent stream.
 #[must_use]
-pub(crate) fn events(stream: &Stream<'_>) -> String {
+pub fn events(stream: &Stream<'_>) -> String {
     enum Event {
         Node(NodeId),
         End(&'static str),

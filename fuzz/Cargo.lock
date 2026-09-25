@@ -13,10 +13,21 @@ name = "astral-yaml"
 version = "0.1.0"
 
 [[package]]
+name = "astral-yaml-dev"
+version = "0.1.0"
+dependencies = [
+ "astral-yaml",
+ "astral-yaml-serde",
+ "serde",
+ "yaml_serde",
+]
+
+[[package]]
 name = "astral-yaml-fuzz"
 version = "0.0.0"
 dependencies = [
  "astral-yaml",
+ "astral-yaml-dev",
  "astral-yaml-serde",
  "libfuzzer-sys",
  "serde",

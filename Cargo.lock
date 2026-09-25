@@ -6,9 +6,20 @@ version = 4
 name = "astral-yaml"
 version = "0.1.0"
 dependencies = [
+ "astral-yaml-dev",
  "insta",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "astral-yaml-dev"
+version = "0.1.0"
+dependencies = [
+ "astral-yaml",
+ "astral-yaml-serde",
+ "serde",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -289,6 +300,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "astral-yaml",
+ "astral-yaml-dev",
  "astral-yaml-serde",
  "serde",
  "yaml_serde",

@@ -1,3 +1,4 @@
+use astral_yaml_dev::benchmarks;
 use astral_yaml_serde::{Spanned, from_document, from_str, to_string};
 use serde::Deserialize;
 use std::{
@@ -7,9 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 use yaml_serde::Value;
-
-#[path = "../tests/support/mod.rs"]
-mod support;
 
 type Fields<'a> = Spanned<'a, BTreeMap<String, Spanned<'a, Value>>>;
 
@@ -59,13 +57,13 @@ fn measure(fixture: &str, mode: &str, mut operation: impl FnMut()) {
 fn main() {
     println!("fixture,mode,median_us");
 
-    for &(name, source) in support::FIXTURES {
+    for &(name, source) in benchmarks::FIXTURES {
         if env::var("ASTRAL_BENCH_FIXTURE").is_ok_and(|filter| filter != name) {
             continue;
         }
 
-        let values = support::astral(source);
-        assert_eq!(values, support::reference(source));
+        let values = benchmarks::astral(source);
+        assert_eq!(values, benchmarks::reference(source));
         let spanned = documents::<Spanned<'_, Value>>(source);
         let fields = documents::<Fields<'_>>(source);
         assert_eq!(spanned.len(), values.len());

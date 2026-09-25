@@ -6,7 +6,7 @@ use astral_yaml::{Comment, Document, Node, NodeId, NodeKind, Span, Stream};
 ///
 /// # Errors
 /// Returns a description of the first broken invariant.
-pub(crate) fn validate_spans(stream: &Stream<'_>) -> Result<(), String> {
+pub fn validate_spans(stream: &Stream<'_>) -> Result<(), String> {
     validate_parts(
         stream.source(),
         stream.nodes(),

@@ -1,12 +1,9 @@
-#[path = "support/checks.rs"]
-mod checks;
-#[path = "real_world/display.rs"]
 mod display;
-#[path = "real_world/fixtures/mod.rs"]
 mod fixtures;
 
 use std::{fs, path::PathBuf, process::Command};
 
+use astral_yaml_dev::{events, validate_spans};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -20,7 +17,10 @@ fn root() -> PathBuf {
 }
 
 fn manifest() -> Vec<Fixture> {
-    serde_json::from_str(include_str!("../../../fixtures/real-world/manifest.json")).unwrap()
+    serde_json::from_str(include_str!(
+        "../../../../fixtures/real-world/manifest.json"
+    ))
+    .unwrap()
 }
 
 fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
@@ -102,7 +102,7 @@ fn every_fixture_has_an_inline_snapshot() {
 fn workflow_scalars_retain_shell_syntax_and_yaml_styles() {
     use astral_yaml::{NodeKind, ScalarStyle};
 
-    let source = include_str!("../../../fixtures/real-world/black-diff-shades.yaml");
+    let source = include_str!("../../../../fixtures/real-world/black-diff-shades.yaml");
     let stream = astral_yaml::parse(source).unwrap();
     let scalars: Vec<_> = stream
         .nodes()
@@ -137,7 +137,7 @@ fn workflow_scalars_retain_shell_syntax_and_yaml_styles() {
         );
     }
 
-    let source = include_str!("../../../fixtures/real-world/compose-ci.yaml");
+    let source = include_str!("../../../../fixtures/real-world/compose-ci.yaml");
     let stream = astral_yaml::parse(source).unwrap();
     let shell_hash = source.find("s# ").unwrap() + 1;
     assert!(
@@ -207,19 +207,14 @@ fn syntax_and_scalar_spans_match_pyyaml() {
         }
 
         let stream = astral_yaml::parse(&source).unwrap();
-        checks::validate_spans(&stream).unwrap();
-        assert_eq!(checks::events(&stream), oracle.events, "{}", fixture.file);
+        validate_spans(&stream).unwrap();
+        assert_eq!(events(&stream), oracle.events, "{}", fixture.file);
 
         for line_break in ["\r\n", "\r"] {
             let converted = source.replace('\n', line_break);
             let converted_stream = astral_yaml::parse(&converted).unwrap();
-            checks::validate_spans(&converted_stream).unwrap();
-            assert_eq!(
-                checks::events(&converted_stream),
-                oracle.events,
-                "{}",
-                fixture.file
-            );
+            validate_spans(&converted_stream).unwrap();
+            assert_eq!(events(&converted_stream), oracle.events, "{}", fixture.file);
         }
 
         assert_eq!(scalar_spans(&stream), oracle.scalars, "{}", fixture.file);

@@ -10,6 +10,7 @@ license.workspace = true
 workspace = true
 
 [dev-dependencies]
+astral-yaml-dev.workspace = true
 insta = "1.48.0"
 serde.workspace = true
 serde_json = "1.0"

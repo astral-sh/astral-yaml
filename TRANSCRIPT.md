@@ -3,7 +3,8 @@
 ## Implementation
 
 The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
-(serialization/deserialization), and `xtask` (fuzzing and benchmarks).
+(serialization/deserialization), `astral-yaml-dev` (shared development helpers),
+and `xtask` (fuzzing and benchmarks).
 The core has no runtime dependencies. The adapter adds only serde and its proc-macro
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
@@ -12,8 +13,10 @@ member, which contains the fuzz command, its tests, and benchmarks.
 Parser conformance and fixture tests live under
 `crates/astral-yaml/tests`; serde comparisons live under `crates/astral-yaml-serde/tests`.
 `cargo test -p astral-yaml --test conformance` runs the bundled suite directly
-against the parser API. Shared validation helpers live in the parser's test
-support and are imported directly by the fuzz targets.
+against the parser API. The unpublished `astral-yaml-dev` crate owns event
+formatting, span validation, and benchmark helpers. Parser tests and xtask
+benchmarks use it as a development dependency; the separate fuzz workspace
+depends on it directly. Modules use standard Rust directory layouts.
 
 `cargo xtask fuzz` prepares the locked uv development environment, seeds the
 corpora, installs nightly if missing, and ensures its Rust source and LLVM tools
@@ -68,8 +71,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
-  The report covers 3,196 lines and 345 functions, excluding integration-test
-  support. LLVM region coverage is **97.79%**;
+  The report covers 3,380 lines and 362 functions, including the shared development
+  helpers and excluding integration-test support. LLVM region coverage is **97.71%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit

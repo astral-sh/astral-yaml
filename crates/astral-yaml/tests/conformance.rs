@@ -1,12 +1,9 @@
-#[path = "support/checks.rs"]
-mod checks;
-#[path = "support/checks_tests.rs"]
-mod checks_tests;
-
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+use astral_yaml_dev::{events, validate_spans};
 
 fn corpus_paths() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yaml-test-suite");
@@ -50,10 +47,9 @@ fn official_yaml_test_suite() {
 
         let stream = astral_yaml::parse(&source)
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        checks::validate_spans(&stream)
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        validate_spans(&stream).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         let expected = fs::read_to_string(directory.join("test.event")).unwrap();
-        assert_eq!(checks::events(&stream), expected, "{}", path.display());
+        assert_eq!(events(&stream), expected, "{}", path.display());
         valid += 1;
     }
 
@@ -89,7 +85,7 @@ fn every_corpus_prefix_has_valid_spans() {
 
             match astral_yaml::parse(prefix) {
                 Ok(stream) => {
-                    checks::validate_spans(&stream).unwrap_or_else(|error| {
+                    validate_spans(&stream).unwrap_or_else(|error| {
                         panic!("{} truncated at {end}: {error}", path.display())
                     });
                 }
@@ -106,5 +102,5 @@ fn every_corpus_prefix_has_valid_spans() {
 #[test]
 fn events_preserve_escaped_controls_and_opaque_tag_bytes() {
     let stream = astral_yaml::parse("!<tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\"").unwrap();
-    assert!(checks::events(&stream).contains("=VAL <tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\n"));
+    assert!(events(&stream).contains("=VAL <tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\n"));
 }
