@@ -1,13 +1,15 @@
 # Conformance and limits
 
 The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). The pinned YAML Test
-Suite contains 402 cases: 308 valid inputs and 94 malformed inputs. Tests compare
+Suite contains 402 cases: 308 valid inputs and 94 malformed inputs. The parser's
+`conformance` integration target runs them directly against the library API;
+use `cargo test -p astral-yaml --test conformance`. Tests compare
 all semantic events for valid cases, require rejection of invalid cases, and
 validate spans for every accepted UTF-8 prefix of every corpus input. No cases
 are excluded. The [real-world corpus](../fixtures/real-world/README.md) contains
 twelve pinned files, including eight GitHub Actions workflows. Eleven valid files
 have readable tree and scalar-range snapshots stored inline in `astral-yaml`'s
-integration tests with Insta. A separate oracle test in `xtask` compares complete
+integration tests with Insta. A separate parser integration test compares complete
 syntax events and UTF-8 scalar ranges with both PyYAML's Python parser and LibYAML,
 without stored expectations.
 Tests also check all three YAML line endings and compare constructed values and

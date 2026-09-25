@@ -9,8 +9,11 @@ stack. All workspace crates forbid unsafe Rust. Work is committed in incremental
 
 Development commands use the Cargo alias in `.cargo/config.toml`:
 `cargo xtask conformance` runs the bundled suite, and `cargo xtask events file`
-prints a parsed event stream. The unpublished `xtask/` workspace member also
-contains shared fuzz checks, integration tests, and the real-world benchmark.
+prints a parsed event stream. The unpublished `xtask/` workspace member contains
+command tests and benchmarks. Parser conformance and fixture tests live under
+`crates/astral-yaml/tests`; serde comparisons live under `crates/astral-yaml-serde/tests`.
+The conformance target runs directly against the parser API. Shared validation
+helpers live in the parser's test support and are reused by the CLI and fuzz targets.
 The bundled suite resolves from the repository regardless of the current directory;
 explicit paths remain relative to the caller.
 
@@ -56,7 +59,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
-  The report covers 3,426 lines and 364 functions. LLVM region coverage is **97.68%**;
+  The report covers 3,171 lines and 346 functions, excluding integration-test
+  support. LLVM region coverage is **97.70%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit
@@ -89,7 +93,7 @@ Both the astral and reference readers consume our serializer's output.
 
 Each fixture now has an inline `insta` snapshot in a parser integration test under
 `crates/astral-yaml/tests`. Serde value, comment, and serialization checks live in
-`crates/astral-yaml-serde/tests`; the optional Python oracle remains in `xtask`.
+`crates/astral-yaml-serde/tests`; the optional Python oracle is a parser integration test.
 Indented trees replace the detached event and scalar-range files, with styles and Unicode
 line/column ranges beside values. Multiline values render one decoded line at a
 time. The rejection snapshot includes a source excerpt, caret, and byte range.

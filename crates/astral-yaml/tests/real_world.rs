@@ -1,9 +1,11 @@
+#[path = "support/checks.rs"]
+mod checks;
 #[path = "real_world/display.rs"]
 mod display;
 #[path = "real_world/fixtures/mod.rs"]
 mod fixtures;
 
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 use serde::Deserialize;
 
@@ -150,4 +152,76 @@ fn workflow_scalars_retain_shell_syntax_and_yaml_styles() {
             .iter()
             .any(|comment| comment.text == " to fetch code (actions/checkout)")
     );
+}
+
+fn scalar_spans(stream: &astral_yaml::Stream<'_>) -> Vec<(usize, usize)> {
+    let mut spans: Vec<_> = stream
+        .nodes()
+        .iter()
+        .filter_map(|node| {
+            if let astral_yaml::NodeKind::Scalar(scalar) = &node.kind {
+                (!scalar.span.is_empty()).then_some((scalar.span.start(), scalar.span.end()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    spans.sort_unstable();
+
+    spans
+}
+
+#[test]
+#[ignore = "requires uv and pinned PyYAML; run by scripts/check.sh"]
+fn syntax_and_scalar_spans_match_pyyaml() {
+    #[derive(Deserialize)]
+    struct Oracle {
+        file: String,
+        events: String,
+        scalars: Vec<(usize, usize)>,
+    }
+
+    let output = Command::new("uv")
+        .args(["run", "--script"])
+        .arg(root().join("../../scripts/real-world-oracle.py"))
+        .output()
+        .expect("run the independent oracle with uv");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let oracles: Vec<Oracle> = serde_json::from_slice(&output.stdout).unwrap();
+    let fixtures = manifest();
+    assert_eq!(oracles.len(), fixtures.len());
+
+    for (oracle, fixture) in oracles.iter().zip(fixtures) {
+        assert_eq!(oracle.file, fixture.file);
+        let source = fs::read_to_string(root().join(&fixture.file)).unwrap();
+
+        if !fixture.valid_yaml_1_2.unwrap_or(true) {
+            // PyYAML accepts this input; the inline diagnostic pins our rejection.
+            assert!(astral_yaml::parse(&source).is_err());
+            continue;
+        }
+
+        let stream = astral_yaml::parse(&source).unwrap();
+        checks::validate_spans(&stream).unwrap();
+        assert_eq!(checks::events(&stream), oracle.events, "{}", fixture.file);
+
+        for line_break in ["\r\n", "\r"] {
+            let converted = source.replace('\n', line_break);
+            let converted_stream = astral_yaml::parse(&converted).unwrap();
+            checks::validate_spans(&converted_stream).unwrap();
+            assert_eq!(
+                checks::events(&converted_stream),
+                oracle.events,
+                "{}",
+                fixture.file
+            );
+        }
+
+        assert_eq!(scalar_spans(&stream), oracle.scalars, "{}", fixture.file);
+    }
 }

@@ -32,14 +32,14 @@ runs PyYAML 6.0.3's Python and LibYAML-backed parsers; their complete syntax eve
 and UTF-8 scalar-token ranges must agree with each other and with our accepted
 ASTs. These results are exchanged in memory, not stored as snapshot files.
 Schema resolution is disabled, so YAML 1.1 spellings such as `on` remain scalar
-text. This optional external check lives in `xtask`; `scripts/check.sh` runs it
-as well as both crates' integration tests.
+text. This optional external check lives in the parser's integration tests;
+`scripts/check.sh` runs it as well as both crates' normal tests.
 
 ```sh
 python3 scripts/verify-fixtures.py
 cargo test -p astral-yaml --test real_world
 cargo test -p astral-yaml-serde --test real_world
-cargo test -p xtask --test real_world -- --ignored  # requires uv
+cargo test -p astral-yaml --test real_world -- --ignored  # requires uv
 
 # Review and update inline expectations after an intentional change:
 cargo install cargo-insta --locked
