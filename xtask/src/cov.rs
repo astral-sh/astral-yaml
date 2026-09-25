@@ -12,21 +12,18 @@ use serde::Deserialize;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const USAGE: &str = "usage: cargo xtask cov [--html]
-
-Run workspace unit and integration tests, then require 100% line and function coverage.
-With --html, also write target/coverage/html/index.html, including on coverage failure.";
+const PACKAGES: [&str; 2] = ["astral-yaml", "astral-yaml-serde"];
 
 #[derive(Deserialize)]
 struct Metadata {
     packages: Vec<Package>,
-    workspace_members: BTreeSet<String>,
     target_directory: PathBuf,
 }
 
 #[derive(Deserialize)]
 struct Package {
     id: String,
+    name: String,
     manifest_path: PathBuf,
 }
 
@@ -141,7 +138,6 @@ fn artifacts(messages: &str, members: &BTreeSet<String>) -> Result<BTreeSet<Path
             executable: Some(path),
         } = serde_json::from_str(line)?
         {
-            // Include ordinary binaries launched via CARGO_BIN_EXE as well as tests.
             if members.contains(&package_id) {
                 executables.insert(path);
             }
@@ -222,17 +218,7 @@ fn toolchain(root: &Path) -> Result<Toolchain> {
     })
 }
 
-pub(crate) fn run(args: &[OsString]) -> Result<()> {
-    let html = match args {
-        [] => false,
-        [arg] if arg == "--html" => true,
-        [arg] if arg == "--help" || arg == "-h" => {
-            println!("{USAGE}");
-            return Ok(());
-        }
-        _ => return Err(USAGE.into()),
-    };
-
+pub(crate) fn run(html: bool) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let metadata: Metadata =
@@ -248,17 +234,19 @@ pub(crate) fn run(args: &[OsString]) -> Result<()> {
     reset_directory(&profiles)?;
 
     let mut sources = Vec::new();
+    let mut members = BTreeSet::new();
 
     for package in &metadata.packages {
-        if metadata.workspace_members.contains(&package.id) {
+        if PACKAGES.contains(&package.name.as_str()) {
             collect_sources(&package.manifest_path.with_file_name("src"), &mut sources)?;
+            members.insert(package.id.clone());
         }
     }
 
     sources.sort();
 
     if sources.is_empty() {
-        return Err("no workspace sources found for coverage".into());
+        return Err("no YAML sources found for coverage".into());
     }
 
     // Build separately so test stdout cannot be mistaken for Cargo JSON messages.
@@ -267,7 +255,7 @@ pub(crate) fn run(args: &[OsString]) -> Result<()> {
         let mut tests = Command::new(&cargo);
         tests
             .current_dir(&root)
-            .args(["test", "--workspace", "--tests", "--locked", "--target"])
+            .args(["test", "--tests", "--locked", "--target"])
             .arg(&toolchain.host)
             .arg("--target-dir")
             .arg(directory.join("build"))
@@ -275,11 +263,15 @@ pub(crate) fn run(args: &[OsString]) -> Result<()> {
             .env("LLVM_PROFILE_FILE", profiles.join("%m-%p.profraw"))
             .env("CARGO_INCREMENTAL", "0");
 
+        for package in PACKAGES {
+            tests.args(["--package", package]);
+        }
+
         tests
     };
     let messages =
         output(test_command().args(["--no-run", "--message-format=json-render-diagnostics"]))?;
-    let executables = artifacts(&messages, &metadata.workspace_members)?;
+    let executables = artifacts(&messages, &members)?;
     execute(&mut test_command())?;
 
     let profile = directory.join("coverage.profdata");

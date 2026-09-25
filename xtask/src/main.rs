@@ -2,40 +2,49 @@
 mod cov;
 mod fuzz;
 
-use std::{env, process::ExitCode};
+use std::{ffi::OsString, process::ExitCode};
 
-const USAGE: &str = "usage: cargo xtask <command>
+use clap::{Parser, Subcommand};
 
-Commands:
-  cov [--html]                   Run coverage and enforce 100% lines and functions
-  fuzz [cargo-fuzz arguments...]  Run all four targets for 60 seconds each, or forward arguments";
+#[derive(Parser)]
+#[command(bin_name = "cargo xtask", about, version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
-    let mut args = env::args_os().skip(1);
-    let Some(command) = args.next() else {
-        println!("{USAGE}");
-        return Ok(ExitCode::SUCCESS);
-    };
+#[derive(Subcommand)]
+enum Command {
+    /// Require 100% line and function coverage for the YAML crates.
+    Cov {
+        /// Write an HTML report, including when coverage falls below the threshold.
+        #[arg(long)]
+        html: bool,
+    },
 
-    if command == "-h" || command == "--help" {
-        println!("{USAGE}");
-        return Ok(ExitCode::SUCCESS);
+    /// Run all four fuzz targets for 60 seconds each, or forward arguments to cargo-fuzz.
+    Fuzz {
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_name = "CARGO_FUZZ_ARGS"
+        )]
+        args: Vec<OsString>,
+    },
+}
+
+fn run(command: Command) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    match command {
+        Command::Cov { html } => {
+            cov::run(html)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Fuzz { args } => Ok(fuzz::run(args)?),
     }
-
-    if command == "cov" {
-        cov::run(&args.collect::<Vec<_>>())?;
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    if command == "fuzz" {
-        return Ok(fuzz::run(args.collect())?);
-    }
-
-    Err(USAGE.into())
 }
 
 fn main() -> ExitCode {
-    match run() {
+    match run(Cli::parse().command) {
         Ok(code) => code,
         Err(error) => {
             eprintln!("{error}");

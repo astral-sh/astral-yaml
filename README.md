@@ -52,11 +52,12 @@ syntax and spans with independent parsers, and enforces 100% line and function
 coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
 
-`cargo xtask cov` runs workspace unit and integration tests with Rust's coverage
-instrumentation and enforces 100% line and function coverage. It uses the active
-compiler's LLVM tools, installing `llvm-tools-preview` through rustup if needed.
-Builds and fresh profiles are kept under `target/coverage`; reports cover workspace
-source, including development helpers and xtask, and exclude separate test modules.
+`cargo xtask cov` runs the YAML crates' unit and integration tests with Rust's coverage
+instrumentation and enforces 100% line and function coverage for `astral-yaml` and
+`astral-yaml-serde`. It uses the active compiler's LLVM tools, installing
+`llvm-tools-preview` through rustup if needed.
+Builds and fresh profiles are kept under `target/coverage`. Development helpers,
+xtask, and separate test modules are excluded from the reports.
 Doctests run in the ordinary workspace test step.
 
 `cargo xtask cov --html` also writes `target/coverage/html/index.html` with annotated

@@ -9,7 +9,8 @@ The core has no runtime dependencies. The adapter adds only serde and its proc-m
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
 The Cargo alias in `.cargo/config.toml` runs the unpublished `xtask/` workspace
-member, which contains coverage and fuzz commands, their tests, and benchmarks.
+member, which contains coverage and fuzz commands and benchmarks. Its CLI uses
+clap derives; xtask has no test suite and is outside the coverage requirement.
 Parser conformance and fixture tests live under
 `crates/astral-yaml/tests`; serde comparisons live under `crates/astral-yaml-serde/tests`.
 `cargo test -p astral-yaml --test conformance` runs the bundled suite directly
@@ -24,8 +25,6 @@ uv development environment to run cargo-fuzz. It runs all four targets for 60
 seconds each with the documented timeout, input-size, and memory bounds. Explicit
 arguments pass through to cargo-fuzz after setup. Subprocesses run from the
 repository root; failures stop the sequence and propagate a failing exit code.
-CLI tests use stub executables
-to verify setup order, argument preservation, missing-tool errors, and failures.
 An end-to-end run of the default command completed 6,293,732 executions without
 findings: 2,336,872 parser, 504,187 serde, 2,104,724 decoder, and 1,347,949 typed
 serde executions. Each target stopped after 61 seconds with the 60-second limit.
@@ -36,12 +35,11 @@ entry points. The locked development environment supplies Ruff, ty, and PyYAML
 type stubs; `scripts/check.sh` checks formatting, annotations, imports, and types.
 
 `cargo xtask cov` builds instrumented tests in an isolated target directory and
-collects current workspace executables from Cargo's JSON output, including binaries
-launched by integration tests. It merges fresh profiles with the active compiler's
-LLVM tools and checks exact line and function counts against the 100% thresholds.
+collects current YAML test executables from Cargo's JSON output. It merges fresh
+profiles with the active compiler's LLVM tools and checks exact line and function
+counts against the 100% thresholds for `astral-yaml` and `astral-yaml-serde`.
 `--html` writes an annotated report before checking thresholds, so coverage failures
-still produce HTML. CLI tests cover setup, source and artifact selection, compiler
-flags, stale output, failing tools, malformed output, and incomplete coverage.
+still produce HTML. Development helpers and xtask are outside this requirement.
 
 The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
 tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
@@ -75,8 +73,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **121 tests and three doctests pass** on stable Rust 1.98.1. The existing suite
-  also passes on MSRV 1.85.1, as do all new coverage CLI tests.
+- **105 tests and three doctests pass** on stable Rust 1.98.1. All workspace targets,
+  including the clap CLI and benchmarks, also check on MSRV 1.85.1.
   Twelve pinned real-world files now cover eight GitHub Actions workflows,
   Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
   independent syntax/span expectations and reference values; one upstream file
@@ -86,8 +84,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: Ruff formatting and linting, ty, rustfmt (workspace and
   fuzz targets), strict workspace clippy, tests, fixture hashes, independent parser
   comparisons, and enforced **100% line / 100% function coverage**.
-  The report covers 3,610 lines and 382 functions, including the shared development
-  helpers and excluding integration-test support. LLVM region coverage is **97.63%**;
+  The report covers 3,078 lines and 337 functions in the two YAML crates, excluding
+  development tooling and separate test modules. LLVM region coverage is **97.76%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit
