@@ -1,7 +1,7 @@
 # Real-world deserialization benchmark
 
 ```sh
-cargo bench -p astral-yaml-dev --bench real_world
+cargo bench -p xtask --bench real_world
 ```
 
 Both implementations deserialize complete streams into `Vec<yaml_serde::Value>`.

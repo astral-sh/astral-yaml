@@ -14,5 +14,5 @@ preserves the escaped tag spelling as required by YAML 1.2.2 section 5.6. Focuse
 regression tests independently verify that preservation.
 
 ```sh
-cargo run -p astral-yaml-dev -- conformance
+cargo xtask conformance
 ```

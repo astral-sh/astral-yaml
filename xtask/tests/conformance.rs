@@ -2,8 +2,8 @@ use std::{path::Path, process::Command};
 
 #[test]
 fn official_yaml_test_suite() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let output = Command::new(env!("CARGO_BIN_EXE_astral-yaml-dev"))
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("conformance")
         .current_dir(root)
         .output()
@@ -19,7 +19,7 @@ fn official_yaml_test_suite() {
 
 #[test]
 fn fuzz_regressions() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/regressions");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/regressions");
 
     for entry in std::fs::read_dir(root).unwrap() {
         let path = entry.unwrap().path();
@@ -34,7 +34,7 @@ fn fuzz_regressions() {
 
 #[test]
 fn every_corpus_prefix_has_valid_spans() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yaml-test-suite");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/yaml-test-suite");
     let mut directories = vec![root];
     let mut inputs = 0;
 
@@ -52,7 +52,7 @@ fn every_corpus_prefix_has_valid_spans() {
 
                     match astral_yaml::parse(prefix) {
                         Ok(stream) => {
-                            astral_yaml_dev::validate_spans(&stream).unwrap_or_else(|e| {
+                            xtask::validate_spans(&stream).unwrap_or_else(|e| {
                                 panic!("{} truncated at {end}: {e}", path.display())
                             });
                         }
@@ -73,7 +73,5 @@ fn every_corpus_prefix_has_valid_spans() {
 #[test]
 fn events_preserve_escaped_controls_and_opaque_tag_bytes() {
     let stream = astral_yaml::parse("!<tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\"").unwrap();
-    assert!(
-        astral_yaml_dev::events(&stream).contains("=VAL <tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\n")
-    );
+    assert!(xtask::events(&stream).contains("=VAL <tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\n"));
 }

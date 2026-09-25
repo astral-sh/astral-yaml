@@ -24,7 +24,7 @@ impl Directory {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_astral-yaml-dev"))
+        Command::new(env!("CARGO_BIN_EXE_xtask"))
             .args(args)
             .current_dir(&self.0)
             .output()
@@ -58,12 +58,26 @@ fn events_and_command_errors() {
         vec!["unknown"],
         vec!["conformance", "missing"],
         vec!["conformance", "."],
-        vec![],
     ] {
         let output = directory.run(&args);
         assert!(!output.status.success(), "{args:?}");
         assert!(!output.stderr.is_empty(), "{args:?}");
     }
+}
+
+#[test]
+fn help_and_default_conformance_work_outside_the_repository_root() {
+    let directory = Directory::new();
+
+    for args in [vec![], vec!["-h"], vec!["--help"]] {
+        let output = directory.run(&args);
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("usage: cargo xtask"));
+    }
+
+    let output = directory.run(&["conformance"]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("402/402 cases passed"));
 }
 
 #[test]

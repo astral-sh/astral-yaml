@@ -2,8 +2,8 @@
 #![forbid(unsafe_code)]
 
 use astral_yaml::{ParseOptions, parse_with_options};
-use astral_yaml_dev::validate_spans;
 use libfuzzer_sys::fuzz_target;
+use xtask::validate_spans;
 
 fuzz_target!(|data: &[u8]| {
     let Ok(source) = std::str::from_utf8(data) else {

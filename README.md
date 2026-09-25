@@ -5,7 +5,7 @@ serde support lives in a separate crate. Workspace code forbids unsafe Rust.
 
 - `astral-yaml`: syntax, source spans, comments, and parsing.
 - `astral-yaml-serde`: serialization and deserialization.
-- `astral-yaml-dev`: conformance and performance tools (not published).
+- `xtask/`: development tasks, conformance tests, and benchmarks (not published).
 
 The implementation targets the [YAML 1.2.2 specification](https://yaml.org/spec/1.2.2/)
 and [YAML Test Suite](https://github.com/yaml/yaml-test-suite). YAML 1.1 schema
@@ -19,6 +19,19 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+The workspace uses the [xtask pattern](https://github.com/matklad/cargo-xtask) for
+development commands:
+
+```sh
+cargo xtask conformance
+cargo xtask events path/to/input.yaml
+cargo bench -p xtask --bench real_world
+```
+
+`cargo xtask --help` lists tasks. Conformance defaults to the bundled YAML Test
+Suite; pass a directory to check another suite. Explicit file and directory paths
+are relative to the current directory.
 
 With `cargo-llvm-cov` installed, `scripts/check.sh` also checks fixture hashes and
 enforces 100% line and function coverage. [Fuzzing instructions](fuzz/README.md)

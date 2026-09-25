@@ -2,8 +2,8 @@
 #![forbid(unsafe_code)]
 
 use astral_yaml::Source;
-use astral_yaml_dev::validate_spans;
 use libfuzzer_sys::fuzz_target;
+use xtask::validate_spans;
 
 fuzz_target!(|data: &[u8]| {
     match Source::with_limit(data, 65_536) {

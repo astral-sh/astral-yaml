@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/astral-yaml", "crates/astral-yaml-serde", "crates/astral-yaml-dev"]
+members = ["crates/astral-yaml", "crates/astral-yaml-serde", "xtask"]
 resolver = "3"
 
 [workspace.package]

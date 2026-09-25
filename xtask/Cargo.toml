@@ -1,5 +1,5 @@
 [package]
-name = "astral-yaml-dev"
+name = "xtask"
 description = "Conformance and performance tooling for astral-yaml"
 version.workspace = true
 edition.workspace = true

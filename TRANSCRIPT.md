@@ -3,9 +3,16 @@
 ## Implementation
 
 The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
-(serialization/deserialization), and `astral-yaml-dev` (validation and benchmarks).
+(serialization/deserialization), and `xtask` (validation and benchmarks).
 The core has no runtime dependencies. The adapter adds only serde and its proc-macro
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
+
+Development commands use the Cargo alias in `.cargo/config.toml`:
+`cargo xtask conformance` runs the bundled suite, and `cargo xtask events file`
+prints a parsed event stream. The unpublished `xtask/` workspace member also
+contains shared fuzz checks, integration tests, and the real-world benchmark.
+The bundled suite resolves from the repository regardless of the current directory;
+explicit paths remain relative to the caller.
 
 The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
 tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
@@ -39,11 +46,11 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **84 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
+- **85 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
   pinned real-world fixtures match the reference values and round-trip through serde.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
-  The report covers 3,317 lines and 350 functions. LLVM region coverage is **97.66%**;
+  The report covers 3,320 lines and 349 functions. LLVM region coverage is **97.66%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit
@@ -120,7 +127,7 @@ still above the 1.98× target for every fixture. Both runs are recorded in
 opting into metadata.
 
 Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
-campaigns/replays, and `cargo bench -p astral-yaml-dev --bench real_world` after
+campaigns/replays, and `cargo bench -p xtask --bench real_world` after
 substantive changes. Locally installed tools are under
 `/Users/ww/.cache/astral-yaml-tools/{coverage,fuzz}/bin`.
 No Docker containers were used. All validation, fuzz, and benchmark processes finished.

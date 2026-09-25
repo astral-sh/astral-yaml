@@ -6,7 +6,9 @@ use std::{
 };
 
 use astral_yaml::parse;
-use astral_yaml_dev::{events, validate_spans};
+use xtask::{events, validate_spans};
+
+const USAGE: &str = "usage: cargo xtask <conformance [suite-dir] | events file>";
 
 fn cases(path: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in fs::read_dir(path)? {
@@ -23,7 +25,15 @@ fn cases(path: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
 
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
-    let command = args.next().unwrap_or_else(|| "conformance".to_owned());
+    let Some(command) = args.next() else {
+        println!("{USAGE}");
+        return Ok(ExitCode::SUCCESS);
+    };
+
+    if matches!(command.as_str(), "-h" | "--help") {
+        println!("{USAGE}");
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if command == "events" {
         let source = fs::read_to_string(args.next().ok_or("expected a file path")?)?;
@@ -34,12 +44,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 
     if command != "conformance" {
-        return Err("usage: astral-yaml-dev [conformance [suite-dir] | events file]".into());
+        return Err(USAGE.into());
     }
 
-    let root = PathBuf::from(
-        args.next()
-            .unwrap_or_else(|| "fixtures/yaml-test-suite".to_owned()),
+    let root = args.next().map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/yaml-test-suite"),
+        PathBuf::from,
     );
 
     let mut paths = Vec::new();

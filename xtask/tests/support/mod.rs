@@ -4,15 +4,15 @@ use yaml_serde::Value;
 pub(crate) const FIXTURES: &[(&str, &str)] = &[
     (
         "uv-ci",
-        include_str!("../../../../fixtures/real-world/uv-ci.yaml"),
+        include_str!("../../../fixtures/real-world/uv-ci.yaml"),
     ),
     (
         "kubernetes-guestbook",
-        include_str!("../../../../fixtures/real-world/kubernetes-guestbook.yaml"),
+        include_str!("../../../fixtures/real-world/kubernetes-guestbook.yaml"),
     ),
     (
         "openapi-petstore",
-        include_str!("../../../../fixtures/real-world/openapi-petstore.yaml"),
+        include_str!("../../../fixtures/real-world/openapi-petstore.yaml"),
     ),
 ];
 

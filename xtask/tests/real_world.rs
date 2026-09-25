@@ -7,7 +7,7 @@ fn real_world_documents_match_reference_and_roundtrip() {
         assert_eq!(values, support::reference(source), "{name}");
 
         let stream = astral_yaml::parse(source).unwrap();
-        astral_yaml_dev::validate_spans(&stream).unwrap();
+        xtask::validate_spans(&stream).unwrap();
 
         for value in values {
             let yaml = astral_yaml_serde::to_string(&value).unwrap();
