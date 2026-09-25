@@ -6,6 +6,9 @@ use std::{
 };
 
 #[cfg(unix)]
+mod cov;
+
+#[cfg(unix)]
 mod fuzz;
 
 struct Directory(PathBuf);
@@ -54,7 +57,7 @@ fn unknown_commands_fail() {
         assert_eq!(output.status.code(), Some(1), "{command}");
         assert!(output.stdout.is_empty(), "{command}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).starts_with("usage: cargo xtask fuzz"),
+            String::from_utf8_lossy(&output.stderr).starts_with("usage: cargo xtask <command>"),
             "{command}"
         );
     }
@@ -69,7 +72,7 @@ fn help_works_outside_the_repository_root() {
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "usage: cargo xtask fuzz [cargo-fuzz arguments...]\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.\n"
+            "usage: cargo xtask <command>\n\nCommands:\n  cov [--html]                   Run coverage and enforce 100% lines and functions\n  fuzz [cargo-fuzz arguments...]  Run all four targets for 60 seconds each, or forward arguments\n"
         );
     }
 }

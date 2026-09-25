@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Fuzzing and performance tooling for astral-yaml"
+description = "Coverage, fuzzing, and performance tooling for astral-yaml"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,11 +10,14 @@ publish = false
 [lints]
 workspace = true
 
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
 [dev-dependencies]
 astral-yaml.workspace = true
 astral-yaml-dev.workspace = true
 astral-yaml-serde.workspace = true
-serde.workspace = true
 yaml_serde.workspace = true
 
 [[bench]]

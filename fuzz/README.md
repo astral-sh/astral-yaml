@@ -64,6 +64,6 @@ combined. These corpus replays measure exercised source; they do not
 perform additional mutations. Test coverage and fuzz coverage are separate
 measurements, and execution counts alone do not imply source coverage.
 
-`cargo llvm-cov --workspace --summary-only` measures unit and conformance coverage.
-Use `cargo llvm-cov --workspace --html` to inspect uncovered lines. Coverage is a
+`cargo xtask cov` measures unit and integration coverage, including conformance.
+Use `cargo xtask cov --html` to inspect uncovered lines. Coverage is a
 completion gate, not an assumption derived from a passing corpus.

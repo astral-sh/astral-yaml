@@ -46,11 +46,23 @@ Python scripts use PEP 723 metadata and run with `uv run --script scripts/<name>
 Each declares its Python requirement and dependencies, including an empty list
 for scripts that only use the standard library.
 
-With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` checks Python formatting,
+With `rustup` and `uv` installed, `scripts/check.sh` checks Python formatting,
 linting, and types with Ruff and ty, verifies fixture hashes, compares real-world
 syntax and spans with independent parsers, and enforces 100% line and function
 coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
+
+`cargo xtask cov` runs workspace unit and integration tests with Rust's coverage
+instrumentation and enforces 100% line and function coverage. It uses the active
+compiler's LLVM tools, installing `llvm-tools-preview` through rustup if needed.
+Builds and fresh profiles are kept under `target/coverage`; reports cover workspace
+source, including development helpers and xtask, and exclude separate test modules.
+Doctests run in the ordinary workspace test step.
+
+`cargo xtask cov --html` also writes `target/coverage/html/index.html` with annotated
+source and execution counts. The HTML report is generated even when coverage falls
+below the threshold. Both commands save the LLVM summary as
+`target/coverage/summary.json`. These paths follow Cargo's configured target directory.
 
 The parser's integration tests use inline `insta` snapshots of readable syntax
 trees and diagnostics. With `cargo-insta` installed, run

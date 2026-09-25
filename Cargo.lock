@@ -303,6 +303,7 @@ dependencies = [
  "astral-yaml-dev",
  "astral-yaml-serde",
  "serde",
+ "serde_json",
  "yaml_serde",
 ]
 

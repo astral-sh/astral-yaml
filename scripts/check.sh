@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run from the repository root with cargo-llvm-cov and uv installed.
+# Run from the repository root with rustup and uv installed.
 set -eu
 uv run --only-dev --locked ruff format --check scripts
 uv run --only-dev --locked ruff check scripts
@@ -10,4 +10,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 uv run --script scripts/verify-fixtures.py
 cargo test -p astral-yaml --test real_world --locked -- --ignored
-cargo llvm-cov --workspace --locked --fail-under-lines 100 --fail-under-functions 100 --summary-only
+cargo xtask cov
