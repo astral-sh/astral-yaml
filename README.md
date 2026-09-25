@@ -27,14 +27,11 @@ The workspace uses the [xtask pattern](https://github.com/matklad/cargo-xtask) f
 development commands:
 
 ```sh
-cargo xtask conformance
 cargo xtask events path/to/input.yaml
 cargo bench -p xtask --bench real_world
 ```
 
-`cargo xtask --help` lists tasks. Conformance defaults to the bundled YAML Test
-Suite; pass a directory to check another suite. Explicit file and directory paths
-are relative to the current directory.
+`cargo xtask --help` shows usage. Input paths are relative to the current directory.
 
 With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` also checks fixture
 hashes, compares real-world syntax and spans with independent parsers, and enforces

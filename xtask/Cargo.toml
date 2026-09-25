@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Conformance and performance tooling for astral-yaml"
+description = "YAML inspection and performance tooling for astral-yaml"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

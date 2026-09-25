@@ -3,19 +3,18 @@
 ## Implementation
 
 The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
-(serialization/deserialization), and `xtask` (validation and benchmarks).
+(serialization/deserialization), and `xtask` (inspection and benchmarks).
 The core has no runtime dependencies. The adapter adds only serde and its proc-macro
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
-Development commands use the Cargo alias in `.cargo/config.toml`:
-`cargo xtask conformance` runs the bundled suite, and `cargo xtask events file`
+The Cargo alias in `.cargo/config.toml` provides `cargo xtask events file`, which
 prints a parsed event stream. The unpublished `xtask/` workspace member contains
 command tests and benchmarks. Parser conformance and fixture tests live under
 `crates/astral-yaml/tests`; serde comparisons live under `crates/astral-yaml-serde/tests`.
-The conformance target runs directly against the parser API. Shared validation
-helpers live in the parser's test support and are reused by the CLI and fuzz targets.
-The bundled suite resolves from the repository regardless of the current directory;
-explicit paths remain relative to the caller.
+`cargo test -p astral-yaml --test conformance` runs the bundled suite directly
+against the parser API. Shared validation helpers live in the parser's test
+support and are reused by the CLI and fuzz targets.
+Input paths for the events command are relative to the caller.
 
 The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
 tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
@@ -49,7 +48,7 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **109 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
+- **108 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
   Twelve pinned real-world files now cover eight GitHub Actions workflows,
   Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
   independent syntax/span expectations and reference values; one upstream file
@@ -59,8 +58,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
-  The report covers 3,171 lines and 346 functions, excluding integration-test
-  support. LLVM region coverage is **97.70%**;
+  The report covers 3,109 lines and 341 functions, excluding integration-test
+  support. LLVM region coverage is **97.76%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit

@@ -56,8 +56,7 @@ fn events_and_command_errors() {
         vec!["events", "missing"],
         vec!["events", "invalid.yaml"],
         vec!["unknown"],
-        vec!["conformance", "missing"],
-        vec!["conformance", "."],
+        vec!["conformance"],
     ] {
         let output = directory.run(&args);
         assert!(!output.status.success(), "{args:?}");
@@ -66,47 +65,15 @@ fn events_and_command_errors() {
 }
 
 #[test]
-fn help_and_default_conformance_work_outside_the_repository_root() {
+fn help_works_outside_the_repository_root() {
     let directory = Directory::new();
 
     for args in [vec![], vec!["-h"], vec!["--help"]] {
         let output = directory.run(&args);
         assert!(output.status.success());
-        assert!(String::from_utf8_lossy(&output.stdout).contains("usage: cargo xtask"));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "usage: cargo xtask events file\n"
+        );
     }
-
-    let output = directory.run(&["conformance"]);
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("402/402 cases passed"));
-}
-
-#[test]
-fn conformance_reports_rejections_acceptance_and_event_differences() {
-    let directory = Directory::new();
-    directory.write("in.yaml", "[");
-    let output = directory.run(&["conformance", "."]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("FAIL"));
-
-    directory.write("in.yaml", "abc");
-    directory.write("error", "");
-    let output = directory.run(&["conformance", "."]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("accepted malformed input"));
-
-    fs::remove_file(directory.0.join("error")).unwrap();
-
-    for expected in [
-        "wrong\n",
-        "+STR\n",
-        "+STR\n+DOC\n=VAL :abc\n-DOC\n-STR\nextra\n",
-    ] {
-        directory.write("test.event", expected);
-        let output = directory.run(&["conformance", "."]);
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stdout).contains("event"));
-    }
-
-    fs::remove_file(directory.0.join("test.event")).unwrap();
-    assert!(!directory.run(&["conformance", "."]).status.success());
 }
