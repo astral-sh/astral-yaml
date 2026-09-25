@@ -1,0 +1,434 @@
++STR
++DOC ---
++MAP
+=VAL :x-airflow-common
++MAP &airflow-common
+=VAL :image
+=VAL :${AIRFLOW_IMAGE_NAME:-apache/airflow:|version|}
+=VAL :env_file
++SEQ
+=VAL :${ENV_FILE_PATH:-.env}
+-SEQ
+=VAL :environment
++MAP &airflow-common-env
+=VAL :AIRFLOW__CORE__EXECUTOR
+=VAL :CeleryExecutor
+=VAL :AIRFLOW__CORE__AUTH_MANAGER
+=VAL :airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+=VAL :AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+=VAL :postgresql+psycopg://airflow:airflow@postgres/airflow
+=VAL :AIRFLOW__CELERY__RESULT_BACKEND
+=VAL :db+postgresql+psycopg://airflow:airflow@postgres/airflow
+=VAL :AIRFLOW__CELERY__BROKER_URL
+=VAL :redis://:@redis:6379/0
+=VAL :AIRFLOW__CORE__FERNET_KEY
+=VAL :${FERNET_KEY}
+=VAL :AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+=VAL 'true
+=VAL :AIRFLOW__CORE__LOAD_EXAMPLES
+=VAL 'true
+=VAL :AIRFLOW__CORE__EXECUTION_API_SERVER_URL
+=VAL 'http://airflow-apiserver:8080/execution/
+=VAL :AIRFLOW__API_AUTH__JWT_SECRET
+=VAL :${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
+=VAL :AIRFLOW__API_AUTH__JWT_ISSUER
+=VAL :${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
+=VAL :AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+=VAL 'true
+=VAL :_PIP_ADDITIONAL_REQUIREMENTS
+=VAL :${_PIP_ADDITIONAL_REQUIREMENTS:-}
+=VAL :AIRFLOW_CONFIG
+=VAL '/opt/airflow/config/airflow.cfg
+-MAP
+=VAL :volumes
++SEQ
+=VAL :${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+=VAL :${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+=VAL :${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+=VAL :${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+-SEQ
+=VAL :user
+=VAL "${AIRFLOW_UID:-50000}:0
+=VAL :depends_on
++MAP &airflow-common-depends-on
+=VAL :redis
++MAP
+=VAL :condition
+=VAL :service_healthy
+-MAP
+=VAL :postgres
++MAP
+=VAL :condition
+=VAL :service_healthy
+-MAP
+-MAP
+-MAP
+=VAL :services
++MAP
+=VAL :postgres
++MAP
+=VAL :image
+=VAL :postgres:16
+=VAL :environment
++MAP
+=VAL :POSTGRES_USER
+=VAL :airflow
+=VAL :POSTGRES_PASSWORD
+=VAL :airflow
+=VAL :POSTGRES_DB
+=VAL :airflow
+-MAP
+=VAL :volumes
++SEQ
+=VAL :postgres-db-volume:/var/lib/postgresql/data
+-SEQ
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD
+=VAL "pg_isready
+=VAL "-U
+=VAL "airflow
+-SEQ
+=VAL :interval
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :5s
+-MAP
+=VAL :restart
+=VAL :always
+-MAP
+=VAL :redis
++MAP
+=VAL :image
+=VAL :redis:7.2-bookworm
+=VAL :expose
++SEQ
+=VAL :6379
+-SEQ
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD
+=VAL "redis-cli
+=VAL "ping
+-SEQ
+=VAL :interval
+=VAL :10s
+=VAL :timeout
+=VAL :30s
+=VAL :retries
+=VAL :50
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+-MAP
+=VAL :airflow-apiserver
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :api-server
+=VAL :ports
++SEQ
+=VAL "8080:8080
+-SEQ
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD
+=VAL "curl
+=VAL "--fail
+=VAL "http://localhost:8080/api/v2/monitor/health
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+=VAL :airflow-scheduler
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :scheduler
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD-SHELL
+=VAL 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+=VAL :airflow-dag-processor
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :dag-processor
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD-SHELL
+=VAL 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+=VAL :airflow-worker
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :celery worker
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD-SHELL
+=VAL 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :environment
++MAP
+=VAL :<<
+=ALI *airflow-common-env
+=VAL :DUMB_INIT_SETSID
+=VAL "0
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-apiserver
++MAP
+=VAL :condition
+=VAL :service_healthy
+-MAP
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+=VAL :airflow-triggerer
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :triggerer
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD-SHELL
+=VAL 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+=VAL :airflow-init
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :entrypoint
+=VAL :/bin/bash
+=VAL :command
++SEQ
+=VAL :-c
+=VAL |if [[ -z "${AIRFLOW_UID}" ]]; then\n  echo\n  echo -e "\\033[1;33mWARNING!!!: AIRFLOW_UID not set!\\e[0m"\n  echo "If you are on Linux, you SHOULD follow the instructions below to set "\n  echo "AIRFLOW_UID environment variable, otherwise files will be owned by root."\n  echo "For other operating systems you can get rid of the warning with manually created .env file:"\n  echo "    See: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#setting-the-right-airflow-user"\n  echo\n  export AIRFLOW_UID=$$(id -u)\nfi\none_meg=1048576\nmem_available=$$(($$(getconf _PHYS_PAGES) * $$(getconf PAGE_SIZE) / one_meg))\ncpus_available=$$(grep -cE 'cpu[0-9]+' /proc/stat)\ndisk_available=$$(df / | tail -1 | awk '{print $$4}')\nwarning_resources="false"\nif (( mem_available < 4000 )) ; then\n  echo\n  echo -e "\\033[1;33mWARNING!!!: Not enough memory available for Docker.\\e[0m"\n  echo "At least 4GB of memory required. You have $$(numfmt --to iec $$((mem_available * one_meg)))"\n  echo\n  warning_resources="true"\nfi\nif (( cpus_available < 2 )); then\n  echo\n  echo -e "\\033[1;33mWARNING!!!: Not enough CPUS available for Docker.\\e[0m"\n  echo "At least 2 CPUs recommended. You have $${cpus_available}"\n  echo\n  warning_resources="true"\nfi\nif (( disk_available < one_meg * 10 )); then\n  echo\n  echo -e "\\033[1;33mWARNING!!!: Not enough Disk space available for Docker.\\e[0m"\n  echo "At least 10 GBs recommended. You have $$(numfmt --to iec $$((disk_available * 1024 )))"\n  echo\n  warning_resources="true"\nfi\nif [[ $${warning_resources} == "true" ]]; then\n  echo\n  echo -e "\\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see above)!\\e[0m"\n  echo "Please follow the instructions to increase amount of resources available:"\n  echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"\n  echo\nfi\necho\necho "Creating missing opt dirs if missing:"\necho\nmkdir -v -p /opt/airflow/{logs,dags,plugins,config}\necho\necho "Airflow version:"\n/entrypoint airflow version\necho\necho "Files in shared volumes:"\necho\nls -la /opt/airflow/{logs,dags,plugins,config}\necho\necho "Running airflow config list to create default config file if missing."\necho\n/entrypoint airflow config list >/dev/null\necho\necho "Files in shared volumes:"\necho\nls -la /opt/airflow/{logs,dags,plugins,config}\necho\necho "Change ownership of files in /opt/airflow to ${AIRFLOW_UID:-50000}:0"\necho\nchown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/\necho\necho "Change ownership of files in shared volumes to ${AIRFLOW_UID:-50000}:0"\necho\nchown -v -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/{logs,dags,plugins,config}\necho\necho "Files in shared volumes:"\necho\nls -la /opt/airflow/{logs,dags,plugins,config}\n
+-SEQ
+=VAL :environment
++MAP
+=VAL :<<
+=ALI *airflow-common-env
+=VAL :_AIRFLOW_DB_MIGRATE
+=VAL 'true
+=VAL :_AIRFLOW_WWW_USER_CREATE
+=VAL 'true
+=VAL :_AIRFLOW_WWW_USER_USERNAME
+=VAL :${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+=VAL :_AIRFLOW_WWW_USER_PASSWORD
+=VAL :${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+=VAL :_PIP_ADDITIONAL_REQUIREMENTS
+=VAL '
+-MAP
+=VAL :user
+=VAL "0:0
+-MAP
+=VAL :airflow-cli
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :profiles
++SEQ
+=VAL :debug
+-SEQ
+=VAL :environment
++MAP
+=VAL :<<
+=ALI *airflow-common-env
+=VAL :CONNECTION_CHECK_MAX_COUNT
+=VAL "0
+-MAP
+=VAL :command
++SEQ
+=VAL :bash
+=VAL :-c
+=VAL :airflow
+-SEQ
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+-MAP
+-MAP
+=VAL :flower
++MAP
+=VAL :<<
+=ALI *airflow-common
+=VAL :command
+=VAL :celery flower
+=VAL :profiles
++SEQ
+=VAL :flower
+-SEQ
+=VAL :ports
++SEQ
+=VAL "5555:5555
+-SEQ
+=VAL :healthcheck
++MAP
+=VAL :test
++SEQ []
+=VAL "CMD
+=VAL "curl
+=VAL "--fail
+=VAL "http://localhost:5555/
+-SEQ
+=VAL :interval
+=VAL :30s
+=VAL :timeout
+=VAL :10s
+=VAL :retries
+=VAL :5
+=VAL :start_period
+=VAL :30s
+-MAP
+=VAL :restart
+=VAL :always
+=VAL :depends_on
++MAP
+=VAL :<<
+=ALI *airflow-common-depends-on
+=VAL :airflow-init
++MAP
+=VAL :condition
+=VAL :service_completed_successfully
+-MAP
+-MAP
+-MAP
+-MAP
+=VAL :volumes
++MAP
+=VAL :postgres-db-volume
+=VAL :
+-MAP
+-MAP
+-DOC
+-STR

@@ -1,0 +1,761 @@
++STR
++DOC
++MAP
+=VAL :name
+=VAL :Deployment
+=VAL :run-name
+=VAL :${{ inputs.tag_name }} / ${{ inputs.environment }}${{ inputs.dry_run == true && ' (dry run)' || '' }}
+=VAL :concurrency
++MAP
+=VAL :group
+=VAL :${{ github.workflow }}-${{ github.ref_name }}
+=VAL :cancel-in-progress
+=VAL :true
+-MAP
+=VAL :permissions
++MAP
+=VAL :attestations
+=VAL :write
+=VAL :contents
+=VAL :write
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :on
++MAP
+=VAL :workflow_dispatch
++MAP
+=VAL :inputs
++MAP
+=VAL :tag_name
++MAP
+=VAL :required
+=VAL :true
+=VAL :type
+=VAL :string
+=VAL :description
+=VAL "The tag name for the release (e.g. v2.100.0, or v2.100.0-rc.1 for a pre-release).
+-MAP
+=VAL :environment
++MAP
+=VAL :default
+=VAL :production
+=VAL :type
+=VAL :environment
+=VAL :description
+=VAL "The deployment environment.
+-MAP
+=VAL :platforms
++MAP
+=VAL :default
+=VAL "linux,macos,windows
+=VAL :type
+=VAL :string
+=VAL :description
+=VAL "Comma-separated list of platforms to build.
+-MAP
+=VAL :release
++MAP
+=VAL :description
+=VAL "Whether to run the final release job. the dry_run flag still blocks final submissions.
+=VAL :type
+=VAL :boolean
+=VAL :default
+=VAL :true
+-MAP
+=VAL :dry_run
++MAP
+=VAL :description
+=VAL "Perform a dry run without publishing artifacts or creating a release
+=VAL :type
+=VAL :boolean
+=VAL :default
+=VAL :true
+-MAP
+-MAP
+-MAP
+-MAP
+=VAL :jobs
++MAP
+=VAL :validate-tag-name
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Validate tag name format
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL |# Build metadata (v1.2.3+001) is rejected: later steps detect a pre-release by its hyphen.\nif [[ ! "$TAG_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$ ]]; then\n  echo "Invalid tag name format. Must be in the form v1.2.3 or v1.2.3-rc.1"\n  exit 1\nfi\n
+-MAP
+-SEQ
+-MAP
+=VAL :linux
++MAP
+=VAL :needs
+=VAL :validate-tag-name
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :environment
+=VAL :${{ inputs.environment }}
+=VAL :if
+=VAL :contains(inputs.platforms, 'linux')
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Go
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version-file
+=VAL 'go.mod
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Install GoReleaser
+=VAL :uses
+=VAL :goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+=VAL :with
++MAP
+=VAL :version
+=VAL :v2.13.1
+=VAL :install-only
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Create temporary tag
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL :git tag "$TAG_NAME"
+-MAP
++MAP
+=VAL :name
+=VAL :Build release binaries
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL :script/release --local "$TAG_NAME" --platform linux
+-MAP
++MAP
+=VAL :name
+=VAL :Generate web manual pages
+=VAL :run
+=VAL |go run ./cmd/gen-docs --website --doc-path dist/manual\ntar -czvf dist/manual.tar.gz -C dist -- manual\n
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :linux
+=VAL :if-no-files-found
+=VAL :error
+=VAL :retention-days
+=VAL :7
+=VAL :path
+=VAL |dist/*.tar.gz\ndist/*.rpm\ndist/*.deb\n
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :macos
++MAP
+=VAL :needs
+=VAL :validate-tag-name
+=VAL :runs-on
+=VAL :macos-latest
+=VAL :environment
+=VAL :${{ inputs.environment }}
+=VAL :if
+=VAL :contains(inputs.platforms, 'macos')
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Go
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version-file
+=VAL 'go.mod
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Install code signing certificate
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :shell
+=VAL :bash
+=VAL :env
++MAP
+=VAL :DEVELOPER_ID_CERT
+=VAL :${{ secrets.GATEWATCHER_DEVELOPER_ID_CERT }}
+=VAL :DEVELOPER_ID_CERT_PASSWORD
+=VAL :${{ secrets.GATEWATCHER_DEVELOPER_ID_PASSWORD }}
+-MAP
+=VAL :run
+=VAL |# create a keychain for the certificate\nPW=pwd.${{ github.run_number }}\nsecurity create-keychain -p $PW "$RUNNER_TEMP/build.keychain"\nsecurity set-keychain-settings -lut 21600 "$RUNNER_TEMP/build.keychain"\nsecurity default-keychain -s "$RUNNER_TEMP/build.keychain"\nsecurity unlock-keychain -p $PW "$RUNNER_TEMP/build.keychain"\n\n# import the certificate\nbase64 -d <<< "$DEVELOPER_ID_CERT" > "$RUNNER_TEMP/cert.p12"\nsecurity import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/build.keychain" -P "$DEVELOPER_ID_CERT_PASSWORD" -T /usr/bin/codesign\nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $PW "$RUNNER_TEMP/build.keychain"\nrm "$RUNNER_TEMP/cert.p12"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Add App Store Connect API key to keychain
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :uses
+=VAL :nodeselector/setup-apple-codesign@6b2173bdcb7dd4057e0396ccfa28ebfa4d90affa
+=VAL :id
+=VAL :setup-apple-codesign
+=VAL :with
++MAP
+=VAL :asset-type
+=VAL "app-store-connect-api-key
+=VAL :app-store-connect-api-key-key-id
+=VAL :${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
+=VAL :app-store-connect-api-key-issuer-id
+=VAL :${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
+=VAL :app-store-connect-api-key-base64-private-key
+=VAL :${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Configure notarization credentials
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :shell
+=VAL :bash
+=VAL :run
+=VAL |xcrun notarytool store-credentials "notarytool-password" \\\n  --key "${{ steps.setup-apple-codesign.outputs.app-store-connect-api-key-key-path }}" \\\n  --key-id "${{ steps.setup-apple-codesign.outputs.app-store-connect-api-key-key-id }}" \\\n  --issuer "${{ steps.setup-apple-codesign.outputs.app-store-connect-api-key-issuer-id }}" \\\n  --keychain "$RUNNER_TEMP/build.keychain"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Install GoReleaser
+=VAL :uses
+=VAL :goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+=VAL :with
++MAP
+=VAL :version
+=VAL :v2.13.1
+=VAL :install-only
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Create temporary tag
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL :git tag "$TAG_NAME"
+-MAP
++MAP
+=VAL :name
+=VAL :Build release binaries
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+=VAL :KEYCHAIN
+=VAL :${{ runner.temp }}/build.keychain
+=VAL :DEVELOPER_ID_CERT_IDENTIFIER
+=VAL :${{ vars.MAC_APP_SIGNING_IDENTITY }}
+=VAL :DO_SIGN_ARTIFACTS
+=VAL :${{ inputs.environment == 'production' }}
+-MAP
+=VAL :run
+=VAL :script/release --local "$TAG_NAME" --platform macos
+-MAP
++MAP
+=VAL :name
+=VAL :Notarize macOS archives
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :env
++MAP
+=VAL :DEVELOPER_ID_CERT_IDENTIFIER
+=VAL :${{ vars.MAC_APP_SIGNING_IDENTITY }}
+=VAL :KEYCHAIN
+=VAL :${{ runner.temp }}/build.keychain
+=VAL :DO_SIGN_ARTIFACTS
+=VAL :${{ inputs.environment == 'production' }}
+-MAP
+=VAL :run
+=VAL |shopt -s failglob\nscript/sign dist/gh_*_macOS_*.zip\n
+-MAP
++MAP
+=VAL :name
+=VAL :Build universal macOS pkg installer
+=VAL :if
+=VAL :inputs.environment != 'production'
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL :script/pkgmacos "$TAG_NAME"
+-MAP
++MAP
+=VAL :name
+=VAL :Build & notarize universal macOS pkg installer
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+=VAL :APPLE_DEVELOPER_INSTALLER_ID
+=VAL :${{ vars.APPLE_DEVELOPER_INSTALLER_ID }}
+-MAP
+=VAL :run
+=VAL |shopt -s failglob\nscript/pkgmacos "$TAG_NAME"\n
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :macos
+=VAL :if-no-files-found
+=VAL :error
+=VAL :retention-days
+=VAL :7
+=VAL :path
+=VAL |dist/*.tar.gz\ndist/*.zip\ndist/*.pkg\n
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :windows
++MAP
+=VAL :needs
+=VAL :validate-tag-name
+=VAL :runs-on
+=VAL :windows-2022
+=VAL :environment
+=VAL :${{ inputs.environment }}
+=VAL :if
+=VAL :contains(inputs.platforms, 'windows')
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Go
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version-file
+=VAL 'go.mod
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Install GoReleaser
+=VAL :uses
+=VAL :goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+=VAL :with
++MAP
+=VAL :version
+=VAL :v2.13.1
+=VAL :install-only
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Install Azure Code Signing Client
+=VAL :shell
+=VAL :pwsh
+=VAL :env
++MAP
+=VAL :ACS_DIR
+=VAL :${{ runner.temp }}\\acs
+=VAL :ACS_ZIP
+=VAL :${{ runner.temp }}\\acs.zip
+=VAL :CORRELATION_ID
+=VAL :${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+=VAL :METADATA_PATH
+=VAL :${{ runner.temp }}\\acs\\metadata.json
+-MAP
+=VAL :run
+=VAL |# Download Azure Code Signing client containing the DLL needed for signtool in script/sign\nInvoke-WebRequest -Uri https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client/1.0.95 -OutFile $Env:ACS_ZIP -Verbose\nExpand-Archive $Env:ACS_ZIP -Destination $Env:ACS_DIR -Force -Verbose\n\n# Generate metadata file for signtool, used in signing box .exe and .msi\n@{\n  CertificateProfileName = "GitHubInc"\n  CodeSigningAccountName = "GitHubInc"\n  CorrelationId = $Env:CORRELATION_ID\n  Endpoint =  "https://wus3.codesigning.azure.net/"\n} | ConvertTo-Json | Out-File -FilePath $Env:METADATA_PATH\n
+-MAP
++MAP
+=VAL :name
+=VAL :Create temporary tag
+=VAL :shell
+=VAL :bash
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL :git tag "$TAG_NAME"
+-MAP
++MAP
+=VAL :name
+=VAL :Authenticate to Azure for code signing
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :uses
+=VAL :azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+=VAL :with
++MAP
+=VAL :client-id
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_CLIENT_ID }}
+=VAL :tenant-id
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_TENANT_ID }}
+=VAL :allow-no-subscriptions
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Build release binaries
+=VAL :shell
+=VAL :bash
+=VAL :env
++MAP
+=VAL :AZURE_CLIENT_ID
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_CLIENT_ID }}
+=VAL :AZURE_TENANT_ID
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_TENANT_ID }}
+=VAL :DLIB_PATH
+=VAL :${{ runner.temp }}\\acs\\bin\\x64\\Azure.CodeSigning.Dlib.dll
+=VAL :METADATA_PATH
+=VAL :${{ runner.temp }}\\acs\\metadata.json
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+=VAL :DO_SIGN_ARTIFACTS
+=VAL :${{ inputs.environment == 'production' }}
+-MAP
+=VAL :run
+=VAL :script/release --local "$TAG_NAME" --platform windows
+-MAP
++MAP
+=VAL :name
+=VAL :Set up MSBuild
+=VAL :id
+=VAL :setupmsbuild
+=VAL :uses
+=VAL :microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57
+-MAP
++MAP
+=VAL :name
+=VAL :Build MSI
+=VAL :shell
+=VAL :bash
+=VAL :env
++MAP
+=VAL :MSBUILD_PATH
+=VAL :${{ steps.setupmsbuild.outputs.msbuildPath }}
+-MAP
+=VAL :run
+=VAL |for ZIP_FILE in dist/gh_*_windows_*.zip; do\n  MSI_NAME="$(basename "$ZIP_FILE" ".zip")"\n  MSI_VERSION="$(cut -d_ -f2 <<<"$MSI_NAME" | cut -d- -f1)"\n  case "$MSI_NAME" in\n  *_386 )\n    source_dir="$PWD/dist/windows_windows_386_sse2"\n    platform="x86"\n    ;;\n  *_amd64 )\n    source_dir="$PWD/dist/windows_windows_amd64_v1"\n    platform="x64"\n    ;;\n  *_arm64 )\n    source_dir="$PWD/dist/windows_windows_arm64_v8.0"\n    platform="arm64"\n    ;;\n  * )\n    printf "unsupported architecture: %s\\n" "$MSI_NAME" >&2\n    exit 1\n    ;;\n  esac\n  "${MSBUILD_PATH}\\MSBuild.exe" ./build/windows/gh.wixproj -p:SourceDir="$source_dir" -p:OutputPath="$PWD/dist" -p:OutputName="$MSI_NAME" -p:ProductVersion="${MSI_VERSION#v}" -p:Platform="$platform"\ndone\n
+-MAP
++MAP
+=VAL :name
+=VAL :Sign .msi release binaries
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :shell
+=VAL :pwsh
+=VAL :env
++MAP
+=VAL :AZURE_CLIENT_ID
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_CLIENT_ID }}
+=VAL :AZURE_TENANT_ID
+=VAL :${{ secrets.SPN_GITHUB_CLI_SIGNING_TENANT_ID }}
+=VAL :DLIB_PATH
+=VAL :${{ runner.temp }}\\acs\\bin\\x64\\Azure.CodeSigning.Dlib.dll
+=VAL :METADATA_PATH
+=VAL :${{ runner.temp }}\\acs\\metadata.json
+=VAL :DO_SIGN_ARTIFACTS
+=VAL :${{ inputs.environment == 'production' }}
+-MAP
+=VAL :run
+=VAL |Get-ChildItem -Path .\\dist -Filter *.msi | ForEach-Object {\n  .\\script\\sign.ps1 $_.FullName\n}\n
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :windows
+=VAL :if-no-files-found
+=VAL :error
+=VAL :retention-days
+=VAL :7
+=VAL :path
+=VAL |dist/*.zip\ndist/*.msi\n
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :release
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :needs
++SEQ []
+=VAL :linux
+=VAL :macos
+=VAL :windows
+-SEQ
+=VAL :environment
+=VAL :${{ inputs.environment }}
+=VAL :if
+=VAL :inputs.release
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout cli/cli
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Merge built artifacts
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+-MAP
++MAP
+=VAL :name
+=VAL :Generate site deploy token
+=VAL :id
+=VAL :site-deploy-token
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :uses
+=VAL :actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+=VAL :with
++MAP
+=VAL :client-id
+=VAL :${{ secrets.SITE_DEPLOY_APP_CLIENT_ID }}
+=VAL :private-key
+=VAL :${{ secrets.SITE_DEPLOY_APP_PRIVATE_KEY }}
+=VAL :owner
+=VAL :github
+=VAL :repositories
+=VAL :cli.github.com
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Checkout documentation site
+=VAL :if
+=VAL :${{ inputs.environment == 'production' }}
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :repository
+=VAL :github/cli.github.com
+=VAL :path
+=VAL :site
+=VAL :fetch-depth
+=VAL :0
+=VAL :token
+=VAL :${{ steps.site-deploy-token.outputs.token}}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Update site man pages
+=VAL :if
+=VAL :${{ inputs.environment == 'production' }}
+=VAL :env
++MAP
+=VAL :GIT_COMMITTER_NAME
+=VAL :cli automation
+=VAL :GIT_AUTHOR_NAME
+=VAL :cli automation
+=VAL :GIT_COMMITTER_EMAIL
+=VAL :noreply@github.com
+=VAL :GIT_AUTHOR_EMAIL
+=VAL :noreply@github.com
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL |git -C site rm 'manual/gh*.md' 2>/dev/null || true\ntar -xzvf linux/manual.tar.gz -C site\ngit -C site add 'manual/gh*.md'\nsed -i.bak -E "s/(assign version = )\\".+\\"/\\1\\"${TAG_NAME#v}\\"/" site/index.html\nrm -f site/index.html.bak\ngit -C site add index.html\ngit -C site diff --quiet --cached || git -C site commit -m "gh ${TAG_NAME#v}"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Prepare release assets
+=VAL :env
++MAP
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+-MAP
+=VAL :run
+=VAL |shopt -s failglob\nrm -rf dist\nmkdir dist\nmv -v {linux,macos,windows}/gh_* dist/\n
+-MAP
++MAP
+=VAL :name
+=VAL :Install packaging dependencies
+=VAL :run
+=VAL :sudo apt-get install -y rpm reprepro
+-MAP
++MAP
+=VAL :name
+=VAL :Set up GPG
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :env
++MAP
+=VAL :GPG_PUBKEY_2026
+=VAL :${{ secrets.GPG_PUBKEY_2026 }}
+=VAL :GPG_KEY_2026
+=VAL :${{ secrets.GPG_KEY_2026 }}
+=VAL :GPG_PASSPHRASE_2026
+=VAL :${{ secrets.GPG_PASSPHRASE_2026 }}
+=VAL :GPG_KEYGRIP_2026
+=VAL :${{ secrets.GPG_KEYGRIP_2026 }}
+-MAP
+=VAL :run
+=VAL |base64 -d <<<"$GPG_PUBKEY_2026" | gpg --import --no-tty --batch --yes\nbase64 -d <<<"$GPG_KEY_2026" | gpg --import --no-tty --batch --yes\necho "allow-preset-passphrase" > ~/.gnupg/gpg-agent.conf\ngpg-connect-agent RELOADAGENT /bye\nbase64 -d <<<"$GPG_PASSPHRASE_2026" | /usr/lib/gnupg2/gpg-preset-passphrase --preset "$GPG_KEYGRIP_2026"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Sign RPMs
+=VAL :if
+=VAL :inputs.environment == 'production'
+=VAL :run
+=VAL |cp script/rpmmacros ~/.rpmmacros\nrpmsign --addsign dist/*.rpm\n
+-MAP
++MAP
+=VAL :name
+=VAL :Attest release artifacts
+=VAL :if
+=VAL :inputs.environment == 'production' && !inputs.dry_run
+=VAL :uses
+=VAL :actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+=VAL :with
++MAP
+=VAL :subject-path
+=VAL "dist/gh_*
+=VAL :create-storage-record
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Run createrepo
+=VAL :if
+=VAL :${{ inputs.environment == 'production' }}
+=VAL :run
+=VAL |mkdir -p site/packages/rpm\ncp dist/*.rpm site/packages/rpm/\n./script/createrepo.sh\ncp -r dist/repodata site/packages/rpm/\npushd site/packages/rpm\ngpg --yes --detach-sign --armor --default-key 7F38BBB59D064DBCB3D84D725612B36462313325 repodata/repomd.xml\npopd\n
+-MAP
++MAP
+=VAL :name
+=VAL :Run reprepro
+=VAL :if
+=VAL :${{ inputs.environment == 'production' }}
+=VAL :env
++MAP
+=VAL :RELEASES
+=VAL "cosmic eoan disco groovy focal stable oldstable testing sid unstable buster bullseye stretch jessie bionic trusty precise xenial hirsute impish kali-rolling
+-MAP
+=VAL :run
+=VAL |mkdir -p upload\nfor release in $RELEASES; do\n  for file in dist/*.deb; do\n    reprepro --confdir="+b/script" includedeb "$release" "$file"\n  done\ndone\ncp -a dists/ pool/ upload/\nmkdir -p site/packages\ncp -a upload/* site/packages/\n
+-MAP
++MAP
+=VAL :name
+=VAL :Create the release
+=VAL :env
++MAP
+=VAL :DO_PUBLISH
+=VAL :${{ inputs.environment == 'production' && !inputs.dry_run }}
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+=VAL :GH_TOKEN
+=VAL :${{ secrets.GITHUB_TOKEN }}
+-MAP
+=VAL :run
+=VAL |shopt -s failglob\npushd dist\nshasum -a 256 gh_* > checksums.txt\nmv checksums.txt gh_${TAG_NAME#v}_checksums.txt\npopd\nrelease_args=(\n  "$TAG_NAME"\n  --title "GitHub CLI ${TAG_NAME#v}"\n  --target "$GITHUB_SHA"\n  --generate-notes\n)\nif [[ $TAG_NAME == *-* ]]; then\n  release_args+=( --prerelease )\nfi\nguard="echo"\n[ "$DO_PUBLISH" = "false" ] || guard=""\nscript/label-assets dist/gh_* | xargs $guard gh release create "${release_args[@]}" --\n
+-MAP
++MAP
+=VAL :name
+=VAL :Publish site
+=VAL :if
+=VAL :${{ inputs.environment == 'production' }}
+=VAL :env
++MAP
+=VAL :DO_PUBLISH
+=VAL :${{ inputs.environment == 'production' && !contains(inputs.tag_name, '-') && !inputs.dry_run }}
+=VAL :TAG_NAME
+=VAL :${{ inputs.tag_name }}
+=VAL :GIT_COMMITTER_NAME
+=VAL :cli automation
+=VAL :GIT_AUTHOR_NAME
+=VAL :cli automation
+=VAL :GIT_COMMITTER_EMAIL
+=VAL :noreply@github.com
+=VAL :GIT_AUTHOR_EMAIL
+=VAL :noreply@github.com
+-MAP
+=VAL :working-directory
+=VAL :./site
+=VAL :run
+=VAL |git add packages\ngit commit -m "Add rpm and deb packages for $TAG_NAME"\nif [ "$DO_PUBLISH" = "true" ]; then\n  git push\nelse\n  git log --oneline @{upstream}..\n  git diff --name-status @{upstream}..\nfi\n
+-MAP
+-SEQ
+-MAP
+-MAP
+-MAP
+-DOC
+-STR

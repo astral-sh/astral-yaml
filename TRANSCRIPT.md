@@ -46,10 +46,14 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **86 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1. Three
-  pinned real-world fixtures match the reference values and round-trip through serde.
+- **93 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
+  Twelve pinned real-world files now cover eight GitHub Actions workflows,
+  Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
+  independent syntax/span expectations and reference values; one upstream file
+  with invalid indentation has a pinned rejection expectation.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
-  clippy, tests, fixture hashes, and enforced **100% line / 100% function coverage**.
+  clippy, tests, fixture hashes, independently regenerated syntax expectations,
+  and enforced **100% line / 100% function coverage**.
   The report covers 3,426 lines and 364 functions. LLVM region coverage is **97.68%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
@@ -70,6 +74,45 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - The suite event convention decodes URI escapes in case `6CK3`; AST tags preserve
   their spelling per spec §5.6. `yaml_serde` rejects some valid 1.2 leading-colon
   keys; those cases use grammar-derived assertions instead of that comparator.
+
+## Independent correctness checks (2026-09-25)
+
+The real-world corpus grew from three files to twelve (223,181 source bytes).
+Every added file is pinned to a commit with a digest and its license. PyYAML 6.0.3's
+Python and LibYAML-backed parsers independently generate complete syntax events
+and UTF-8 scalar ranges; they must agree before expectations are written. Rust
+tests compare those expectations with the AST, check alias targets, LF/CRLF/CR
+equivalence, shell text and scalar styles, and complete root comment aggregation.
+Both the astral and reference readers consume our serializer's output.
+
+Sentry's Compose snapshot contains an under-indented closing flow delimiter.
+It remains unmodified and is tested as invalid YAML 1.2, with the exact error
+range recorded. Airflow's valid Compose configuration exercises anchors, aliases,
+and ordinary `<<` mapping keys. Benchmark inputs remain the original three files.
+
+Generated checks cover 73,728 block scalar presentations across four nesting
+contexts and 3,258 quoted scalar presentations. Direct regressions document the
+suite's EOF line-break policy and two LibYAML indentation disagreements; see
+[conformance and limits](docs/conformance.md). No production-code defect was
+confirmed in this iteration, and the runtime parser and serializer are unchanged.
+
+Independent serializer checks cover all 1,112,064 Unicode scalar values, 23,040
+f32/f64 sign/exponent/mantissa combinations, wide integers, long keys, and
+collection-valued keys. The generic-serde fuzz target now reads emitted strings
+and values with `yaml_serde` as well as the astral reader.
+
+Final campaigns used all 416 official/regression/real-world seed inputs, all five
+encodings, and all 29 typed-serde selectors. Each target ran for 61 seconds with
+the bounds and toolchain listed below. All **4,101,751 executions** completed
+without findings; all four final corpora were replayed with matching coverage
+binaries and profiles. Earlier campaigns in this iteration are not included.
+
+| Target | Executions | Relevant source line coverage from final corpus replay |
+| --- | ---: | --- |
+| parse | 1,591,706 | Parser 98.82% |
+| serde | 337,350 | Parser 98.98%; emitted strings and values also read independently |
+| decode | 1,262,857 | Parser 99.53%; decoder 89.19% |
+| typed | 909,838 | Deserializer 92.92%; serializer 98.37%; comments 98.67%; wrapper 59.02% |
 
 ## Optimization fuzzing (2026-09-25)
 

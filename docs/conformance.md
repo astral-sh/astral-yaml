@@ -4,8 +4,13 @@ The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). The pinned YAML T
 Suite contains 402 cases: 308 valid inputs and 94 malformed inputs. Tests compare
 all semantic events for valid cases, require rejection of invalid cases, and
 validate spans for every accepted UTF-8 prefix of every corpus input. No cases
-are excluded. Three pinned real-world documents are also checked against
-`yaml_serde` and round-tripped through the serde adapter.
+are excluded. The [real-world corpus](../fixtures/real-world/README.md) contains
+twelve pinned files, including eight GitHub Actions workflows. Eleven valid files
+have complete syntax-event and scalar-span expectations generated with both
+PyYAML's Python parser and LibYAML. Tests compare our ASTs against those snapshots,
+check all three YAML line endings, and compare constructed values and serialized
+output with `yaml_serde`. Sentry's Compose file is retained as an explicit rejection
+case because a closing flow delimiter is under-indented.
 
 Additional regressions cover requirements that the corpus does not exhaust:
 
@@ -24,6 +29,29 @@ it is not the conformance authority. For example, it rejects the valid YAML 1.2
 plain key in `{:foo}`. That case is checked directly against the grammar. The
 suite event formatter also decodes URI escapes to match case `6CK3`, while the
 public AST preserves the tag URI spelling required by section 5.6.
+
+Generated tests exercise 73,728 block scalar presentations and 3,258 quoted scalar
+presentations, including whitespace, folding, chomping, escapes, and EOF. These
+comparisons account for documented differences instead of treating the reference
+parser as authoritative:
+
+- The pinned suite and its maintainer's guidance treat EOF as an implicit final
+  line break ([upstream issue 118](https://github.com/yaml/yaml-test-suite/issues/118)).
+  We retain that behavior. LibYAML does not insert the break; the generated
+  comparison supplies it explicitly to the reference reader. This remains an
+  upstream specification ambiguity, not evidence of universal agreement.
+- An indented `#` can begin block scalar content. Over-indented leading empty
+  lines must be rejected, including before such content (suite `S98Z` and
+  [upstream issue 37](https://github.com/yaml/yaml-test-suite/issues/37)). LibYAML
+  can incorrectly treat the content as a comment instead.
+- A tab following detected indentation is block scalar content (spec example
+  8.2). LibYAML can reject it; direct tests preserve the specified interpretation.
+
+Serializer checks send every Unicode scalar value through both readers, exercise
+all f32/f64 exponent fields with boundary mantissas and both signs, and verify
+wide integers, signed zero, infinities, NaN, long keys, and collection-valued keys.
+The serde fuzz target also uses the independent reader for emitted strings and
+values, preventing a shared parser/emitter defect from hiding in a self-round-trip.
 
 The core returns syntax and tags without constructing application values. The
 serde adapter applies the core schema, validates supported tags and duplicate

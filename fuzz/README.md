@@ -11,6 +11,8 @@ cargo +nightly fuzz run typed -- -max_total_time=60 -timeout=2 -max_len=65536 -r
 ```
 
 The serde target checks string and arbitrary-value round trips and error ranges.
+It also reads every successfully serialized string and value with `yaml_serde`,
+so a shared parser/emitter bug cannot hide behind a successful self-round-trip.
 The typed target covers all integer widths, floating point, booleans, characters,
 strings, options, tuples, newtypes, enums, maps, byte visitors, and ignored fields.
 Every type is wrapped in `Spanned<'a, T>` to check its source range, complete

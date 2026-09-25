@@ -1,0 +1,2740 @@
++STR
++DOC
++MAP
+=VAL :name
+=VAL :CI
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+-MAP
+=VAL :on
++MAP
+=VAL :push
++MAP
+=VAL :branches
++SEQ []
+=VAL :main
+-SEQ
+-MAP
+=VAL :pull_request
+=VAL :
+=VAL :workflow_dispatch
+=VAL :
+-MAP
+=VAL :concurrency
++MAP
+=VAL :group
+=VAL :${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+=VAL :cancel-in-progress
+=VAL :true
+-MAP
+=VAL :defaults
++MAP
+=VAL :run
++MAP
+=VAL :shell
+=VAL :bash
+-MAP
+-MAP
+=VAL :env
++MAP
+=VAL :UV_LOCKED
+=VAL :1
+=VAL :CARGO_INCREMENTAL
+=VAL :0
+=VAL :CARGO_NET_RETRY
+=VAL :10
+=VAL :CARGO_PROFILE_DEV_LTO
+=VAL "false
+=VAL :CARGO_PROFILE_DEV_OPT_LEVEL
+=VAL :0
+=VAL :CARGO_TERM_COLOR
+=VAL :always
+=VAL :HAWK_VERSION
+=VAL :0.1.13
+=VAL :RUSTUP_MAX_RETRIES
+=VAL :10
+=VAL :PACKAGE_NAME
+=VAL :ruff
+=VAL :PYTHON_VERSION
+=VAL "3.14
+=VAL :NEXTEST_PROFILE
+=VAL :ci
+=VAL :MDTEST_EXTERNAL
+=VAL "1
+-MAP
+=VAL :jobs
++MAP
+=VAL :determine_changes
++MAP
+=VAL :name
+=VAL "Determine changes
+=VAL :if
+=VAL :${{ github.repository != 'astral-sh/ruff-security' || github.ref != 'refs/heads/main' }}
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :outputs
++MAP
+=VAL :comparison_base
+=VAL :${{ steps.merge_base.outputs.sha }}
+=VAL :parser
+=VAL :${{ steps.check_parser.outputs.changed }}
+=VAL :linter
+=VAL :${{ steps.check_linter.outputs.changed }}
+=VAL :formatter
+=VAL :${{ steps.check_formatter.outputs.changed }}
+=VAL :code
+=VAL :${{ steps.check_code.outputs.changed }}
+=VAL :fuzz
+=VAL :${{ steps.check_fuzzer.outputs.changed }}
+=VAL :ty
+=VAL :${{ steps.check_ty.outputs.changed }}
+=VAL :py-fuzzer
+=VAL :${{ steps.check_py_fuzzer.outputs.changed }}
+=VAL :playground
+=VAL :${{ steps.check_playground.outputs.changed }}
+=VAL :benchmarks
+=VAL :${{ steps.check_benchmarks.outputs.changed }}
+=VAL :release
+=VAL :${{ steps.check_release.outputs.changed }}
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Fetch full history without tags
+=VAL :env
++MAP
+=VAL :GH_TOKEN
+=VAL :${{ github.token }}
+-MAP
+=VAL :run
+=VAL |gh auth setup-git\ngit fetch --no-tags --filter=blob:none --unshallow origin\n
+-MAP
++MAP
+=VAL :name
+=VAL :Determine merge base
+=VAL :id
+=VAL :merge_base
+=VAL :env
++MAP
+=VAL :BASE_REF
+=VAL :${{ github.event.pull_request.base.ref || 'main' }}
+-MAP
+=VAL :run
+=VAL |if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then\n  # The first parent contains any preceding layers in a stacked pull request.\n  sha="$(git rev-parse "${GITHUB_SHA}^1")"\nelse\n  sha="$(git merge-base HEAD "origin/${BASE_REF}")"\nfi\necho "sha=${sha}" >> "$GITHUB_OUTPUT"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if release build inputs changed
+=VAL :id
+=VAL :check_release
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':pyproject.toml' \\\n  ':.github/workflows/build-binaries.yml' \\\n  ':scripts/build_ruff_pgo.py' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the parser code changed
+=VAL :id
+=VAL :check_parser
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':crates/ruff_python_trivia/**' \\\n  ':crates/ruff_source_file/**' \\\n  ':crates/ruff_text_size/**' \\\n  ':crates/ruff_python_ast/**' \\\n  ':crates/ruff_python_parser/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the linter code changed
+=VAL :id
+=VAL :check_linter
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':crates/**' \\\n  ':!crates/ty*/**' \\\n  ':!crates/ruff_python_formatter/**' \\\n  ':!crates/ruff_formatter/**' \\\n  ':!crates/ruff_dev/**' \\\n  ':!crates/ruff_benchmark/**' \\\n  ':scripts/*' \\\n  ':python/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the formatter code changed
+=VAL :id
+=VAL :check_formatter
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':crates/ruff_python_formatter/**' \\\n  ':crates/ruff_formatter/**' \\\n  ':crates/ruff_python_trivia/**' \\\n  ':crates/ruff_python_ast/**' \\\n  ':crates/ruff_source_file/**' \\\n  ':crates/ruff_python_index/**' \\\n  ':crates/ruff_python_index/**' \\\n  ':crates/ruff_text_size/**' \\\n  ':crates/ruff_python_parser/**' \\\n  ':scripts/*' \\\n  ':python/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the fuzzer code changed
+=VAL :id
+=VAL :check_fuzzer
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':fuzz/fuzz_targets/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the py-fuzzer code changed
+=VAL :id
+=VAL :check_py_fuzzer
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- 'python/py-fuzzer/**' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if there was any code related change
+=VAL :id
+=VAL :check_code
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |# NOTE: Do not exclude all Markdown files here, but rather use\n# specific exclude patterns like 'docs/**'), because tests for\n# 'ty' are written in Markdown.\nif git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':!docs/**' \\\n  ':!assets/**' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if there was any playground related change
+=VAL :id
+=VAL :check_playground
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':playground/**' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the ty code changed
+=VAL :id
+=VAL :check_ty
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':crates/ty*/**' \\\n  ':crates/ruff_db/**' \\\n  ':crates/ruff_annotate_snippets/**' \\\n  ':crates/ruff_python_ast/**' \\\n  ':crates/ruff_python_edits/**' \\\n  ':crates/ruff_python_parser/**' \\\n  ':crates/ruff_python_trivia/**' \\\n  ':crates/ruff_source_file/**' \\\n  ':crates/ruff_text_size/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check if the benchmark code changed
+=VAL :id
+=VAL :check_benchmarks
+=VAL :env
++MAP
+=VAL :MERGE_BASE
+=VAL :${{ steps.merge_base.outputs.sha }}
+-MAP
+=VAL :run
+=VAL |if git diff --quiet "${MERGE_BASE}...HEAD" -- \\\n  ':Cargo.toml' \\\n  ':Cargo.lock' \\\n  ':rust-toolchain.toml' \\\n  ':cargo/config.toml' \\\n  ':crates/ruff_benchmark/**' \\\n  ':.github/workflows/ci.yaml' \\\n; then\n    echo "changed=false" >> "$GITHUB_OUTPUT"\nelse\n    echo "changed=true" >> "$GITHUB_OUTPUT"\nfi\n
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-fmt
++MAP
+=VAL :name
+=VAL "cargo fmt
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup component add rustfmt
+-MAP
++MAP
+=VAL :run
+=VAL :cargo fmt --all --check
+-MAP
+-SEQ
+-MAP
+=VAL :shellcheck
++MAP
+=VAL :name
+=VAL "shellcheck
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :timeout-minutes
+=VAL :5
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version
+=VAL "1.27.0
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Run ShellCheck
+=VAL :env
++MAP
+=VAL :GOSUMDB
+=VAL :sum.golang.org
+-MAP
+=VAL :run
+=VAL |files=()\nwhile IFS= read -r -d '' file; do\n  files+=("${file}")\ndone < <(git ls-files -z '*.sh')\nif ((${#files[@]} == 0)); then\n  exit 0\nfi\ngo run github.com/wasilibs/go-shellcheck/cmd/shellcheck@v0.11.1 "${files[@]}"\n
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-clippy
++MAP
+=VAL :name
+=VAL "cargo clippy
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main' }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL |rustup component add clippy\nrustup target add wasm32-unknown-unknown\n
+-MAP
++MAP
+=VAL :name
+=VAL "Clippy
+=VAL :run
+=VAL :cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+-MAP
++MAP
+=VAL :name
+=VAL "Clippy (wasm)
+=VAL :run
+=VAL :cargo clippy -p ruff_wasm -p ty_wasm --target wasm32-unknown-unknown --all-features --locked -- -D warnings
+-MAP
+-SEQ
+-MAP
+=VAL :hawk
++MAP
+=VAL :name
+=VAL "cargo hawk
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main' }}
+=VAL :timeout-minutes
+=VAL :15
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :workspaces
+=VAL ". -> target/hawk
+=VAL :cache-workspace-crates
+=VAL "false
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup toolchain install 1.98.0
+-MAP
++MAP
+=VAL :name
+=VAL "Install Hawk
+=VAL :run
+=VAL |curl --proto '=https' --tlsv1.2 -LsSf \\\n  "https://github.com/astral-sh/hawk/releases/download/${HAWK_VERSION}/cargo-hawk-installer.sh" | sh\n
+-MAP
++MAP
+=VAL :name
+=VAL "Hawk
+=VAL :run
+=VAL :cargo +1.98.0 hawk check --target-dir target/hawk -D warnings
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-publish-dry-run
++MAP
+=VAL :name
+=VAL "cargo publish dry-run
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-22.04-8' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "cargo publish dry-run
+=VAL :run
+=VAL :cargo publish --workspace --dry-run
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-test-linux
++MAP
+=VAL :name
+=VAL "cargo test (linux)
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :shared-key
+=VAL :ruff-linux-debug
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL "Install uv
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+=VAL :enable-cache
+=VAL "true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :ty mdtests (GitHub annotations)
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.ty == 'true' }}
+=VAL :env
++MAP
+=VAL :NO_COLOR
+=VAL :1
+=VAL :MDTEST_GITHUB_ANNOTATIONS_FORMAT
+=VAL :1
+-MAP
+=VAL :run
+=VAL :cargo test -p ty_python_semantic --test mdtest || true
+-MAP
++MAP
+=VAL :name
+=VAL "Run tests
+=VAL :run
+=VAL :uv run --locked --only-dev cargo insta test --all-features --unreferenced reject --test-runner nextest --disable-nextest-doctest
+-MAP
++MAP
+=VAL :name
+=VAL "Run doctests
+=VAL :run
+=VAL :cargo test --doc --all-features
+-MAP
++MAP
+=VAL :name
+=VAL :Dogfood ty on py-fuzzer
+=VAL :run
+=VAL :uv run --quiet --project=./python/py-fuzzer cargo run --quiet -p ty check --project=./python/py-fuzzer --color=always
+-MAP
++MAP
+=VAL :name
+=VAL :Dogfood ty on ty_benchmark
+=VAL :run
+=VAL :uv run --quiet --project=./scripts/ty_benchmark cargo run --quiet -p ty check --project=./scripts/ty_benchmark --color=always
+-MAP
++MAP
+=VAL :name
+=VAL :Dogfood ty on scripts
+=VAL :env
++MAP
+=VAL :TY_UV
+=VAL :scripts
+=VAL :UV_LOCKED
+=VAL "true
+-MAP
+=VAL :run
+=VAL :cargo run --quiet -p ty check scripts/*.py --color=always
+-MAP
++MAP
+=VAL :run
+=VAL :cargo doc --all --no-deps
+=VAL :env
++MAP
+=VAL :RUSTDOCFLAGS
+=VAL "-D warnings
+-MAP
+-MAP
++MAP
+=VAL :run
+=VAL :cargo doc --no-deps -p ty_python_semantic -p ty_python_core -p ty_module_resolver -p ty_site_packages -p ty_combine -p ty_project -p ty_ide -p ty_wasm -p ty_vendored -p ty_static -p ty -p ty_test -p ruff_db -p ruff_python_formatter --document-private-items
+=VAL :env
++MAP
+=VAL :RUSTDOCFLAGS
+=VAL "-D warnings
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-test-linux-release
++MAP
+=VAL :name
+=VAL "cargo test (linux, release)
+=VAL :runs-on
+=VAL :depot-ubuntu-22.04-16
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL |github.repository == 'astral-sh/ruff' &&\n!contains(github.event.pull_request.labels.*.name, 'no-test') &&\n(needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main')\n
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_PROFILING_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL "Install uv
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+=VAL :enable-cache
+=VAL "true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Run tests
+=VAL :run
+=VAL :uv run --locked --only-dev cargo nextest run --cargo-profile profiling --all-features
+-MAP
++MAP
+=VAL :name
+=VAL "Run doctests
+=VAL :run
+=VAL :cargo test --doc --profile profiling --all-features
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-test-other
++MAP
+=VAL :strategy
++MAP
+=VAL :matrix
++MAP
+=VAL :platform
++SEQ
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-latest' }}
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'namespace-profile-macos-15' || 'macos-latest' }}
+-SEQ
+-MAP
+-MAP
+=VAL :name
+=VAL "cargo test (${{ matrix.platform }})
+=VAL :runs-on
+=VAL :${{ matrix.platform }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+=VAL :cache-bin
+=VAL "false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install uv (Windows)
+=VAL :if
+=VAL :runner.os == 'Windows'
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff
+=VAL :enable-cache
+=VAL "true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install uv (macOS)
+=VAL :if
+=VAL :runner.os == 'macOS'
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b
+=VAL :enable-cache
+=VAL "true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Run tests
+=VAL :run
+=VAL |uv run --locked --only-dev cargo nextest run --all-features --profile ci\ncargo test --all-features --doc\n
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-test-wasm
++MAP
+=VAL :name
+=VAL "cargo test (wasm)
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup target add wasm32-unknown-unknown
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+=VAL :with
++MAP
+=VAL :node-version
+=VAL :24.19.0
+=VAL :cache
+=VAL "npm
+=VAL :cache-dependency-path
+=VAL :playground/package-lock.json
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa
+=VAL :with
++MAP
+=VAL :version
+=VAL :v0.13.1
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Test ruff_wasm
+=VAL :run
+=VAL |cd crates/ruff_wasm\nwasm-pack test --node\n
+-MAP
++MAP
+=VAL :name
+=VAL "Test ty_wasm
+=VAL :run
+=VAL |cd crates/ty_wasm\nwasm-pack test --node\n
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-build-msrv
++MAP
+=VAL :name
+=VAL "cargo build (msrv)
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-24.04-8' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :SebRollen/toml-action@b1b3628f55fc3a28208d4203ada8b737e9687876
+=VAL :id
+=VAL :msrv
+=VAL :with
++MAP
+=VAL :file
+=VAL "Cargo.toml
+=VAL :field
+=VAL "workspace.package.rust-version
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :env
++MAP
+=VAL :MSRV
+=VAL :${{ steps.msrv.outputs.value }}
+-MAP
+=VAL :run
+=VAL :rustup default "${MSRV}"
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL "Build tests
+=VAL :env
++MAP
+=VAL :MSRV
+=VAL :${{ steps.msrv.outputs.value }}
+-MAP
+=VAL :run
+=VAL :cargo "+${MSRV}" test --no-run --all-features
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-fuzz-build
++MAP
+=VAL :name
+=VAL "cargo fuzz build
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ github.ref == 'refs/heads/main' || needs.determine_changes.outputs.fuzz == 'true' || needs.determine_changes.outputs.code == 'true' }}
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :workspaces
+=VAL "fuzz -> target
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :run
+=VAL :uv run --only-dev cargo fuzz build -s none
+-MAP
+-SEQ
+-MAP
+=VAL :fuzz-parser
++MAP
+=VAL :name
+=VAL "fuzz parser
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.parser == 'true' || needs.determine_changes.outputs.py-fuzzer == 'true') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :FORCE_COLOR
+=VAL :1
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :shared-key
+=VAL :ruff-linux-debug
+=VAL :save-if
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL :Build Ruff binary
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :run
+=VAL :cargo build --bin ruff
+-MAP
++MAP
+=VAL :name
+=VAL :Fuzz
+=VAL :run
+=VAL |(\n  uv run \\\n  --python="${PYTHON_VERSION}" \\\n  --project=./python/py-fuzzer \\\n  --locked \\\n  fuzz \\\n  --test-executable=target/debug/ruff \\\n  --bin=ruff \\\n  0-500\n)\n
+-MAP
+-SEQ
+-MAP
+=VAL :scripts
++MAP
+=VAL :name
+=VAL "test scripts
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :5
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup component add rustfmt
+-MAP
++MAP
+=VAL :run
+=VAL :python crates/ruff_python_ast/generate.py
+-MAP
++MAP
+=VAL :run
+=VAL :python crates/ruff_python_formatter/generate.py
+-MAP
++MAP
+=VAL :run
+=VAL :test -z "$(git status --porcelain)"
+-MAP
++MAP
+=VAL :run
+=VAL :./scripts/add_rule.py --name DoTheThing --prefix F --code 999 --linter pyflakes --category correctness
+-MAP
++MAP
+=VAL :run
+=VAL :cargo check
+-MAP
++MAP
+=VAL :run
+=VAL |./scripts/add_plugin.py test --url https://pypi.org/project/-test/0.1.0/ --prefix TST\n./scripts/add_rule.py --name FirstRule --prefix TST --code 001 --linter test --category correctness\n
+-MAP
++MAP
+=VAL :run
+=VAL :cargo check
+-MAP
++MAP
+=VAL :run
+=VAL :uv run --directory=./python/py-fuzzer mypy
+-MAP
++MAP
+=VAL :run
+=VAL :uv run --directory=./python/py-fuzzer ruff format --check
+-MAP
++MAP
+=VAL :run
+=VAL :uv run --directory=./python/py-fuzzer ruff check
+-MAP
+-SEQ
+-MAP
+=VAL :ecosystem
++MAP
+=VAL :name
+=VAL "ecosystem
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-24.04-8' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL |!contains(github.event.pull_request.labels.*.name, 'no-test') && github.event_name == 'pull_request' &&\n(\n  needs.determine_changes.outputs.linter == 'true' ||\n  needs.determine_changes.outputs.formatter == 'true'\n)\n
+=VAL :timeout-minutes
+=VAL :20
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :ref
+=VAL :${{ needs.determine_changes.outputs.comparison_base }}
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :python-version
+=VAL :${{ env.PYTHON_VERSION }}
+=VAL :activate-environment
+=VAL :true
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :shared-key
+=VAL :ruff-linux-debug
+=VAL :save-if
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Build baseline version
+=VAL :run
+=VAL |cargo build --bin ruff\nmv target/debug/ruff target/debug/ruff-baseline\n
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+=VAL :clean
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Build comparison version
+=VAL :run
+=VAL :cargo build --bin ruff
+-MAP
++MAP
+=VAL :name
+=VAL :Install ruff-ecosystem
+=VAL :run
+=VAL |uv pip install ./python/ruff-ecosystem\n
+-MAP
++MAP
+=VAL :name
+=VAL :Run `ruff check` stable ecosystem check
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.linter == 'true' }}
+=VAL :run
+=VAL |# Set pipefail to avoid hiding errors with tee\nset -eo pipefail\n\nruff-ecosystem check ./target/debug/ruff-baseline ./target/debug/ruff --cache "$RUNNER_TEMP/ruff-ecosystem-checkouts" --output-format markdown | tee ecosystem-result-check-stable\n\ncat ecosystem-result-check-stable > "$GITHUB_STEP_SUMMARY"\necho "### Linter (stable)"  > ecosystem-result\ncat ecosystem-result-check-stable >> ecosystem-result\necho "" >> ecosystem-result\n
+-MAP
++MAP
+=VAL :name
+=VAL :Run `ruff check` preview ecosystem check
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.linter == 'true' }}
+=VAL :run
+=VAL |# Set pipefail to avoid hiding errors with tee\nset -eo pipefail\n\nruff-ecosystem check ./target/debug/ruff-baseline ./target/debug/ruff --cache "$RUNNER_TEMP/ruff-ecosystem-checkouts" --output-format markdown --force-preview | tee ecosystem-result-check-preview\n\ncat ecosystem-result-check-preview > "$GITHUB_STEP_SUMMARY"\necho "### Linter (preview)" >> ecosystem-result\ncat ecosystem-result-check-preview >> ecosystem-result\necho "" >> ecosystem-result\n
+-MAP
++MAP
+=VAL :name
+=VAL :Run `ruff format` stable ecosystem check
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.formatter == 'true' }}
+=VAL :run
+=VAL |# Set pipefail to avoid hiding errors with tee\nset -eo pipefail\n\nruff-ecosystem format ./target/debug/ruff-baseline ./target/debug/ruff --cache "$RUNNER_TEMP/ruff-ecosystem-checkouts" --output-format markdown | tee ecosystem-result-format-stable\n\ncat ecosystem-result-format-stable > "$GITHUB_STEP_SUMMARY"\necho "### Formatter (stable)" >> ecosystem-result\ncat ecosystem-result-format-stable >> ecosystem-result\necho "" >> ecosystem-result\n
+-MAP
++MAP
+=VAL :name
+=VAL :Run `ruff format` preview ecosystem check
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.formatter == 'true' }}
+=VAL :run
+=VAL |# Set pipefail to avoid hiding errors with tee\nset -eo pipefail\n\nruff-ecosystem format ./target/debug/ruff-baseline ./target/debug/ruff --cache "$RUNNER_TEMP/ruff-ecosystem-checkouts" --output-format markdown --force-preview | tee ecosystem-result-format-preview\n\ncat ecosystem-result-format-preview > "$GITHUB_STEP_SUMMARY"\necho "### Formatter (preview)" >> ecosystem-result\ncat ecosystem-result-format-preview >> ecosystem-result\necho "" >> ecosystem-result\n
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :name
+=VAL :Upload Results
+=VAL :with
++MAP
+=VAL :name
+=VAL :ecosystem-result
+=VAL :path
+=VAL :ecosystem-result
+=VAL :if-no-files-found
+=VAL "error
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Fail on ecosystem errors
+=VAL :run
+=VAL |if grep -q "project error" ecosystem-result; then\n  exit 1\nfi\n
+-MAP
+-SEQ
+-MAP
+=VAL :fuzz-ty
++MAP
+=VAL :name
+=VAL "Fuzz for new ty panics
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
+=VAL :needs
++SEQ
+=VAL :determine_changes
+-SEQ
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && github.event_name == 'pull_request' && (needs.determine_changes.outputs.ty == 'true' || needs.determine_changes.outputs.py-fuzzer == 'true') }}
+=VAL :timeout-minutes
+=VAL :${{ github.repository == 'astral-sh/ruff' && 10 || 20 }}
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Fetch full history without tags
+=VAL :env
++MAP
+=VAL :GH_TOKEN
+=VAL :${{ github.token }}
+-MAP
+=VAL :run
+=VAL |gh auth setup-git\ngit fetch --no-tags --filter=blob:none --unshallow origin\n
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL :Fuzz
+=VAL :env
++MAP
+=VAL :FORCE_COLOR
+=VAL :1
+=VAL :MERGE_BASE
+=VAL :${{ needs.determine_changes.outputs.comparison_base }}
+=VAL :CARGO_PROFILE_PROFILING_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :run
+=VAL |echo "new commit"\ngit rev-list --format=%s --max-count=1 "$GITHUB_SHA"\ncargo build --profile=profiling --bin=ty\nmv target/profiling/ty ty-new\n\ngit checkout -b old_commit "$MERGE_BASE"\necho "old commit (merge base)"\ngit rev-list --format=%s --max-count=1 old_commit\ncargo build --profile=profiling --bin=ty\nmv target/profiling/ty ty-old\n\n(\n  uv run \\\n  --python="${PYTHON_VERSION}" \\\n  --project=./python/py-fuzzer \\\n  --locked \\\n  fuzz \\\n  --test-executable=ty-new \\\n  --baseline-executable=ty-old \\\n  --only-new-bugs \\\n  --bin=ty \\\n  0-1000\n)\n
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-deny
++MAP
+=VAL :name
+=VAL "cargo deny
+=VAL :timeout-minutes
+=VAL :10
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main' }}
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.11
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Check licenses
+=VAL :run
+=VAL :uv run --only-dev cargo deny --locked --all-features check licenses
+-MAP
++MAP
+=VAL :name
+=VAL "Check sources
+=VAL :run
+=VAL :uv run --only-dev cargo deny --locked --all-features check sources
+-MAP
++MAP
+=VAL :name
+=VAL "Check workspace dependency features and build-script allowlist
+=VAL :run
+=VAL :uv run --no-project --locked scripts/check-cargo-bans.py
+-MAP
++MAP
+=VAL :name
+=VAL "Check bans
+=VAL :run
+=VAL :uv run --only-dev cargo deny --locked --all-features check bans
+-MAP
+-SEQ
+-MAP
+=VAL :cargo-shear
++MAP
+=VAL :name
+=VAL "cargo shear
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main' }}
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :run
+=VAL :uv run --only-dev cargo shear --deny-warnings
+-MAP
+-SEQ
+-MAP
+=VAL :ty-completion-evaluation
++MAP
+=VAL :name
+=VAL "ty completion evaluation
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.ty == 'true' || github.ref == 'refs/heads/main' }}
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_PROFILING_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL "Run ty completion evaluation
+=VAL :run
+=VAL :cargo run --profile profiling --package ty_completion_eval -- all --threshold 0.4 --tasks /tmp/completion-evaluation-tasks.csv
+-MAP
++MAP
+=VAL :name
+=VAL "Ensure there are no changes
+=VAL :run
+=VAL :diff ./crates/ty_completion_eval/completion-evaluation-tasks.csv /tmp/completion-evaluation-tasks.csv
+-MAP
+-SEQ
+-MAP
+=VAL :python-package
++MAP
+=VAL :name
+=VAL "python package
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :timeout-minutes
+=VAL :20
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') }}
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+=VAL :with
++MAP
+=VAL :python-version
+=VAL :${{ env.PYTHON_VERSION }}
+=VAL :architecture
+=VAL :x64
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Prep README.md
+=VAL :run
+=VAL :python scripts/transform_readme.py --target pypi
+-MAP
++MAP
+=VAL :name
+=VAL "Build wheels
+=VAL :uses
+=VAL :PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b
+=VAL :with
++MAP
+=VAL :args
+=VAL :--out dist
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Test wheel
+=VAL :run
+=VAL |pip install --force-reinstall --find-links dist "${PACKAGE_NAME}"\nruff --help\npython -m ruff --help\n
+-MAP
++MAP
+=VAL :name
+=VAL "Remove wheels from cache
+=VAL :run
+=VAL :rm -rf target/wheels
+-MAP
+-SEQ
+-MAP
+=VAL :pgo
++MAP
+=VAL :name
+=VAL "PGO
+=VAL :runs-on
+=VAL :depot-ubuntu-24.04-8
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ needs.determine_changes.outputs.release == 'true' && !contains(github.event.pull_request.labels.*.name, 'no-build') }}
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+=VAL :with
++MAP
+=VAL :python-version
+=VAL :${{ env.PYTHON_VERSION }}
+=VAL :architecture
+=VAL :x64
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install LLVM profiling tools
+=VAL :run
+=VAL :rustup component add llvm-tools-preview
+-MAP
++MAP
+=VAL :name
+=VAL "Run PGO pipeline
+=VAL :run
+=VAL :python scripts/build_ruff_pgo.py --debug
+-MAP
+-SEQ
+-MAP
+=VAL :prek
++MAP
+=VAL :name
+=VAL "prek
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+=VAL :with
++MAP
+=VAL :node-version
+=VAL :24
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Cache prek
+=VAL :uses
+=VAL :actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+=VAL :with
++MAP
+=VAL :path
+=VAL :~/.cache/prek
+=VAL :key
+=VAL :prek-${{ hashFiles('.pre-commit-config.yaml') }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Run prek
+=VAL :run
+=VAL |echo '```console' > "$GITHUB_STEP_SUMMARY"\n# Enable color output for prek and remove it for the summary\n# Use --hook-stage=manual to enable slower hooks that are skipped by default\nSKIP=rustfmt uv run --only-dev --locked prek run --all-files --show-diff-on-failure --color always --hook-stage manual | \\\n  tee >(sed -E 's/\\x1B\\[([0-9]{1,2}(;[0-9]{1,2})*)?[mGK]//g' >> "$GITHUB_STEP_SUMMARY") >&1\nexit_code="${PIPESTATUS[0]}"\necho '```' >> "$GITHUB_STEP_SUMMARY"\nexit "$exit_code"\n
+-MAP
+-SEQ
+-MAP
+=VAL :docs
++MAP
+=VAL :name
+=VAL "mkdocs
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL :Install uv
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :python-version
+=VAL :3.13
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Update README File
+=VAL :run
+=VAL :uv run scripts/transform_readme.py --target mkdocs
+-MAP
++MAP
+=VAL :name
+=VAL "Generate docs
+=VAL :run
+=VAL :uv run scripts/generate_mkdocs.py
+-MAP
++MAP
+=VAL :name
+=VAL "Check docs formatting
+=VAL :run
+=VAL :uv run scripts/check_docs_formatted.py
+-MAP
++MAP
+=VAL :name
+=VAL "Build docs
+=VAL :run
+=VAL :uv run --only-group=docs mkdocs build --strict -f mkdocs.yml
+-MAP
+-SEQ
+-MAP
+=VAL :check-formatter-instability-and-black-similarity
++MAP
+=VAL :name
+=VAL "formatter instabilities and black similarity
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.formatter == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :timeout-minutes
+=VAL :10
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Run checks
+=VAL :run
+=VAL :scripts/formatter_ecosystem_checks.sh
+-MAP
++MAP
+=VAL :name
+=VAL "Github step summary
+=VAL :run
+=VAL :cat target/formatter-ecosystem/stats.txt > "$GITHUB_STEP_SUMMARY"
+-MAP
++MAP
+=VAL :name
+=VAL "Remove checkouts from cache
+=VAL :run
+=VAL :rm -r target/formatter-ecosystem
+-MAP
+-SEQ
+-MAP
+=VAL :check-ruff-lsp
++MAP
+=VAL :name
+=VAL "test ruff-lsp
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :timeout-minutes
+=VAL :5
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL :${{ !contains(github.event.pull_request.labels.*.name, 'no-test') && (needs.determine_changes.outputs.code == 'true' || github.ref == 'refs/heads/main') }}
+=VAL :env
++MAP
+=VAL :CARGO_PROFILE_DEV_DEBUG
+=VAL :line-tables-only
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :name
+=VAL "Checkout ruff source
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :shared-key
+=VAL :ruff-linux-debug
+=VAL :save-if
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Install mold
+=VAL :uses
+=VAL :rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+-MAP
++MAP
+=VAL :name
+=VAL :Build Ruff binary
+=VAL :run
+=VAL :cargo build -p ruff --bin ruff
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :name
+=VAL "Checkout ruff-lsp source
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+=VAL :repository
+=VAL "astral-sh/ruff-lsp
+=VAL :path
+=VAL :ruff-lsp
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+=VAL :python-version
+=VAL "3.12
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Install ruff-lsp dependencies
+=VAL :run
+=VAL :uv sync --locked --only-group ruff-lsp-test --python 3.12
+-MAP
++MAP
+=VAL :name
+=VAL :Run ruff-lsp tests
+=VAL :run
+=VAL |# Setup development binary\nexport PATH="${PWD}/target/debug:${PWD}/.venv/bin:${PATH}"\nruff version\n\ncd ruff-lsp\npytest\n
+-MAP
+-SEQ
+-MAP
+=VAL :check-playground
++MAP
+=VAL :name
+=VAL "check playground
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :timeout-minutes
+=VAL :5
+=VAL :needs
++SEQ
+=VAL :determine_changes
+-SEQ
+=VAL :if
+=VAL :${{ (needs.determine_changes.outputs.playground == 'true') }}
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup target add wasm32-unknown-unknown
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+=VAL :with
++MAP
+=VAL :node-version
+=VAL :24.19.0
+=VAL :cache
+=VAL "npm
+=VAL :cache-dependency-path
+=VAL |playground/package-lock.json\nplayground/deploy/package-lock.json\n
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :jetli/wasm-bindgen-action@20b33e20595891ab1a0ed73145d8a21fc96e7c29
+-MAP
++MAP
+=VAL :name
+=VAL "Check deployment dependencies
+=VAL :env
++MAP
+=VAL :WRANGLER_SEND_METRICS
+=VAL "false
+=VAL :WRANGLER_SEND_ERROR_REPORTS
+=VAL "false
+-MAP
+=VAL :run
+=VAL |npm ci --ignore-scripts\n./node_modules/.bin/wrangler --version\n
+=VAL :working-directory
+=VAL :playground/deploy
+-MAP
++MAP
+=VAL :name
+=VAL "Install Node dependencies
+=VAL :run
+=VAL :npm ci --ignore-scripts
+=VAL :working-directory
+=VAL :playground
+-MAP
++MAP
+=VAL :name
+=VAL "Build playgrounds
+=VAL :run
+=VAL :npm run dev:build
+=VAL :working-directory
+=VAL :playground
+-MAP
++MAP
+=VAL :name
+=VAL "Run TypeScript checks
+=VAL :run
+=VAL :npm run check
+=VAL :working-directory
+=VAL :playground
+-MAP
++MAP
+=VAL :name
+=VAL "Check formatting
+=VAL :run
+=VAL :npm run fmt:check
+=VAL :working-directory
+=VAL :playground
+-MAP
+-SEQ
+-MAP
+=VAL :benchmarks-instrumented-ruff
++MAP
+=VAL :name
+=VAL "benchmarks instrumented (ruff)
+=VAL :runs-on
+=VAL :depot-ubuntu-24.04
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL |github.repository == 'astral-sh/ruff' &&\n(\n  github.ref == 'refs/heads/main' ||\n  needs.determine_changes.outputs.formatter == 'true' ||\n  needs.determine_changes.outputs.linter == 'true' ||\n  needs.determine_changes.outputs.parser == 'true' ||\n  needs.determine_changes.outputs.benchmarks == 'true'\n)\n
+=VAL :timeout-minutes
+=VAL :20
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Checkout Branch
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Build benchmarks
+=VAL :run
+=VAL :uv run --only-dev cargo codspeed build -m simulation -m memory --features "codspeed,ruff_instrumented" --profile profiling --no-default-features -p ruff_benchmark --bench formatter --bench lexer --bench linter --bench parser
+-MAP
++MAP
+=VAL :name
+=VAL "Configure apt mirror fallback
+=VAL :run
+=VAL |# Let CodSpeed's dependency installation move past unhealthy mirrors quickly.\ncat /etc/apt/apt-mirrors.txt\nprintf '%s\\n' \\\n  'Acquire::Retries "0";' \\\n  'Acquire::http::Timeout "10";' \\\n  'Acquire::https::Timeout "10";' \\\n  | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null\n
+-MAP
++MAP
+=VAL :name
+=VAL "Run benchmarks
+=VAL :uses
+=VAL :CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8
+=VAL :with
++MAP
+=VAL :mode
+=VAL "simulation,memory
+=VAL :run
+=VAL :uv run --only-dev cargo codspeed run
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :benchmarks-instrumented-ty-build
++MAP
+=VAL :name
+=VAL "benchmarks instrumented ty (build)
+=VAL :runs-on
+=VAL :depot-ubuntu-24.04-4
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL |github.repository == 'astral-sh/ruff' &&\n(\n  github.ref == 'refs/heads/main' ||\n  needs.determine_changes.outputs.ty == 'true' ||\n  needs.determine_changes.outputs.benchmarks == 'true'\n)\n
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Checkout Branch
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Build benchmarks
+=VAL :run
+=VAL :uv run --only-dev cargo codspeed build -m simulation -m memory --features "codspeed,module_resolution,ty_instrumented" --profile profiling --no-default-features -p ruff_benchmark --bench module_resolution --bench ty --bench ty_constraint_set
+-MAP
++MAP
+=VAL :name
+=VAL "Upload benchmark binary
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :benchmarks-instrumented-ty-binary
+=VAL :compression-level
+=VAL :1
+=VAL :path
+=VAL :target/codspeed
+=VAL :if-no-files-found
+=VAL "error
+=VAL :retention-days
+=VAL :1
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :benchmarks-instrumented-ty-run
++MAP
+=VAL :name
+=VAL "benchmarks instrumented ty (${{ matrix.mode }}: ${{ matrix.name }})
+=VAL :runs-on
+=VAL :depot-ubuntu-24.04
+=VAL :needs
+=VAL :benchmarks-instrumented-ty-build
+=VAL :timeout-minutes
+=VAL :20
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :strategy
++MAP
+=VAL :fail-fast
+=VAL :false
+=VAL :matrix
++MAP
+=VAL :include
++SEQ
++MAP
+=VAL :name
+=VAL :micro-a-l
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL 'ty_micro\\[[a-l]
+=VAL :mode
+=VAL :simulation
+-MAP
++MAP
+=VAL :name
+=VAL :micro-m-z
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL 'ty_micro\\[[^a-l]
+=VAL :mode
+=VAL :simulation
+-MAP
++MAP
+=VAL :name
+=VAL :micro-a-l
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL 'ty_micro\\[[a-l]
+=VAL :mode
+=VAL :memory
+-MAP
++MAP
+=VAL :name
+=VAL :micro-m-z
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL 'ty_micro\\[[^a-l]
+=VAL :mode
+=VAL :memory
+-MAP
++MAP
+=VAL :name
+=VAL :constraint_set
+=VAL :target
+=VAL :ty_constraint_set
+=VAL :filter
+=VAL :micro
+=VAL :mode
+=VAL :simulation
+-MAP
++MAP
+=VAL :name
+=VAL :constraint_set
+=VAL :target
+=VAL :ty_constraint_set
+=VAL :filter
+=VAL :micro
+=VAL :mode
+=VAL :memory
+-MAP
++MAP
+=VAL :name
+=VAL :projects
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL "check_file|anyio|attrs|hydra|datetype
+=VAL :mode
+=VAL :simulation
+-MAP
++MAP
+=VAL :name
+=VAL :projects
+=VAL :target
+=VAL :ty
+=VAL :filter
+=VAL "check_file|anyio|attrs|hydra|datetype
+=VAL :mode
+=VAL :memory
+-MAP
++MAP
+=VAL :name
+=VAL :module_resolution
+=VAL :target
+=VAL :module_resolution
+=VAL :filter
+=VAL :ty_module_resolver
+=VAL :mode
+=VAL :simulation
+-MAP
+-SEQ
+-MAP
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Checkout Branch
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Download benchmark binary
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :name
+=VAL :benchmarks-instrumented-ty-binary
+=VAL :path
+=VAL :target/codspeed
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Restore binary permissions
+=VAL :run
+=VAL :find target/codspeed -type f -exec chmod +x {} +
+-MAP
++MAP
+=VAL :name
+=VAL "Configure apt mirror fallback
+=VAL :if
+=VAL :matrix.mode == 'simulation'
+=VAL :run
+=VAL |# Let CodSpeed's dependency installation move past unhealthy mirrors quickly.\ncat /etc/apt/apt-mirrors.txt\nprintf '%s\\n' \\\n  'Acquire::Retries "0";' \\\n  'Acquire::http::Timeout "10";' \\\n  'Acquire::https::Timeout "10";' \\\n  | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null\n
+-MAP
++MAP
+=VAL :name
+=VAL "Run benchmarks
+=VAL :uses
+=VAL :CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8
+=VAL :with
++MAP
+=VAL :mode
+=VAL :${{ matrix.mode }}
+=VAL :run
+=VAL :uv run --only-dev cargo codspeed run --bench "${{ matrix.target }}" "${{ matrix.filter }}"
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :benchmarks-walltime-build
++MAP
+=VAL :name
+=VAL "benchmarks walltime (build)
+=VAL :runs-on
+=VAL :depot-ubuntu-22.04-arm-4
+=VAL :needs
+=VAL :determine_changes
+=VAL :if
+=VAL |github.repository == 'astral-sh/ruff' &&\n(\n  !contains(github.event.pull_request.labels.*.name, 'no-test') &&\n  (\n    needs.determine_changes.outputs.ty == 'true' ||\n    needs.determine_changes.outputs.benchmarks == 'true' ||\n    github.ref == 'refs/heads/main'\n  )\n)\n
+=VAL :timeout-minutes
+=VAL :20
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Checkout Branch
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+=VAL :with
++MAP
+=VAL :save-if
+=VAL :${{ github.ref == 'refs/heads/main' }}
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "afb6291f3f0a6b4521fc67b947822506c41dde5b60d2189dd8f3695b2ac8c9e7
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Install Rust toolchain
+=VAL :run
+=VAL :rustup show
+-MAP
++MAP
+=VAL :name
+=VAL "Build benchmarks
+=VAL :run
+=VAL :uv run --only-dev cargo codspeed build -m walltime --features "codspeed,ty_ide,ty_walltime" --profile profiling --no-default-features -p ruff_benchmark --bench ty_walltime --bench ty_script --bench ty_ide
+-MAP
++MAP
+=VAL :name
+=VAL "Upload benchmark binary
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :benchmarks-walltime-binary
+=VAL :compression-level
+=VAL :1
+=VAL :path
+=VAL :target/codspeed
+=VAL :if-no-files-found
+=VAL "error
+=VAL :retention-days
+=VAL :1
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :benchmarks-walltime-run
++MAP
+=VAL :name
+=VAL "benchmarks walltime (${{ matrix.benchmark.name }})
+=VAL :runs-on
+=VAL :codspeed-macro
+=VAL :needs
+=VAL :benchmarks-walltime-build
+=VAL :timeout-minutes
+=VAL :20
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :strategy
++MAP
+=VAL :matrix
++MAP
+=VAL :benchmark
++SEQ
++MAP
+=VAL :name
+=VAL :script
+=VAL :target
+=VAL :ty_script
+-MAP
++MAP
+=VAL :name
+=VAL :ide
+=VAL :target
+=VAL :ty_ide
+=VAL :filter
+=VAL :auto_import
+-MAP
++MAP
+=VAL :name
+=VAL :sympy
+=VAL :target
+=VAL :ty_walltime
+=VAL :filter
+=VAL :sympy
+-MAP
++MAP
+=VAL :name
+=VAL "pandas|tanjun
+=VAL :target
+=VAL :ty_walltime
+=VAL :filter
+=VAL "pandas|tanjun
+-MAP
++MAP
+=VAL :name
+=VAL "colour_science|static_frame
+=VAL :target
+=VAL :ty_walltime
+=VAL :filter
+=VAL "colour_science|static_frame
+-MAP
++MAP
+=VAL :name
+=VAL "pydantic|freqtrade|multithreaded|altair
+=VAL :target
+=VAL :ty_walltime
+=VAL :filter
+=VAL "pydantic|freqtrade|multithreaded|altair
+-MAP
+-SEQ
+-MAP
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Checkout Branch
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+=VAL :with
++MAP
+=VAL :version
+=VAL "0.12.18
+=VAL :checksum
+=VAL "afb6291f3f0a6b4521fc67b947822506c41dde5b60d2189dd8f3695b2ac8c9e7
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Download benchmark binary
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :name
+=VAL :benchmarks-walltime-binary
+=VAL :path
+=VAL :target/codspeed
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Restore binary permissions
+=VAL :run
+=VAL :find target/codspeed -type f -exec chmod +x {} +
+-MAP
++MAP
+=VAL :name
+=VAL "Run benchmarks
+=VAL :uses
+=VAL :CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8
+=VAL :env
++MAP
+=VAL :CODSPEED_PERF_ENABLED
+=VAL :false
+=VAL :UV_LOCKED
+=VAL :0
+-MAP
+=VAL :with
++MAP
+=VAL :mode
+=VAL :walltime
+=VAL :run
+=VAL :uv run --locked --only-dev cargo codspeed run --bench "${{ matrix.benchmark.target }}" -m walltime "${{ matrix.benchmark.filter }}"
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :required-checks-passed
++MAP
+=VAL :name
+=VAL "all required checks passed
+=VAL :if
+=VAL :${{ always() && github.ref != 'refs/heads/main' }}
+=VAL :needs
++SEQ
+=VAL :determine_changes
+=VAL :cargo-fmt
+=VAL :cargo-clippy
+=VAL :cargo-deny
+=VAL :hawk
+=VAL :cargo-test-linux
+=VAL :cargo-test-wasm
+=VAL :cargo-build-msrv
+=VAL :shellcheck
+=VAL :scripts
+=VAL :prek
+=VAL :docs
+=VAL :python-package
+-SEQ
+=VAL :runs-on
+=VAL :${{ github.repository == 'astral-sh/ruff' && 'github-ubuntu-24.04-x86_64-2' || 'ubuntu-slim' }}
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Check required jobs passed
+=VAL :run
+=VAL |failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\\(.key): \\(.value.result)"')\nif [ -n "$failing" ]; then\n  echo "$failing"\n  exit 1\nfi\n
+=VAL :env
++MAP
+=VAL :NEEDS_JSON
+=VAL :${{ toJSON(needs) }}
+-MAP
+-MAP
+-SEQ
+-MAP
+-MAP
+-MAP
+-DOC
+-STR

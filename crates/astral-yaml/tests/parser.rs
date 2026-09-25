@@ -3,6 +3,60 @@ use std::borrow::Cow;
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
 #[test]
+fn block_scalar_eof_and_indentation_follow_the_test_suite() {
+    // yaml/yaml-test-suite#118 defines EOF as an implicit final line break.
+    for style in ["|", ">"] {
+        for (body, clipped, kept) in [
+            ("  text", "text\n", "text\n"),
+            ("  text\n", "text\n", "text\n"),
+            ("  text\r", "text\n", "text\n"),
+            ("  text\r\n", "text\n", "text\n"),
+            ("  text\n ", "text\n", "text\n\n"),
+            ("  text\n   ", "text\n \n", "text\n \n"),
+            ("", "", ""),
+            ("  ", "", "\n"),
+        ] {
+            for (chomp, expected) in [
+                ("", clipped),
+                ("+", kept),
+                ("-", clipped.trim_end_matches('\n')),
+            ] {
+                let source = format!("{style}{chomp}\n{body}");
+                let stream = parse(&source).unwrap();
+                let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+                    panic!("expected scalar")
+                };
+
+                assert_eq!(scalar.value, expected, "{source:?}");
+                assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+            }
+        }
+
+        // yaml/yaml-test-suite#37: an indented # is the first content line,
+        // not a trailing comment. Prior empty lines must not be more indented.
+        let source = format!("key: {style}\n\n   \n  # content\n");
+        assert_eq!(
+            parse(&source).unwrap_err().message,
+            "leading empty line is over-indented"
+        );
+    }
+
+    // A tab after the detected spaces is content (YAML 1.2.2 example 8.2).
+    // LibYAML incorrectly rejects this when indentation is inferred.
+    for (source, expected) in [
+        ("|\n  \ttext\n", "\ttext\n"),
+        (">\n  \t\n  text\n", "\t\ntext\n"),
+    ] {
+        let stream = parse(source).unwrap();
+        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+            panic!("expected scalar")
+        };
+
+        assert_eq!(scalar.value, expected);
+    }
+}
+
+#[test]
 fn prefix_boms_and_multiple_restricted_quoted_characters() {
     let stream = parse("# prefix\n\u{feff}").unwrap();
     assert!(stream.documents().is_empty());

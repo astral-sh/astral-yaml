@@ -33,8 +33,9 @@ cargo bench -p xtask --bench real_world
 Suite; pass a directory to check another suite. Explicit file and directory paths
 are relative to the current directory.
 
-With `cargo-llvm-cov` installed, `scripts/check.sh` also checks fixture hashes and
-enforces 100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
+With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` also checks fixture
+hashes, independently verifies the real-world syntax snapshots, and enforces
+100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
 
 Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte

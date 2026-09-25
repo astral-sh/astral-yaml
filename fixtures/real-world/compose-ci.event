@@ -1,0 +1,706 @@
++STR
++DOC
++MAP
+=VAL :name
+=VAL :ci
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+-MAP
+=VAL :concurrency
++MAP
+=VAL :group
+=VAL :${{ github.workflow }}-${{ github.ref }}
+=VAL :cancel-in-progress
+=VAL :true
+-MAP
+=VAL :on
++MAP
+=VAL :push
++MAP
+=VAL :branches
++SEQ
+=VAL 'main
+-SEQ
+=VAL :tags
++SEQ
+=VAL 'v*
+-SEQ
+-MAP
+=VAL :pull_request
+=VAL :
+=VAL :workflow_dispatch
++MAP
+=VAL :inputs
++MAP
+=VAL :debug_enabled
++MAP
+=VAL :description
+=VAL 'To run with tmate enter "debug_enabled"
+=VAL :required
+=VAL :false
+=VAL :default
+=VAL "false
+-MAP
+-MAP
+-MAP
+-MAP
+=VAL :jobs
++MAP
+=VAL :validate
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :strategy
++MAP
+=VAL :fail-fast
+=VAL :false
+=VAL :matrix
++MAP
+=VAL :target
++SEQ
+=VAL :lint
+=VAL :validate-go-mod
+=VAL :validate-headers
+=VAL :validate-docs
+=VAL :validate-mocks
+=VAL :relay-lint
+=VAL :relay-test
+-SEQ
+-MAP
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Docker Buildx
+=VAL :uses
+=VAL :docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003
+-MAP
++MAP
+=VAL :name
+=VAL :Run
+=VAL :run
+=VAL |make ${{ matrix.target }}\n
+-MAP
+-SEQ
+-MAP
+=VAL :binary
++MAP
+=VAL :uses
+=VAL :docker/github-builder/.github/workflows/bake.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :with
++MAP
+=VAL :runner
+=VAL :amd64
+=VAL :artifact-name
+=VAL :compose
+=VAL :artifact-upload
+=VAL :true
+=VAL :cache
+=VAL :true
+=VAL :cache-scope
+=VAL :binary
+=VAL :target
+=VAL :release
+=VAL :output
+=VAL :local
+=VAL :sbom
+=VAL :true
+=VAL :sign
+=VAL :${{ github.event_name != 'pull_request' }}
+-MAP
+-MAP
+=VAL :binary-finalize
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :needs
++SEQ
+=VAL :binary
+-SEQ
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Download artifacts
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :path
+=VAL :/tmp/compose-output
+=VAL :name
+=VAL :${{ needs.binary.outputs.artifact-name }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Rename provenance and sbom
+=VAL :run
+=VAL |for pdir in /tmp/compose-output/*/; do\n  (\n    cd "$pdir"\n    binname=$(find . -name 'docker-compose-*')\n    filename=$(basename "${binname%.exe}")\n    mv "provenance.json" "${filename}.provenance.json"\n    mv "sbom-binary.spdx.json" "${filename}.sbom.json"\n    find . -name 'sbom*.json' -exec rm {} \\;\n    if [ -f "provenance.sigstore.json" ]; then\n      mv "provenance.sigstore.json" "${filename}.sigstore.json"\n    fi\n  )\ndone\nmkdir -p "./bin/release"\nmv /tmp/compose-output/**/* "./bin/release/"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Create checksum file
+=VAL :working-directory
+=VAL :./bin/release
+=VAL :run
+=VAL |find . -type f -print0 | sort -z | xargs -r0 shasum -a 256 -b | sed 's# \\*\\./# *#' > $RUNNER_TEMP/checksums.txt\nshasum -a 256 -U -c $RUNNER_TEMP/checksums.txt\nmv $RUNNER_TEMP/checksums.txt .\ncat checksums.txt | while read sum file; do\n  if [[ "${file#\\*}" == docker-compose-* && "${file#\\*}" != *.provenance.json && "${file#\\*}" != *.sbom.json && "${file#\\*}" != *.sigstore.json ]]; then\n    echo "$sum $file" > ${file#\\*}.sha256\n  fi\ndone\n
+-MAP
++MAP
+=VAL :name
+=VAL :List artifacts
+=VAL :run
+=VAL |tree -nh ./bin/release\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check artifacts
+=VAL :run
+=VAL |find bin/release -type f -exec file -e ascii -- {} +\n
+-MAP
++MAP
+=VAL :name
+=VAL :Upload artifacts
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :release
+=VAL :path
+=VAL :./bin/release/*
+=VAL :if-no-files-found
+=VAL :error
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :bin-image-test
++MAP
+=VAL :if
+=VAL :github.event_name == 'pull_request'
+=VAL :uses
+=VAL :docker/github-builder/.github/workflows/bake.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a
+=VAL :with
++MAP
+=VAL :runner
+=VAL :amd64
+=VAL :target
+=VAL :image-cross
+=VAL :cache
+=VAL :true
+=VAL :cache-scope
+=VAL :bin-image-test
+=VAL :output
+=VAL :image
+=VAL :push
+=VAL :false
+=VAL :sbom
+=VAL :true
+=VAL :set-meta-labels
+=VAL :true
+=VAL :meta-images
+=VAL |compose-bin\n
+=VAL :meta-tags
+=VAL |type=ref,event=pr\n
+=VAL :meta-bake-target
+=VAL :meta-helper
+-MAP
+-MAP
+=VAL :relay-image-test
++MAP
+=VAL :if
+=VAL :github.event_name == 'pull_request'
+=VAL :uses
+=VAL :docker/github-builder/.github/workflows/bake.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a
+=VAL :with
++MAP
+=VAL :runner
+=VAL :amd64
+=VAL :target
+=VAL :relay-image-cross
+=VAL :cache
+=VAL :true
+=VAL :cache-scope
+=VAL :relay-image-test
+=VAL :output
+=VAL :image
+=VAL :push
+=VAL :false
+=VAL :sbom
+=VAL :true
+=VAL :set-meta-labels
+=VAL :true
+=VAL :meta-images
+=VAL |compose-relay\n
+=VAL :meta-tags
+=VAL |type=ref,event=pr\n
+=VAL :meta-bake-target
+=VAL :meta-helper
+-MAP
+-MAP
+=VAL :test
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Set up Docker Buildx
+=VAL :uses
+=VAL :docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003
+-MAP
++MAP
+=VAL :name
+=VAL :Test
+=VAL :uses
+=VAL :docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f
+=VAL :with
++MAP
+=VAL :targets
+=VAL :test
+=VAL :set
+=VAL |*.cache-from=type=gha,scope=test\n*.cache-to=type=gha,scope=test\n
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Gather coverage data
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :coverage-data-unit
+=VAL :path
+=VAL :bin/coverage/unit/
+=VAL :if-no-files-found
+=VAL :error
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Unit Test Summary
+=VAL :uses
+=VAL :test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5
+=VAL :with
++MAP
+=VAL :paths
+=VAL :bin/coverage/unit/report.xml
+-MAP
+=VAL :if
+=VAL :always()
+-MAP
+-SEQ
+-MAP
+=VAL :e2e
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :name
+=VAL :e2e (${{ matrix.mode }}, ${{ matrix.channel }}, ${{ matrix.store }})
+=VAL :strategy
++MAP
+=VAL :fail-fast
+=VAL :false
+=VAL :matrix
++MAP
+=VAL :include
++SEQ
++MAP
+=VAL :mode
+=VAL :plugin
+=VAL :engine
+=VAL :29
+=VAL :channel
+=VAL :stable
+=VAL :store
+=VAL :graphdriver
+-MAP
++MAP
+=VAL :mode
+=VAL :plugin
+=VAL :engine
+=VAL :29
+=VAL :channel
+=VAL :stable
+=VAL :store
+=VAL :containerd
+-MAP
++MAP
+=VAL :mode
+=VAL :standalone
+=VAL :engine
+=VAL :29
+=VAL :channel
+=VAL :stable
+=VAL :store
+=VAL :graphdriver
+-MAP
++MAP
+=VAL :mode
+=VAL :standalone
+=VAL :engine
+=VAL :29
+=VAL :channel
+=VAL :stable
+=VAL :store
+=VAL :containerd
+-MAP
++MAP
+=VAL :mode
+=VAL :plugin
+=VAL :engine
+=VAL :28
+=VAL :channel
+=VAL :oldstable
+=VAL :store
+=VAL :graphdriver
+-MAP
++MAP
+=VAL :mode
+=VAL :standalone
+=VAL :engine
+=VAL :28
+=VAL :channel
+=VAL :oldstable
+=VAL :store
+=VAL :graphdriver
+-MAP
+-SEQ
+-MAP
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Prepare
+=VAL :run
+=VAL |mode=${{ matrix.mode }}\nengine=${{ matrix.engine }}\nstore=${{ matrix.store }}\necho "MODE_ENGINE_PAIR=${mode}-${engine}-${store}" >> $GITHUB_ENV\n
+-MAP
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Install Docker ${{ matrix.engine }}
+=VAL :run
+=VAL |sudo systemctl stop docker.service\nsudo apt-get purge docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-ce-rootless-extras docker-buildx-plugin\nsudo apt-get install curl\ncurl -fsSL https://test.docker.com -o get-docker.sh\nsudo sh ./get-docker.sh --version ${{ matrix.engine }}\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check Docker Version
+=VAL :run
+=VAL :docker --version
+-MAP
++MAP
+=VAL :name
+=VAL :Enable containerd image store
+=VAL :if
+=VAL :${{ matrix.store == 'containerd' }}
+=VAL :run
+=VAL |sudo mkdir -p /etc/docker\nif [ -s /etc/docker/daemon.json ]; then\n  jq -s '.[0] * .[1]' /etc/docker/daemon.json <(echo '{"features": {"containerd-snapshotter": true}}') \\\n    | sudo tee /etc/docker/daemon.json.new > /dev/null\n  sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json\nelse\n  echo '{"features": {"containerd-snapshotter": true}}' | sudo tee /etc/docker/daemon.json > /dev/null\nfi\nsudo systemctl restart docker.service\ndocker info -f '{{json .DriverStatus}}' | grep -q io.containerd.snapshotter.v1\n
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Docker Buildx
+=VAL :uses
+=VAL :docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Docker Model
+=VAL :run
+=VAL |sudo apt-get install docker-model-plugin\ndocker model version\n
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Go
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version-file
+=VAL '.go-version
+=VAL :check-latest
+=VAL :true
+=VAL :cache
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Build example provider
+=VAL :run
+=VAL :make example-provider
+-MAP
++MAP
+=VAL :name
+=VAL :Build
+=VAL :uses
+=VAL :docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f
+=VAL :with
++MAP
+=VAL :source
+=VAL :.
+=VAL :targets
+=VAL :binary-with-coverage
+=VAL :set
+=VAL |*.cache-from=type=gha,scope=binary-linux-amd64\n*.cache-from=type=gha,scope=binary-e2e-${{ matrix.mode }}\n*.cache-to=type=gha,scope=binary-e2e-${{ matrix.mode }},mode=max\n
+-MAP
+=VAL :env
++MAP
+=VAL :BUILD_TAGS
+=VAL :e2e
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Setup tmate session
+=VAL :if
+=VAL :${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled }}
+=VAL :uses
+=VAL :mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113
+=VAL :with
++MAP
+=VAL :limit-access-to-actor
+=VAL :true
+=VAL :github-token
+=VAL :${{ secrets.GITHUB_TOKEN }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Test plugin mode
+=VAL :if
+=VAL :${{ matrix.mode == 'plugin' }}
+=VAL :run
+=VAL |rm -rf ./bin/coverage/e2e\nmkdir -p ./bin/coverage/e2e\nmake e2e-compose GOCOVERDIR=bin/coverage/e2e TEST_FLAGS="-v"\n
+-MAP
++MAP
+=VAL :name
+=VAL :Gather coverage data
+=VAL :if
+=VAL :${{ matrix.mode == 'plugin' }}
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :coverage-data-e2e-${{ env.MODE_ENGINE_PAIR }}
+=VAL :path
+=VAL :bin/coverage/e2e/
+=VAL :if-no-files-found
+=VAL :error
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Test standalone mode
+=VAL :if
+=VAL :${{ matrix.mode == 'standalone' }}
+=VAL :run
+=VAL |rm -f /usr/local/bin/docker-compose\ncp bin/build/docker-compose /usr/local/bin\nmake e2e-compose-standalone\n
+-MAP
++MAP
+=VAL :name
+=VAL :e2e Test Summary
+=VAL :uses
+=VAL :test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5
+=VAL :with
++MAP
+=VAL :paths
+=VAL :/tmp/report/report.xml
+-MAP
+=VAL :if
+=VAL :always()
+-MAP
+-SEQ
+-MAP
+=VAL :coverage
++MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :needs
++SEQ
+=VAL :test
+=VAL :e2e
+-SEQ
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Set up Go
+=VAL :uses
+=VAL :actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+=VAL :with
++MAP
+=VAL :go-version-file
+=VAL '.go-version
+=VAL :check-latest
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Download unit test coverage
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :name
+=VAL :coverage-data-unit
+=VAL :path
+=VAL :coverage/unit
+=VAL :merge-multiple
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Download E2E test coverage
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :pattern
+=VAL :coverage-data-e2e-*
+=VAL :path
+=VAL :coverage/e2e
+=VAL :merge-multiple
+=VAL :true
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Merge coverage reports
+=VAL :run
+=VAL |go tool covdata textfmt -i=./coverage/unit,./coverage/e2e -o ./coverage.txt\n
+-MAP
++MAP
+=VAL :name
+=VAL :Store coverage report in GitHub Actions
+=VAL :uses
+=VAL :actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+=VAL :with
++MAP
+=VAL :name
+=VAL :go-covdata-txt
+=VAL :path
+=VAL :./coverage.txt
+=VAL :if-no-files-found
+=VAL :error
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :Upload coverage to Codecov
+=VAL :uses
+=VAL :codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
+=VAL :with
++MAP
+=VAL :files
+=VAL :./coverage.txt
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :release
++MAP
+=VAL :if
+=VAL :startsWith(github.ref, 'refs/tags/v')
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :write
+-MAP
+=VAL :runs-on
+=VAL :ubuntu-latest
+=VAL :needs
++SEQ
+=VAL :binary-finalize
+-SEQ
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL :Checkout
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+-MAP
++MAP
+=VAL :name
+=VAL :Download artifacts
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :path
+=VAL :./bin/release
+=VAL :name
+=VAL :release
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL :List artifacts
+=VAL :run
+=VAL |tree -nh ./bin/release\n
+-MAP
++MAP
+=VAL :name
+=VAL :Check artifacts
+=VAL :run
+=VAL |find bin/release -type f -exec file -e ascii -- {} +\n
+-MAP
++MAP
+=VAL :name
+=VAL :GitHub Release
+=VAL :uses
+=VAL :softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+=VAL :with
++MAP
+=VAL :files
+=VAL :./bin/release/*
+=VAL :generate_release_notes
+=VAL :true
+=VAL :draft
+=VAL :true
+=VAL :overwrite_files
+=VAL :false
+=VAL :token
+=VAL :${{ secrets.GITHUB_TOKEN }}
+-MAP
+-MAP
+-SEQ
+-MAP
+-MAP
+-MAP
+-DOC
+-STR

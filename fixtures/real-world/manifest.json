@@ -25,5 +25,98 @@
     "license": "LICENSE-openapi",
     "sha256": "b1633b6309c065c43d56be7c659b0f2c4be03be5a4013b7c3f74b32bd33f62eb",
     "bytes": 5479
+  },
+  {
+    "file": "ruff-ci.yaml",
+    "repository": "astral-sh/ruff",
+    "revision": "d4cc0a95013cbbf59abd2247e860252ecba5e5be",
+    "path": ".github/workflows/ci.yaml",
+    "license": "LICENSE-ruff",
+    "license_path": "LICENSE",
+    "sha256": "b97b4cc559ac4c09d695011afa084f65e1e110090522a07ace0f5c8f9f6c5477",
+    "bytes": 62995
+  },
+  {
+    "file": "cpython-build.yaml",
+    "repository": "python/cpython",
+    "revision": "68d86eb18a91226975eec5523d2d55d4796b1211",
+    "path": ".github/workflows/build.yml",
+    "license": "LICENSE-cpython",
+    "license_path": "LICENSE",
+    "sha256": "14a5491ca38e0368055daec96902a9e75913711898a384c72e681634158509a0",
+    "bytes": 26035
+  },
+  {
+    "file": "cibuildwheel-test.yaml",
+    "repository": "pypa/cibuildwheel",
+    "revision": "d36591e0b31f232df571137cfbdf10b22743186c",
+    "path": ".github/workflows/test.yml",
+    "license": "LICENSE-cibuildwheel",
+    "license_path": "LICENSE",
+    "sha256": "204e71ac5d133a38c6f8f7efd87f3fc4ad5e70b7a5f85c17cefd694e412f2804",
+    "bytes": 12187
+  },
+  {
+    "file": "black-diff-shades.yaml",
+    "repository": "psf/black",
+    "revision": "8d5a2d9f49378d7abe2eb632df1601818de8c24e",
+    "path": ".github/workflows/diff_shades.yml",
+    "license": "LICENSE-black",
+    "license_path": "LICENSE",
+    "sha256": "0fef14c473ec5076e44e8e20c562d0e8ae82865e165af63e874b9712222d3dba",
+    "bytes": 8397
+  },
+  {
+    "file": "gh-deployment.yaml",
+    "repository": "cli/cli",
+    "revision": "9b031151a825bda919203c5202876a725d637368",
+    "path": ".github/workflows/deployment.yml",
+    "license": "LICENSE-gh",
+    "license_path": "LICENSE",
+    "sha256": "dc13980ee70c9bec97bba69a93c29866c9af85f0e015d67dac506b0538d31046",
+    "bytes": 20216
+  },
+  {
+    "file": "runner-release.yaml",
+    "repository": "actions/runner",
+    "revision": "15231bede4aacecb6686f4b7de25c62398607993",
+    "path": ".github/workflows/release.yml",
+    "license": "LICENSE-runner",
+    "license_path": "LICENSE",
+    "sha256": "1ca9a9799f45cf68ebda8b0566d9e0db62474f8b021aa4b2258f2cb7f60111ea",
+    "bytes": 13889
+  },
+  {
+    "file": "compose-ci.yaml",
+    "repository": "docker/compose",
+    "revision": "32bddfc4c693dd1b9ed8633ff2adb2d511a07ee1",
+    "path": ".github/workflows/ci.yml",
+    "license": "LICENSE-compose",
+    "license_path": "LICENSE",
+    "sha256": "3df99fe117cc6e2d459ea8cdad93a672d91ea74256850fa4fbe94bb1f362ed5c",
+    "bytes": 13202
+  },
+  {
+    "file": "sentry-compose.yaml",
+    "repository": "getsentry/self-hosted",
+    "revision": "df6109d84df7b01a6f20e43e7bca373ce37aaef1",
+    "path": "docker-compose.yml",
+    "license": "LICENSE-sentry",
+    "license_path": "LICENSE.md",
+    "sha256": "82b1556f1db4118b94c4815405535cb19bb8ee1c29a45c0547ad52eb79079415",
+    "bytes": 32768,
+    "valid_yaml_1_2": false,
+    "rejection": "Under-indented closing flow delimiter; see README.md and sentry-compose.error."
+  },
+  {
+    "file": "airflow-compose.yaml",
+    "repository": "apache/airflow",
+    "revision": "07197c29a2f4b1598615014f7b36bd8237a8de2c",
+    "path": "airflow-core/docs/howto/docker-compose/docker-compose.yaml",
+    "license": "LICENSE-airflow",
+    "license_path": "LICENSE",
+    "notice": "NOTICE-airflow",
+    "sha256": "96806d5e14083947e8f3c16fe1d677a2953e8053e591cf58ce890112de8323d9",
+    "bytes": 13045
   }
 ]

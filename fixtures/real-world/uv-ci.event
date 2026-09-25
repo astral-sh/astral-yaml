@@ -1,0 +1,593 @@
++STR
++DOC
++MAP
+=VAL :name
+=VAL :CI
+=VAL :on
++MAP
+=VAL :push
++MAP
+=VAL :branches
++SEQ []
+=VAL :main
+-SEQ
+-MAP
+=VAL :pull_request
+=VAL :
+=VAL :workflow_dispatch
+=VAL :
+-MAP
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+-MAP
+=VAL :concurrency
++MAP
+=VAL :group
+=VAL :${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+=VAL :cancel-in-progress
+=VAL :true
+-MAP
+=VAL :env
++MAP
+=VAL :UV_LOCKED
+=VAL :1
+-MAP
+=VAL :jobs
++MAP
+=VAL :plan
++MAP
+=VAL :if
+=VAL :${{ github.repository != 'astral-sh/uv-security' || github.ref != 'refs/heads/main' }}
+=VAL :uses
+=VAL :$/.github/workflows/plan.yml
+-MAP
+=VAL :check-fmt
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :uses
+=VAL :$/.github/workflows/check-fmt.yml
+-MAP
+=VAL :review
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ github.event_name == 'pull_request' && github.repository == 'astral-sh/uv' && github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.review-security == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/pull-request-security-review.yml
+=VAL :secrets
+=VAL :inherit
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+=VAL :issues
+=VAL :read
+=VAL :pull-requests
+=VAL :read
+-MAP
+-MAP
+=VAL :check-lint
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :uses
+=VAL :$/.github/workflows/check-lint.yml
+=VAL :with
++MAP
+=VAL :code-changed
+=VAL :${{ needs.plan.outputs.test-code }}
+=VAL :save-rust-cache
+=VAL :${{ needs.plan.outputs.save-rust-cache }}
+-MAP
+-MAP
+=VAL :check-docs
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.run-checks == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-docs.yml
+=VAL :secrets
+=VAL :inherit
+-MAP
+=VAL :check-zizmor
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.run-checks == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-zizmor.yml
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :security-events
+=VAL :write
+-MAP
+-MAP
+=VAL :check-publish
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-code == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-publish.yml
+-MAP
+=VAL :check-release
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.run-checks == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-release.yml
+-MAP
+=VAL :check-crates-policies
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.check-crates-policies == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-crates-policies.yml
+=VAL :secrets
+=VAL :inherit
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+-MAP
+=VAL :check-lock
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.run-checks == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-lock.yml
+-MAP
+=VAL :check-generated-files
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-code == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/check-generated-files.yml
+=VAL :with
++MAP
+=VAL :schema-changed
+=VAL :${{ needs.plan.outputs.check-schema }}
+=VAL :save-rust-cache
+=VAL :${{ needs.plan.outputs.save-rust-cache }}
+-MAP
+-MAP
+=VAL :test
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-code == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test.yml
+=VAL :with
++MAP
+=VAL :save-rust-cache
+=VAL :${{ needs.plan.outputs.save-rust-cache }}
+=VAL :test-macos
+=VAL :${{ needs.plan.outputs.test-macos }}
+-MAP
+-MAP
+=VAL :test-windows-trampolines
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-windows-trampoline == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test-windows-trampolines.yml
+=VAL :with
++MAP
+=VAL :trampoline-build
+=VAL :${{ needs.plan.outputs.test-windows-trampoline-check-binary }}
+-MAP
+-MAP
+=VAL :build-dev-binaries
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-code == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/build-dev-binaries.yml
+=VAL :with
++MAP
+=VAL :save-rust-cache
+=VAL :${{ needs.plan.outputs.save-rust-cache }}
+-MAP
+-MAP
+=VAL :test-smoke
++MAP
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :build-dev-binaries
+-SEQ
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-smoke == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test-smoke.yml
+=VAL :with
++MAP
+=VAL :sha
+=VAL :${{ github.sha }}
+-MAP
+-MAP
+=VAL :test-integration
++MAP
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :build-dev-binaries
+-SEQ
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-integration == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test-integration.yml
+=VAL :secrets
+=VAL :inherit
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :with
++MAP
+=VAL :sha
+=VAL :${{ github.sha }}
+-MAP
+-MAP
+=VAL :test-system
++MAP
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :build-dev-binaries
+-SEQ
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-system == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test-system.yml
+=VAL :with
++MAP
+=VAL :sha
+=VAL :${{ github.sha }}
+-MAP
+-MAP
+=VAL :test-ecosystem
++MAP
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :build-dev-binaries
+-SEQ
+=VAL :if
+=VAL :${{ needs.plan.outputs.test-ecosystem == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/test-ecosystem.yml
+=VAL :with
++MAP
+=VAL :sha
+=VAL :${{ github.sha }}
+-MAP
+-MAP
+=VAL :build-release-artifacts
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.build-release-binaries == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/build-release-binaries.yml
+=VAL :secrets
+=VAL :inherit
+-MAP
+=VAL :build-docker
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.build-docker == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/build-docker.yml
+=VAL :with
++MAP
+=VAL :push-dev
+=VAL :${{ needs.plan.outputs.push-docker == 'true' }}
+-MAP
+=VAL :secrets
+=VAL :inherit
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+-MAP
+=VAL :publish-docker
++MAP
+=VAL :needs
+=VAL :build-docker
+=VAL :if
+=VAL :${{ needs.build-docker.outputs.publish-dev == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/publish-docker.yml
+=VAL :with
++MAP
+=VAL :manifest
+=VAL :${{ needs.build-docker.outputs.manifest }}
+=VAL :push-dev
+=VAL :true
+-MAP
+=VAL :secrets
+=VAL :inherit
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+=VAL :packages
+=VAL :write
+=VAL :attestations
+=VAL :write
+-MAP
+-MAP
+=VAL :bench
++MAP
+=VAL :needs
+=VAL :plan
+=VAL :if
+=VAL :${{ needs.plan.outputs.run-bench == 'true' }}
+=VAL :uses
+=VAL :$/.github/workflows/bench.yml
+=VAL :secrets
+=VAL :inherit
+=VAL :with
++MAP
+=VAL :save-rust-cache
+=VAL :${{ needs.plan.outputs.save-rust-cache }}
+-MAP
+=VAL :permissions
++MAP
+=VAL :contents
+=VAL :read
+=VAL :id-token
+=VAL :write
+-MAP
+-MAP
+=VAL :test-publish
++MAP
+=VAL :name
+=VAL "test uv publish
+=VAL :timeout-minutes
+=VAL :20
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :build-dev-binaries
+-SEQ
+=VAL :runs-on
+=VAL :${{ github.repository_owner == 'astral-sh' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-latest' }}
+=VAL :if
+=VAL :${{ github.repository == 'astral-sh/uv' && github.event.pull_request.head.repo.fork != true && needs.plan.outputs.test-publish == 'true' }}
+=VAL :environment
++MAP
+=VAL :name
+=VAL :uv-test-publish
+=VAL :deployment
+=VAL :false
+-MAP
+=VAL :env
++MAP
+=VAL :PYTHON_VERSION
+=VAL :3.12
+-MAP
+=VAL :permissions
++MAP
+=VAL :id-token
+=VAL :write
+-MAP
+=VAL :steps
++SEQ
++MAP
+=VAL :uses
+=VAL :actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+=VAL :with
++MAP
+=VAL :fetch-depth
+=VAL :0
+=VAL :persist-credentials
+=VAL :false
+-MAP
+-MAP
++MAP
+=VAL :uses
+=VAL :actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+=VAL :with
++MAP
+=VAL :python-version
+=VAL "${{ env.PYTHON_VERSION }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Download binary
+=VAL :uses
+=VAL :actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+=VAL :with
++MAP
+=VAL :name
+=VAL :uv-linux-libc-${{ github.sha }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Prepare binary
+=VAL :run
+=VAL :chmod +x ./uv
+-MAP
++MAP
+=VAL :name
+=VAL "Build astral-test-pypa-gh-action
+=VAL :shell
+=VAL :bash -eo pipefail {0}
+=VAL :run
+=VAL |# Build a yet unused version of `astral-test-pypa-gh-action`\nmkdir astral-test-pypa-gh-action\ncd astral-test-pypa-gh-action\n../uv init --package --no-workspace\n# Get the latest patch version\npatch_version=$(curl https://test.pypi.org/simple/astral-test-pypa-gh-action/?format=application/vnd.pypi.simple.v1+json | jq --raw-output '[.files[].filename | select(endswith(".tar.gz"))] | last' | grep -oP '(?<=astral_test_pypa_gh_action-0\\.1\\.)\\d+(?=\\.tar\\.gz)')\n# Set the current version to one higher (which should be unused)\nsed -i "s/0.1.0/0.1.$((patch_version + 1))/g" pyproject.toml\n../uv build\n
+-MAP
++MAP
+=VAL :name
+=VAL "Publish astral-test-pypa-gh-action
+=VAL :uses
+=VAL :pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+=VAL :with
++MAP
+=VAL :skip-existing
+=VAL "true
+=VAL :verbose
+=VAL "true
+=VAL :repository-url
+=VAL "https://test.pypi.org/legacy/
+=VAL :packages-dir
+=VAL "astral-test-pypa-gh-action/dist
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Request GitLab OIDC tokens for impersonation
+=VAL :uses
+=VAL :digital-blueprint/gitlab-pipeline-trigger-action@c59b56e9d2688ab42c1304322ac8831a4ef6f7d2
+=VAL :with
++MAP
+=VAL :host
+=VAL :gitlab.com
+=VAL :id
+=VAL :astral-test-publish/astral-test-gitlab-pypi-tp
+=VAL :ref
+=VAL :main
+=VAL :trigger_token
+=VAL :${{ secrets.GITLAB_TEST_PUBLISH_TRIGGER_TOKEN }}
+=VAL :access_token
+=VAL :${{ secrets.GITLAB_TEST_PUBLISH_ACCESS_TOKEN }}
+=VAL :download_artifacts
+=VAL :true
+=VAL :fail_if_no_artifacts
+=VAL :true
+=VAL :download_path
+=VAL :./gitlab-artifacts
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Load GitLab OIDC tokens from GitLab job artifacts
+=VAL :id
+=VAL :load-gitlab-oidc-token
+=VAL :run
+=VAL |# we expect ./gitlab-artifacts/*/artifacts/pypi-id-token to exist\npypi_id_token_file=$(find ./gitlab-artifacts -type f -name pypi-id-token | head -n 1)\nif [ -z "${pypi_id_token_file}" ]; then\n  echo "No pypi-id-token file found in GitLab artifacts"\n  exit 1\nfi\nGITLAB_PYPI_OIDC_TOKEN=$(cat "${pypi_id_token_file}")\n\n# Add secret masks for the tokens.\necho "::add-mask::$GITLAB_PYPI_OIDC_TOKEN"\n\necho "GITLAB_PYPI_OIDC_TOKEN=${GITLAB_PYPI_OIDC_TOKEN}" >> "${GITHUB_OUTPUT}"\n
+-MAP
++MAP
+=VAL :name
+=VAL "Add password to uv text store
+=VAL :run
+=VAL |./uv auth login https://test.pypi.org/legacy/?astral-test-text-store --token ${UV_TEST_PUBLISH_TEXT_STORE}\n
+=VAL :env
++MAP
+=VAL :UV_TEST_PUBLISH_TEXT_STORE
+=VAL :${{ secrets.UV_TEST_PUBLISH_TEXT_STORE }}
+-MAP
+-MAP
++MAP
+=VAL :name
+=VAL "Publish test packages
+=VAL :run
+=VAL :./uv run --no-project -p "${PYTHON_VERSION}" scripts/publish/test_publish.py --uv ./uv all
+=VAL :env
++MAP
+=VAL :RUST_LOG
+=VAL :uv=debug,uv_publish=trace
+=VAL :UV_TEST_PUBLISH_TOKEN
+=VAL :${{ secrets.UV_TEST_PUBLISH_TOKEN }}
+=VAL :UV_TEST_PUBLISH_PASSWORD
+=VAL :${{ secrets.UV_TEST_PUBLISH_PASSWORD }}
+=VAL :UV_TEST_PUBLISH_KEYRING
+=VAL :${{ secrets.UV_TEST_PUBLISH_KEYRING }}
+=VAL :UV_TEST_PUBLISH_GITLAB_PAT
+=VAL :${{ secrets.UV_TEST_PUBLISH_GITLAB_PAT }}
+=VAL :UV_TEST_PUBLISH_CODEBERG_TOKEN
+=VAL :${{ secrets.UV_TEST_PUBLISH_CODEBERG_TOKEN }}
+=VAL :UV_TEST_PUBLISH_CLOUDSMITH_TOKEN
+=VAL :${{ secrets.UV_TEST_PUBLISH_CLOUDSMITH_TOKEN }}
+=VAL :UV_TEST_PUBLISH_PYTHON_VERSION
+=VAL :${{ env.PYTHON_VERSION }}
+=VAL :UV_TEST_PUBLISH_GITLAB_PYPI_OIDC_TOKEN
+=VAL :${{ steps.load-gitlab-oidc-token.outputs.GITLAB_PYPI_OIDC_TOKEN }}
+-MAP
+-MAP
+-SEQ
+-MAP
+=VAL :required-checks-passed
++MAP
+=VAL :name
+=VAL "all required jobs passed
+=VAL :if
+=VAL :${{ always() && github.ref != 'refs/heads/main' }}
+=VAL :needs
++SEQ
+=VAL :plan
+=VAL :check-fmt
+=VAL :check-lint
+=VAL :check-docs
+=VAL :check-crates-policies
+=VAL :check-generated-files
+=VAL :test
+=VAL :test-system
+=VAL :build-dev-binaries
+-SEQ
+=VAL :runs-on
+=VAL :${{ github.repository_owner == 'astral-sh' && 'github-ubuntu-24.04-x86_64-2' || 'ubuntu-slim' }}
+=VAL :steps
++SEQ
++MAP
+=VAL :name
+=VAL "Check required jobs passed
+=VAL :run
+=VAL |failing=$(\n  echo "$NEEDS_JSON" | jq -r --argjson conditional_jobs "$CONDITIONAL_JOBS" '\n    to_entries[]\n    | select($conditional_jobs[.key] != false)\n    | select(.value.result != "success" and .value.result != "skipped")\n    | "\\(.key): \\(.value.result)"\n  '\n)\nif [ -n "$failing" ]; then\n  echo "$failing"\n  exit 1\nfi\n
+=VAL :env
++MAP
+=VAL :NEEDS_JSON
+=VAL :${{ toJSON(needs) }}
+=VAL :CONDITIONAL_JOBS
+=VAL >{\n  "test-system": ${{ contains(github.event.pull_request.labels.*.name, 'test:system') }}\n}
+-MAP
+-MAP
+-SEQ
+-MAP
+-MAP
+-MAP
+-DOC
+-STR
