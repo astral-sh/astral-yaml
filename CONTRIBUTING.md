@@ -19,25 +19,13 @@ cargo test -p astral-yaml --test real_world --locked -- --ignored
 cargo xtask cov
 ```
 
-The first `uv run` creates `.venv`, including the type stubs used by `ty`.
-Python scripts use PEP 723 metadata; run them with
-`uv run --script scripts/<name>.py`.
-
-`cargo test --workspace` includes doctests. The `--ignored` test compares fixture
-syntax events and scalar spans with PyYAML's Python and LibYAML parsers. It uses
-`uv` to run the comparison script with its pinned PyYAML version.
-
 ## Coverage
 
-`cargo xtask cov` enforces 100% line and function coverage for `astral-yaml` and
-`astral-yaml-serde`. It uses the active compiler's LLVM tools, installing
-`llvm-tools-preview` through rustup if needed. Reports exclude development tooling
-and separate test modules.
+We require 100% line and function coverage for `astral-yaml` and
+`astral-yaml-serde`.
 
-Builds, profiles, and `summary.json` go under `target/coverage`.
-`cargo xtask cov --html` also writes `target/coverage/html/index.html`, even when
-coverage falls below the threshold. These paths follow Cargo's configured target
-directory.
+Use `cargo xtask cov --html` to generate a report at
+`target/coverage/html/index.html`.
 
 ## Conformance and snapshots
 
@@ -47,14 +35,11 @@ Run the pinned YAML Test Suite:
 cargo test -p astral-yaml --test conformance
 ```
 
-Fixture tests use inline `insta` snapshots. With `cargo-insta` installed:
+Review inline snapshots with `cargo-insta`:
 
 ```sh
 cargo insta test -p astral-yaml --test real_world --review
 ```
-
-See [conformance and limits](docs/conformance.md) and
-[fixture documentation](fixtures/real-world/README.md).
 
 ## Fuzzing and benchmarks
 
@@ -63,8 +48,7 @@ cargo xtask fuzz
 cargo bench -p xtask --bench real_world
 ```
 
-`cargo xtask fuzz` installs its tools, seeds the corpora, and runs all four targets
-for 60 seconds each. With arguments, it forwards them to cargo-fuzz after setup.
+`cargo xtask fuzz` runs all four targets for 60 seconds each. Additional arguments
+are passed to cargo-fuzz instead.
 
-See the [fuzzing guide](fuzz/README.md) for limits and corpus replay, and the
-[benchmark notes](benchmarks/README.md) for measurement and comparisons.
+See [fuzzing](fuzz/README.md) and [benchmarks](benchmarks/README.md) for details.
