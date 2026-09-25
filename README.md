@@ -38,9 +38,9 @@ hashes, compares real-world syntax and spans with independent parsers, and enfor
 100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
 
-Real-world tests use inline `insta` snapshots of readable syntax trees and
-diagnostics. With `cargo-insta` installed, run
-`cargo insta test -p xtask --test real_world --review` to review updates.
+The parser's integration tests use inline `insta` snapshots of readable syntax
+trees and diagnostics. With `cargo-insta` installed, run
+`cargo insta test -p astral-yaml --test real_world --review` to review updates.
 
 Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte
 ranges, comments, scalar styles, tags, and anchors. Collection children and aliases

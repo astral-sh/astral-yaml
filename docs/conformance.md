@@ -6,12 +6,14 @@ all semantic events for valid cases, require rejection of invalid cases, and
 validate spans for every accepted UTF-8 prefix of every corpus input. No cases
 are excluded. The [real-world corpus](../fixtures/real-world/README.md) contains
 twelve pinned files, including eight GitHub Actions workflows. Eleven valid files
-have readable tree and scalar-range snapshots stored inline in Rust tests with
-Insta. A separate oracle test compares complete syntax events and UTF-8 scalar
-ranges with both PyYAML's Python parser and LibYAML, without stored expectations.
+have readable tree and scalar-range snapshots stored inline in `astral-yaml`'s
+integration tests with Insta. A separate oracle test in `xtask` compares complete
+syntax events and UTF-8 scalar ranges with both PyYAML's Python parser and LibYAML,
+without stored expectations.
 Tests also check all three YAML line endings and compare constructed values and
-serialized output with `yaml_serde`. Sentry's Compose file is retained as an
-explicit rejection case because a closing flow delimiter is under-indented.
+serialized output with `yaml_serde` in `astral-yaml-serde`'s integration tests.
+Sentry's Compose file is retained as an explicit rejection case because a closing
+flow delimiter is under-indented.
 
 Additional regressions cover requirements that the corpus does not exhaust:
 

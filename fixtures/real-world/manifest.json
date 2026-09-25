@@ -106,7 +106,7 @@
     "sha256": "82b1556f1db4118b94c4815405535cb19bb8ee1c29a45c0547ad52eb79079415",
     "bytes": 32768,
     "valid_yaml_1_2": false,
-    "rejection": "Under-indented closing flow delimiter; see README.md and the inline sentry_compose snapshot in xtask/tests/real_world/fixtures/."
+    "rejection": "Under-indented closing flow delimiter; see README.md and the inline sentry_compose snapshot in crates/astral-yaml/tests/real_world/fixtures/."
   },
   {
     "file": "airflow-compose.yaml",

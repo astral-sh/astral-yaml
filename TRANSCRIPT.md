@@ -46,7 +46,7 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **107 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
+- **109 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
   Twelve pinned real-world files now cover eight GitHub Actions workflows,
   Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
   independent syntax/span expectations and reference values; one upstream file
@@ -87,11 +87,13 @@ in memory. Tests also check alias targets, LF/CRLF/CR
 equivalence, shell text and scalar styles, and complete root comment aggregation.
 Both the astral and reference readers consume our serializer's output.
 
-Each fixture now has an inline `insta` snapshot in its own Rust test. Indented
-trees replace the detached event and scalar-range files, with styles and Unicode
+Each fixture now has an inline `insta` snapshot in a parser integration test under
+`crates/astral-yaml/tests`. Serde value, comment, and serialization checks live in
+`crates/astral-yaml-serde/tests`; the optional Python oracle remains in `xtask`.
+Indented trees replace the detached event and scalar-range files, with styles and Unicode
 line/column ranges beside values. Multiline values render one decoded line at a
 time. The rejection snapshot includes a source excerpt, caret, and byte range.
-Snapshot updates use `cargo insta test -p xtask --test real_world --review`.
+Snapshot updates use `cargo insta test -p astral-yaml --test real_world --review`.
 
 Sentry's Compose snapshot contains an under-indented closing flow delimiter.
 It remains unmodified and is tested as invalid YAML 1.2, with the exact error
