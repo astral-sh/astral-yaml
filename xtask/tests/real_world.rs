@@ -1,8 +1,29 @@
 mod support;
 
-use std::{fmt::Write, fs, path::Path};
+#[path = "real_world/display.rs"]
+mod display;
+#[path = "real_world/fixtures/mod.rs"]
+mod fixtures;
 
-fn scalar_spans(stream: &astral_yaml::Stream<'_>) -> String {
+use std::{fs, path::PathBuf, process::Command};
+
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Fixture {
+    file: String,
+    valid_yaml_1_2: Option<bool>,
+}
+
+fn root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/real-world")
+}
+
+fn manifest() -> Vec<Fixture> {
+    serde_json::from_str(include_str!("../../fixtures/real-world/manifest.json")).unwrap()
+}
+
+fn scalar_spans(stream: &astral_yaml::Stream<'_>) -> Vec<(usize, usize)> {
     let mut spans: Vec<_> = stream
         .nodes()
         .iter()
@@ -15,13 +36,8 @@ fn scalar_spans(stream: &astral_yaml::Stream<'_>) -> String {
         })
         .collect();
     spans.sort_unstable();
-    let mut actual = String::new();
 
-    for (start, end) in spans {
-        writeln!(actual, "{start} {end}").unwrap();
-    }
-
-    actual
+    spans
 }
 
 fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
@@ -51,114 +67,134 @@ fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
     }
 }
 
+fn check_fixture(name: &str) -> String {
+    let source = fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap();
+    let stream = astral_yaml::parse(&source).unwrap();
+    let values = support::astral(&source);
+    assert_eq!(values, support::reference(&source), "{name}");
+    xtask::validate_spans(&stream).unwrap();
+    assert_alias_targets(&stream);
+
+    for line_break in ["\r\n", "\r"] {
+        let converted = source.replace('\n', line_break);
+        let converted_stream = astral_yaml::parse(&converted).unwrap();
+        xtask::validate_spans(&converted_stream).unwrap();
+        assert_eq!(
+            xtask::events(&converted_stream),
+            xtask::events(&stream),
+            "line endings: {name}"
+        );
+    }
+
+    if stream.documents().len() == 1 {
+        let wrapped: astral_yaml_serde::Spanned<'_, yaml_serde::Value> =
+            astral_yaml_serde::from_document(&stream, 0).unwrap();
+        let comments: Vec<_> = wrapped
+            .comments
+            .iter()
+            .map(|attached| attached.comment.clone())
+            .collect();
+        assert_eq!(comments, stream.comments(), "root comments: {name}");
+    }
+
+    for value in values {
+        let yaml = astral_yaml_serde::to_string(&value).unwrap();
+        assert_eq!(
+            astral_yaml_serde::from_str::<yaml_serde::Value>(&yaml).unwrap(),
+            value,
+            "{name}"
+        );
+        assert_eq!(
+            yaml_serde::from_str::<yaml_serde::Value>(&yaml).unwrap(),
+            value,
+            "reference reader: {name}"
+        );
+    }
+
+    assert!(
+        astral_yaml_serde::from_document::<yaml_serde::Value>(&stream, stream.documents().len())
+            .is_err()
+    );
+
+    display::tree(&stream)
+}
+
+fn check_rejection(name: &str) -> String {
+    let source = fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap();
+    let error = astral_yaml::parse(&source).unwrap_err();
+    assert!(!support::reference(&source).is_empty());
+
+    display::diagnostic(name, &source, &error)
+}
+
 #[test]
-fn real_world_syntax_values_and_serialization_match_independent_oracles() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/real-world");
-    let mut paths: Vec<_> = fs::read_dir(&root)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+fn every_fixture_has_an_inline_snapshot() {
+    let mut expected: Vec<_> = manifest().into_iter().map(|fixture| fixture.file).collect();
+    expected.sort();
+    let mut actual: Vec<_> = fixtures::NAMES
+        .iter()
+        .map(|name| format!("{}.yaml", name.replace('_', "-")))
         .collect();
-    paths.sort();
+    actual.sort();
+    assert_eq!(actual, expected);
+
+    for fixture in manifest() {
+        let source = fs::read_to_string(root().join(&fixture.file)).unwrap();
+        assert_eq!(
+            astral_yaml::parse(&source).is_ok(),
+            fixture.valid_yaml_1_2.unwrap_or(true),
+            "{}",
+            fixture.file
+        );
+    }
 
     // Keep the historical benchmark inputs fixed while the test corpus grows.
     for &(name, source) in support::FIXTURES {
         assert_eq!(
-            fs::read_to_string(root.join(format!("{name}.yaml"))).unwrap(),
+            fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap(),
             source
         );
     }
+}
 
-    assert!(paths.len() >= 12);
+#[test]
+#[ignore = "requires uv and pinned PyYAML; run by scripts/check.sh"]
+fn syntax_and_scalar_spans_match_pyyaml() {
+    #[derive(Deserialize)]
+    struct Oracle {
+        file: String,
+        events: String,
+        scalars: Vec<(usize, usize)>,
+    }
 
-    for path in paths {
-        let name = path.file_stem().unwrap().to_str().unwrap();
-        let source = fs::read_to_string(&path).unwrap();
-        if path.with_extension("error").exists() {
-            // Real applications sometimes accept YAML outside the 1.2 grammar.
-            // Keep these inputs and verify the documented rejection explicitly.
-            let error = astral_yaml::parse(&source).unwrap_err();
-            let actual = format!(
-                "{} {}\n{}\n",
-                error.span.start(),
-                error.span.end(),
-                error.message
-            );
-            assert_eq!(
-                actual,
-                fs::read_to_string(path.with_extension("error")).unwrap(),
-                "{name}"
-            );
-            assert!(!support::reference(&source).is_empty());
+    let output = Command::new("uv")
+        .args(["run", "--script"])
+        .arg(root().join("../../scripts/real-world-oracle.py"))
+        .output()
+        .expect("run the independent oracle with uv");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let oracles: Vec<Oracle> = serde_json::from_slice(&output.stdout).unwrap();
+    let fixtures = manifest();
+    assert_eq!(oracles.len(), fixtures.len());
+
+    for (oracle, fixture) in oracles.iter().zip(fixtures) {
+        assert_eq!(oracle.file, fixture.file);
+        let source = fs::read_to_string(root().join(&fixture.file)).unwrap();
+
+        if !fixture.valid_yaml_1_2.unwrap_or(true) {
+            // PyYAML accepts this input; the inline diagnostic pins our rejection.
+            assert!(astral_yaml::parse(&source).is_err());
             continue;
         }
 
-        let values = support::astral(&source);
-        assert_eq!(values, support::reference(&source), "{name}");
-
         let stream = astral_yaml::parse(&source).unwrap();
-        xtask::validate_spans(&stream).unwrap();
-        assert_alias_targets(&stream);
-
-        // The snapshots come from PyYAML's Python and C parsers, never this
-        // parser. They retain collection/scalar styles, order, tags and aliases.
-        assert_eq!(
-            xtask::events(&stream),
-            fs::read_to_string(path.with_extension("event")).unwrap(),
-            "syntax tree: {name}"
-        );
-
-        for line_break in ["\r\n", "\r"] {
-            let converted = source.replace('\n', line_break);
-            let converted_stream = astral_yaml::parse(&converted).unwrap();
-            xtask::validate_spans(&converted_stream).unwrap();
-            assert_eq!(
-                xtask::events(&converted_stream),
-                xtask::events(&stream),
-                "line endings: {name}"
-            );
-        }
-
-        if stream.documents().len() == 1 {
-            let wrapped: astral_yaml_serde::Spanned<'_, yaml_serde::Value> =
-                astral_yaml_serde::from_document(&stream, 0).unwrap();
-            let comments: Vec<_> = wrapped
-                .comments
-                .iter()
-                .map(|attached| attached.comment.clone())
-                .collect();
-            assert_eq!(comments, stream.comments(), "root comments: {name}");
-        }
-
-        let actual = scalar_spans(&stream);
-
-        assert_eq!(
-            actual,
-            fs::read_to_string(path.with_extension("scalars")).unwrap(),
-            "scalar spans: {name}"
-        );
-
-        for value in values {
-            let yaml = astral_yaml_serde::to_string(&value).unwrap();
-            assert_eq!(
-                astral_yaml_serde::from_str::<yaml_serde::Value>(&yaml).unwrap(),
-                value,
-                "{name}"
-            );
-            assert_eq!(
-                yaml_serde::from_str::<yaml_serde::Value>(&yaml).unwrap(),
-                value,
-                "reference reader: {name}"
-            );
-        }
-
-        assert!(
-            astral_yaml_serde::from_document::<yaml_serde::Value>(
-                &stream,
-                stream.documents().len()
-            )
-            .is_err()
-        );
+        assert_eq!(xtask::events(&stream), oracle.events, "{}", fixture.file);
+        assert_eq!(scalar_spans(&stream), oracle.scalars, "{}", fixture.file);
     }
 }
 

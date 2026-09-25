@@ -4,3 +4,5 @@
 /fuzz/coverage/
 /coverage/
 /fuzz/corpus/
+*.snap.new
+.*.pending-snap

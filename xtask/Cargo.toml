@@ -15,7 +15,9 @@ workspace = true
 
 [dev-dependencies]
 astral-yaml-serde.workspace = true
+insta = "1.48.0"
 serde.workspace = true
+serde_json = "1.0"
 yaml_serde = "=0.10.7"
 
 [[bench]]

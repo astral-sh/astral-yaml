@@ -18,11 +18,5 @@ for fixture in fixtures:
         raise SystemExit(f"Missing license: {fixture['file']}")
     if "notice" in fixture and not (root / fixture["notice"]).is_file():
         raise SystemExit(f"Missing notice: {fixture['file']}")
-    for suffix in [".event", ".scalars"]:
-        if not (root / fixture["file"]).with_suffix(suffix).is_file():
-            raise SystemExit(f"Missing syntax expectation: {fixture['file']}{suffix}")
-    error = (root / fixture["file"]).with_suffix(".error")
-    if error.exists() != (fixture.get("valid_yaml_1_2", True) is False):
-        raise SystemExit(f"Rejection expectation disagrees with manifest: {fixture['file']}")
 
 print("All real-world fixture checksums match")

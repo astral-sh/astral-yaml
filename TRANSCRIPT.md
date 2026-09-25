@@ -46,13 +46,15 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **93 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
+- **107 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
   Twelve pinned real-world files now cover eight GitHub Actions workflows,
   Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
   independent syntax/span expectations and reference values; one upstream file
-  with invalid indentation has a pinned rejection expectation.
+  with invalid indentation has a pinned rejection expectation. The separate
+  PyYAML oracle test also passes; it runs in `scripts/check.sh` and is ignored by
+  ordinary `cargo test` because it requires `uv`.
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
-  clippy, tests, fixture hashes, independently regenerated syntax expectations,
+  clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
   The report covers 3,426 lines and 364 functions. LLVM region coverage is **97.68%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
@@ -80,10 +82,16 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 The real-world corpus grew from three files to twelve (223,181 source bytes).
 Every added file is pinned to a commit with a digest and its license. PyYAML 6.0.3's
 Python and LibYAML-backed parsers independently generate complete syntax events
-and UTF-8 scalar ranges; they must agree before expectations are written. Rust
-tests compare those expectations with the AST, check alias targets, LF/CRLF/CR
+and UTF-8 scalar ranges; they must agree before Rust compares them with the AST
+in memory. Tests also check alias targets, LF/CRLF/CR
 equivalence, shell text and scalar styles, and complete root comment aggregation.
 Both the astral and reference readers consume our serializer's output.
+
+Each fixture now has an inline `insta` snapshot in its own Rust test. Indented
+trees replace the detached event and scalar-range files, with styles and Unicode
+line/column ranges beside values. Multiline values render one decoded line at a
+time. The rejection snapshot includes a source excerpt, caret, and byte range.
+Snapshot updates use `cargo insta test -p xtask --test real_world --review`.
 
 Sentry's Compose snapshot contains an under-indented closing flow delimiter.
 It remains unmodified and is tested as invalid YAML 1.2, with the exact error

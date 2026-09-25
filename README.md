@@ -34,9 +34,13 @@ Suite; pass a directory to check another suite. Explicit file and directory path
 are relative to the current directory.
 
 With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` also checks fixture
-hashes, independently verifies the real-world syntax snapshots, and enforces
+hashes, compares real-world syntax and spans with independent parsers, and enforces
 100% line and function coverage. [Fuzzing instructions](fuzz/README.md)
 cover corpus seeding, bounded campaigns, and source-coverage reports.
+
+Real-world tests use inline `insta` snapshots of readable syntax trees and
+diagnostics. With `cargo-insta` installed, run
+`cargo insta test -p xtask --test real_world --review` to review updates.
 
 Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte
 ranges, comments, scalar styles, tags, and anchors. Collection children and aliases

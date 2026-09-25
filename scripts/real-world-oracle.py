@@ -3,9 +3,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["PyYAML==6.0.3"]
 # ///
-"""Check or regenerate syntax expectations with PyYAML, without running astral-yaml."""
+"""Emit independent syntax expectations as JSON for the Rust oracle test."""
 
-import argparse
 import json
 from pathlib import Path
 
@@ -61,18 +60,14 @@ def expectations(source, loader):
         if isinstance(token, tokens.ScalarToken):
             start = offsets[token.start_mark.index]
             end = offsets[token.end_mark.index]
-            scalars.append(f"{start} {end}\n")
+            scalars.append((start, end))
 
-    return {"event": event_output, "scalars": "".join(scalars)}
+    return {"events": event_output, "scalars": scalars}
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--write", action="store_true", help="replace committed expectations"
-    )
-    args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent / "fixtures/real-world"
+    results = []
 
     for fixture in json.loads((root / "manifest.json").read_text()):
         path = root / fixture["file"]
@@ -83,14 +78,9 @@ def main():
         # resolution occurs: plain `on`, for example, remains scalar text.
         assert expected == expectations(source, yaml.CBaseLoader), path
 
-        for suffix, content in expected.items():
-            snapshot = path.with_suffix("." + suffix)
-            if args.write:
-                snapshot.write_text(content)
-            elif snapshot.read_text() != content:
-                raise SystemExit(f"Oracle mismatch: {snapshot}")
+        results.append({"file": fixture["file"], **expected})
 
-        print(f"Verified {fixture['file']}")
+    print(json.dumps(results))
 
 
 if __name__ == "__main__":
