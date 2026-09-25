@@ -2,18 +2,20 @@
 
 These are unmodified snapshots of eight GitHub Actions workflows, a Kubernetes
 guestbook, an OpenAPI document, and Airflow and Sentry Compose configurations.
-`manifest.json` records the repository, revision, original path, size, SHA-256, and retained
-license for each file. Workflows exercise expressions, multiline shell scripts,
+`manifest.json` records each file's repository, revision, original path, size,
+SHA-256, and license. Workflows exercise expressions, multiline shell scripts,
 plain continuation lines, literal and folded scalars, flow matrices, empty
 values, quotes, comments, and reusable jobs.
-Airflow's configuration also exercises anchors, aliases, and merge-key syntax
-(preserved as ordinary mappings; merge expansion is outside YAML 1.2 core).
+Airflow's configuration also exercises anchors, aliases, and `<<` mapping keys.
+The parser treats `<<` as an ordinary key; YAML 1.2 core does not define merge
+expansion.
 
 Each fixture has an [inline Insta snapshot](../../crates/astral-yaml/tests/real_world/fixtures/)
 in a parser integration test. Accepted inputs render as indented trees: mapping
-entries stay together, sequences use dashes, and scalar values appear beside their styles and
-source ranges. Ranges use one-based Unicode line/column positions with exclusive
-ends. Anchors, aliases, tags, collection styles, and document markers are retained.
+entries stay together, sequences use dashes, and scalar values appear beside their
+styles and source ranges. Ranges use one-based Unicode line/column positions with
+exclusive ends. Anchors, aliases, tags, collection styles, and document markers
+are retained.
 Multiline values show one quoted decoded line at a time. Escapes make newlines
 and tabs explicit; closing quotes expose trailing spaces.
 
@@ -27,37 +29,34 @@ mapping [block]
     - "test" [plain @2:9..2:13]
 ```
 
-Normal tests check the inline snapshots without Python. The separate oracle test
-runs PyYAML 6.0.3's Python and LibYAML-backed parsers; their complete syntax events
-and UTF-8 scalar-token ranges must agree with each other and with our accepted
-ASTs. These results are exchanged in memory, not stored as snapshot files.
-Schema resolution is disabled, so YAML 1.1 spellings such as `on` remain scalar
-text. This optional external check lives in the parser's integration tests;
-`scripts/check.sh` runs it as well as both crates' normal tests.
+Snapshot tests do not require Python. An optional test compares syntax events and
+UTF-8 scalar-token ranges with PyYAML 6.0.3's Python and LibYAML parsers. Both must
+agree with each other and with each accepted AST. The test generates these
+expectations at runtime. It does not construct values or resolve schema types,
+so YAML 1.1 spellings such as `on` remain scalar text. `scripts/check.sh` runs
+this comparison as well as both crates' normal tests.
 
 ```sh
-python3 scripts/verify-fixtures.py
+uv run --script scripts/verify-fixtures.py
 cargo test -p astral-yaml --test real_world
 cargo test -p astral-yaml-serde --test real_world
 cargo test -p astral-yaml --test real_world -- --ignored  # requires uv
 
-# Review and update inline expectations after an intentional change:
+# Review snapshot changes:
 cargo install cargo-insta --locked
 cargo insta test -p astral-yaml --test real_world --review
 ```
 
-Parser tests also check LF/CRLF/CR equivalence. The serde crate's integration
-tests compare constructed values with `yaml_serde`. Both readers also consume
-our serializer's output. Handwritten assertions check shell content, YAML styles,
-and comments. Root `Spanned` values must collect every comment in each
-single-document fixture. Benchmarks retain the original three
-fixtures for comparable performance measurements.
+Parser tests also check LF/CRLF/CR equivalence. Serde tests compare values with
+`yaml_serde` and read serialized output with both readers. They check that root
+`Spanned` values collect every comment in each accepted single-document fixture.
+Other assertions check shell content, YAML styles, and comments. Benchmarks use
+the original three fixtures so results remain comparable.
 
-`sentry-compose.yaml` is deliberately retained as a **rejection** case. Its
-`seaweedfs.healthcheck.test` closing bracket is at the mapping key's indentation
+`sentry-compose.yaml` is a rejection case. The closing bracket in
+`seaweedfs.healthcheck.test` is at the mapping key's indentation
 (line 302), rather than inside the flow continuation. YAML 1.2.2 productions
 63, 65, 79, 137, and 138 require greater indentation in this context. The
 inline [rejection snapshot](../../crates/astral-yaml/tests/real_world/fixtures/sentry_compose.rs)
-pins the diagnostic and byte range and shows the source line with a caret.
-PyYAML accepts the file; the oracle test preserves that documented disagreement.
-The source remains unmodified, including its anchors and aliases.
+records the diagnostic, byte range, and source line. PyYAML accepts the file;
+the comparison test checks this disagreement. The fixture is unmodified.

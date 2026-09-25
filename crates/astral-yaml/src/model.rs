@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-/// A half-open byte range in the original UTF-8 source.
+/// A half-open byte range.
+///
+/// Parser spans use offsets in the decoded UTF-8 input. [`crate::Source::original_span`]
+/// converts them to offsets in the original encoded bytes.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Span {
     pub(crate) start: usize,
@@ -43,7 +46,7 @@ impl Span {
         source.get(self.start..self.end)
     }
 
-    /// Slices an encoded input using a span returned by `Source::original_span`.
+    /// Slices encoded input using a span returned by [`crate::Source::original_span`].
     #[must_use]
     pub fn slice_bytes(self, source: &[u8]) -> Option<&[u8]> {
         source.get(self.start..self.end)
@@ -87,7 +90,7 @@ pub struct Property<'a> {
     pub span: Span,
 }
 
-/// A mapping entry. YAML keys can themselves be collections.
+/// A mapping entry. YAML keys can be collections.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub key: NodeId,
@@ -122,10 +125,12 @@ pub struct Node<'a> {
     pub kind: NodeKind<'a>,
 }
 
-/// A comment, excluding its line break and including the `#` indicator.
+/// A comment's text and source range.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Comment<'a> {
+    /// Includes `#` and excludes the line break.
     pub span: Span,
+    /// Excludes `#` and the line break; preserves whitespace after `#`.
     pub text: &'a str,
 }
 

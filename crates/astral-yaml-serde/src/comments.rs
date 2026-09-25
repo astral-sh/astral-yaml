@@ -6,7 +6,7 @@ use std::{
     ops::Range,
 };
 
-/// A comment's relationship to its directly associated syntax node.
+/// A comment's position relative to its direct syntax owner.
 /// Ancestor wrappers retain this placement when collecting descendant comments.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommentPlacement {
@@ -130,8 +130,8 @@ impl<'de> CommentIndex<'de> {
             .collect::<Result<_, Error>>()?;
         owned.sort_by_key(|(owner, comment)| (*owner, comment.comment.span.start()));
 
-        // Preorder makes every syntax subtree a contiguous interval. Store each
-        // comment once; materialize a wrapper's source ordering only on request.
+        // Preorder makes each subtree a contiguous interval. Store comments by
+        // owner here; a wrapper sorts its subtree's comments into source order.
         let ranges = tree
             .nodes
             .iter()

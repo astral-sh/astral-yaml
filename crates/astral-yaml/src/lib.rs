@@ -1,4 +1,4 @@
-//! A safe, span-aware YAML 1.2 parser.
+//! A YAML 1.2 parser that retains source spans and comments.
 //!
 //! Parsed streams use an arena so aliases do not expand or create recursively
 //! owned values. Scalar resolution is separate from syntax parsing.

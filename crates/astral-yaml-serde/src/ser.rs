@@ -44,9 +44,9 @@ impl Serializer {
     fn quoted(&mut self, mut value: &str) {
         self.output.push('"');
 
-        // Copy ordinary text together, including UTF-8. Only C2, E2, and EF
-        // can begin a non-ASCII character that needs escaping below. Stopping
-        // at ASCII or a leading byte preserves character boundaries.
+        // Copy runs of text until a possible escape. The non-ASCII characters
+        // escaped below start with C2, E2, or EF; stopping at those leading bytes
+        // or at ASCII preserves UTF-8 character boundaries.
         while let Some(index) = value.bytes().position(|byte| {
             byte < b' ' || matches!(byte, b'"' | b'\\' | 0x7f | 0xc2 | 0xe2 | 0xef)
         }) {

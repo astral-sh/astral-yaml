@@ -10,14 +10,13 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-// A private newtype protocol transports (start, end, value, comments) from our deserializer.
-// The offsets come from the parser, never from fields in the YAML document.
+// The private newtype protocol requests (start, end, value, comments) from the
+// deserializer. Offsets come from the parser, not YAML fields.
 pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 
-/// A deserialized value together with its source span and borrowed comments.
+/// A deserialized value with its source span and borrowed comments.
 ///
-/// Wrap any deserializable type, including individual fields, mapping keys, or
-/// collection elements. Borrowed values retain the input's lifetime.
+/// Can wrap a field, mapping key, collection element, or whole document.
 ///
 /// The span is a half-open byte range in the decoded UTF-8 source. It covers the
 /// entire YAML node, including quotes, collection delimiters, tags, and anchors.
@@ -30,14 +29,14 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 /// metadata. Equality and hashing include the value, span, and comments.
 ///
 /// Comments include the node's own comments and those of all syntax descendants,
-/// in source order, once per wrapper. Parent and child lists intentionally overlap.
-/// Aliases are leaves for comment aggregation: their wrappers contain use-site
-/// comments, while wrapped children of aliased collections retain definition-site
-/// comments. Placement always describes the direct owner. Comments can lie outside
+/// in source order, once per wrapper. Parent and child lists overlap.
+/// Alias wrappers contain comments at the alias occurrence. Wrapped children of
+/// aliased collections retain comments from the anchor's definition. Comment
+/// placement is relative to the direct owner. Comments can lie outside
 /// the node's span. Comment text borrows the input even when `T` is owned.
 ///
-/// Deserialization requires this crate's deserializer. Serde's intermediate
-/// buffering, used by `#[serde(untagged)]` and `#[serde(flatten)]`, discards source
+/// Deserialization requires this crate's deserializer. Serde's buffering for
+/// `#[serde(untagged)]` and `#[serde(flatten)]` discards source
 /// metadata: wrap the containing enum or struct instead of fields decoded from that
 /// buffer.
 ///

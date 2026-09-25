@@ -1,6 +1,6 @@
 [package]
 name = "astral-yaml"
-description = "A safe, span-aware YAML 1.2 parser"
+description = "A YAML 1.2 parser with source spans and comments"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

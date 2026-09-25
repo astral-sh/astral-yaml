@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["PyYAML==6.0.3"]
 # ///
-"""Emit independent syntax expectations as JSON for the Rust oracle test."""
+"""Emit PyYAML syntax events and UTF-8 scalar ranges as JSON for the Rust tests."""
 
 import json
 from pathlib import Path

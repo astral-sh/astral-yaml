@@ -4,7 +4,7 @@ use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_o
 
 #[test]
 fn block_scalar_eof_and_indentation_follow_the_test_suite() {
-    // yaml/yaml-test-suite#118 defines EOF as an implicit final line break.
+    // Follow the suite's EOF-as-line-break interpretation (yaml/yaml-test-suite#118).
     for style in ["|", ">"] {
         for (body, clipped, kept) in [
             ("  text", "text\n", "text\n"),

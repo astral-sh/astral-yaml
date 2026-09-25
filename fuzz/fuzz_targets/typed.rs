@@ -18,8 +18,8 @@ struct Pair(i16, String);
 #[derive(Deserialize, Serialize)]
 struct Unit;
 
-// Exercise comment indexing for every parsed syntax shape, including cyclic
-// aliases and tags that an ordinary application value would reject.
+// Skip value construction so comment indexing can accept arbitrary tags and
+// cyclic aliases.
 #[derive(Serialize)]
 struct SyntaxOnly;
 
@@ -115,7 +115,8 @@ macro_rules! check {
                     let decoded: Spanned<'_, $ty> = from_str(&encoded).unwrap();
                     assert!(decoded.comments.is_empty());
 
-                    // Canonical output also compares NaN values and the sign of zero.
+                    // Compare serialized forms: NaN is unequal to itself, and
+                    // numeric equality does not distinguish positive and negative zero.
                     assert_eq!(to_string(&decoded).unwrap(), encoded);
                 }
             }

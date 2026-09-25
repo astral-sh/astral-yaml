@@ -1,84 +1,29 @@
 # astral-yaml
 
-A pure Rust YAML 1.2 parser under development. The core parser uses only `std`;
+A Rust YAML 1.2 parser under development. The core parser uses only `std`;
 serde support lives in a separate crate. Workspace code forbids unsafe Rust.
 
-- `astral-yaml`: syntax, source spans, comments, and parsing.
+- `astral-yaml`: parsing, syntax, source spans, and comments.
 - `astral-yaml-serde`: serialization and deserialization.
 - `astral-yaml-dev`: shared test, fuzz, and benchmark helpers (not published).
 - `xtask/`: development commands and benchmarks (not published).
 
-Workspace members inherit their shared package version and dependency requirements
-from the root `Cargo.toml`.
+The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). YAML 1.1 schema
+compatibility is outside the project's scope. See
+[conformance and limits](docs/conformance.md) for supported behavior and
+[validation results](TRANSCRIPT.md) for recorded test, fuzz, and benchmark runs.
 
-The implementation targets the [YAML 1.2.2 specification](https://yaml.org/spec/1.2.2/)
-and [YAML Test Suite](https://github.com/yaml/yaml-test-suite). YAML 1.1 schema
-compatibility is outside the scope of this project.
+## Usage
 
-See [conformance and limits](docs/conformance.md) for supported behavior and
-[TRANSCRIPT.md](TRANSCRIPT.md) for measured engineering status.
-
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-Conformance tests live in the parser crate and run directly against its API:
-`cargo test -p astral-yaml --test conformance`.
-Tests and benchmarks share helpers through the `astral-yaml-dev` development
-dependency. The separate fuzz workspace also depends on this unpublished crate.
-
-The workspace uses the [xtask pattern](https://github.com/matklad/cargo-xtask) for
-development commands:
-
-```sh
-cargo xtask fuzz
-cargo bench -p xtask --bench real_world
-```
-
-`cargo xtask --help` shows usage. With `uv` and `rustup` installed,
-`cargo xtask fuzz` sets up the tools and corpora and runs all four fuzz targets
-for 60 seconds each. Extra arguments are forwarded to cargo-fuzz;
-see [fuzzing instructions](fuzz/README.md).
-
-Python scripts use PEP 723 metadata and run with `uv run --script scripts/<name>.py`.
-Each declares its Python requirement and dependencies, including an empty list
-for scripts that only use the standard library.
-
-With `rustup` and `uv` installed, `scripts/check.sh` checks Python formatting,
-linting, and types with Ruff and ty, verifies fixture hashes, compares real-world
-syntax and spans with independent parsers, and enforces 100% line and function
-coverage. [Fuzzing instructions](fuzz/README.md)
-cover corpus seeding, bounded campaigns, and source-coverage reports.
-
-`cargo xtask cov` runs the YAML crates' unit and integration tests with Rust's coverage
-instrumentation and enforces 100% line and function coverage for `astral-yaml` and
-`astral-yaml-serde`. It uses the active compiler's LLVM tools, installing
-`llvm-tools-preview` through rustup if needed.
-Builds and fresh profiles are kept under `target/coverage`. Development helpers,
-xtask, and separate test modules are excluded from the reports.
-Doctests run in the ordinary workspace test step.
-
-`cargo xtask cov --html` also writes `target/coverage/html/index.html` with annotated
-source and execution counts. The HTML report is generated even when coverage falls
-below the threshold. Both commands save the LLVM summary as
-`target/coverage/summary.json`. These paths follow Cargo's configured target directory.
-
-The parser's integration tests use inline `insta` snapshots of readable syntax
-trees and diagnostics. With `cargo-insta` installed, run
-`cargo insta test -p astral-yaml --test real_world --review` to review updates.
-
-Parse syntax with `astral_yaml::parse(source)`. The returned stream retains byte
-ranges, comments, scalar styles, tags, and anchors. Collection children and aliases
-refer to arena node IDs; aliases are not expanded by the parser.
+`astral_yaml::parse(source)` returns a stream of syntax nodes with byte ranges,
+comments, scalar styles, tags, and anchors. Collection children and aliases refer
+to node IDs in the stream's arena. The parser does not expand aliases.
 
 Use `astral_yaml_serde::from_str::<T>(source)` for a `Deserialize` type and
-`astral_yaml_serde::to_string(&value)` for a `Serialize` value. The emitter uses flow
-style and quotes strings to preserve their type under YAML 1.2 core resolution.
+`astral_yaml_serde::to_string(&value)` for a `Serialize` value. The serializer uses
+flow style and quotes strings to preserve their type under YAML 1.2 core resolution.
 
-Wrap a value or field in `astral_yaml_serde::Spanned<'a, T>` to retain its source
-range and borrow its comments:
+Wrap a value or field in `Spanned<'a, T>` to retain its source range and comments:
 
 ```rust
 use astral_yaml_serde::{Spanned, from_str};
@@ -97,18 +42,17 @@ assert_eq!(config.timeout.span.slice(source), Some("30"));
 assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 ```
 
-`Spanned<'a, T>` exposes `value`, `span`, and `comments`, implements `Deref` and
-`DerefMut` for `T`, and serializes as the value alone. Its comments include syntax
-descendants, once per wrapper, in source order; parent and child lists overlap.
-Each `AttachedComment` contains a borrowed core `Comment` and a `CommentPlacement`:
-`Leading`, `Inline`, `Trailing`, or `Detached`. Placement describes the direct
-owner, including when a comment appears in an ancestor's list.
+`Spanned` exposes `value`, `span`, and `comments`, implements `Deref` and `DerefMut`
+for `T`, and serializes as the value alone. Each wrapper collects its node's
+comments and those of its syntax descendants once, in source order. Parent and
+child lists overlap. Each `AttachedComment` contains a borrowed `Comment` and a
+`CommentPlacement`: `Leading`, `Inline`, `Trailing`, or `Detached`. Placement is
+relative to the comment's direct owner, even in an ancestor's list.
 
-The input must outlive the wrapper, even when `T` is owned. This makes the wrapper
-incompatible with `DeserializeOwned`; ordinary owned types still work with the
-existing deserialization APIs. `Spanned` remains `Clone`, but is no longer `Copy`.
-Spans include node properties and delimiters; an alias uses its `*name` occurrence.
-Alias wrappers collect use-site comments without importing target comments.
+The input must outlive the wrapper, even when `T` is owned. `Spanned` therefore
+cannot satisfy `DeserializeOwned`; ordinary owned types still can. Spans include
+node properties and delimiters. Alias wrappers use the span and comments at the
+`*name` occurrence; comment collection does not follow the alias target.
 Serde buffering for `untagged` and `flatten` discards metadata, so wrap the
 containing enum or struct instead of fields decoded from a buffer.
 
@@ -116,3 +60,48 @@ For encoded byte input, use `astral_yaml::Source::from_bytes(&bytes)` and parse 
 decoded text. UTF-8 is borrowed; UTF-16 and UTF-32 in either byte order are decoded
 with size limits. `Source::original_span` maps a parsed UTF-8 span back to the
 original encoded bytes.
+
+## Development
+
+With `rustup` and `uv` installed, run:
+
+```sh
+scripts/check.sh
+```
+
+This checks Rust and Python formatting, clippy, Python linting and types, fixture
+hashes, tests, and coverage. It also compares fixture syntax and spans with
+PyYAML's Python and LibYAML parsers. Python scripts declare PEP 723 metadata;
+run them with `uv run --script scripts/<name>.py`.
+
+To run individual checks:
+
+```sh
+cargo test --workspace
+cargo test -p astral-yaml --test conformance
+cargo xtask cov --html
+cargo xtask fuzz
+cargo bench -p xtask --bench real_world
+```
+
+`cargo xtask cov` enforces 100% line and function coverage for `astral-yaml` and
+`astral-yaml-serde`. It uses the active compiler's LLVM tools, installing
+`llvm-tools-preview` through rustup if needed. Development helpers, xtask, and
+separate test modules are excluded from the reports. Doctests run under
+`cargo test --workspace`.
+
+Coverage builds, fresh profiles, and `summary.json` go under `target/coverage`.
+`--html` also writes `target/coverage/html/index.html`, even when coverage falls
+below the threshold. These paths follow Cargo's configured target directory.
+
+`cargo xtask fuzz` sets up the tools and corpora, then runs all four targets for
+60 seconds each. Extra arguments are forwarded to cargo-fuzz. See the
+[fuzzing guide](fuzz/README.md) for limits and corpus replay, and the
+[benchmark notes](benchmarks/README.md) for measurement and comparison commands.
+
+The parser's fixture tests use inline `insta` snapshots. With `cargo-insta`
+installed, review updates with:
+
+```sh
+cargo insta test -p astral-yaml --test real_world --review
+```

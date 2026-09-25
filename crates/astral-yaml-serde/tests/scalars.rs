@@ -1,4 +1,4 @@
-//! Differential checks over a bounded grammar, independent of our emitter.
+//! Compare generated scalar syntax with yaml_serde without using our serializer.
 
 fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
     for source in [
@@ -13,7 +13,8 @@ fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
             continue;
         }
 
-        // The suite treats EOF as a final line break (upstream #118).
+        // Supply the suite's implicit EOF line break to LibYAML
+        // (yaml/yaml-test-suite#118).
         let terminated = if source.ends_with('\n') {
             source.clone()
         } else {
@@ -54,7 +55,7 @@ fn block_scalar_combinations_match_reference() {
                                     "{style}{indent}{chomp}\n{first}\n{second}\n{third}{ending}"
                                 );
                                 // LibYAML accepts an over-indented leading blank before
-                                // a # content line, contrary to suite case S98Z (#37).
+                                // a # content line, contrary to S98Z (yaml/yaml-test-suite#37).
                                 let body = [first, second, third];
                                 let first_content =
                                     body.iter().position(|line| !line.trim().is_empty());

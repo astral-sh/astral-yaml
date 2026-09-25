@@ -7,7 +7,7 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// Resource limits applied before allocation or recursive descent.
+/// Limits on input size, collection nesting, and syntax elements.
 #[derive(Clone, Copy, Debug)]
 pub struct ParseOptions {
     /// Maximum collection nesting, between 1 and 128.

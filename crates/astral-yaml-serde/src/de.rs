@@ -355,9 +355,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn check_mapping_keys(self, entries: &[Entry], span: Span) -> Result<()> {
-        // Most configuration mappings have a few string keys. Their borrowed
-        // text is sufficient for uniqueness; avoid constructing and dropping
-        // the larger canonical-key representation in that common case.
+        // Avoid constructing canonical keys for small string-key mappings.
+        // Other key types fall back to check_general_keys.
         if entries.len() > 8 {
             return self.check_general_keys(entries, span);
         }
@@ -388,8 +387,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn check_general_keys(self, entries: &[Entry], span: Span) -> Result<()> {
-        // Small mappings need only a few comparisons. Keep their canonical keys
-        // on the stack; larger mappings retain a hash set to bound lookup work.
+        // Keep up to eight canonical keys on the stack. Use a hash set beyond
+        // that threshold to avoid quadratic duplicate checks.
         let mut small_keys = [const { Key::Null }; 8];
         let mut large_keys =
             (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));

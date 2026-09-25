@@ -67,8 +67,8 @@ fn node(out: &mut String, stream: &Stream<'_>, id: NodeId, depth: usize, prefix:
 
     match &current.kind {
         NodeKind::Scalar(scalar) if scalar.value.contains('\n') => {
-            // Keep decoded lines separate, but quote them so trailing spaces,
-            // blank lines, and the presence of a final newline remain visible.
+            // Quote each decoded line to expose trailing spaces, blank lines,
+            // and the presence or absence of a final newline.
             for line in scalar.value.split_inclusive('\n') {
                 writeln!(out, "{indent}  {line:?}").unwrap();
             }
@@ -122,8 +122,8 @@ pub(super) fn tree(stream: &Stream<'_>) -> String {
 }
 
 pub(super) fn diagnostic(name: &str, source: &str, error: &astral_yaml::Error) -> String {
-    // Corpus files use LF. The byte range below also retains the precise span
-    // when the diagnostic covers more than one line.
+    // Corpus files use LF. Include the byte range because a multiline error's
+    // caret covers only its first line.
     let prefix = &source[..error.span.start()];
     let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
     let column = prefix.rsplit('\n').next().unwrap().chars().count() + 1;

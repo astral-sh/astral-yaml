@@ -22,8 +22,8 @@ pub fn classify(value: &str) -> ScalarType {
 
     let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
 
-    // Numeric scalars begin with a digit or a dot after their optional sign.
-    // Most configuration values are strings, so avoid scanning their contents.
+    // After an optional sign, numeric scalars begin with a digit or a dot.
+    // Other prefixes need no further numeric checks.
     if !matches!(unsigned.as_bytes().first(), Some(b'0'..=b'9' | b'.')) {
         return ScalarType::String;
     }

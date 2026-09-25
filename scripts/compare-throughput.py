@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = []
 # ///
-"""Compare preserved throughput executables with alternating measurement order."""
+"""Compare two throughput benchmark binaries, alternating their execution order."""
 
 import argparse
 import csv

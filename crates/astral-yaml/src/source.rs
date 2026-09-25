@@ -11,11 +11,11 @@ pub enum Encoding {
     Utf32Le,
 }
 
-/// Decoded input with a mapping back to byte ranges in the original encoding.
+/// Decoded input with access to byte ranges in the original encoding.
 ///
-/// UTF-8 is borrowed. Other encodings are converted once, then can be parsed with
-/// borrowed scalars. Parser spans refer to [`Self::text`]; [`Self::original_span`]
-/// translates them to the original input without a per-character offset table.
+/// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned string;
+/// parsed scalars can borrow from that string. Parser spans refer to [`Self::text`].
+/// Use [`Self::original_span`] to convert them to offsets in the original input.
 #[derive(Clone, Debug)]
 pub struct Source<'a> {
     bytes: &'a [u8],
@@ -146,7 +146,8 @@ impl<'a> Source<'a> {
 
     /// Converts a decoded-text span into a span of the original bytes.
     ///
-    /// For UTF-16/32 this scans the text prefix. Invalid UTF-8 boundaries return `None`.
+    /// For UTF-16/32 this scans the text through the end of the span. Returns `None`
+    /// for out-of-bounds offsets or offsets that split a UTF-8 character.
     #[must_use]
     pub fn original_span(&self, span: Span) -> Option<Span> {
         let before = self.text.get(..span.start)?;
