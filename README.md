@@ -1,29 +1,36 @@
 # astral-yaml
 
-A Rust YAML 1.2 parser under development. The core parser uses only `std`;
-serde support lives in a separate crate. Workspace code forbids unsafe Rust.
+A fast, safe Rust YAML 1.2 parser.
+
+> [!WARNING]
+> This README is human-edited, but all code changes, PR summaries, and additional
+> documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
+> Use at your own risk.
+
+Core parts:
 
 - `astral-yaml`: parsing, syntax, source spans, and comments.
 - `astral-yaml-serde`: serialization and deserialization.
-- `astral-yaml-dev`: shared test, fuzz, and benchmark helpers (not published).
-- `xtask/`: development commands and benchmarks (not published).
 
-The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). YAML 1.1 schema
-compatibility is outside the project's scope. See
-[conformance and limits](docs/conformance.md) for supported behavior and
-[validation results](TRANSCRIPT.md) for recorded test, fuzz, and benchmark runs.
+The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). See
+[conformance and limits](docs/conformance.md) for supported behavior.
 
 ## Usage
 
-`astral_yaml::parse(source)` returns a stream of syntax nodes with byte ranges,
-comments, scalar styles, tags, and anchors. Collection children and aliases refer
-to node IDs in the stream's arena. The parser does not expand aliases.
+There are two primary interfaces:
 
-Use `astral_yaml_serde::from_str::<T>(source)` for a `Deserialize` type and
-`astral_yaml_serde::to_string(&value)` for a `Serialize` value. The serializer uses
-flow style and quotes strings to preserve their type under YAML 1.2 core resolution.
+- `astral-yaml` provides a low-level stream of syntax nodes with byte ranges,
+  comment states, scalar styles, tags, and anchors. Aliases are not expanded.
 
-Wrap a value or field in `Spanned<'a, T>` to retain its source range and comments:
+- `astral-yaml-serde` provides a high-level serde-compatible serialization
+  and deserialization interface. The serializer uses flow style and quoted
+  strings.
+
+
+One of astral-yaml's specialties is that it's _span aware_, and can convey
+span information even within the serde layer. For any deserializable `T`,
+wrap a value or field in `Spanned<'a, T>` to retain its source range and
+comments:
 
 ```rust
 use astral_yaml_serde::{Spanned, from_str};
@@ -42,23 +49,26 @@ assert_eq!(config.timeout.span.slice(source), Some("30"));
 assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 ```
 
-`Spanned` exposes `value`, `span`, and `comments`, implements `Deref` and `DerefMut`
-for `T`, and serializes as the value alone. Each wrapper collects its node's
-comments and those of its syntax descendants once, in source order. Parent and
-child lists overlap. Each `AttachedComment` contains a borrowed `Comment` and a
-`CommentPlacement`: `Leading`, `Inline`, `Trailing`, or `Detached`. Placement is
-relative to the comment's direct owner, even in an ancestor's list.
+Note that `Spanned` has an interior lifetime, so it cannot be used with `DeserializeOwned`.
 
-The input must outlive the wrapper, even when `T` is owned. `Spanned` therefore
-cannot satisfy `DeserializeOwned`; ordinary owned types still can. Spans include
-node properties and delimiters. Alias wrappers use the span and comments at the
-`*name` occurrence; comment collection does not follow the alias target.
-Serde buffering for `untagged` and `flatten` discards metadata, so wrap the
-containing enum or struct instead of fields decoded from a buffer.
-
-For encoded byte input, use `astral_yaml::Source::from_bytes(&bytes)` and parse its
-decoded text. UTF-8 is borrowed; UTF-16 and UTF-32 in either byte order are decoded
-with size limits. `Source::original_span` maps a parsed UTF-8 span back to the
-original encoded bytes.
+## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks.
+
+## Performance
+
+The [latest benchmarks](benchmarks/results/2026-09-25.csv) compare
+`astral-yaml-serde` with `yaml_serde` 0.10.7:
+
+| Fixture | Bytes | `astral-yaml-serde` | `yaml_serde` | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| uv CI workflow | 11,602 | 50.64 µs | 145.10 µs | 2.87× |
+| Kubernetes Guestbook | 3,366 | 22.30 µs | 59.30 µs | 2.66× |
+| OpenAPI Petstore | 5,479 | 27.47 µs | 74.50 µs | 2.71× |
+
+Both implementations deserialize into `Vec<yaml_serde::Value>`, including parsing,
+value construction, and destruction. These are median times from eleven samples,
+measured on 2026-09-25 with Rust 1.98.1 on macOS arm64.
+
+See [benchmarks](benchmarks/README.md) for reproduction commands and measurements
+with `Spanned`.
