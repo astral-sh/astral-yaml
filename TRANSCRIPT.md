@@ -2,7 +2,7 @@
 
 Recorded test, fuzz, and benchmark results. API behavior and limits are documented
 in [conformance and limits](docs/conformance.md); development commands are in the
-[README](README.md#development).
+[contributing guide](CONTRIBUTING.md).
 
 ## Tests (2026-09-25)
 
@@ -12,8 +12,8 @@ in [conformance and limits](docs/conformance.md); development commands are in th
   every input.
 - 105 tests and three doctests pass on Rust 1.98.1. All workspace targets,
   including xtask and benchmarks, check on MSRV 1.85.1.
-- `scripts/check.sh` passes Rust and Python formatting, clippy, Ruff, ty, fixture
-  hashes, tests, the PyYAML comparison, and coverage. Clippy also passes for the
+- Rust and Python formatting, clippy, Ruff, ty, fixture hashes, tests, the PyYAML
+  comparison, and coverage pass. Clippy also passes for the
   separate fuzz workspace.
 - `astral-yaml` and `astral-yaml-serde` have 100% line and function coverage:
   3,078 lines and 337 functions. Region coverage is 97.76%. Development tooling

@@ -33,8 +33,9 @@ Snapshot tests do not require Python. An optional test compares syntax events an
 UTF-8 scalar-token ranges with PyYAML 6.0.3's Python and LibYAML parsers. Both must
 agree with each other and with each accepted AST. The test generates these
 expectations at runtime. It does not construct values or resolve schema types,
-so YAML 1.1 spellings such as `on` remain scalar text. `scripts/check.sh` runs
-this comparison as well as both crates' normal tests.
+so YAML 1.1 spellings such as `on` remain scalar text. The
+[development checks](../../CONTRIBUTING.md#checks) include this comparison as well
+as both crates' normal tests.
 
 ```sh
 uv run --script scripts/verify-fixtures.py

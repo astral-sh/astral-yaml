@@ -172,7 +172,7 @@ fn scalar_spans(stream: &astral_yaml::Stream<'_>) -> Vec<(usize, usize)> {
 }
 
 #[test]
-#[ignore = "requires uv and pinned PyYAML; run by scripts/check.sh"]
+#[ignore = "requires uv and pinned PyYAML; see CONTRIBUTING.md"]
 fn syntax_and_scalar_spans_match_pyyaml() {
     #[derive(Deserialize)]
     struct Oracle {

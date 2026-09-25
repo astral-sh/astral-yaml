@@ -114,7 +114,8 @@ error if deserialization expands them.
 Serialization also bounds nesting. Numeric construction is limited by the requested
 Rust type; lexical scalar classification does not impose a machine integer limit.
 
-`scripts/check.sh` enforces formatting, clippy, Python linting and types, fixture
-hashes, tests, and 100% line and function coverage for the two YAML crates. Region
-coverage is reported separately. See the [fuzzing guide](../fuzz/README.md) for
-target limits and corpus replay.
+The [development checks](../CONTRIBUTING.md#checks) cover formatting, clippy, Python
+linting and types, fixture hashes, tests, and coverage. `cargo xtask cov` enforces
+100% line and function coverage for the two YAML crates; region coverage is
+reported separately. See the [fuzzing guide](../fuzz/README.md) for target limits
+and corpus replay.
