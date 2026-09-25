@@ -21,3 +21,7 @@ yaml_serde = "=0.10.7"
 [[bench]]
 name = "real_world"
 harness = false
+
+[[bench]]
+name = "throughput"
+harness = false

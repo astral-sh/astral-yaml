@@ -52,3 +52,34 @@ These are measurements on one host, without CPU isolation or frequency
 control. Re-run after parser or adapter changes; they do not establish performance
 on other workloads or platforms. Validation and coverage results are recorded in
 `TRANSCRIPT.md`.
+
+## Comparing implementation revisions
+
+```sh
+cargo bench -p xtask --bench throughput
+```
+
+The throughput harness measures parsing, ordinary deserialization, root
+`Spanned<Value>` deserialization, root and field wrappers, and serialization on
+the same three fixtures. Deserialization includes parsing and dropping the result.
+Serialization starts from values constructed outside timing and includes dropping
+the output. Each result is the median of eleven samples lasting at least 150 ms.
+Values, serialization round-trips, and root comment lists are checked before timing.
+
+Preserve the executable printed by `cargo bench --no-run` for each revision, then
+compare them without rebuilding between measurements:
+
+```sh
+python3 scripts/compare-throughput.py /path/to/baseline /path/to/candidate \
+  --runs 3 --output /tmp/throughput.csv
+```
+
+The comparison alternates execution order for each fixture and operation, records
+every run, and requires at least a 20% reduction in elapsed time for every
+deserialization and serialization workload. It reports median times and the median
+of paired candidate/baseline ratios. Parsing is a diagnostic measurement rather
+than a separate acceptance requirement.
+
+For focused measurements, set `ASTRAL_BENCH_FIXTURE` and `ASTRAL_BENCH_MODE` to
+the names in the CSV output. Setting `ASTRAL_BENCH_PROFILE=1` runs each selected
+operation for 20 seconds for use with a CPU profiler.
