@@ -1,14 +1,31 @@
 # Fuzzing
 
-Install `cargo-fuzz` and a nightly Rust toolchain, then run from the repository root:
+With `uv` and `rustup` on `PATH`, run:
 
 ```sh
-python3 scripts/seed-fuzz.py
-cargo +nightly fuzz run parse -- -max_total_time=60 -timeout=2 -max_len=65536 -rss_limit_mb=2048
-cargo +nightly fuzz run serde -- -max_total_time=60 -timeout=2 -max_len=65536 -rss_limit_mb=2048
-cargo +nightly fuzz run decode -- -max_total_time=60 -timeout=2 -max_len=65536 -rss_limit_mb=2048
-cargo +nightly fuzz run typed -- -max_total_time=60 -timeout=2 -max_len=65536 -rss_limit_mb=2048
+cargo xtask fuzz
 ```
+
+The command uses `uv run --only-dev --locked` to install the project's pinned
+development tools, seeds all four corpora, installs nightly if missing, and adds
+its `rust-src` and `llvm-tools-preview` components. It then runs `parse`, `serde`,
+`decode`, and `typed` sequentially for 60 seconds each, with a 2-second input
+timeout, 64 KiB input limit, and 2 GiB RSS limit. Setup and fuzzing failures stop
+the command immediately. Missing `uv` is an error.
+
+Explicit arguments are passed through to cargo-fuzz after the same setup:
+
+```sh
+cargo xtask fuzz list
+cargo xtask fuzz run parse -- -max_total_time=10 -timeout=2 -max_len=65536 -rss_limit_mb=2048
+cargo xtask fuzz tmin parse /absolute/path/to/crash
+```
+
+Explicit runs use the limits you supply; the default campaign's limits are not
+added. All subprocesses run from the repository root, including when invoking
+xtask from a crate directory, so relative corpus and artifact paths use that
+root. Nightly selection applies only to the fuzz subprocesses. Existing corpus
+discoveries and artifacts are retained when seeding.
 
 The serde target checks string and arbitrary-value round trips and error ranges.
 It also reads every successfully serialized string and value with `yaml_serde`,
@@ -27,15 +44,15 @@ comment ordering, and error ranges. It uses all official cases as seeds.
 Campaign corpora and artifacts are ignored; reproduce and minimize any finding,
 then preserve it in `fixtures/regressions` with a regression assertion.
 
-To measure the source coverage reached by the generated corpora, install nightly
-LLVM tools, replay each corpus, then generate source reports:
+To measure the source coverage reached by the generated corpora, replay each
+corpus, then generate source reports. The wrapper installs the required LLVM
+tools during setup:
 
 ```sh
-rustup component add llvm-tools-preview --toolchain nightly
 for target in parse serde decode typed; do
-  cargo +nightly fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
+  cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
-python3 scripts/fuzz-coverage.py
+uv run --only-dev --locked python scripts/fuzz-coverage.py
 ```
 
 The script reports core and adapter source coverage separately for each target

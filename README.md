@@ -28,10 +28,14 @@ development commands:
 
 ```sh
 cargo xtask events path/to/input.yaml
+cargo xtask fuzz
 cargo bench -p xtask --bench real_world
 ```
 
-`cargo xtask --help` shows usage. Input paths are relative to the current directory.
+`cargo xtask --help` shows usage. Event input paths are relative to the current
+directory. With `uv` and `rustup` installed, `cargo xtask fuzz` sets up the tools
+and corpora and runs all four fuzz targets for 60 seconds each. Extra arguments
+are forwarded to cargo-fuzz; see [fuzzing instructions](fuzz/README.md).
 
 With `cargo-llvm-cov` and `uv` installed, `scripts/check.sh` also checks fixture
 hashes, compares real-world syntax and spans with independent parsers, and enforces

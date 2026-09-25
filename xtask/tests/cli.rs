@@ -5,6 +5,10 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[cfg(unix)]
+#[path = "cli/fuzz.rs"]
+mod fuzz;
+
 struct Directory(PathBuf);
 
 impl Directory {
@@ -23,12 +27,15 @@ impl Directory {
         fs::write(self.0.join(name), content).unwrap();
     }
 
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_xtask"));
+        command.args(args).current_dir(&self.0);
+
+        command
+    }
+
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_xtask"))
-            .args(args)
-            .current_dir(&self.0)
-            .output()
-            .unwrap()
+        self.command(args).output().unwrap()
     }
 }
 
@@ -73,7 +80,20 @@ fn help_works_outside_the_repository_root() {
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "usage: cargo xtask events file\n"
+            "usage: cargo xtask <events file | fuzz [cargo-fuzz arguments...]>\n\nWithout arguments, fuzz runs parse, serde, decode, and typed for 60 seconds each.\n"
         );
     }
+}
+
+#[test]
+fn fuzz_requires_uv() {
+    let directory = Directory::new();
+    let output = directory
+        .command(&["fuzz"])
+        .env("PATH", &directory.0)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("failed to run uv"));
 }

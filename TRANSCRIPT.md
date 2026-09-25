@@ -3,7 +3,7 @@
 ## Implementation
 
 The workspace contains `astral-yaml` (syntax and spans), `astral-yaml-serde`
-(serialization/deserialization), and `xtask` (inspection and benchmarks).
+(serialization/deserialization), and `xtask` (inspection, fuzzing, and benchmarks).
 The core has no runtime dependencies. The adapter adds only serde and its proc-macro
 stack. All workspace crates forbid unsafe Rust. Work is committed in incremental units.
 
@@ -15,6 +15,17 @@ command tests and benchmarks. Parser conformance and fixture tests live under
 against the parser API. Shared validation helpers live in the parser's test
 support and are reused by the CLI and fuzz targets.
 Input paths for the events command are relative to the caller.
+
+`cargo xtask fuzz` prepares the locked uv development environment, seeds the
+corpora, installs nightly if missing, and ensures its Rust source and LLVM tools
+are available. It runs all four targets for 60 seconds each with the documented
+timeout, input-size, and memory bounds. Explicit arguments pass through to
+cargo-fuzz after setup. Subprocesses run from the repository root; failures stop
+the sequence and propagate a failing exit code. CLI tests use stub executables
+to verify setup order, argument preservation, missing-tool errors, and failures.
+An end-to-end run of the default command completed 6,293,732 executions without
+findings: 2,336,872 parser, 504,187 serde, 2,104,724 decoder, and 1,347,949 typed
+serde executions. Each target stopped after 61 seconds with the 60-second limit.
 
 The parser implements YAML 1.2 block/flow syntax, scalar styles, streams, directives,
 tags, anchors/aliases, comments, core-schema classification, and UTF-8/16/32 input.
@@ -48,7 +59,7 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - **402/402 official cases pass**: 308 valid, 94 invalid, pinned at
   `6ad3d2c62885d82fc349026c136ef560838fdf3d`. Full events and span invariants are
   checked with no excluded cases. Every UTF-8 prefix of every input is also checked.
-- **108 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
+- **113 tests and three doctests pass** on stable Rust 1.98.1 and MSRV 1.85.1.
   Twelve pinned real-world files now cover eight GitHub Actions workflows,
   Kubernetes, OpenAPI, and two Compose configurations. Eleven valid files match
   independent syntax/span expectations and reference values; one upstream file
@@ -58,8 +69,8 @@ uses preorder subtree intervals for retrieval. Alias references are not traverse
 - `scripts/check.sh` passes: rustfmt (workspace and fuzz targets), strict workspace
   clippy, tests, fixture hashes, independent parser comparisons,
   and enforced **100% line / 100% function coverage**.
-  The report covers 3,109 lines and 341 functions, excluding integration-test
-  support. LLVM region coverage is **97.76%**;
+  The report covers 3,209 lines and 347 functions, excluding integration-test
+  support. LLVM region coverage is **97.78%**;
   the 100% claim is specifically line and function coverage, not branch coverage.
   Strict clippy also passes for the separate fuzz workspace.
 - Span regressions cover borrowing, scalar syntax, nested collections, implicit
@@ -214,8 +225,8 @@ measurements exceeds a 20% reduction. The unchanged reference benchmark measures
 [benchmark notes](benchmarks/README.md#comparing-implementation-revisions) document
 the workloads, changes, reproduction commands, and raw results.
 
-Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, the bounded fuzz
-campaigns/replays, and `cargo bench -p xtask --bench real_world` after
-substantive changes. Locally installed tools are under
-`/Users/ww/.cache/astral-yaml-tools/{coverage,fuzz}/bin`.
+Run `scripts/check.sh`, `cargo +1.85.1 test --workspace --locked`, `cargo xtask fuzz`,
+the coverage replays, and `cargo bench -p xtask --bench real_world` after
+substantive changes. Cargo-fuzz is provided by the uv development environment;
+the local coverage tool is under `/Users/ww/.cache/astral-yaml-tools/coverage/bin`.
 No Docker containers were used. All validation, fuzz, and benchmark processes finished.

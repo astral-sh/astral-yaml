@@ -32,7 +32,7 @@ for name in ["parse", "serde", "decode", "typed"]:
     for path in [profile, binary]:
         if not path.is_file():
             raise SystemExit(
-                f"Missing {path}; run cargo +nightly fuzz coverage for all four targets first"
+                f"Missing {path}; run cargo xtask fuzz coverage for all four targets first"
             )
     arguments = [str(binary), f"-instr-profile={profile}", *map(str, sources)]
     print(f"Fuzz target: {name}", flush=True)
