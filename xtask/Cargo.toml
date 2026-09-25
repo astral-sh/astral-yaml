@@ -15,7 +15,7 @@ astral-yaml.workspace = true
 astral-yaml-dev.workspace = true
 astral-yaml-serde.workspace = true
 serde.workspace = true
-yaml_serde = "=0.10.7"
+yaml_serde.workspace = true
 
 [[bench]]
 name = "real_world"

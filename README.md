@@ -8,6 +8,9 @@ serde support lives in a separate crate. Workspace code forbids unsafe Rust.
 - `astral-yaml-dev`: shared test, fuzz, and benchmark helpers (not published).
 - `xtask/`: development commands and benchmarks (not published).
 
+Workspace members inherit their shared package version and dependency requirements
+from the root `Cargo.toml`.
+
 The implementation targets the [YAML 1.2.2 specification](https://yaml.org/spec/1.2.2/)
 and [YAML Test Suite](https://github.com/yaml/yaml-test-suite). YAML 1.1 schema
 compatibility is outside the scope of this project.

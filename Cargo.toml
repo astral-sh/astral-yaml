@@ -14,10 +14,17 @@ rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-astral-yaml = { path = "crates/astral-yaml" }
+# Keep these requirements aligned with workspace.package.version.
+astral-yaml = { version = "0.1.0", path = "crates/astral-yaml" }
+astral-yaml-serde = { version = "0.1.0", path = "crates/astral-yaml-serde" }
+
+# Omit a version so Cargo excludes this development helper when publishing.
 astral-yaml-dev = { path = "crates/astral-yaml-dev" }
-astral-yaml-serde = { path = "crates/astral-yaml-serde" }
+
+insta = "1.48.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yaml_serde = "=0.10.7"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
