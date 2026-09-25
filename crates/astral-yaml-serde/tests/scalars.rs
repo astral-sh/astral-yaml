@@ -1,4 +1,4 @@
-//! Compare generated scalar syntax with yaml_serde without using our serializer.
+//! Compare generated scalar syntax with `yaml_serde` without using our serializer.
 
 fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
     for source in [

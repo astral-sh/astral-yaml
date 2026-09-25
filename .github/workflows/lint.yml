@@ -1,0 +1,44 @@
+name: Lint
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Linters and formatters
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Check Python formatting
+        run: uv run --only-dev --locked ruff format --check scripts
+
+      - name: Lint Python
+        run: uv run --only-dev --locked ruff check scripts
+
+      - name: Check Python types
+        run: uv run --only-dev --locked ty check --python .venv scripts

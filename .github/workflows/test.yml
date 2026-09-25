@@ -1,0 +1,39 @@
+name: Test
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+
+      - name: Verify fixtures
+        run: uv run --script scripts/verify-fixtures.py
+
+      - name: Run unit, integration, and doc tests
+        run: cargo test --workspace --locked
+
+      - name: Compare fixtures with PyYAML
+        run: cargo test -p astral-yaml --test real_world --locked -- --ignored
+
+      - name: Enforce coverage
+        run: cargo xtask cov
