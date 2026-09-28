@@ -32,6 +32,8 @@ fn is_core_tag(tag: &str) -> bool {
 /// Plain and quoted scalars without escapes can be borrowed from the input.
 /// Aliases are visited with depth and work budgets, including cyclic aliases.
 /// Non-core YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
+/// Strings accept untagged scalar spellings such as `42` and `true`, but reject
+/// explicit non-string core tags such as `!!int` and `!!bool`.
 ///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
@@ -329,8 +331,18 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn text<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, _) = self.scalar()?;
-        Self::visit_text(s, visitor)
+        let node = self.node()?;
+        self.reject_tag(node)?;
+        let (scalar, kind) = self.scalar_value(node)?;
+
+        if node.tag.is_some()
+            && self.tag_state != TagState::ConsumedApplication
+            && kind != ScalarType::String
+        {
+            return Err(Error::at("tag does not match string type", scalar.span));
+        }
+
+        Self::visit_text(scalar, visitor)
     }
 
     fn visit_text<V: Visitor<'de>>(scalar: &Scalar<'de>, visitor: V) -> Result<V::Value> {

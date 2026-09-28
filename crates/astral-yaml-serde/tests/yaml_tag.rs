@@ -167,6 +167,100 @@ fn core_tags_still_validate_their_payloads() {
 }
 
 #[test]
+fn strings_accept_implicit_types_and_explicit_string_tags() {
+    for (source, expected) in [
+        ("42", "42"),
+        ("'42'", "42"),
+        ("true", "true"),
+        ("1.5", "1.5"),
+        ("null", "null"),
+        ("!!str false", "false"),
+        ("! null", "null"),
+        ("!<tag:yaml.org,2002:str> 42", "42"),
+        ("%TAG !c! tag:yaml.org,2002:\n--- !c!str 42", "42"),
+    ] {
+        assert_eq!(from_str::<String>(source).unwrap(), expected, "{source}");
+        assert_eq!(from_str::<&str>(source).unwrap(), expected, "{source}");
+    }
+
+    for source in ["!Text 42", "!!str 42", "! 42"] {
+        assert_eq!(from_str::<Tagged<String>>(source).unwrap().value, "42");
+        assert_eq!(from_str::<Tagged<&str>>(source).unwrap().value, "42");
+    }
+}
+
+// Explicit tags determine the YAML type even on quoted scalars.
+// https://yaml.org/spec/1.2.2/#691-node-tags
+#[test]
+fn strings_reject_explicit_non_string_core_tags() {
+    let mut output = String::new();
+
+    for source in [
+        "!!int 42",
+        "!!int '42'",
+        "!!bool true",
+        "!!float 1.5",
+        "!!null null",
+        "!<tag:yaml.org,2002:int> 42",
+        "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42",
+        "!!int nope",
+        "!!map 'string'",
+    ] {
+        let error = from_str::<String>(source).unwrap_err();
+        assert_eq!(from_str::<&str>(source).unwrap_err(), error);
+        assert_eq!(from_str::<Tagged<String>>(source).unwrap_err(), error);
+        assert_eq!(from_str::<Tagged<&str>>(source).unwrap_err(), error);
+        assert_eq!(from_str::<Spanned<'_, String>>(source).unwrap_err(), error);
+        writeln!(output, "{source:?}: {error}").unwrap();
+    }
+
+    insta::assert_snapshot!(output, @r#"
+    "!!int 42": tag does not match string type at bytes 6..8
+    "!!int '42'": tag does not match string type at bytes 6..10
+    "!!bool true": tag does not match string type at bytes 7..11
+    "!!float 1.5": tag does not match string type at bytes 8..11
+    "!!null null": tag does not match string type at bytes 7..11
+    "!<tag:yaml.org,2002:int> 42": tag does not match string type at bytes 25..27
+    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": tag does not match string type at bytes 39..41
+    "!!int nope": scalar does not match its tag at bytes 6..10
+    "!!map 'string'": unsupported scalar tag at bytes 0..14
+    "#);
+}
+
+#[test]
+fn string_tag_checks_apply_to_aliases_keys_and_wrapped_values() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Text(String);
+
+    for (scalar, accepted) in [("42", true), ("!!str 42", true), ("!!int 42", false)] {
+        let source = format!("[&value {scalar}, *value]");
+        let result = from_str::<(IgnoredAny, String)>(&source).map(|(_, value)| value);
+        let borrowed = from_str::<(IgnoredAny, &str)>(&source).map(|(_, value)| value);
+
+        if accepted {
+            assert_eq!(result.unwrap(), "42");
+            assert_eq!(borrowed.unwrap(), "42");
+            assert_eq!(
+                from_str::<Option<String>>(scalar).unwrap(),
+                Some("42".into())
+            );
+            assert_eq!(from_str::<Text>(scalar).unwrap(), Text("42".into()));
+            assert_eq!(
+                from_str::<BTreeMap<String, u8>>(&format!("{{{scalar}: 1}}")).unwrap(),
+                BTreeMap::from([("42".into(), 1)])
+            );
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(borrowed.unwrap_err(), error);
+            assert_eq!(error.span.unwrap().slice(&source), Some("42"));
+            assert!(from_str::<Option<String>>(scalar).is_err());
+            assert!(from_str::<Text>(scalar).is_err());
+            assert!(from_str::<BTreeMap<String, u8>>(&format!("{{{scalar}: 1}}")).is_err());
+        }
+    }
+}
+
+#[test]
 fn adapter_roundtrips_every_variant_shape() {
     for (yaml, expected) in [
         ("!Ready", Message::Ready),

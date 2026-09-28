@@ -48,7 +48,7 @@ fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
     for (source, expected) in [
         ("42", "42"),
         ("null", "null"),
-        ("!!int '42'", "42"),
+        ("!!str '42'", "42"),
         ("!!str false", "false"),
     ] {
         assert_eq!(from_str::<String>(source).unwrap(), expected);
@@ -58,6 +58,7 @@ fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
     for source in [
         "[]",
         "{}",
+        "!!int '42'",
         "!!int nope",
         "!!bool 2",
         "!!seq scalar",
