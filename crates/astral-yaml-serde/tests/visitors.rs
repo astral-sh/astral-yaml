@@ -1,6 +1,6 @@
 mod support;
 
-use astral_yaml_serde::{Error, from_str, to_string};
+use astral_yaml_serde::{Error, Tagged, from_str, to_string};
 use serde::{
     Deserialize, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
@@ -115,9 +115,22 @@ impl<'de> Deserialize<'de> for Bytes {
 
 #[test]
 fn bytes_borrow_or_decode_as_needed() {
-    for source in ["abc", "'abc'", "\"a\\u0062c\"", "[97, 98, 99]"] {
+    for source in [
+        "abc",
+        "'abc'",
+        "\"a\\u0062c\"",
+        "[97, 98, 99]",
+        "!!str abc",
+        "!!seq [97, 98, 99]",
+        "! abc",
+    ] {
         assert_eq!(from_str::<Bytes>(source).unwrap(), Bytes(b"abc".to_vec()));
     }
+
+    assert_eq!(
+        from_str::<Tagged<Bytes>>("!Bytes 7").unwrap().value,
+        Bytes(b"7".to_vec())
+    );
 
     let source = "'abc'";
     let borrowed: &[u8] = from_str(source).unwrap();
@@ -133,7 +146,7 @@ fn bytes_borrow_or_decode_as_needed() {
         );
     }
 
-    for source in ["[256]", "{}"] {
+    for source in ["[256]", "{}", "!!int 7"] {
         assert!(from_str::<Bytes>(source).is_err());
     }
 }

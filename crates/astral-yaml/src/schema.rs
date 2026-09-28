@@ -12,12 +12,29 @@ pub enum ScalarType {
 
 /// Classifies a plain, untagged scalar without imposing machine numeric limits.
 #[must_use]
+#[inline]
 pub fn classify(value: &str) -> ScalarType {
-    match value {
-        "" | "~" | "null" | "Null" | "NULL" => return ScalarType::Null,
-        "true" | "True" | "TRUE" | "false" | "False" | "FALSE" => return ScalarType::Bool,
-        ".nan" | ".NaN" | ".NAN" => return ScalarType::Float,
-        _ => {}
+    match value.as_bytes().first() {
+        None => ScalarType::Null,
+        Some(b'~' | b'n' | b'N') if matches!(value, "~" | "null" | "Null" | "NULL") => {
+            ScalarType::Null
+        }
+        Some(b't' | b'T' | b'f' | b'F')
+            if matches!(
+                value,
+                "true" | "True" | "TRUE" | "false" | "False" | "FALSE"
+            ) =>
+        {
+            ScalarType::Bool
+        }
+        Some(b'+' | b'-' | b'.' | b'0'..=b'9') => classify_number(value),
+        _ => ScalarType::String,
+    }
+}
+
+fn classify_number(value: &str) -> ScalarType {
+    if matches!(value, ".nan" | ".NaN" | ".NAN") {
+        return ScalarType::Float;
     }
 
     let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);

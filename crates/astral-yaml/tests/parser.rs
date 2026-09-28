@@ -2,6 +2,61 @@ use std::borrow::Cow;
 
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
+// https://yaml.org/spec/1.2.2/#51-character-set
+#[test]
+fn ascii_character_checks_cover_chunk_boundaries() {
+    for padding in [0, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127] {
+        for byte in 0..=127 {
+            let character = char::from(byte);
+            let source = format!("# {}{character}\n", "a".repeat(padding));
+            let allowed = matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~');
+            let result = parse(&source);
+            assert_eq!(result.is_ok(), allowed, "{source:?}");
+
+            if let Err(error) = result {
+                let expected = character.to_string();
+                assert_eq!(error.span.slice(&source), Some(expected.as_str()));
+            }
+        }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+#[test]
+fn line_tracking_survives_scalar_lookahead() {
+    let template = "\u{feff}first: one\nsecond:\n  - two\n  - three\nfolded: four\n  five\nlast: six\n---\n[seven,\n eight]\n";
+
+    for newline in ["\n", "\r", "\r\n"] {
+        let source = template.replace('\n', newline);
+        let stream = parse(&source).unwrap();
+        assert_eq!(stream.documents().len(), 2);
+        let scalars: Vec<_> = stream
+            .nodes()
+            .iter()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Scalar(scalar) => Some(scalar.value.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            scalars,
+            [
+                "first",
+                "one",
+                "second",
+                "two",
+                "three",
+                "folded",
+                "four five",
+                "last",
+                "six",
+                "seven",
+                "eight",
+            ]
+        );
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn json_surrogate_pairs_and_malformed_escapes() {

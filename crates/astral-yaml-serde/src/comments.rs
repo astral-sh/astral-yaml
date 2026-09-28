@@ -86,8 +86,8 @@ impl<'de> CommentIndex<'de> {
             source: stream.source(),
             lines: Lines::new(stream.source(), start..end, budget)?,
             budget,
-            nodes: Vec::new(),
-            slots: Vec::new(),
+            nodes: Vec::with_capacity(32),
+            slots: Vec::with_capacity(16),
         };
         tree.push(stream, doc.root)?;
 
@@ -132,15 +132,26 @@ impl<'de> CommentIndex<'de> {
 
         // Preorder makes each subtree a contiguous interval. Store comments by
         // owner here; a wrapper sorts its subtree's comments into source order.
+        let mut offsets = Vec::with_capacity(tree.nodes.len() + 1);
+        let mut comment_index = 0;
+
+        for node_index in 0..tree.nodes.len() {
+            offsets.push(comment_index);
+
+            while owned
+                .get(comment_index)
+                .is_some_and(|(owner, _)| *owner == node_index)
+            {
+                comment_index += 1;
+            }
+        }
+
+        offsets.push(comment_index);
         let ranges = tree
             .nodes
             .iter()
             .enumerate()
-            .map(|(index, node)| {
-                let start = owned.partition_point(|(owner, _)| *owner < index);
-                let end = owned.partition_point(|(owner, _)| *owner < node.end);
-                (node.id, start..end)
-            })
+            .map(|(index, node)| (node.id, offsets[index]..offsets[node.end]))
             .filter(|(_, range)| !range.is_empty())
             .collect();
 
@@ -193,14 +204,17 @@ impl Tree<'_, '_> {
             collection: None,
         });
 
-        let properties_end = node
-            .anchor
-            .iter()
-            .chain(node.tag.iter())
-            .map(|property| property.span.end())
-            .max()
-            .unwrap_or(node.span.start());
-        let start = skip_trivia(self.source, properties_end);
+        let source = self.source;
+        let collection_start = || {
+            let properties_end = node
+                .anchor
+                .iter()
+                .chain(node.tag.iter())
+                .map(|property| property.span.end())
+                .max()
+                .unwrap_or(node.span.start());
+            skip_trivia(source, properties_end)
+        };
 
         let collection = match &node.kind {
             NodeKind::Mapping { entries, style } => {
@@ -224,12 +238,13 @@ impl Tree<'_, '_> {
                 }
 
                 Some(Collection {
-                    start,
+                    start: collection_start(),
                     flow: *style == CollectionStyle::Flow,
                     slots,
                 })
             }
             NodeKind::Sequence { items, style } => {
+                let start = collection_start();
                 let slots = self.slots.len()..self.slots.len() + items.len();
                 self.slots.resize_with(slots.end, Slot::default);
                 let mut previous_end = start;
@@ -393,7 +408,9 @@ struct Lines {
 impl Lines {
     fn new(source: &str, range: Range<usize>, budget: &Cell<usize>) -> Result<Self, Error> {
         let bytes = &source.as_bytes()[..range.end];
-        let mut result = Self { lines: Vec::new() };
+        let mut result = Self {
+            lines: Vec::with_capacity(32),
+        };
         let mut start = range.start;
         let mut blanks = 0;
 

@@ -60,7 +60,9 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         source,
         pos: 0,
         options,
-        nodes: Vec::new(),
+        // Start with a bounded estimate; large scalars should not reserve an
+        // arena proportional to their byte length.
+        nodes: Vec::with_capacity((source.len() / 32).min(128).min(options.max_nodes)),
         documents: Vec::new(),
         comments: Vec::new(),
         anchors: HashMap::new(),
@@ -68,7 +70,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
-        line_bounds: Cell::new(None),
+        line_start: 0,
         colon_cache: Cell::new(None),
     }
     .stream()?;
@@ -89,7 +91,7 @@ struct Parser<'a> {
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
-    line_bounds: Cell<Option<Span>>,
+    line_start: usize,
     colon_cache: Cell<Option<KeyLookahead>>,
 }
 
@@ -124,37 +126,11 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn column(&self) -> usize {
-        let start = if let Some(bounds) = self.cached_line() {
-            bounds.start
-        } else {
-            let start = self.source.as_bytes()[..self.pos]
-                .iter()
-                .rposition(|b| matches!(b, b'\r' | b'\n'))
-                .map_or(0, |n| n + 1);
-            self.line_bounds.set(Some(Span {
-                start,
-                end: self.line_end(),
-            }));
-            start
-        };
-
-        // Reuse line bounds across flow entries; repeated prefix scans are quadratic
-        // on long lines. The range check also handles scalar-parser backtracking.
-        let prefix = &self.source[start..self.pos];
+        let prefix = &self.source[self.line_start..self.pos];
         prefix.strip_prefix('\u{feff}').unwrap_or(prefix).len()
     }
 
-    fn cached_line(&self) -> Option<Span> {
-        self.line_bounds
-            .get()
-            .filter(|bounds| bounds.start <= self.pos && self.pos <= bounds.end)
-    }
-
     fn line_end(&self) -> usize {
-        if let Some(bounds) = self.cached_line() {
-            return bounds.end;
-        }
-
         self.source.as_bytes()[self.pos..]
             .iter()
             .position(|b| matches!(b, b'\r' | b'\n'))
@@ -174,15 +150,13 @@ impl<'a> Parser<'a> {
                 if self.byte() == Some(b'\n') {
                     self.pos += 1;
                 }
-
-                true
             }
-            Some(b'\n') => {
-                self.pos += 1;
-                true
-            }
-            _ => false,
+            Some(b'\n') => self.pos += 1,
+            _ => return false,
         }
+
+        self.line_start = self.pos;
+        true
     }
 
     fn reserve_element(&mut self) -> Result<()> {
@@ -262,10 +236,13 @@ impl<'a> Parser<'a> {
     }
 
     fn document_boundary(&self) -> bool {
-        self.byte().is_none()
-            || self.marker("---")
-            || self.marker("...")
-            || (self.rest().starts_with('\u{feff}') && self.column() == 0)
+        match self.byte() {
+            None => true,
+            Some(b'-') => self.marker("---"),
+            Some(b'.') => self.marker("..."),
+            Some(0xef) => self.rest().starts_with('\u{feff}') && self.column() == 0,
+            Some(_) => false,
+        }
     }
 
     fn finish_line(&mut self) -> Result<()> {
@@ -593,6 +570,12 @@ impl<'a> Parser<'a> {
 
         if self.indicator(b'?') || self.indicator(b':') || self.simple_colon().is_some() {
             return self.block_mapping(indent, depth, existing);
+        }
+
+        if existing.is_none() && !matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>')) {
+            let id = self.inline(false, parent, depth)?;
+            self.finish_line()?;
+            return Ok(id);
         }
 
         let id = if let Some(id) = existing {
@@ -1049,6 +1032,26 @@ impl<'a> Parser<'a> {
 
     fn inline(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeId> {
         self.check_depth(depth)?;
+
+        // Scalars and aliases have no children or properties to register before
+        // parsing. Append their completed node without an empty placeholder.
+        if !matches!(self.byte(), Some(b'!' | b'&' | b'[' | b'{')) {
+            self.reserve_element()?;
+            let start = self.pos;
+            let kind = self.inline_kind(flow, parent, depth)?;
+            let id = NodeId(self.nodes.len());
+            self.nodes.push(Node {
+                span: Span {
+                    start,
+                    end: self.pos,
+                },
+                anchor: None,
+                tag: None,
+                kind,
+            });
+            return Ok(id);
+        }
+
         let id = self.empty(self.pos)?;
         self.properties(id, flow, parent)?;
         let kind = self.inline_kind(flow, parent, depth)?;
@@ -1283,6 +1286,28 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // The block-mapping lookahead has already scanned this implicit key.
+    // Its separator ends the scalar, apart from trailing separation space.
+    fn cached_plain_key(&mut self) -> Option<NodeKind<'a>> {
+        let start = self.pos;
+        let colon = self
+            .colon_cache
+            .get()
+            .filter(|cached| cached.start == start)?
+            .colon?;
+        let value = self.source[start..colon].trim_end_matches([' ', '\t']);
+        self.pos = start + value.len();
+
+        Some(NodeKind::Scalar(Scalar {
+            value: Cow::Borrowed(value),
+            style: ScalarStyle::Plain,
+            span: Span {
+                start,
+                end: self.pos,
+            },
+        }))
+    }
+
     fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'a>> {
         let start = self.pos;
         let b = self.byte().expect("plain scalar has a first byte");
@@ -1295,6 +1320,12 @@ impl<'a> Parser<'a> {
             return Err(self.error("invalid plain scalar start"));
         }
 
+        if !flow {
+            if let Some(key) = self.cached_plain_key() {
+                return Ok(key);
+            }
+        }
+
         let mut end = start;
         let mut value: Option<String> = None;
         let mut segment = start;
@@ -1304,6 +1335,7 @@ impl<'a> Parser<'a> {
                 None => break,
                 Some(b'\r' | b'\n') => {
                     let save = self.pos;
+                    let saved_line_start = self.line_start;
                     let mut breaks = 0;
 
                     while self.newline() {
@@ -1321,6 +1353,7 @@ impl<'a> Parser<'a> {
                         || (flow && self.byte().is_some_and(|b| b",[]{}".contains(&b)))
                     {
                         self.pos = save;
+                        self.line_start = saved_line_start;
                         break;
                     }
 
@@ -1756,8 +1789,10 @@ fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: Chomping) -> St
 fn validate_characters(stream: &Stream<'_>) -> Result<()> {
     // A full reduction lets the compiler vectorize this common ASCII check.
     // Unicode and restricted bytes still receive the contextual checks below.
+    #[allow(clippy::needless_bitwise_bool)]
     let ascii = stream.source().bytes().fold(true, |valid, byte| {
-        valid & matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~')
+        valid
+            & ((b' '..=b'~').contains(&byte) | (byte == b'\t') | (byte == b'\r') | (byte == b'\n'))
     });
     if ascii {
         return Ok(());

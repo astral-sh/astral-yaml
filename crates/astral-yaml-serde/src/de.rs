@@ -14,17 +14,42 @@ use std::{borrow::Cow, cell::Cell, collections::HashSet};
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum YamlType {
+    Scalar(ScalarType),
+    Sequence,
+    Mapping,
+}
+
+impl YamlType {
+    fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "tag:yaml.org,2002:str" => Some(Self::Scalar(ScalarType::String)),
+            "tag:yaml.org,2002:null" => Some(Self::Scalar(ScalarType::Null)),
+            "tag:yaml.org,2002:bool" => Some(Self::Scalar(ScalarType::Bool)),
+            "tag:yaml.org,2002:int" => Some(Self::Scalar(ScalarType::Int)),
+            "tag:yaml.org,2002:float" => Some(Self::Scalar(ScalarType::Float)),
+            "tag:yaml.org,2002:seq" => Some(Self::Sequence),
+            "tag:yaml.org,2002:map" => Some(Self::Mapping),
+            _ => None,
+        }
+    }
+
+    fn accepts(self, declared: Self) -> bool {
+        // Floating-point destinations also accept YAML integers.
+        self == declared
+            || matches!(
+                (self, declared),
+                (
+                    Self::Scalar(ScalarType::Float),
+                    Self::Scalar(ScalarType::Int)
+                )
+            )
+    }
+}
+
 fn is_core_tag(tag: &str) -> bool {
-    matches!(
-        tag,
-        "!" | "tag:yaml.org,2002:str"
-            | "tag:yaml.org,2002:null"
-            | "tag:yaml.org,2002:bool"
-            | "tag:yaml.org,2002:int"
-            | "tag:yaml.org,2002:float"
-            | "tag:yaml.org,2002:seq"
-            | "tag:yaml.org,2002:map"
-    )
+    tag == "!" || YamlType::from_tag(tag).is_some()
 }
 
 /// Deserializes exactly one YAML document using YAML 1.2 core-schema resolution.
@@ -32,6 +57,9 @@ fn is_core_tag(tag: &str) -> bool {
 /// Plain and quoted scalars without escapes can be borrowed from the input.
 /// Aliases are visited with depth and work budgets, including cyclic aliases.
 /// Non-core YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
+/// Explicit core tags must be compatible with the destination type. Integer
+/// tags also allow floating-point destinations. Strings, characters, scalar
+/// bytes, and enum names require string tags, but accept untagged scalar text.
 ///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
@@ -250,10 +278,13 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         seed.deserialize(de::value::SeqDeserializer::new(records))
     }
 
-    fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
+    fn scalar(self, expected: ScalarType) -> Result<(&'s Scalar<'de>, ScalarType)> {
         let node = self.node()?;
         self.reject_tag(node)?;
-        self.scalar_value(node)
+        let value = self.scalar_value(node)?;
+        self.check_core_tag(node, YamlType::Scalar(expected))?;
+
+        Ok(value)
     }
 
     fn reject_tag(self, node: &Node<'_>) -> Result<()> {
@@ -308,12 +339,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         };
 
         let kind = match tag {
-            Some("tag:yaml.org,2002:str" | "!") => ScalarType::String,
-            Some("tag:yaml.org,2002:null") => ScalarType::Null,
-            Some("tag:yaml.org,2002:bool") => ScalarType::Bool,
-            Some("tag:yaml.org,2002:int") => ScalarType::Int,
-            Some("tag:yaml.org,2002:float") => ScalarType::Float,
-            Some(_) => return Err(Error::at("unsupported scalar tag", node.span)),
+            Some("!") => ScalarType::String,
+            Some(tag) => match YamlType::from_tag(tag) {
+                Some(YamlType::Scalar(kind)) => kind,
+                _ => return Err(Error::at("unsupported scalar tag", node.span)),
+            },
             None if s.style == ScalarStyle::Plain => classify(&s.value),
             None => ScalarType::String,
         };
@@ -329,8 +359,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn text<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, _) = self.scalar()?;
-        Self::visit_text(s, visitor)
+        let (scalar, _) = self.scalar(ScalarType::String)?;
+        Self::visit_text(scalar, visitor)
     }
 
     fn visit_text<V: Visitor<'de>>(scalar: &Scalar<'de>, visitor: V) -> Result<V::Value> {
@@ -341,7 +371,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn integer(self) -> Result<(&'s str, u32, Span)> {
-        let (scalar, kind) = self.scalar()?;
+        let (scalar, kind) = self.scalar(ScalarType::Int)?;
         Self::integer_value(scalar, kind)
     }
 
@@ -362,7 +392,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn float(self) -> Result<f64> {
-        let (scalar, kind) = self.scalar()?;
+        let (scalar, kind) = self.scalar(ScalarType::Float)?;
         Self::float_value(scalar, kind)
     }
 
@@ -412,14 +442,20 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Ok(value)
     }
 
-    fn collection_tag(self, node: &Node<'_>, expected: &str) -> Result<()> {
-        if self.tag_state != TagState::ConsumedApplication
-            && node
-                .tag
-                .as_ref()
-                .is_some_and(|tag| tag.value != expected && tag.value != "!")
+    fn check_core_tag(self, node: &Node<'_>, expected: YamlType) -> Result<()> {
+        if self.tag_state == TagState::ConsumedApplication {
+            return Ok(());
+        }
+
+        // Non-specific `!` follows the node's shape (and forces scalar text).
+        // Application tags are checked separately by reject_tag.
+        if node
+            .tag
+            .as_ref()
+            .and_then(|tag| YamlType::from_tag(&tag.value))
+            .is_some_and(|declared| !expected.accepts(declared))
         {
-            return Err(Error::at("tag does not match collection type", node.span));
+            return Err(Error::at("tag does not match requested type", node.span));
         }
 
         Ok(())
@@ -476,7 +512,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 })
             }
             NodeKind::Sequence { items, .. } => {
-                self.collection_tag(node, "tag:yaml.org,2002:seq")?;
+                self.check_core_tag(node, YamlType::Sequence)?;
                 items
                     .iter()
                     .map(|&id| self.child(id).key())
@@ -484,7 +520,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                     .map(Key::Sequence)
             }
             NodeKind::Mapping { entries, .. } => {
-                self.collection_tag(node, "tag:yaml.org,2002:map")?;
+                self.check_core_tag(node, YamlType::Mapping)?;
                 let mut pairs = entries
                     .iter()
                     .map(|entry| Ok((self.child(entry.key).key()?, self.child(entry.value).key()?)))
@@ -580,7 +616,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             return Err(Error::at("expected a mapping", node.span));
         };
 
-        self.collection_tag(node, "tag:yaml.org,2002:map")?;
+        self.check_core_tag(node, YamlType::Mapping)?;
 
         self.check_mapping_keys(entries, node.span)?;
 
@@ -611,7 +647,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             return Err(Error::at("expected a sequence", node.span));
         };
 
-        self.collection_tag(node, "tag:yaml.org,2002:seq")?;
+        self.check_core_tag(node, YamlType::Sequence)?;
 
         let mut access = Sequence {
             de: self,
@@ -726,7 +762,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (scalar, kind) = self.scalar()?;
+        let (scalar, kind) = self.scalar(ScalarType::Float)?;
 
         // Convert decimal text and radix integers directly to f32 to avoid
         // double rounding through f64. Rust cannot parse YAML's .inf/.nan.
@@ -754,7 +790,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, kind) = self.scalar()?;
+        let (s, kind) = self.scalar(ScalarType::Bool)?;
         if kind != ScalarType::Bool {
             return Err(Error::at("expected a boolean", s.span));
         }
@@ -771,7 +807,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, _) = self.scalar()?;
+        let (s, _) = self.scalar(ScalarType::String)?;
         let mut chars = s.value.chars();
 
         match (chars.next(), chars.next()) {
@@ -785,7 +821,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             return self.seq(visitor);
         }
 
-        let (s, _) = self.scalar()?;
+        let (s, _) = self.scalar(ScalarType::String)?;
 
         match &s.value {
             Cow::Borrowed(s) => visitor.visit_borrowed_bytes(s.as_bytes()),
@@ -808,7 +844,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 .is_some_and(|tag| !is_core_tag(&tag.value));
         if !application_tag
             && matches!(node.kind, NodeKind::Scalar(_))
-            && self.scalar()?.1 == ScalarType::Null
+            && self.scalar_value(node)?.1 == ScalarType::Null
         {
             visitor.visit_none()
         } else {
@@ -820,7 +856,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, kind) = self.scalar()?;
+        let (s, kind) = self.scalar(ScalarType::Null)?;
         if kind != ScalarType::Null {
             return Err(Error::at("expected null", s.span));
         }
@@ -906,7 +942,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
         match &node.kind {
             NodeKind::Scalar(_) => {
-                let (scalar, _) = self.scalar()?;
+                let (scalar, _) = self.scalar(ScalarType::String)?;
                 visitor.visit_enum(Enumeration {
                     de: self,
                     variant: &scalar.value,
@@ -914,8 +950,8 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 })
             }
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
-                self.collection_tag(node, "tag:yaml.org,2002:map")?;
-                let (key, _) = self.child(entries[0].key).scalar()?;
+                self.check_core_tag(node, YamlType::Mapping)?;
+                let (key, _) = self.child(entries[0].key).scalar(ScalarType::String)?;
                 visitor.visit_enum(Enumeration {
                     de: self,
                     variant: &key.value,
@@ -1181,7 +1217,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, Context, Deserializer, TagState, VariantValue};
+    use super::{Cell, Context, Deserializer, ScalarType, TagState, VariantValue};
     use serde::{Deserialize, de::SeqAccess};
 
     #[test]
@@ -1422,7 +1458,7 @@ mod tests {
             yaml_tag: false,
         };
 
-        assert_eq!(de.scalar().unwrap().0.value, "abc");
+        assert_eq!(de.scalar(ScalarType::String).unwrap().0.value, "abc");
         assert_eq!(
             (de.context.budget.get(), de.context.scalar_budget.get()),
             (2, 3)
@@ -1433,7 +1469,7 @@ mod tests {
                 yaml_tag: false,
                 ..de
             }
-            .scalar()
+            .scalar(ScalarType::String)
             .unwrap_err()
             .message,
             "non-core YAML tags require Tagged<T> or with::yaml_tag"
