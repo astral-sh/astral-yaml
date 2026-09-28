@@ -1,6 +1,4 @@
-use crate::{
-    Value, assert_eq_with_nan, events, events::event_tag, spans::validate_parts, validate_spans,
-};
+use crate::{Value, events, events::event_tag, spans::validate_parts, validate_spans};
 use astral_yaml::{Span, parse};
 
 #[test]
@@ -11,6 +9,7 @@ fn test_values_preserve_scalar_and_collection_types() {
         ("-42", Value::Integer(-42)),
         ("18446744073709551615", Value::Unsigned(u64::MAX)),
         ("1.5", Value::Float(1.5)),
+        (".nan", Value::Float(f64::NAN)),
         (".inf", Value::Float(f64::INFINITY)),
         ("hello", Value::String("hello".to_owned())),
         ("[null]", Value::Sequence(vec![Value::Null])),
@@ -43,10 +42,10 @@ fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
         ("{[true]: 1}", "{[1]: 1}", false),
         ("[1, 2]", "[2, 1]", false),
         ("1", "1.0", false),
-        (".nan", ".nan", false),
-        ("[.nan]", "[.nan]", false),
-        ("{key: .nan}", "{key: .nan}", false),
-        ("{.nan: value}", "{.nan: value}", false),
+        (".nan", ".nan", true),
+        ("[.nan]", "[.nan]", true),
+        ("{key: .nan}", "{key: .nan}", true),
+        ("{.nan: value}", "{.nan: value}", true),
         (".inf", "-.inf", false),
     ] {
         let left = astral_yaml_serde::from_str::<Value>(left).unwrap();
@@ -66,7 +65,16 @@ fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
 }
 
 #[test]
-fn nan_roundtrips_use_an_explicit_comparison() {
+fn nan_values_compare_equal_and_roundtrip() {
+    for bits in [
+        f64::NAN.to_bits(),
+        (-f64::NAN).to_bits(),
+        0x7ff0_0000_0000_0001,
+        0x7ff8_0000_0000_0042,
+    ] {
+        assert_eq!(Value::Float(f64::from_bits(bits)), Value::Float(f64::NAN));
+    }
+
     for source in [
         ".nan",
         "[.nan]",
@@ -75,11 +83,11 @@ fn nan_roundtrips_use_an_explicit_comparison() {
         "{[.nan]: {nested: [.nan]}}",
     ] {
         let value = astral_yaml_serde::from_str::<Value>(source).unwrap();
-        assert_ne!(value, value.clone());
+        assert_eq!(value, value.clone());
 
         let yaml = astral_yaml_serde::to_string(&value).unwrap();
         let decoded = astral_yaml_serde::from_str::<Value>(&yaml).unwrap();
-        assert_eq_with_nan(&value, &decoded);
+        assert_eq!(value, decoded);
     }
 
     for (left, right) in [
@@ -90,7 +98,7 @@ fn nan_roundtrips_use_an_explicit_comparison() {
     ] {
         let left = astral_yaml_serde::from_str::<Value>(left).unwrap();
         let right = astral_yaml_serde::from_str::<Value>(right).unwrap();
-        assert!(std::panic::catch_unwind(|| assert_eq_with_nan(&left, &right)).is_err());
+        assert_ne!(left, right);
     }
 }
 
