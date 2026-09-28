@@ -27,8 +27,8 @@
 //!
 //! Unit variants use an empty tagged node. Untagged variants retain their usual
 //! representation. Deserialization also accepts ordinary enum names and
-//! singleton mappings. Core tags such as `!!str` and global tags are rejected;
-//! use [`crate::Tagged`] to capture those tags as data.
+//! singleton mappings. Core tags such as `!!str` retain their usual meaning;
+//! other global tags are rejected. Use [`crate::Tagged`] to capture tags as data.
 //!
 //! The adapter applies to this value through options and newtype wrappers, not
 //! to collection elements or fields inside its payload. Mixed tagged/untagged

@@ -20,14 +20,6 @@ fn agree<'de, T: Deserialize<'de> + PartialEq + Debug>(source: &'de str, expecte
     );
 }
 
-fn agree_tagged<'de, T: Deserialize<'de> + PartialEq + Debug>(source: &'de str, expected: &T) {
-    assert!(astral_yaml_serde::from_str::<T>(source).is_err());
-    let ours = astral_yaml_serde::from_str::<astral_yaml_serde::Tagged<T>>(source).unwrap();
-    let theirs = serde_saphyr::from_str_with_options::<T>(source, options()).unwrap();
-    assert_eq!(&ours.value, expected, "astral: {source:?}");
-    assert_eq!(&theirs, expected, "saphyr: {source:?}");
-}
-
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(bound = "T: Deserialize<'de>")]
 struct YamlTag<T>(#[serde(with = "astral_yaml_serde::with::yaml_tag")] T);
@@ -57,13 +49,8 @@ fn null_like_strings() {
         ("|-\n  null\n", "null"),
         (">-\n  null\n", "null"),
     ] {
-        if source.starts_with('!') {
-            agree_tagged(source, &Some(expected.to_owned()));
-            agree_tagged(source, &Value::String(expected.to_owned()));
-        } else {
-            agree(source, &Some(expected.to_owned()));
-            agree(source, &Value::String(expected.to_owned()));
-        }
+        agree(source, &Some(expected.to_owned()));
+        agree(source, &Value::String(expected.to_owned()));
     }
 
     for source in [
@@ -76,13 +63,8 @@ fn null_like_strings() {
         "!!null null",
         "!!null ~",
     ] {
-        if source.starts_with('!') {
-            agree_tagged::<Option<String>>(source, &None);
-            agree_tagged(source, &Value::Null);
-        } else {
-            agree::<Option<String>>(source, &None);
-            agree(source, &Value::Null);
-        }
+        agree::<Option<String>>(source, &None);
+        agree(source, &Value::Null);
     }
 }
 
@@ -100,36 +82,23 @@ fn scalar_tags_and_aliases() {
         ("!!bool |-\n  true", json!(true)),
         ("%TAG !n! tag:yaml.org,2002:\n--- !n!int '42'", json!(42)),
     ] {
-        agree_tagged(source, &expected);
+        agree(source, &expected);
     }
 
-    let source = "[&n !!int '42', *n]";
-    let ours =
-        astral_yaml_serde::from_str::<Vec<astral_yaml_serde::Tagged<Value>>>(source).unwrap();
-    let ours: Vec<_> = ours.into_iter().map(|value| value.value).collect();
-    let theirs = serde_saphyr::from_str::<Vec<Value>>(source).unwrap();
-    assert_eq!(ours, vec![json!(42), json!(42)]);
-    assert_eq!(ours, theirs);
-
-    let source = "{a: &n ! null, b: *n}";
-    let ours =
-        astral_yaml_serde::from_str::<BTreeMap<String, astral_yaml_serde::Tagged<String>>>(source)
-            .unwrap();
-    let ours: BTreeMap<_, _> = ours
-        .into_iter()
-        .map(|(key, value)| (key, value.value))
-        .collect();
-    assert_eq!(
-        ours,
-        serde_saphyr::from_str::<BTreeMap<String, String>>(source).unwrap()
+    agree("[&n !!int '42', *n]", &vec![json!(42), json!(42)]);
+    agree(
+        "{a: &n ! null, b: *n}",
+        &BTreeMap::from([
+            ("a".to_owned(), "null".to_owned()),
+            ("b".to_owned(), "null".to_owned()),
+        ]),
     );
 
     for tag in ["!!int", "!!float", "!!bool"] {
         for value in ["", "null", "~", "wrong"] {
             let source = format!("{tag} {value}");
             assert!(
-                astral_yaml_serde::from_str::<astral_yaml_serde::Tagged<Option<Value>>>(&source)
-                    .is_err(),
+                astral_yaml_serde::from_str::<Option<Value>>(&source).is_err(),
                 "{source}"
             );
             assert!(
@@ -140,9 +109,7 @@ fn scalar_tags_and_aliases() {
     }
 
     for source in ["!!float -0", "!!float '-0'"] {
-        let ours = astral_yaml_serde::from_str::<astral_yaml_serde::Tagged<f64>>(source)
-            .unwrap()
-            .value;
+        let ours = astral_yaml_serde::from_str::<f64>(source).unwrap();
         let theirs = serde_saphyr::from_str::<f64>(source).unwrap();
         assert_eq!(ours.to_bits(), (-0.0_f64).to_bits());
         assert_eq!(theirs.to_bits(), ours.to_bits());
@@ -420,7 +387,7 @@ fn local_tags_in_serde_content_buffers() {
         astral_yaml_serde::from_str::<Vec<Mixed>>(source)
             .unwrap_err()
             .message,
-        "explicit YAML tags require Tagged<T> or with::yaml_tag"
+        "non-core YAML tags require Tagged<T> or with::yaml_tag"
     );
     assert_eq!(
         serde_saphyr::from_str::<Vec<Mixed>>(source).unwrap(),

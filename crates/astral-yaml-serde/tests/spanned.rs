@@ -12,7 +12,7 @@ fn scalars_retain_their_lexical_spans() {
         ("  hello # comment\n", "hello", "hello"),
         ("'héllo'", "héllo", "'héllo'"),
         ("\"a\\nb\"", "a\nb", "\"a\\nb\""),
-        ("&name 42", "42", "&name 42"),
+        ("!!str &name 42", "42", "!!str &name 42"),
         (
             "|-\n  hello\n  world\n",
             "hello\nworld",

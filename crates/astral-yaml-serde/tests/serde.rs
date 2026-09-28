@@ -1,6 +1,6 @@
 mod support;
 
-use astral_yaml_serde::{Tagged, from_str, from_stream, to_string};
+use astral_yaml_serde::{from_str, from_stream, to_string};
 use serde::{
     Deserialize, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
@@ -91,10 +91,7 @@ fn derived_types() {
         Kind::Struct { value: -2 }
     );
     assert_eq!(from_tag::<Kind>("!Unit").unwrap(), Kind::Unit);
-    assert_eq!(
-        from_str::<Tagged<Kind>>("! Unit").unwrap().value,
-        Kind::Unit
-    );
+    assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
 }
 
 #[test]
@@ -138,8 +135,8 @@ fn core_resolution_and_numeric_limits() {
     assert!(from_str::<i8>("128").is_err());
     assert!(from_str::<i32>("'42'").is_err());
 
-    assert_eq!(from_str::<Tagged<i32>>("!!int '42'").unwrap().value, 42);
-    assert_eq!(from_str::<Tagged<String>>("!!str 42").unwrap().value, "42");
+    assert_eq!(from_str::<i32>("!!int '42'").unwrap(), 42);
+    assert_eq!(from_str::<String>("!!str 42").unwrap(), "42");
     assert!(from_str::<bool>("!!bool yes").is_err());
     assert!(from_str::<String>("!unknown value").is_err());
 
@@ -164,7 +161,7 @@ fn core_resolution_and_numeric_limits() {
 
 #[test]
 fn finite_float_overflow_is_an_error() {
-    for source in ["1e999", "-1e999"] {
+    for source in ["1e999", "-1e999", "!!float '1e999'"] {
         let error = from_str::<f64>(source).unwrap_err();
         assert_eq!(error.message, "float out of range");
         assert!(error.span.unwrap().slice(source).is_some());
@@ -461,5 +458,5 @@ fn collection_tags_must_match_the_requested_type() {
         assert!(from_str::<Anything>(source).is_err(), "{source}");
     }
 
-    from_str::<Tagged<BTreeMap<String, Tagged<Vec<u8>>>>>("!!map {a: !!seq [1]}").unwrap();
+    from_str::<Anything>("!!map {a: !!seq [1]}").unwrap();
 }

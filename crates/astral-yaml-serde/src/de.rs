@@ -31,7 +31,7 @@ fn is_core_tag(tag: &str) -> bool {
 ///
 /// Plain and quoted scalars without escapes can be borrowed from the input.
 /// Aliases are visited with depth and work budgets, including cyclic aliases.
-/// Explicit YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
+/// Non-core YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
 ///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
@@ -255,9 +255,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn reject_tag(self, node: &Node<'_>) -> Result<()> {
-        if !self.tag_consumed && node.tag.is_some() {
+        if !self.tag_consumed
+            && node
+                .tag
+                .as_ref()
+                .is_some_and(|tag| !is_core_tag(&tag.value))
+        {
             return Err(Error::at(
-                "explicit YAML tags require Tagged<T> or with::yaml_tag",
+                "non-core YAML tags require Tagged<T> or with::yaml_tag",
                 node.span,
             ));
         }
@@ -794,10 +799,14 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
-        // Preserve explicit tags for an inner Tagged<T> or yaml_tag adapter.
-        // The inner type decides whether the tag is permitted.
-        let explicit_tag = node.tag.is_some() && !self.tag_consumed;
-        if !explicit_tag
+        // Preserve application tags for an inner Tagged<T> or yaml_tag adapter.
+        // Core tags retain their normal resolution, including !!null as None.
+        let application_tag = !self.tag_consumed
+            && node
+                .tag
+                .as_ref()
+                .is_some_and(|tag| !is_core_tag(&tag.value));
+        if !application_tag
             && matches!(node.kind, NodeKind::Scalar(_))
             && self.scalar()?.1 == ScalarType::Null
         {
@@ -1422,7 +1431,7 @@ mod tests {
             .scalar()
             .unwrap_err()
             .message,
-            "explicit YAML tags require Tagged<T> or with::yaml_tag"
+            "non-core YAML tags require Tagged<T> or with::yaml_tag"
         );
     }
 }

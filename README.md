@@ -53,8 +53,8 @@ Note that `Spanned` has an interior lifetime, so it cannot be used with `Deseria
 
 Enums use variant names for unit variants and singleton mappings for variants
 with payloads. Serde's representation attributes, including `untagged`, still
-apply. Deserialization rejects explicit YAML tags by default, including core tags
-such as `!!str`.
+apply. Core tags such as `!!str` and `!!int` work by default. Application tags
+require an explicit opt-in.
 
 Use `with::yaml_tag` on an enum field to opt into local YAML tags:
 

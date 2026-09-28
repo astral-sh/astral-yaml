@@ -5,17 +5,19 @@ tags and aliases without constructing application values. `astral-yaml-serde`
 uses the core schema and rejects duplicate mapping keys. YAML 1.1 merge keys are
 not expanded; timestamps and spellings such as `yes` and `no` remain strings.
 
-The serde adapter rejects explicit tags by default, including core tags, tags
-on ignored fields, and tags reached through aliases. Implicit core-schema
-resolution still applies. Enums use variant names for unit variants and singleton
-mappings otherwise, unless Serde attributes select another representation.
+The serde adapter accepts the core tags `!!str`, `!!null`, `!!bool`, `!!int`,
+`!!float`, `!!seq`, and `!!map`, as well as the non-specific tag `!`. Core tags
+must match their content; `!!null` resolves as `None` for `Option<T>`. Other tags
+require an explicit opt-in, including on ignored fields and through aliases.
+Enums use variant names for unit variants and singleton mappings otherwise,
+unless Serde attributes select another representation.
 
 `#[serde(with = "astral_yaml_serde::with::yaml_tag")]` on an enum field enables
 local tags such as `!Text hello`. Unit variants serialize as empty tagged nodes;
 empty and null payloads deserialize as unit. The adapter also accepts ordinary
 enum names and singleton mappings. For mixed tagged/untagged enums, it exposes
 local tags to Serde's buffer as singleton mappings. It applies through options
-and newtypes, but nested values require their own opt-in.
+and newtypes, but nested application tags require their own opt-in.
 
 `Tagged<T>` captures an explicit local, global, or core tag with its typed
 payload; untagged input is rejected. Tag handles are expanded, and tag URIs retain

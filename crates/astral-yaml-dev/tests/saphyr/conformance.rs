@@ -207,7 +207,6 @@ fn yaml_suite_events() {
 fn yaml_suite_json_values() {
     let mut count = 0;
     let mut rejected = Vec::new();
-    let mut tagged = 0;
 
     for path in corpus_paths() {
         if path.with_file_name("error").exists() || !path.with_file_name("in.json").exists() {
@@ -230,19 +229,6 @@ fn yaml_suite_json_values() {
             .cloned()
             .collect();
 
-        let stream = astral_yaml::parse(&source).unwrap();
-        if stream.nodes().iter().any(|node| node.tag.is_some()) {
-            tagged += 1;
-            assert!(astral.is_err(), "explicit tag accepted: {}", path.display());
-        } else {
-            assert_eq!(
-                astral.as_ref().ok(),
-                Some(&expected),
-                "{}: {astral:?}",
-                path.display()
-            );
-        }
-
         if saphyr.is_err() {
             assert!(astral.is_err());
             rejected.push(
@@ -256,6 +242,12 @@ fn yaml_suite_json_values() {
             );
         } else {
             assert_eq!(
+                astral.as_ref().ok(),
+                Some(&expected),
+                "{}: {astral:?}",
+                path.display()
+            );
+            assert_eq!(
                 saphyr.as_ref().ok(),
                 Some(&non_null),
                 "{}: {saphyr:?}",
@@ -267,9 +259,8 @@ fn yaml_suite_json_values() {
     }
 
     assert_eq!(count, 279);
-    assert_eq!(tagged, 35);
-    // JSON erases tags. Astral rejects every explicit tag without an adapter;
-    // serde-saphyr rejects only these non-core tags or binary values.
+    // JSON erases tags. Both libraries reject these non-core tags or binary values
+    // under the comparison settings.
     assert_eq!(
         rejected,
         [

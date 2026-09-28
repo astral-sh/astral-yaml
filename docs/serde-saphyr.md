@@ -23,7 +23,7 @@ Both parsers were tested against all 402 unmodified cases in the
 | Valid syntax | 308/308 | 308/308 |
 | Invalid syntax rejected | 94/94 | 93/94 |
 | Valid event streams match the suite | 308/308 | 308/308 |
-| Constructible JSON expectations match | 244/244 | 263/263 |
+| Constructible JSON expectations match | 263/263 | 263/263 |
 | Accepted real-world fixtures produce equal values | 11/11 | 11/11 |
 
 Granit accepts `9C9N`, an under-indented flow sequence. Its upstream test
@@ -36,11 +36,11 @@ Event comparison normalizes granit's numeric anchor IDs, implicit empty scalars
 Collection styles, document starts, tags, aliases, and other scalar contents are
 compared. Astral's event comparison needs none of these normalizations.
 
-Of the 279 valid cases with JSON expectations, 35 contain explicit tags. Astral
-rejects those inputs without an adapter. serde-saphyr accepts core tags and rejects
-16 cases containing other tags with the comparison settings. The syntax tests
-still check all cases. serde-saphyr's multi-document API drops null documents, so
-its expected results omit those documents. Astral retains them.
+Of the 279 valid cases with JSON expectations, both libraries accept 263 and
+reject 16 containing non-core tags with the comparison settings. Core tags work
+without an adapter. The syntax tests still check all cases. serde-saphyr's
+multi-document API drops null documents, so its expected results omit those
+documents. Astral retains them.
 
 Additional tests cover upstream regressions involving null-like strings, numeric
 tags, root block scalars, aliases, duplicate and complex keys, enums, floating-point
@@ -77,14 +77,14 @@ identical:
 - Astral reads UTF-8, UTF-16, and UTF-32 with or without a BOM. The tested
   serde-saphyr reader accepts UTF-8 and BOM-prefixed UTF-16, but rejects BOM-less
   UTF-16 and UTF-32 in either byte order.
-- Astral rejects explicit tags by default. `with::yaml_tag` opts an enum field
+- Astral rejects non-core tags by default. `with::yaml_tag` opts an enum field
   into local tags, including mixed tagged/untagged enums. serde-saphyr accepts
   local enum tags by default; its strict tag setting rejects them. Enum tests
   use Astral's adapter and serde-saphyr's defaults.
-- Core-tag tests use Astral's `Tagged<T>` wrapper, which captures the tag and
-  typed payload. serde-saphyr accepts core tags without a wrapper. Its default
-  generic deserialization drops application tags; Astral requires an explicit
-  opt-in even when deserializing into `yaml_serde::Value`.
+- Astral's `Tagged<T>` wrapper captures a tag and its typed payload.
+  serde-saphyr's default generic deserialization drops application tags;
+  Astral requires an explicit opt-in even when deserializing into
+  `yaml_serde::Value`.
 - serde-saphyr provides extensions such as binary decoding and includes. Those
   are outside Astral's current core-schema interface.
 

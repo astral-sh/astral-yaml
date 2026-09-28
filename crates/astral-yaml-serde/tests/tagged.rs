@@ -173,7 +173,7 @@ fn generic_yaml_values_reject_local_tags() {
     let error = from_str::<Vec<Mixed>>("[!Text hello, 42]").unwrap_err();
     assert_eq!(
         error.message,
-        "explicit YAML tags require Tagged<T> or with::yaml_tag"
+        "non-core YAML tags require Tagged<T> or with::yaml_tag"
     );
     assert_eq!(
         error.span.unwrap().slice("[!Text hello, 42]"),

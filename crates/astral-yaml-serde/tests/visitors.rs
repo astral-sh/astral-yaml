@@ -1,6 +1,6 @@
 mod support;
 
-use astral_yaml_serde::{Error, Tagged, from_str, to_string};
+use astral_yaml_serde::{Error, from_str, to_string};
 use serde::{
     Deserialize, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
@@ -30,9 +30,9 @@ fn every_integer_width_checks_its_boundaries() {
 
 #[test]
 fn numeric_and_type_errors_are_located() {
-    from_str::<Tagged<()>>("!!null null").unwrap();
+    from_str::<()>("!!null null").unwrap();
     assert_eq!(
-        from_str::<Tagged<f64>>("!!float 0xff").unwrap_err().message,
+        from_str::<f64>("!!float 0xff").unwrap_err().message,
         "invalid float"
     );
     assert_eq!(from_str::<f64>("0o10").unwrap().to_bits(), 8.0f64.to_bits());
@@ -171,10 +171,7 @@ fn enum_payloads_and_aliases() {
         support::from_tag::<Variant>("{Unit: null}").unwrap(),
         Variant::Unit
     );
-    assert_eq!(
-        from_str::<Tagged<Variant>>("! Unit").unwrap().value,
-        Variant::Unit
-    );
+    assert_eq!(from_str::<Variant>("! Unit").unwrap(), Variant::Unit);
     assert_eq!(
         from_str::<Vec<YamlTag<Variant>>>("[&a !Unit, *a]").unwrap(),
         [YamlTag(Variant::Unit), YamlTag(Variant::Unit)]

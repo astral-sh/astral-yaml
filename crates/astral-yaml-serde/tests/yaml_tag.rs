@@ -30,7 +30,7 @@ fn enums_use_strings_and_maps_by_default() {
 }
 
 #[test]
-fn explicit_tags_require_opt_in_including_ignored_values_and_keys() {
+fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
     #[derive(Debug, Deserialize)]
     struct Empty {}
 
@@ -39,23 +39,20 @@ fn explicit_tags_require_opt_in_including_ignored_values_and_keys() {
         "!Ready",
         "!Pair [1, true]",
         "!Config {enabled: true}",
-        "!!str hello",
-        "!!int 42",
-        "!!bool true",
-        "!!null null",
-        "!!seq []",
-        "!!map {}",
-        "! null",
+        "!str hello",
+        "!!binary aGVsbG8=",
+        "!!timestamp 2026-09-28",
+        "!!set {x: null}",
         "!<tag:example.org,2026:text> hello",
+        "%TAG !! tag:example.org,2026:\n--- !!str hello",
         "[!Text hello]",
         "{unknown: !Text hello}",
         "{!Text key: value}",
-        "{!!str key: value}",
         "[&x !Text hello, *x]",
     ] {
         let error = from_str::<IgnoredAny>(source).unwrap_err();
         assert_eq!(
-            error.message, "explicit YAML tags require Tagged<T> or with::yaml_tag",
+            error.message, "non-core YAML tags require Tagged<T> or with::yaml_tag",
             "{source}"
         );
         assert!(error.span.unwrap().slice(source).is_some());
@@ -63,12 +60,102 @@ fn explicit_tags_require_opt_in_including_ignored_values_and_keys() {
         assert!(from_str::<yaml_serde::Value>(source).is_err());
     }
 
-    assert!(from_str::<Empty>("{ignored: !!int 42}").is_err());
-    assert!(from_str::<Option<u32>>("!!int 42").is_err());
-    assert!(from_str::<Spanned<'_, String>>("!!str hello").is_err());
-    assert!(from_str::<Vec<u8>>("!!seq [1]").is_err());
-    assert!(from_str::<BTreeMap<String, u8>>("!!map {x: 1}").is_err());
+    assert!(from_str::<Empty>("{ignored: !Count 42}").is_err());
+    assert!(from_str::<Option<u32>>("!Count 42").is_err());
+    assert!(from_str::<Spanned<'_, String>>("!Text hello").is_err());
+    assert!(from_str::<Vec<u8>>("!Items [1]").is_err());
+    assert!(from_str::<BTreeMap<String, u8>>("!Config {x: 1}").is_err());
     assert!(from_str::<Message>("!Text hello").is_err());
+}
+
+#[test]
+fn core_tags_work_without_opt_in() {
+    #[derive(Debug, Deserialize)]
+    struct Empty {}
+
+    for (source, expected) in [
+        ("!!str null", serde_json::json!("null")),
+        ("!!int '42'", serde_json::json!(42)),
+        ("!!float '1.5'", serde_json::json!(1.5)),
+        ("!!bool 'true'", serde_json::json!(true)),
+        ("!!null null", serde_json::Value::Null),
+        ("!!seq [!!int '1']", serde_json::json!([1])),
+        (
+            "!!map {!!str key: !!int '1'}",
+            serde_json::json!({"key": 1}),
+        ),
+        ("! null", serde_json::json!("null")),
+        ("! [1]", serde_json::json!([1])),
+        ("! {key: 1}", serde_json::json!({"key": 1})),
+        ("!<tag:yaml.org,2002:str> null", serde_json::json!("null")),
+        (
+            "%TAG !c! tag:yaml.org,2002:\n--- !c!int '42'",
+            serde_json::json!(42),
+        ),
+        ("[&x !!int '42', *x]", serde_json::json!([42, 42])),
+    ] {
+        assert_eq!(from_str::<serde_json::Value>(source).unwrap(), expected);
+        from_str::<IgnoredAny>(source).unwrap();
+    }
+
+    from_str::<Empty>("{ignored: !!int 42}").unwrap();
+    assert_eq!(from_str::<Option<u32>>("!!int '42'").unwrap(), Some(42));
+    assert_eq!(from_str::<Vec<u8>>("!!seq [1]").unwrap(), [1]);
+    assert_eq!(
+        from_str::<BTreeMap<String, u8>>("!!map {x: 1}").unwrap(),
+        BTreeMap::from([("x".into(), 1)])
+    );
+
+    let source = "!!str hello # greeting";
+    let text = from_str::<Spanned<'_, &str>>(source).unwrap();
+    assert_eq!(text.value, "hello");
+    assert!(std::ptr::eq(text.value.as_ptr(), source[6..].as_ptr()));
+    assert_eq!(text.span.slice(source), Some("!!str hello"));
+    assert_eq!(text.comments[0].comment.text, " greeting");
+
+    for source in ["!!null", "!!null null", "!!null '~'"] {
+        assert_eq!(from_str::<Option<String>>(source).unwrap(), None);
+        assert_eq!(from_tag::<Option<Message>>(source).unwrap(), None);
+        assert_eq!(from_str::<Option<Tagged<()>>>(source).unwrap(), None);
+        let value = from_str::<Tagged<Option<String>>>(source).unwrap();
+        assert_eq!(value.tag, "tag:yaml.org,2002:null");
+        assert_eq!(value.value, None);
+    }
+
+    assert_eq!(
+        from_str::<Option<String>>("!!str null").unwrap(),
+        Some("null".into())
+    );
+    assert_eq!(
+        from_str::<Vec<Option<String>>>("[&n !!null null, *n]").unwrap(),
+        [None, None]
+    );
+}
+
+#[test]
+fn core_tags_still_validate_their_payloads() {
+    for source in [
+        "!!bool yes",
+        "!!int text",
+        "!!float text",
+        "!!null text",
+        "!!str []",
+        "!!seq {}",
+        "!!map []",
+        "!!seq text",
+        "{ignored: !!int text}",
+    ] {
+        assert!(from_str::<IgnoredAny>(source).is_err(), "{source}");
+        assert!(from_str::<serde_json::Value>(source).is_err(), "{source}");
+    }
+
+    assert_eq!(
+        from_str::<bool>("!!bool yes").unwrap_err().message,
+        "scalar does not match its tag"
+    );
+    assert!(from_str::<u32>("!!str 42").is_err());
+    assert!(from_str::<Option<u32>>("!!int null").is_err());
+    assert!(from_str::<Vec<u32>>("!!map [1]").is_err());
 }
 
 #[test]
@@ -92,6 +179,13 @@ fn adapter_roundtrips_every_variant_shape() {
     }
 
     assert_eq!(from_tag::<Message>("Ready").unwrap(), Message::Ready);
+    assert_eq!(from_str::<Message>("!!str Ready").unwrap(), Message::Ready);
+    assert_eq!(from_tag::<Message>("!!str Ready").unwrap(), Message::Ready);
+    assert_eq!(from_tag::<Message>("! Ready").unwrap(), Message::Ready);
+    assert_eq!(
+        from_tag::<Message>("!!map {Text: !!str hello}").unwrap(),
+        Message::Text("hello".into())
+    );
     assert_eq!(from_tag::<Message>("!Ready null").unwrap(), Message::Ready);
     assert_eq!(
         from_tag::<Message>("{Text: hello}").unwrap(),
@@ -102,8 +196,6 @@ fn adapter_roundtrips_every_variant_shape() {
         "!Ready []",
         "!Ready ''",
         "!Unknown x",
-        "!!str Ready",
-        "! Ready",
         "!<tag:example.org,2026:Ready>",
     ] {
         assert!(from_tag::<Message>(yaml).is_err(), "{yaml}");
@@ -130,6 +222,10 @@ fn mixed_enums_buffer_tags_only_when_opted_in() {
         ("!Text hello", Mixed::Text("hello".into())),
         ("!Pair [1, true]", Mixed::Pair(1, true)),
         ("!Config {enabled: true}", Mixed::Config { enabled: true }),
+        (
+            "!Config {enabled: !!bool true}",
+            Mixed::Config { enabled: true },
+        ),
         ("42", Mixed::Number(42)),
     ] {
         let value = from_tag::<Mixed>(source).unwrap();
@@ -147,7 +243,7 @@ fn mixed_enums_buffer_tags_only_when_opted_in() {
         "!Unknown hello",
         "!Pair [1]",
         "!Text []",
-        "!Config {enabled: !!bool true}",
+        "!Config {enabled: !Bool true}",
     ] {
         assert!(from_tag::<Mixed>(source).is_err(), "{source}");
     }
@@ -198,7 +294,11 @@ fn adapter_scope_survives_transparent_wrappers_but_stops_at_children() {
     );
     assert!(to_string(&YamlTag(Outer::Explicit(YamlTag(Message::Ready)))).is_err());
     assert!(from_tag::<Vec<Message>>("[!Ready]").is_err());
-    assert!(from_tag::<Message>("!Config {enabled: !!bool true}").is_err());
+    assert!(from_tag::<Message>("!Config {enabled: !Bool true}").is_err());
+    assert_eq!(
+        from_tag::<Message>("!Config {enabled: !!bool true}").unwrap(),
+        Message::Config { enabled: true }
+    );
 }
 
 #[test]
