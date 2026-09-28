@@ -51,6 +51,20 @@ assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 
 Note that `Spanned` has an interior lifetime, so it cannot be used with `DeserializeOwned`.
 
+Use `Tagged<T>` to retain an explicit YAML tag with a typed payload:
+
+```rust
+use astral_yaml_serde::{Tagged, from_str};
+
+let text: Tagged<String> = from_str("!Text hello").unwrap();
+assert_eq!(text.tag, "!Text");
+assert_eq!(*text, "hello");
+```
+
+`Tagged<T>` owns its tag and supports `DeserializeOwned` when `T` does. It rejects
+untagged input and preserves the tag when serialized. Use
+`Spanned<'a, Tagged<T>>` to capture the source span and comments as well.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks.

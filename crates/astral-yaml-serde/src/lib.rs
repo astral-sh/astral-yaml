@@ -4,9 +4,11 @@ mod de;
 mod error;
 mod ser;
 mod spanned;
+mod tagged;
 
 pub use comments::{AttachedComment, CommentPlacement};
 pub use de::{from_document, from_str, from_stream};
 pub use error::Error;
 pub use ser::to_string;
 pub use spanned::Spanned;
+pub use tagged::Tagged;

@@ -1,4 +1,6 @@
-use crate::Error;
+mod tag;
+
+use crate::{Error, tagged};
 use serde::{
     Serialize,
     ser::{self, SerializeMap, SerializeSeq},
@@ -19,6 +21,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {
         output: String::new(),
         depth: 0,
+        tagged: false,
     };
 
     value.serialize(&mut serializer)?;
@@ -29,6 +32,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
 struct Serializer {
     output: String,
     depth: usize,
+    tagged: bool,
 }
 
 impl Serializer {
@@ -42,6 +46,7 @@ impl Serializer {
     }
 
     fn quoted(&mut self, mut value: &str) {
+        self.tagged = false;
         self.output.push('"');
 
         // Copy runs of text until a possible escape. The non-ASCII characters
@@ -80,6 +85,7 @@ impl Serializer {
 
     fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
         self.enter()?;
+        self.tagged = false;
         self.output.push(if mapping { '{' } else { '[' });
         Ok(Compound {
             serializer: self,
@@ -105,6 +111,7 @@ impl Serializer {
     }
 
     fn number(&mut self, value: impl std::fmt::Display) {
+        self.tagged = false;
         write!(self.output, "{value}").expect("String write");
     }
 }
@@ -145,6 +152,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_bool(self, value: bool) -> Result<()> {
+        self.tagged = false;
         self.output.push_str(if value { "true" } else { "false" });
         Ok(())
     }
@@ -164,6 +172,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_f64(self, value: f64) -> Result<()> {
+        self.tagged = false;
         if value.is_nan() {
             self.output.push_str(".nan");
         } else if value.is_infinite() {
@@ -216,6 +225,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_unit(self) -> Result<()> {
+        self.tagged = false;
         self.output.push_str("null");
         Ok(())
     }
@@ -256,7 +266,26 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.compound(false)
     }
 
-    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Compound<'a>> {
+    fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Compound<'a>> {
+        if name == tagged::NAME {
+            if len != 2 {
+                return Err(Error::new("a tagged value requires a tag and payload"));
+            }
+
+            if self.tagged {
+                return Err(Error::new("a YAML node cannot have multiple tags"));
+            }
+
+            self.enter()?;
+            self.tagged = true;
+            return Ok(Compound {
+                serializer: self,
+                first: true,
+                state: CompoundState::Tag,
+                variant: false,
+            });
+        }
+
         self.compound(false)
     }
 
@@ -294,6 +323,9 @@ enum CompoundState {
     Sequence,
     MapKey,
     MapValue,
+    Tag,
+    TaggedValue,
+    TaggedEnd,
 }
 
 struct Compound<'a> {
@@ -313,6 +345,17 @@ impl Compound<'_> {
     }
 
     fn finish(self) -> Result<()> {
+        match self.state {
+            CompoundState::Tag | CompoundState::TaggedValue => {
+                return Err(Error::new("a tagged value requires a tag and payload"));
+            }
+            CompoundState::TaggedEnd => {
+                self.serializer.depth -= 1;
+                return Ok(());
+            }
+            _ => {}
+        }
+
         if self.state == CompoundState::MapValue {
             return Err(Error::new("mapping key has no value"));
         }
@@ -340,6 +383,25 @@ impl SerializeSeq for Compound<'_> {
     type Error = Error;
 
     fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
+        match self.state {
+            CompoundState::Tag => {
+                let tag = value.serialize(tag::TagSerializer)?;
+                self.serializer.output.push_str(&tag);
+                self.serializer.output.push(' ');
+                self.state = CompoundState::TaggedValue;
+                return Ok(());
+            }
+            CompoundState::TaggedValue => {
+                value.serialize(&mut *self.serializer)?;
+                self.state = CompoundState::TaggedEnd;
+                return Ok(());
+            }
+            CompoundState::TaggedEnd => {
+                return Err(Error::new("a tagged value has more than two fields"));
+            }
+            _ => {}
+        }
+
         self.separator();
         value.serialize(&mut *self.serializer)
     }

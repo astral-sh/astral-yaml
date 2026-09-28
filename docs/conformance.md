@@ -5,9 +5,20 @@ tags and aliases without constructing application values. `astral-yaml-serde`
 uses the core schema and rejects duplicate mapping keys. YAML 1.1 merge keys are
 not expanded; timestamps and spellings such as `yes` and `no` remain strings.
 
-The serde adapter accepts local tags as enum variants when deserializing an enum.
-Other application-specific tags are preserved by the parser but rejected by the
-adapter. Tag URIs retain their percent-escape spelling.
+The serde adapter accepts local tags as enum variants. Generic deserialization
+passes them through Serde's enum interface, allowing YAML value types to preserve
+them. `Tagged<T>` captures an explicit local, global, or core tag with its typed
+payload; untagged input is rejected. Tag handles are expanded, and tag URIs retain
+their percent-escape spelling. Core tags still validate the payload's type.
+
+Serde's internal buffer rejects enum input, so local tags inside derived mixed
+tagged/untagged enums remain unsupported. A singleton mapping such as
+`{Text: hello}` works in place of `!Text hello` for those enums.
+
+Mapping-key comparison includes application tags. Application-tagged scalar keys
+are compared by their tag and scalar text; the adapter cannot infer a custom
+tag's canonical form. Applications that assign additional equivalences to these
+keys must check them when constructing their values.
 
 `Source::from_bytes` accepts UTF-8, UTF-16, and UTF-32, with or without a BOM and in
 either byte order where applicable. Source spans use decoded UTF-8 byte offsets;
@@ -40,6 +51,10 @@ The tests compare results with LibYAML and `yaml_serde`, with these exceptions:
   (spec example 8.2). LibYAML can reject it when indentation is inferred.
 - **Flow keys:** The parser accepts `{:foo}` as the key `:foo` with an empty value.
   `yaml_serde` rejects it.
+- **Tag URIs:** The parser preserves percent-escape spelling in tags, as required
+  by [YAML 1.2.2 §5.6](https://yaml.org/spec/1.2.2/#56-miscellaneous-characters).
+  LibYAML decodes it: `!%12` becomes a tag containing a control character in
+  `yaml_serde`. LibYAML also rejects `#` inside tag URIs, which §5.6 permits.
 
 The [Sentry Compose fixture](../fixtures/real-world/README.md) is another rejection
 case: a closing flow delimiter is under-indented. PyYAML accepts it; astral-yaml
@@ -89,7 +104,7 @@ The parser defaults to:
 For encoded input, `Source::with_limit` bounds both the original and decoded byte
 lengths.
 
-Deserialization also limits nesting, node visits, and inspected scalar bytes,
+Deserialization also limits nesting, node visits, and inspected scalar and tag bytes,
 including alias expansion and ignored values. Collecting comments counts toward
 the work limit, including repeated comments in parent and child wrappers. Cyclic
 aliases can be parsed, but expanding them during deserialization hits a resource

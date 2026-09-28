@@ -1,4 +1,4 @@
-use crate::{AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned};
+use crate::{AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned, tagged};
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
     schema::{ScalarType, classify},
@@ -10,6 +10,19 @@ use serde::de::{
 use std::{borrow::Cow, cell::Cell, collections::HashSet};
 
 type Result<T> = std::result::Result<T, Error>;
+
+fn is_core_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "!" | "tag:yaml.org,2002:str"
+            | "tag:yaml.org,2002:null"
+            | "tag:yaml.org,2002:bool"
+            | "tag:yaml.org,2002:int"
+            | "tag:yaml.org,2002:float"
+            | "tag:yaml.org,2002:seq"
+            | "tag:yaml.org,2002:map"
+    )
+}
 
 /// Deserializes exactly one YAML document using YAML 1.2 core-schema resolution.
 ///
@@ -57,6 +70,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         id: doc.root,
         depth: 0,
         ignore_tag: false,
+        tag_consumed: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
 }
@@ -73,7 +87,10 @@ struct Deserializer<'s, 'de> {
     context: &'s Context<'s, 'de>,
     id: NodeId,
     depth: usize,
+    // Application tags are consumed before deserializing their payload.
     ignore_tag: bool,
+    // Core tags still affect payload resolution after Tagged captures them.
+    tag_consumed: bool,
 }
 
 impl<'s, 'de> Deserializer<'s, 'de> {
@@ -124,6 +141,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             id,
             depth: self.depth + 1,
             ignore_tag: false,
+            tag_consumed: false,
             ..self
         }
     }
@@ -147,6 +165,22 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
 
         Ok(value)
+    }
+
+    fn tagged<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        let node = self.node()?;
+        let tag = node
+            .tag
+            .as_ref()
+            .filter(|_| !self.tag_consumed)
+            .ok_or_else(|| Error::at("expected an explicit YAML tag", node.span))?;
+
+        visitor.visit_enum(Enumeration {
+            de: self,
+            variant: &tag.value,
+            value: Some(self.id),
+            tagged: true,
+        })
     }
 
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
@@ -313,6 +347,26 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     fn key(self) -> Result<Key<'s>> {
         let node = self.raw_node()?;
 
+        if let Some(tag) = node
+            .tag
+            .as_ref()
+            .filter(|tag| !self.ignore_tag && !is_core_tag(&tag.value))
+        {
+            // Application tags define their own scalar types. Without an
+            // application-specific canonical form, compare the scalar text.
+            let value = if let NodeKind::Scalar(scalar) = &node.kind {
+                Key::String(&scalar.value)
+            } else {
+                Self {
+                    ignore_tag: true,
+                    ..self
+                }
+                .key()?
+            };
+
+            return Ok(Key::Tagged(&tag.value, Box::new(value)));
+        }
+
         match &node.kind {
             NodeKind::Scalar(_) => {
                 let (scalar, kind) = self.scalar_value(node)?;
@@ -380,6 +434,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             let de = self.child(entry.key);
             let node = de.raw_node()?;
             if !matches!(node.kind, NodeKind::Scalar(_)) {
+                return self.check_general_keys(entries, span);
+            }
+
+            if node
+                .tag
+                .as_ref()
+                .is_some_and(|tag| !is_core_tag(&tag.value))
+            {
                 return self.check_general_keys(entries, span);
             }
 
@@ -496,6 +558,7 @@ enum Key<'a> {
     Float(u64),
     Sequence(Vec<Self>),
     Mapping(Vec<(Self, Self)>),
+    Tagged(&'a str, Box<Self>),
 }
 
 macro_rules! signed {
@@ -517,6 +580,24 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.raw_node()?;
+
+        if !self.ignore_tag {
+            if let Some(variant) = node
+                .tag
+                .as_ref()
+                .and_then(|tag| tag.value.strip_prefix('!'))
+                .filter(|variant| !variant.is_empty())
+            {
+                return visitor
+                    .visit_enum(Enumeration {
+                        de: self,
+                        variant,
+                        value: Some(self.id),
+                        tagged: true,
+                    })
+                    .map_err(|error: Error| error.located(node.span));
+            }
+        }
 
         match &node.kind {
             NodeKind::Sequence { .. } => self.seq_node(node, visitor),
@@ -696,6 +777,10 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             return self.spanned(visitor);
         }
 
+        if name == tagged::NAME {
+            return self.tagged(visitor);
+        }
+
         self.node()?;
         visitor.visit_newtype_struct(Self {
             depth: self.depth + 1,
@@ -743,6 +828,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         if let Some(tag) = node
             .tag
             .as_ref()
+            .filter(|_| !self.tag_consumed)
             .and_then(|tag| tag.value.strip_prefix('!'))
         {
             if !tag.is_empty() {
@@ -923,11 +1009,36 @@ struct Enumeration<'s, 'de> {
     tagged: bool,
 }
 
+impl<'s, 'de> Enumeration<'s, 'de> {
+    fn payload(&self, id: NodeId) -> Result<Deserializer<'s, 'de>> {
+        let node = self.de.node()?;
+        let core_tag = node.tag.as_ref().is_some_and(|tag| is_core_tag(&tag.value));
+
+        Ok(Deserializer {
+            ignore_tag: self.tagged && !core_tag,
+            tag_consumed: self.tagged,
+            ..self.de.child(id)
+        })
+    }
+}
+
 impl<'de> EnumAccess<'de> for Enumeration<'_, 'de> {
     type Error = Error;
     type Variant = Self;
 
     fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self)> {
+        let remaining = self
+            .de
+            .context
+            .scalar_budget
+            .get()
+            .checked_sub(self.variant.len())
+            .ok_or_else(|| {
+                let node = self.de.context.stream.node(self.de.id).unwrap();
+                Error::at("expanded scalar byte limit exceeded", node.span)
+            })?;
+        self.de.context.scalar_budget.set(remaining);
+
         let variant = seed.deserialize(de::value::StrDeserializer::<Error>::new(self.variant))?;
         Ok((variant, self))
     }
@@ -955,21 +1066,14 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         let id = self
             .value
             .ok_or_else(|| Error::new("expected a variant payload"))?;
-        seed.deserialize(Deserializer {
-            ignore_tag: self.tagged,
-            ..self.de.child(id)
-        })
+        seed.deserialize(self.payload(id)?)
     }
 
     fn tuple_variant<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
         let id = self
             .value
             .ok_or_else(|| Error::new("expected a variant payload"))?;
-        Deserializer {
-            ignore_tag: self.tagged,
-            ..self.de.child(id)
-        }
-        .seq(visitor)
+        self.payload(id)?.seq(visitor)
     }
 
     fn struct_variant<V: Visitor<'de>>(
@@ -980,11 +1084,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         let id = self
             .value
             .ok_or_else(|| Error::new("expected a variant payload"))?;
-        Deserializer {
-            ignore_tag: self.tagged,
-            ..self.de.child(id)
-        }
-        .map(visitor)
+        self.payload(id)?.map(visitor)
     }
 }
 
@@ -992,6 +1092,76 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
 mod tests {
     use super::{Cell, Context, Deserializer};
     use serde::{Deserialize, de::SeqAccess};
+
+    #[test]
+    fn metadata_protocols_can_be_ignored() {
+        use serde::Deserializer as _;
+
+        let stream = astral_yaml::parse("!Text hello").unwrap();
+        let context = Context {
+            stream: &stream,
+            budget: Cell::new(100),
+            scalar_budget: Cell::new(100),
+            comments: crate::comments::CommentCache::new(0),
+        };
+        let de = Deserializer {
+            context: &context,
+            id: stream.documents()[0].root,
+            depth: 0,
+            ignore_tag: false,
+            tag_consumed: false,
+        };
+
+        for name in [crate::spanned::NAME, crate::tagged::NAME, "Transparent"] {
+            de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn enum_variant_names_charge_the_byte_budget() {
+        use serde::de::EnumAccess;
+        use std::marker::PhantomData;
+
+        let stream = astral_yaml::parse("!long-tag x").unwrap();
+
+        for bytes in [7, 8] {
+            let context = Context {
+                stream: &stream,
+                budget: Cell::new(10),
+                scalar_budget: Cell::new(bytes),
+                comments: crate::comments::CommentCache::new(0),
+            };
+            let de = Deserializer {
+                context: &context,
+                id: stream.documents()[0].root,
+                depth: 0,
+                ignore_tag: false,
+                tag_consumed: false,
+            };
+            let access = super::Enumeration {
+                de,
+                variant: "long-tag",
+                value: Some(de.id),
+                tagged: true,
+            };
+
+            match access.variant_seed(PhantomData::<String>) {
+                Ok((name, _)) => {
+                    assert_eq!(name, "long-tag");
+                    assert_eq!(context.scalar_budget.get(), 0);
+                }
+                Err(error) => {
+                    assert_eq!(bytes, 7);
+                    assert_eq!(error.message, "expanded scalar byte limit exceeded");
+                    assert_eq!(
+                        error.span.unwrap().slice(stream.source()),
+                        Some("!long-tag x")
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn nested_comment_lists_charge_each_emitted_record() {
@@ -1010,6 +1180,7 @@ mod tests {
                 id: stream.documents()[0].root,
                 depth: 0,
                 ignore_tag: false,
+                tag_consumed: false,
             };
 
             let result = crate::Spanned::<crate::Spanned<'_, u8>>::deserialize(de);
@@ -1112,6 +1283,7 @@ mod tests {
             id: stream.documents()[0].root,
             depth: 0,
             ignore_tag: false,
+            tag_consumed: false,
         };
 
         de.node().unwrap();
@@ -1152,6 +1324,7 @@ mod tests {
             id: alias.unwrap(),
             depth: 0,
             ignore_tag: true,
+            tag_consumed: true,
         };
 
         assert_eq!(de.scalar().unwrap().0.value, "abc");
@@ -1162,6 +1335,7 @@ mod tests {
         assert_eq!(
             Deserializer {
                 ignore_tag: false,
+                tag_consumed: false,
                 ..de
             }
             .scalar()

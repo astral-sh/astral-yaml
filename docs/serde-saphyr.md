@@ -78,9 +78,14 @@ identical:
 - serde-saphyr's strict tag setting also rejects local enum tags, so enum tests
   use its defaults. Direct enum tags and optional enums work in both libraries.
   When Serde buffers a mixed tagged/untagged enum through `deserialize_any`,
-  Astral rejects local tags. The equivalent singleton-map form works in both.
-- serde-saphyr provides extensions such as binary decoding, includes, and tag
-  wrappers. Those are outside Astral's current core-schema interface.
+  Astral passes local tags as enum input, which Serde's buffer rejects.
+  serde-saphyr adapts those tags into maps for the buffer. The equivalent
+  singleton-map input works in both.
+- Astral preserves local tags when deserializing into `yaml_serde::Value`, as
+  `yaml_serde` itself does. serde-saphyr's default generic deserialization drops
+  them. Astral's `Tagged<T>` wrapper captures an explicit tag and typed payload.
+- serde-saphyr provides extensions such as binary decoding and includes. Those
+  are outside Astral's current core-schema interface.
 
 Span and comment wrappers have different ownership and attachment semantics and
 are not compared by the timing benchmark.

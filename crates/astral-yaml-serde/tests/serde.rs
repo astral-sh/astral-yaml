@@ -1,7 +1,7 @@
 use astral_yaml_serde::{from_str, from_stream, to_string};
 use serde::{
     Deserialize, Serialize,
-    de::{self, MapAccess, SeqAccess, Visitor},
+    de::{self, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor},
 };
 use std::{collections::BTreeMap, fmt, fmt::Write};
 
@@ -346,6 +346,11 @@ impl<'de> Deserialize<'de> for Anything {
 
                 Ok(Anything)
             }
+
+            fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<Anything, A::Error> {
+                let (_, payload) = data.variant::<String>()?;
+                payload.newtype_variant()
+            }
         }
 
         deserializer.deserialize_any(AnyVisitor)
@@ -355,6 +360,8 @@ impl<'de> Deserialize<'de> for Anything {
 #[test]
 fn arbitrary_values_and_alias_limits() {
     from_str::<Anything>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    from_str::<Anything>("!Values [!Text hello, !Count 42]").unwrap();
+    assert!(from_str::<Anything>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Anything>("&a [*a]").is_err());
 
     let mut bomb = "a: &a [0,0]\n".to_owned();

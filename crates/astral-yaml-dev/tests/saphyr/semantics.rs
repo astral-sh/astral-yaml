@@ -365,14 +365,14 @@ fn local_tags_in_serde_content_buffers() {
         Number(u32),
     }
 
-    // Serde buffers this enum through deserialize_any. Astral's untyped
-    // visitor rejects application tags; serde-saphyr adapts them into maps.
+    // Serde buffers this enum through deserialize_any. Its Content visitor
+    // rejects enum input; serde-saphyr adapts local tags into maps instead.
     let source = "[!Text value, 42]";
     assert_eq!(
         astral_yaml_serde::from_str::<Vec<Mixed>>(source)
             .unwrap_err()
             .message,
-        "unsupported scalar tag"
+        "untagged and internally tagged enums do not support enum input"
     );
     assert_eq!(
         serde_saphyr::from_str::<Vec<Mixed>>(source).unwrap(),
