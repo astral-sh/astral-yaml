@@ -1,4 +1,6 @@
-use crate::{Value, events, events::event_tag, spans::validate_parts, validate_spans};
+use crate::{
+    Value, assert_eq_with_nan, events, events::event_tag, spans::validate_parts, validate_spans,
+};
 use astral_yaml::{Span, parse};
 
 #[test]
@@ -9,7 +11,6 @@ fn test_values_preserve_scalar_and_collection_types() {
         ("-42", Value::Integer(-42)),
         ("18446744073709551615", Value::Unsigned(u64::MAX)),
         ("1.5", Value::Float(1.5)),
-        (".nan", Value::Float(f64::NAN)),
         (".inf", Value::Float(f64::INFINITY)),
         ("hello", Value::String("hello".to_owned())),
         ("[null]", Value::Sequence(vec![Value::Null])),
@@ -42,7 +43,10 @@ fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
         ("{[true]: 1}", "{[1]: 1}", false),
         ("[1, 2]", "[2, 1]", false),
         ("1", "1.0", false),
-        (".nan", ".nan", true),
+        (".nan", ".nan", false),
+        ("[.nan]", "[.nan]", false),
+        ("{key: .nan}", "{key: .nan}", false),
+        ("{.nan: value}", "{.nan: value}", false),
         (".inf", "-.inf", false),
     ] {
         let left = astral_yaml_serde::from_str::<Value>(left).unwrap();
@@ -59,6 +63,35 @@ fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
         Value::Mapping(vec![entry.clone(), entry.clone()]),
         Value::Mapping(vec![entry, (Value::Null, Value::Bool(false))]),
     );
+}
+
+#[test]
+fn nan_roundtrips_use_an_explicit_comparison() {
+    for source in [
+        ".nan",
+        "[.nan]",
+        "{key: .nan}",
+        "{.nan: value}",
+        "{[.nan]: {nested: [.nan]}}",
+    ] {
+        let value = astral_yaml_serde::from_str::<Value>(source).unwrap();
+        assert_ne!(value, value.clone());
+
+        let yaml = astral_yaml_serde::to_string(&value).unwrap();
+        let decoded = astral_yaml_serde::from_str::<Value>(&yaml).unwrap();
+        assert_eq_with_nan(&value, &decoded);
+    }
+
+    for (left, right) in [
+        (".nan", "1.0"),
+        ("[.nan]", "[.inf]"),
+        ("{.nan: 1}", "{.nan: 2}"),
+        ("{key: .nan}", "{other: .nan}"),
+    ] {
+        let left = astral_yaml_serde::from_str::<Value>(left).unwrap();
+        let right = astral_yaml_serde::from_str::<Value>(right).unwrap();
+        assert!(std::panic::catch_unwind(|| assert_eq_with_nan(&left, &right)).is_err());
+    }
 }
 
 #[test]

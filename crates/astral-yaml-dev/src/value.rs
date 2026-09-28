@@ -10,7 +10,7 @@ use serde::{
 ///
 /// Supports arbitrary mapping keys and non-finite floats. Integers are limited
 /// to 64 bits; tests for wider integers use concrete Rust types. Mapping equality
-/// ignores entry order, and NaNs compare equal so round trips can be asserted.
+/// ignores entry order. Floats use ordinary IEEE equality, including NaN != NaN.
 #[derive(Debug, Clone)]
 pub enum Value {
     Null,
@@ -25,6 +25,12 @@ pub enum Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
+        self.compare(other, f64::eq)
+    }
+}
+
+impl Value {
+    fn compare(&self, other: &Self, floats_equal: fn(&f64, &f64) -> bool) -> bool {
         match (self, other) {
             (Self::Null, Self::Null) => true,
             (Self::Bool(left), Self::Bool(right)) => left == right,
@@ -34,11 +40,15 @@ impl PartialEq for Value {
             | (Self::Unsigned(unsigned), Self::Integer(signed)) => {
                 u64::try_from(*signed).ok() == Some(*unsigned)
             }
-            (Self::Float(left), Self::Float(right)) => {
-                left == right || (left.is_nan() && right.is_nan())
-            }
+            (Self::Float(left), Self::Float(right)) => floats_equal(left, right),
             (Self::String(left), Self::String(right)) => left == right,
-            (Self::Sequence(left), Self::Sequence(right)) => left == right,
+            (Self::Sequence(left), Self::Sequence(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.compare(right, floats_equal))
+            }
             (Self::Mapping(left), Self::Mapping(right)) => {
                 if left.len() != right.len() {
                     return false;
@@ -47,8 +57,10 @@ impl PartialEq for Value {
                 let mut remaining: Vec<_> = right.iter().collect();
 
                 for entry in left {
-                    let Some(index) = remaining.iter().position(|candidate| *candidate == entry)
-                    else {
+                    let Some(index) = remaining.iter().position(|candidate| {
+                        entry.0.compare(&candidate.0, floats_equal)
+                            && entry.1.compare(&candidate.1, floats_equal)
+                    }) else {
                         return false;
                     };
 
@@ -60,6 +72,22 @@ impl PartialEq for Value {
             _ => false,
         }
     }
+}
+
+/// Asserts that values match, allowing NaN on both sides of a comparison.
+///
+/// Use for round trips and parser comparisons that may contain NaN, including
+/// within sequences, mapping keys, and mapping values.
+///
+/// # Panics
+/// Panics if the values differ by anything other than NaN's non-reflexivity.
+#[track_caller]
+pub fn assert_eq_with_nan(left: &Value, right: &Value) {
+    let matches = left.compare(right, |left, right| {
+        left.eq(right) || (left.is_nan() && right.is_nan())
+    });
+
+    assert!(matches, "values differ:\nleft: {left:?}\nright: {right:?}");
 }
 
 impl Serialize for Value {

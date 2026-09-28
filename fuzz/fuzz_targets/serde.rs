@@ -1,7 +1,7 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use astral_yaml_dev::Value;
+use astral_yaml_dev::{Value, assert_eq_with_nan};
 use astral_yaml_serde::{Tagged, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::{Deserialize, Serialize};
@@ -30,8 +30,8 @@ fuzz_target!(|data: &[u8]| {
     match from_str::<Value>(source) {
         Ok(value) => {
             if let Ok(encoded) = to_string(&value) {
-                assert_eq!(from_str::<Value>(&encoded).unwrap(), value);
-                assert_eq!(yaml_serde::from_str::<Value>(&encoded).unwrap(), value);
+                assert_eq_with_nan(&from_str::<Value>(&encoded).unwrap(), &value);
+                assert_eq_with_nan(&yaml_serde::from_str::<Value>(&encoded).unwrap(), &value);
             }
         }
         Err(error) => {
@@ -45,7 +45,9 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(value) = from_str::<Tagged<Value>>(source)
         && let Ok(encoded) = to_string(&value)
     {
-        assert_eq!(from_str::<Tagged<Value>>(&encoded).unwrap(), value);
+        let decoded = from_str::<Tagged<Value>>(&encoded).unwrap();
+        assert_eq!(decoded.tag, value.tag);
+        assert_eq_with_nan(&decoded.value, &value.value);
     }
 
     let text = YamlTag(Message::Text(source.to_owned()));

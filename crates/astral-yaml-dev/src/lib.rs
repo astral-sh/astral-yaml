@@ -9,7 +9,7 @@ mod value;
 
 pub use events::events;
 pub use spans::validate_spans;
-pub use value::Value;
+pub use value::{Value, assert_eq_with_nan};
 
 #[cfg(test)]
 mod tests;
