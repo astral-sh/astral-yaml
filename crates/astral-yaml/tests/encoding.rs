@@ -16,6 +16,7 @@ fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
 fn encodings_and_original_spans() {
     for encoding in [
@@ -60,6 +61,7 @@ fn encodings_and_original_spans() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
 fn invalid_encodings_and_limits() {
     for bytes in [

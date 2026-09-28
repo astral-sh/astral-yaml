@@ -1,6 +1,14 @@
-use astral_yaml_serde::{CommentPlacement, Spanned, from_document, from_str, to_string};
+//! Comment syntax: <https://yaml.org/spec/1.2.2/#66-comments>.
+//! Ownership and aggregation are astral-yaml-serde API behavior.
+
+use astral_yaml_serde::{
+    AttachedComment, CommentPlacement, Spanned, from_document, from_str, to_string,
+};
 use serde::{Deserialize, de::DeserializeOwned};
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Write,
+};
 
 use CommentPlacement::{Detached, Inline, Leading, Trailing};
 
@@ -13,6 +21,33 @@ fn comments<'a, T>(value: &Spanned<'a, T>) -> Vec<(&'a str, CommentPlacement)> {
         .iter()
         .map(|attached| (attached.comment.text, attached.placement))
         .collect()
+}
+
+fn comment_snapshot(source: &str, groups: &[(&str, &[AttachedComment<'_>])]) -> String {
+    let stream = astral_yaml::parse(source).unwrap();
+    let mut output = String::new();
+
+    for (name, comments) in groups {
+        writeln!(output, "{name}:").unwrap();
+
+        if comments.is_empty() {
+            writeln!(output, "  (none)").unwrap();
+        }
+
+        for attached in *comments {
+            let comment = &attached.comment;
+            let (start_line, start_column) = stream.location(comment.span.start()).unwrap();
+            let (end_line, end_column) = stream.location(comment.span.end()).unwrap();
+            writeln!(
+                output,
+                "  {:?} @{start_line}:{start_column}..{end_line}:{end_column} {:?}",
+                attached.placement, comment.text,
+            )
+            .unwrap();
+        }
+    }
+
+    output
 }
 
 fn assert_borrowed<T>(value: &Spanned<'_, T>, source: &str) {
@@ -45,41 +80,61 @@ struct Config<'a> {
 
 #[test]
 fn parents_collect_comments_with_their_original_placement() {
-    let source = "# first\none: 1 # one\n\n# detached\n\nnested: # header\n  # child\n  two: 2 # two\n  # nested tail\n# last\nlast: 3\n# root tail\n\n# detached tail\n";
+    let source = r"# first
+one: 1 # one
+
+# detached
+
+nested: # header
+  # child
+  two: 2 # two
+  # nested tail
+# last
+last: 3
+# root tail
+
+# detached tail
+";
     let value: Spanned<'_, Config<'_>> = from_str(source).unwrap();
-    assert_eq!(
-        comments(&value.one),
-        [(" first", Leading), (" one", Inline)]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("one", &value.one.comments),
+            ("nested", &value.nested.comments),
+            ("nested.two", &value.nested["two"].comments),
+            ("last", &value.last.comments),
+        ],
     );
-    assert_eq!(
-        comments(&value.nested["two"]),
-        [(" child", Leading), (" two", Inline)]
-    );
-    assert_eq!(
-        comments(&value.nested),
-        [
-            (" header", Inline),
-            (" child", Leading),
-            (" two", Inline),
-            (" nested tail", Trailing),
-        ]
-    );
-    assert_eq!(comments(&value.last), [(" last", Leading)]);
-    assert_eq!(
-        comments(&value),
-        [
-            (" first", Leading),
-            (" one", Inline),
-            (" detached", Detached),
-            (" header", Inline),
-            (" child", Leading),
-            (" two", Inline),
-            (" nested tail", Trailing),
-            (" last", Leading),
-            (" root tail", Trailing),
-            (" detached tail", Detached),
-        ]
-    );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Leading @1:1..1:8 " first"
+      Inline @2:8..2:13 " one"
+      Detached @4:1..4:11 " detached"
+      Inline @6:9..6:17 " header"
+      Leading @7:3..7:10 " child"
+      Inline @8:10..8:15 " two"
+      Trailing @9:3..9:16 " nested tail"
+      Leading @10:1..10:7 " last"
+      Trailing @12:1..12:12 " root tail"
+      Detached @14:1..14:16 " detached tail"
+    one:
+      Leading @1:1..1:8 " first"
+      Inline @2:8..2:13 " one"
+    nested:
+      Inline @6:9..6:17 " header"
+      Leading @7:3..7:10 " child"
+      Inline @8:10..8:15 " two"
+      Trailing @9:3..9:16 " nested tail"
+    nested.two:
+      Leading @7:3..7:10 " child"
+      Inline @8:10..8:15 " two"
+    last:
+      Leading @10:1..10:7 " last"
+    "#);
+
     assert_borrowed(&value, source);
 
     let unwrapped_children: Spanned<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
@@ -90,44 +145,104 @@ fn parents_collect_comments_with_their_original_placement() {
 
 #[test]
 fn sequence_headers_and_empty_items_own_their_comments() {
-    let source = "# first\n- 1 # inline\n- # empty\n# third\n- 3\n# end\n";
+    let source = r"# first
+- 1 # inline
+- # empty
+# third
+- 3
+# end
+";
     let value: Spanned<'_, Vec<Spanned<'_, Option<u8>>>> = from_str(source).unwrap();
-    assert_eq!(
-        comments(&value[0]),
-        [(" first", Leading), (" inline", Inline)]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("[0]", &value[0].comments),
+            ("[1]", &value[1].comments),
+            ("[2]", &value[2].comments),
+        ],
     );
-    assert_eq!(comments(&value[1]), [(" empty", Inline)]);
-    assert_eq!(comments(&value[2]), [(" third", Leading)]);
-    assert_eq!(value.comments.last().unwrap().placement, Trailing);
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Leading @1:1..1:8 " first"
+      Inline @2:5..2:13 " inline"
+      Inline @3:3..3:10 " empty"
+      Leading @4:1..4:8 " third"
+      Trailing @6:1..6:6 " end"
+    [0]:
+      Leading @1:1..1:8 " first"
+      Inline @2:5..2:13 " inline"
+    [1]:
+      Inline @3:3..3:10 " empty"
+    [2]:
+      Leading @4:1..4:8 " third"
+    "#);
+
     assert_borrowed(&value, source);
 
-    let source = "- # item header\n  name: first # field\n- name: second\n";
+    let source = r"- # item header
+  name: first # field
+- name: second
+";
     let value: Spanned<'_, Vec<Spanned<'_, Fields<'_>>>> = from_str(source).unwrap();
-    assert_eq!(
-        comments(&value[0]),
-        [(" item header", Inline), (" field", Inline)]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("[0]", &value[0].comments),
+            ("[0].name", &value[0]["name"].comments),
+            ("[1]", &value[1].comments),
+        ],
     );
-    assert_eq!(comments(&value[0]["name"]), [(" field", Inline)]);
-    assert!(value[1].comments.is_empty());
+
+    insta::assert_snapshot!(snapshot, @r#"
+    [0]:
+      Inline @1:3..1:16 " item header"
+      Inline @2:15..2:22 " field"
+    [0].name:
+      Inline @2:15..2:22 " field"
+    [1]:
+      (none)
+    "#);
 }
 
 #[test]
 fn flow_delimiters_and_empty_containers_own_their_comments() {
-    let source = "[ # opening\n # first\n 1, # one\n # second\n 2,\n # tail\n] # closing\n";
+    let source = r"[ # opening
+ # first
+ 1, # one
+ # second
+ 2,
+ # tail
+] # closing
+";
     let value: Spanned<'_, Vec<Spanned<'_, u8>>> = from_str(source).unwrap();
-    assert_eq!(comments(&value[0]), [(" first", Leading), (" one", Inline)]);
-    assert_eq!(comments(&value[1]), [(" second", Leading)]);
-    assert_eq!(
-        comments(&value),
-        [
-            (" opening", Inline),
-            (" first", Leading),
-            (" one", Inline),
-            (" second", Leading),
-            (" tail", Trailing),
-            (" closing", Inline),
-        ]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("[0]", &value[0].comments),
+            ("[1]", &value[1].comments),
+        ],
     );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Inline @1:3..1:12 " opening"
+      Leading @2:2..2:9 " first"
+      Inline @3:5..3:10 " one"
+      Leading @4:2..4:10 " second"
+      Trailing @6:2..6:8 " tail"
+      Inline @7:3..7:12 " closing"
+    [0]:
+      Leading @2:2..2:9 " first"
+      Inline @3:5..3:10 " one"
+    [1]:
+      Leading @4:2..4:10 " second"
+    "#);
 
     for source in ["[\n # empty\n]", "{\n # empty\n}"] {
         let value: Spanned<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
@@ -142,45 +257,105 @@ fn flow_delimiters_and_empty_containers_own_their_comments() {
 
 #[test]
 fn explicit_complex_keys_keep_key_specific_comments() {
-    let source = "# field\n? [a, # child\n   b] # key\n: 1 # value\n";
+    let source = r"# field
+? [a, # child
+   b] # key
+: 1 # value
+";
     let value: Spanned<'_, HashMap<ComplexKey<'_>, Spanned<'_, u8>>> = from_str(source).unwrap();
     let (key, number) = value.iter().next().unwrap();
-    assert_eq!(comments(key), [(" child", Inline), (" key", Inline)]);
-    assert_eq!(comments(&key[0]), [(" child", Inline)]);
-    assert_eq!(comments(number), [(" field", Leading), (" value", Inline)]);
-    assert_eq!(value.comments.len(), 4);
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("key", &key.comments),
+            ("key[0]", &key[0].comments),
+            ("value", &number.comments),
+        ],
+    );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Leading @1:1..1:8 " field"
+      Inline @2:7..2:14 " child"
+      Inline @3:7..3:12 " key"
+      Inline @4:5..4:12 " value"
+    key:
+      Inline @2:7..2:14 " child"
+      Inline @3:7..3:12 " key"
+    key[0]:
+      Inline @2:7..2:14 " child"
+    value:
+      Leading @1:1..1:8 " field"
+      Inline @4:5..4:12 " value"
+    "#);
 }
 
 #[test]
 fn aliases_collect_use_site_comments_without_importing_targets() {
-    let source = "definition: &items # definition\n  - 1 # child\nalias: *items # use\n";
+    let source = r"definition: &items # definition
+  - 1 # child
+alias: *items # use
+";
     let value: Spanned<'_, BTreeMap<String, Spanned<'_, Vec<Spanned<'_, u8>>>>> =
         from_str(source).unwrap();
-    assert_eq!(
-        comments(&value["definition"]),
-        [(" definition", Inline), (" child", Inline)]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("definition", &value["definition"].comments),
+            ("alias", &value["alias"].comments),
+            ("alias[0]", &value["alias"][0].comments),
+        ],
     );
-    assert_eq!(comments(&value["alias"]), [(" use", Inline)]);
-    assert_eq!(comments(&value["alias"][0]), [(" child", Inline)]);
-    assert_eq!(
-        comments(&value),
-        [
-            (" definition", Inline),
-            (" child", Inline),
-            (" use", Inline)
-        ]
-    );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Inline @1:20..1:32 " definition"
+      Inline @2:7..2:14 " child"
+      Inline @3:15..3:20 " use"
+    definition:
+      Inline @1:20..1:32 " definition"
+      Inline @2:7..2:14 " child"
+    alias:
+      Inline @3:15..3:20 " use"
+    alias[0]:
+      Inline @2:7..2:14 " child"
+    "#);
+
     assert_borrowed(&value, source);
 }
 
 #[test]
 fn properties_and_block_scalar_headers_belong_to_their_node() {
-    let source = "value: &value # anchor\n  !!str # tag\n  |- # scalar\n    # scalar content\n";
+    let source = r"value: &value # anchor
+  !!str # tag
+  |- # scalar
+    # scalar content
+";
     let value: Spanned<'_, BTreeMap<String, Spanned<'_, String>>> = from_str(source).unwrap();
-    assert_eq!(
-        comments(&value["value"]),
-        [(" anchor", Inline), (" tag", Inline), (" scalar", Inline)]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("value", &value["value"].comments),
+        ],
     );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    root:
+      Inline @1:15..1:23 " anchor"
+      Inline @2:9..2:14 " tag"
+      Inline @3:6..3:14 " scalar"
+    value:
+      Inline @1:15..1:23 " anchor"
+      Inline @2:9..2:14 " tag"
+      Inline @3:6..3:14 " scalar"
+    "#);
+
     assert_eq!(value["value"].value, "# scalar content");
 
     let source = "&items # anchor\n- 1\n";
@@ -191,25 +366,43 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
 
 #[test]
 fn document_markers_and_gaps_stay_with_the_correct_root() {
-    let source = "# preamble\n\n%YAML 1.2 # directive\n--- # start\n1 # one\n... # end\n# gap\n--- # second\n2 # two\n# suffix\n";
+    let source = r"# preamble
+
+%YAML 1.2 # directive
+--- # start
+1 # one
+... # end
+# gap
+--- # second
+2 # two
+# suffix
+";
     let stream = astral_yaml::parse(source).unwrap();
     let first: Spanned<'_, u8> = from_document(&stream, 0).unwrap();
     let second: Spanned<'_, u8> = from_document(&stream, 1).unwrap();
-    assert_eq!(
-        comments(&first),
-        [
-            (" preamble", Detached),
-            (" directive", Inline),
-            (" start", Inline),
-            (" one", Inline),
-            (" end", Inline),
-            (" gap", Trailing)
-        ]
+
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("document 1", &first.comments),
+            ("document 2", &second.comments),
+        ],
     );
-    assert_eq!(
-        comments(&second),
-        [(" second", Inline), (" two", Inline), (" suffix", Trailing)]
-    );
+
+    insta::assert_snapshot!(snapshot, @r#"
+    document 1:
+      Detached @1:1..1:11 " preamble"
+      Inline @3:11..3:22 " directive"
+      Inline @4:5..4:12 " start"
+      Inline @5:3..5:8 " one"
+      Inline @6:5..6:10 " end"
+      Trailing @7:1..7:6 " gap"
+    document 2:
+      Inline @8:5..8:13 " second"
+      Inline @9:3..9:8 " two"
+      Trailing @10:1..10:9 " suffix"
+    "#);
+
     assert_borrowed(&first, source);
     assert_borrowed(&second, source);
 
@@ -275,12 +468,19 @@ fn owned_values_and_transparent_serialization_remain_supported() {
 
 #[test]
 fn comments_at_scalar_boundaries_and_dedents_keep_their_scope() {
-    let source = "first: |\n  text\n# second\nsecond: next\n";
+    let source = r"first: |
+  text
+# second
+second: next
+";
     let value: Spanned<'_, Fields<'_>> = from_str(source).unwrap();
     assert!(value["first"].comments.is_empty());
     assert_eq!(comments(&value["second"]), [(" second", Leading)]);
 
-    let source = "items:\n  - 1\n# root tail\n";
+    let source = r"items:
+  - 1
+# root tail
+";
     let value: Spanned<'_, BTreeMap<String, Spanned<'_, Vec<u8>>>> = from_str(source).unwrap();
     assert!(value["items"].comments.is_empty());
     assert_eq!(comments(&value), [(" root tail", Trailing)]);

@@ -78,6 +78,7 @@ fn real_world_values_comments_and_serialization() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
 #[test]
 fn flow_key_and_value_separation_matches_reference() {
     for source in ["{a: [b]}", "{'a':[b]}", "{[]:value}"] {

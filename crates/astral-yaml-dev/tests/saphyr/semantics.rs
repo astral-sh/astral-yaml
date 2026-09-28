@@ -24,6 +24,7 @@ fn agree<'de, T: Deserialize<'de> + PartialEq + Debug>(source: &'de str, expecte
 #[serde(bound = "T: Deserialize<'de>")]
 struct YamlTag<T>(#[serde(with = "astral_yaml_serde::with::yaml_tag")] T);
 
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn null_like_strings() {
     for (source, expected) in [
@@ -68,6 +69,8 @@ fn null_like_strings() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
 #[test]
 fn scalar_tags_and_aliases() {
     for (source, expected) in [
@@ -116,6 +119,8 @@ fn scalar_tags_and_aliases() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#81-block-scalar-styles
+// https://yaml.org/spec/1.2.2/#912-document-markers
 #[test]
 fn root_block_scalars_and_document_boundaries() {
     for style in ["|", ">"] {
@@ -140,6 +145,7 @@ fn root_block_scalars_and_document_boundaries() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn json_surrogate_pairs() {
     for scalar in [0x10000_u32, 0x1d11e, 0x1f30d, 0x0010_ffff] {
@@ -162,6 +168,7 @@ fn json_surrogate_pairs() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn complex_keys_and_duplicate_identity() {
     for source in [
@@ -251,6 +258,7 @@ fn real_world_values() {
     assert_eq!(accepted, 11);
 }
 
+// https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn numeric_range_and_non_finite_floats() {
     for source in ["1e999", "-1e999", "!!float '1e999'"] {
@@ -282,6 +290,7 @@ fn numeric_range_and_non_finite_floats() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn schema_and_api_differences() {
     for (source, expected) in [("yes", true), ("on", true), ("no", false), ("off", false)] {
@@ -406,6 +415,7 @@ fn local_tags_in_serde_content_buffers() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
 fn non_utf8_input_encodings() {
     use astral_yaml::{Encoding, Source};

@@ -2,7 +2,7 @@ mod support;
 
 use astral_yaml_serde::{Spanned, Tagged, from_str, to_string, with::yaml_tag};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Write};
 use support::{YamlTag, from_tag};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -15,18 +15,25 @@ enum Message {
 
 #[test]
 fn enums_use_strings_and_maps_by_default() {
-    for (value, yaml) in [
-        (Message::Ready, "\"Ready\"\n"),
-        (Message::Text("hello".into()), "{? \"Text\": \"hello\"}\n"),
-        (Message::Pair(1, true), "{\"Pair\": [1, true]}\n"),
-        (
-            Message::Config { enabled: true },
-            "{\"Config\": {? \"enabled\": true}}\n",
-        ),
+    let mut output = String::new();
+
+    for (name, value) in [
+        ("unit", Message::Ready),
+        ("newtype", Message::Text("hello".into())),
+        ("tuple", Message::Pair(1, true)),
+        ("struct", Message::Config { enabled: true }),
     ] {
-        assert_eq!(to_string(&value).unwrap(), yaml);
-        assert_eq!(from_str::<Message>(yaml).unwrap(), value);
+        let yaml = to_string(&value).unwrap();
+        assert_eq!(from_str::<Message>(&yaml).unwrap(), value);
+        write!(output, "{name}: {yaml}").unwrap();
     }
+
+    insta::assert_snapshot!(output, @r#"
+    unit: "Ready"
+    newtype: {? "Text": "hello"}
+    tuple: {"Pair": [1, true]}
+    struct: {"Config": {? "enabled": true}}
+    "#);
 }
 
 #[test]
@@ -68,6 +75,7 @@ fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
     assert!(from_str::<Message>("!Text hello").is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn core_tags_work_without_opt_in() {
     #[derive(Debug, Deserialize)]
@@ -132,6 +140,7 @@ fn core_tags_work_without_opt_in() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
 #[test]
 fn core_tags_still_validate_their_payloads() {
     for source in [

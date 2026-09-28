@@ -21,6 +21,8 @@ where
     );
 }
 
+// https://yaml.org/spec/1.2.2/#51-character-set
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn every_unicode_scalar_survives_serialization() {
     let mut chunk = String::new();
@@ -39,6 +41,7 @@ fn every_unicode_scalar_survives_serialization() {
     assert!(chunk.is_empty());
 }
 
+// https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn floating_point_exponents_and_mantissas_roundtrip() {
     for sign in [0, 1_u64 << 63] {
@@ -82,6 +85,7 @@ fn floating_point_exponents_and_mantissas_roundtrip() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
 #[test]
 fn complex_and_long_keys_remain_valid_yaml() {
     roundtrip(&BTreeMap::from([

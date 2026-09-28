@@ -46,6 +46,8 @@ fn owned_and_borrowed_payloads() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#691-node-tags
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn expanded_tags_and_core_types() {
     for (source, tag, text) in [
@@ -185,35 +187,34 @@ fn generic_yaml_values_reject_local_tags() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 #[test]
-fn tag_uri_escapes_retain_their_spelling() {
-    let tagged = from_str::<Tagged<()>>("!%12").unwrap();
-    assert_eq!(tagged.tag, "!%12");
-    let encoded = to_string(&tagged).unwrap();
-    assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
+fn tag_uri_characters_retain_their_spelling() {
+    // LibYAML decodes percent escapes and rejects hashes; YAML preserves both.
+    for (source, reference_tag) in [("!%12", Some("!\u{12}")), ("!#", None)] {
+        let tagged = from_str::<Tagged<()>>(source).unwrap();
+        assert_eq!(tagged.tag, source);
 
-    let value = from_str::<Tagged<yaml_serde::Value>>(&encoded).unwrap();
-    assert_eq!(value.tag, "!%12");
-    assert_eq!(value.value, yaml_serde::Value::Null);
+        let encoded = to_string(&tagged).unwrap();
+        assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
+        let value = from_str::<Tagged<yaml_serde::Value>>(&encoded).unwrap();
+        assert_eq!(value.tag, source);
+        assert_eq!(value.value, yaml_serde::Value::Null);
 
-    let yaml_serde::Value::Tagged(reference) =
-        yaml_serde::from_str::<yaml_serde::Value>(&encoded).unwrap()
-    else {
-        panic!("expected a tagged value");
-    };
-    assert_eq!(reference.tag.to_string(), "!\u{12}");
+        let reference = yaml_serde::from_str::<yaml_serde::Value>(&encoded);
+        if let Some(expected) = reference_tag {
+            let yaml_serde::Value::Tagged(reference) = reference.unwrap() else {
+                panic!("expected a tagged value");
+            };
+
+            assert_eq!(reference.tag.to_string(), expected);
+        } else {
+            assert!(reference.is_err());
+        }
+    }
 }
 
-#[test]
-fn tag_uris_allow_hash_characters() {
-    let value = from_str::<Tagged<()>>("!#").unwrap();
-    assert_eq!(value.tag, "!#");
-
-    let encoded = to_string(&value).unwrap();
-    assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), value);
-    assert!(yaml_serde::from_str::<yaml_serde::Value>(&encoded).is_err());
-}
-
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn tags_in_mapping_keys() {
     let source = "{!Text one: 1, !Other one: 2}";
@@ -273,6 +274,7 @@ fn spans_comments_and_aliases() {
     assert_eq!(values[1].span.slice(source), Some("*text"));
 }
 
+// https://yaml.org/spec/1.2.2/#69-node-properties
 #[test]
 fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
     for tag in [

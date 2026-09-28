@@ -30,6 +30,7 @@ fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#81-block-scalar-styles
 #[test]
 fn block_scalar_combinations_match_reference() {
     let lines = [
@@ -79,6 +80,7 @@ fn block_scalar_combinations_match_reference() {
     assert_eq!(cases * 4, 73_728);
 }
 
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
 #[test]
 fn quoted_scalar_folding_and_escapes_match_reference() {
     let mut cases = 0;

@@ -73,8 +73,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         context: &context,
         id: doc.root,
         depth: 0,
-        ignore_tag: false,
-        tag_consumed: false,
+        tag_state: TagState::Unconsumed,
         yaml_tag: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
@@ -87,15 +86,21 @@ struct Context<'s, 'de> {
     comments: CommentCache<'de>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TagState {
+    Unconsumed,
+    // Core tags still determine the payload's type after capture.
+    ConsumedCore,
+    // Application tags are metadata; resolve the payload without its tag.
+    ConsumedApplication,
+}
+
 #[derive(Clone, Copy)]
 struct Deserializer<'s, 'de> {
     context: &'s Context<'s, 'de>,
     id: NodeId,
     depth: usize,
-    // Application tags are consumed before deserializing their payload.
-    ignore_tag: bool,
-    // Core tags still affect payload resolution after Tagged captures them.
-    tag_consumed: bool,
+    tag_state: TagState,
     // Enable local tags as enum names for this value only.
     yaml_tag: bool,
 }
@@ -147,8 +152,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Self {
             id,
             depth: self.depth + 1,
-            ignore_tag: false,
-            tag_consumed: false,
+            tag_state: TagState::Unconsumed,
             yaml_tag: false,
             ..self
         }
@@ -180,14 +184,13 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         let tag = node
             .tag
             .as_ref()
-            .filter(|_| !self.tag_consumed)
+            .filter(|_| self.tag_state == TagState::Unconsumed)
             .ok_or_else(|| Error::at("expected an explicit YAML tag", node.span))?;
 
         visitor.visit_enum(Enumeration {
             de: self,
             variant: &tag.value,
-            value: Some(self.id),
-            tagged: true,
+            value: VariantValue::Tagged(self.id),
         })
     }
 
@@ -203,15 +206,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             enumeration: Enumeration {
                 de: self,
                 variant,
-                value: Some(self.id),
-                tagged: true,
+                value: VariantValue::Tagged(self.id),
             },
-            index: 0,
+            state: TagMappingState::Key,
         };
         let value = visitor
             .visit_map(&mut map)
             .map_err(|error: Error| error.located(node.span))?;
-        if map.index != 2 {
+        if map.state != TagMappingState::End {
             return Err(Error::at(
                 "tagged mapping was not fully consumed",
                 node.span,
@@ -255,7 +257,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn reject_tag(self, node: &Node<'_>) -> Result<()> {
-        if !self.tag_consumed
+        if self.tag_state == TagState::Unconsumed
             && node
                 .tag
                 .as_ref()
@@ -273,7 +275,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     fn enum_tag(self, node: &'s Node<'de>) -> Option<&'s str> {
         node.tag
             .as_ref()
-            .filter(|_| self.yaml_tag && !self.tag_consumed)
+            .filter(|_| self.yaml_tag && self.tag_state == TagState::Unconsumed)
             .and_then(|tag| tag.value.strip_prefix('!'))
             .filter(|name| !name.is_empty())
     }
@@ -299,7 +301,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             return Err(Error::at("expected a scalar", node.span));
         };
 
-        let tag = if self.ignore_tag {
+        let tag = if self.tag_state == TagState::ConsumedApplication {
             None
         } else {
             node.tag.as_ref().map(|t| t.value.as_ref())
@@ -411,7 +413,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn collection_tag(self, node: &Node<'_>, expected: &str) -> Result<()> {
-        if !self.ignore_tag
+        if self.tag_state != TagState::ConsumedApplication
             && node
                 .tag
                 .as_ref()
@@ -426,18 +428,16 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     fn key(self) -> Result<Key<'s>> {
         let node = self.raw_node()?;
 
-        if let Some(tag) = node
-            .tag
-            .as_ref()
-            .filter(|tag| !self.ignore_tag && !is_core_tag(&tag.value))
-        {
+        if let Some(tag) = node.tag.as_ref().filter(|tag| {
+            self.tag_state != TagState::ConsumedApplication && !is_core_tag(&tag.value)
+        }) {
             // Application tags define their own scalar types. Without an
             // application-specific canonical form, compare the scalar text.
             let value = if let NodeKind::Scalar(scalar) = &node.kind {
                 Key::String(&scalar.value)
             } else {
                 Self {
-                    ignore_tag: true,
+                    tag_state: TagState::ConsumedApplication,
                     ..self
                 }
                 .key()?
@@ -801,7 +801,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         let node = self.node()?;
         // Preserve application tags for an inner Tagged<T> or yaml_tag adapter.
         // Core tags retain their normal resolution, including !!null as None.
-        let application_tag = !self.tag_consumed
+        let application_tag = self.tag_state == TagState::Unconsumed
             && node
                 .tag
                 .as_ref()
@@ -898,8 +898,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             return visitor.visit_enum(Enumeration {
                 de: self,
                 variant: tag,
-                value: Some(self.id),
-                tagged: true,
+                value: VariantValue::Tagged(self.id),
             });
         }
 
@@ -911,8 +910,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 visitor.visit_enum(Enumeration {
                     de: self,
                     variant: &scalar.value,
-                    value: None,
-                    tagged: false,
+                    value: VariantValue::Unit,
                 })
             }
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
@@ -921,8 +919,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 visitor.visit_enum(Enumeration {
                     de: self,
                     variant: &key.value,
-                    value: Some(entries[0].value),
-                    tagged: false,
+                    value: VariantValue::Node(entries[0].value),
                 })
             }
             _ => Err(Error::at(
@@ -1068,54 +1065,78 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
 
 struct TagMapping<'s, 'de> {
     enumeration: Enumeration<'s, 'de>,
-    index: u8,
+    state: TagMappingState,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TagMappingState {
+    Key,
+    Value,
+    End,
 }
 
 impl<'de> MapAccess<'de> for TagMapping<'_, 'de> {
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
-        match self.index {
-            0 => {
+        match self.state {
+            TagMappingState::Key => {
                 let name = self.enumeration.de.variant_name(self.enumeration.variant)?;
                 let key = seed.deserialize(name)?;
-                self.index = 1;
+                self.state = TagMappingState::Value;
                 Ok(Some(key))
             }
-            1 => Err(Error::new("mapping key has no value")),
-            _ => Ok(None),
+            TagMappingState::Value => Err(Error::new("mapping key has no value")),
+            TagMappingState::End => Ok(None),
         }
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
-        if self.index != 1 {
+        if self.state != TagMappingState::Value {
             return Err(Error::new("mapping value has no key"));
         }
 
-        self.index = 2;
-        seed.deserialize(self.enumeration.payload(self.enumeration.de.id)?)
+        self.state = TagMappingState::End;
+        seed.deserialize(self.enumeration.payload()?)
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(usize::from(self.index != 2))
+        Some(usize::from(self.state != TagMappingState::End))
     }
 }
 
 struct Enumeration<'s, 'de> {
     de: Deserializer<'s, 'de>,
     variant: &'s str,
-    value: Option<NodeId>,
-    tagged: bool,
+    value: VariantValue,
+}
+
+enum VariantValue {
+    Unit,
+    Node(NodeId),
+    Tagged(NodeId),
 }
 
 impl<'s, 'de> Enumeration<'s, 'de> {
-    fn payload(&self, id: NodeId) -> Result<Deserializer<'s, 'de>> {
+    fn payload(&self) -> Result<Deserializer<'s, 'de>> {
+        let (VariantValue::Node(id) | VariantValue::Tagged(id)) = self.value else {
+            return Err(Error::new("expected a variant payload"));
+        };
+
         let node = self.de.node()?;
         let core_tag = node.tag.as_ref().is_some_and(|tag| is_core_tag(&tag.value));
+        let tag_state = if matches!(self.value, VariantValue::Tagged(_)) {
+            if core_tag {
+                TagState::ConsumedCore
+            } else {
+                TagState::ConsumedApplication
+            }
+        } else {
+            TagState::Unconsumed
+        };
 
         Ok(Deserializer {
-            ignore_tag: self.tagged && !core_tag,
-            tag_consumed: self.tagged,
+            tag_state,
             ..self.de.child(id)
         })
     }
@@ -1136,23 +1157,17 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
 
     fn unit_variant(self) -> Result<()> {
         match self.value {
-            None => Ok(()),
-            Some(id) => <()>::deserialize(self.payload(id)?),
+            VariantValue::Unit => Ok(()),
+            VariantValue::Node(_) | VariantValue::Tagged(_) => <()>::deserialize(self.payload()?),
         }
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-        let id = self
-            .value
-            .ok_or_else(|| Error::new("expected a variant payload"))?;
-        seed.deserialize(self.payload(id)?)
+        seed.deserialize(self.payload()?)
     }
 
     fn tuple_variant<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
-        let id = self
-            .value
-            .ok_or_else(|| Error::new("expected a variant payload"))?;
-        self.payload(id)?.seq(visitor)
+        self.payload()?.seq(visitor)
     }
 
     fn struct_variant<V: Visitor<'de>>(
@@ -1160,16 +1175,13 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
         _: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        let id = self
-            .value
-            .ok_or_else(|| Error::new("expected a variant payload"))?;
-        self.payload(id)?.map(visitor)
+        self.payload()?.map(visitor)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, Context, Deserializer};
+    use super::{Cell, Context, Deserializer, TagState, VariantValue};
     use serde::{Deserialize, de::SeqAccess};
 
     #[test]
@@ -1187,8 +1199,7 @@ mod tests {
             context: &context,
             id: stream.documents()[0].root,
             depth: 0,
-            ignore_tag: false,
-            tag_consumed: false,
+            tag_state: TagState::Unconsumed,
             yaml_tag: true,
         };
 
@@ -1221,15 +1232,13 @@ mod tests {
                 context: &context,
                 id: stream.documents()[0].root,
                 depth: 0,
-                ignore_tag: false,
-                tag_consumed: false,
+                tag_state: TagState::Unconsumed,
                 yaml_tag: false,
             };
             let access = super::Enumeration {
                 de,
                 variant: "long-tag",
-                value: Some(de.id),
-                tagged: true,
+                value: VariantValue::Tagged(de.id),
             };
 
             match access.variant_seed(PhantomData::<String>) {
@@ -1265,8 +1274,7 @@ mod tests {
                 },
                 id: stream.documents()[0].root,
                 depth: 0,
-                ignore_tag: false,
-                tag_consumed: false,
+                tag_state: TagState::Unconsumed,
                 yaml_tag: false,
             };
 
@@ -1369,8 +1377,7 @@ mod tests {
             },
             id: stream.documents()[0].root,
             depth: 0,
-            ignore_tag: false,
-            tag_consumed: false,
+            tag_state: TagState::Unconsumed,
             yaml_tag: false,
         };
 
@@ -1411,8 +1418,7 @@ mod tests {
             },
             id: alias.unwrap(),
             depth: 0,
-            ignore_tag: true,
-            tag_consumed: true,
+            tag_state: TagState::ConsumedApplication,
             yaml_tag: false,
         };
 
@@ -1423,8 +1429,7 @@ mod tests {
         );
         assert_eq!(
             Deserializer {
-                ignore_tag: false,
-                tag_consumed: false,
+                tag_state: TagState::Unconsumed,
                 yaml_tag: false,
                 ..de
             }

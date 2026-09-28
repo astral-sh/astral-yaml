@@ -70,6 +70,7 @@ fn digits(value: &str, radix: u32) -> bool {
 mod tests {
     use super::{ScalarType, classify};
 
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     #[test]
     fn core_schema() {
         for (kind, values) in [

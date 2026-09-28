@@ -94,6 +94,7 @@ fn derived_types() {
     assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
 }
 
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn core_resolution_and_numeric_limits() {
     for source in [
@@ -159,6 +160,7 @@ fn core_resolution_and_numeric_limits() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn finite_float_overflow_is_an_error() {
     for source in ["1e999", "-1e999", "!!float '1e999'"] {
@@ -249,25 +251,30 @@ fn all_string_characters_and_complex_keys() {
     assert_eq!(map["a"], map["b"]);
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn serialization_preserves_text_and_escape_spelling() {
-    for (value, expected) in [
-        ("", "\"\"\n"),
-        ("plain ASCII", "\"plain ASCII\"\n"),
-        ("é — 中 🌍\u{a0}", "\"é — 中 🌍\u{a0}\"\n"),
-        ("é \"quoted\" 🌍\\\n", "\"é \\\"quoted\\\" 🌍\\\\\\n\"\n"),
-        (
-            "\u{7f}\u{85}\u{2028}\0",
-            "\"\\u007F\\u0085\\u2028\\u0000\"\n",
-        ),
+    let mut output = String::new();
+
+    for (name, value) in [
+        ("empty", ""),
+        ("ASCII", "plain ASCII"),
+        ("Unicode", "é — 中 🌍\u{a0}"),
+        ("escapes", "é \"quoted\" 🌍\\\n"),
+        ("controls", "\u{7f}\u{85}\u{2028}\0"),
     ] {
-        assert_eq!(to_string(value).unwrap(), expected);
+        write!(output, "{name}: {}", to_string(value).unwrap()).unwrap();
     }
 
-    assert_eq!(
-        to_string(&[1.0, -0.0, 1.25]).unwrap(),
-        "[1.0, -0.0, 1.25]\n"
-    );
+    write!(output, "floats: {}", to_string(&[1.0, -0.0, 1.25]).unwrap()).unwrap();
+    insta::assert_snapshot!(output, @r#"
+    empty: ""
+    ASCII: "plain ASCII"
+    Unicode: "é — 中 🌍 "
+    escapes: "é \"quoted\" 🌍\\\n"
+    controls: "\u007F\u0085\u2028\u0000"
+    floats: [1.0, -0.0, 1.25]
+    "#);
 }
 
 #[test]
@@ -392,6 +399,7 @@ fn serialization_recursion_limit() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn mapping_key_uniqueness_uses_core_types() {
     for source in [
@@ -419,6 +427,7 @@ fn mapping_key_uniqueness_uses_core_types() {
     from_str::<Anything>("{1: a, '1': b, true: c, 'true': d}").unwrap();
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn mapping_key_uniqueness_across_mapping_sizes() {
     for count in [1, 7, 8, 9, 64] {
@@ -452,6 +461,7 @@ fn mapping_key_uniqueness_across_mapping_sizes() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
 #[test]
 fn collection_tags_must_match_the_requested_type() {
     for source in ["!!str []", "!!int {}", "!!map []", "!!seq {}"] {

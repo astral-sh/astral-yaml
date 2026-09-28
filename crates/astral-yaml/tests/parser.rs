@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn json_surrogate_pairs_and_malformed_escapes() {
     for value in [0x10000, 0x1d11e, 0x1f30d, 0x0010_ffff] {
@@ -39,6 +40,8 @@ fn json_surrogate_pairs_and_malformed_escapes() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
 #[test]
 fn block_scalar_eof_and_indentation_follow_the_test_suite() {
     // Follow the suite's EOF-as-line-break interpretation (yaml/yaml-test-suite#118).
@@ -93,6 +96,8 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#51-character-set
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
 fn prefix_boms_and_multiple_restricted_quoted_characters() {
     let stream = parse("# prefix\n\u{feff}").unwrap();
@@ -169,6 +174,7 @@ fn scalar_borrowing_and_unicode() {
     assert_eq!(stream.location(5), Some((2, 2)));
 }
 
+// https://yaml.org/spec/1.2.2/#733-plain-style
 #[test]
 fn plain_scalars_preserve_unicode_and_embedded_indicators() {
     let source = "café:λ 中#文 🌍{x,y}  \n";
@@ -245,6 +251,7 @@ fn budgets_and_adversarial_nesting() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
 #[test]
 fn aliases_preserve_identity_and_cycles() {
     let stream = parse("&root [*root]").unwrap();
@@ -262,6 +269,8 @@ fn aliases_preserve_identity_and_cycles() {
     assert!(parse("[*missing]").is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#51-character-set
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn invalid_unicode_and_escape_regressions() {
     for source in [
@@ -278,12 +287,49 @@ fn invalid_unicode_and_escape_regressions() {
         assert!(error.span.slice(source).is_some(), "{source:?}: {error:?}");
         assert!(error.to_string().contains(error.message));
     }
+}
 
-    for source in ["{key\n: value}", "[key\n: value]"] {
-        let _ = parse(source);
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test]
+fn implicit_key_limits_include_separation_before_the_colon() {
+    for key in ["key", "'key'", "[key]", "é", "'🌍'"] {
+        for length in [1024, 1025] {
+            let padding = " ".repeat(length - key.chars().count());
+
+            for (context, source, accepted) in [
+                (
+                    "block mapping",
+                    format!("{key}{padding}: value"),
+                    length == 1024,
+                ),
+                (
+                    "flow pair",
+                    format!("[{key}{padding}: value]"),
+                    length == 1024,
+                ),
+                ("flow mapping", format!("{{{key}{padding}: value}}"), true),
+                (
+                    "explicit block key",
+                    format!("? {key}{padding}\n: value"),
+                    true,
+                ),
+            ] {
+                assert_eq!(
+                    parse(&source).is_ok(),
+                    accepted,
+                    "{context}: {key:?}, {length} characters"
+                );
+            }
+        }
+    }
+
+    for (source, accepted) in [("{key\n: value}", true), ("[key\n: value]", false)] {
+        assert_eq!(parse(source).is_ok(), accepted, "{source}");
     }
 }
 
+// https://yaml.org/spec/1.2.2/#812-literal-style
 #[test]
 fn block_scalar_ranges_exclude_following_node() {
     let source = "a: |\n  text\nb: next\n";
@@ -296,6 +342,7 @@ fn block_scalar_ranges_exclude_following_node() {
     assert_eq!(scalar.span.slice(source), Some("|\n  text\n"));
 }
 
+// https://yaml.org/spec/1.2.2/#51-character-set
 #[test]
 fn json_compatible_quoted_characters() {
     for c in [
@@ -318,6 +365,7 @@ fn json_compatible_quoted_characters() {
     assert!(parse("\"\u{1f}\"").is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
 fn document_byte_order_marks() {
     for source in [
@@ -352,6 +400,8 @@ fn metadata_respects_the_element_budget() {
     assert!(parse_with_options("# a\n# b\n", options).is_ok());
 }
 
+// https://yaml.org/spec/1.2.2/#68-directives
+// https://yaml.org/spec/1.2.2/#69-node-properties
 #[test]
 fn invalid_directives_properties_and_keys() {
     for source in [
@@ -380,6 +430,8 @@ fn invalid_directives_properties_and_keys() {
     assert!(parse(&format!("{}: x", "a".repeat(1025))).is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
 #[test]
 fn escape_repertoire_and_empty_pairs() {
     let source = "\"\\0\\a\\b\\t\\n\\v\\f\\r\\e\\ \\\"\\/\\\\\\N\\_\\L\\P\\x41\\u03bb\\U0001F30D\"";
@@ -398,6 +450,8 @@ fn escape_repertoire_and_empty_pairs() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
+// https://yaml.org/spec/1.2.2/#691-node-tags
 #[test]
 fn tag_uris_preserve_percent_escapes() {
     for (source, tag) in [
@@ -436,6 +490,7 @@ fn tag_uris_preserve_percent_escapes() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#823-block-nodes
 #[test]
 fn multiline_properties_preserve_anchor_identity() {
     for source in [
@@ -457,6 +512,7 @@ fn multiline_properties_preserve_anchor_identity() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#72-empty-nodes
 #[test]
 fn empty_scalar_span_follows_properties() {
     let source = "- &a\n- x\n";
@@ -475,6 +531,8 @@ fn empty_scalar_span_follows_properties() {
     assert_eq!(node.span.slice(source), Some("&a"));
 }
 
+// https://yaml.org/spec/1.2.2/#61-indentation-spaces
+// https://yaml.org/spec/1.2.2/#63-line-prefixes
 #[test]
 fn continuation_indentation_uses_spaces() {
     for source in [
@@ -490,6 +548,7 @@ fn continuation_indentation_uses_spaces() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#822-block-mappings
 #[test]
 fn implicit_key_must_end_at_the_mapping_separator() {
     for source in ["\"a\" extra: b", "[a] extra: b", "{a: b} extra: c"] {
@@ -500,6 +559,7 @@ fn implicit_key_must_end_at_the_mapping_separator() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test]
 fn tag_prefixes_obey_the_first_character_rule() {
     for prefix in [",tag:example", "[tag:example", "]tag:example"] {
@@ -516,6 +576,7 @@ fn tag_prefixes_obey_the_first_character_rule() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#92-streams
 #[test]
 fn standalone_document_end_markers_retain_spans_and_use_the_budget() {
     let source = "...\n---\nvalue\n...\n... # suffix\n";
@@ -547,6 +608,7 @@ fn standalone_document_end_markers_retain_spans_and_use_the_budget() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
 #[test]
 fn flow_values_require_separation_after_yaml_keys() {
     for source in ["{a:[]}", "[a:[]]", "{:[]}", "[:[]]", "[&a x, {*a :value}]"] {
@@ -596,5 +658,28 @@ fn large_flow_collections_and_line_backtracking() {
         for node in stream.nodes() {
             assert!(node.span.slice(&source).is_some());
         }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+// https://yaml.org/spec/1.2.2/#813-folded-style
+#[test]
+fn large_block_scalars_with_leading_empty_lines() {
+    let blank_lines = "\n".repeat(30_000);
+    let content = "  text\n".repeat(30_000);
+
+    for (style, separator) in [("|", "\n"), (">", " ")] {
+        let source = format!("{style}\n{blank_lines}{content}");
+        let stream = parse(&source).unwrap();
+        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+            panic!("expected scalar");
+        };
+
+        let expected = format!(
+            "{blank_lines}{}text\n",
+            format!("text{separator}").repeat(29_999)
+        );
+        assert_eq!(scalar.value, expected);
+        assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
     }
 }

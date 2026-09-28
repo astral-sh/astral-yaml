@@ -14,5 +14,6 @@ serde.workspace = true
 workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 serde_json.workspace = true
 yaml_serde.workspace = true

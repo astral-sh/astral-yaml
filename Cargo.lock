@@ -96,6 +96,7 @@ name = "astral-yaml-serde"
 version = "0.1.0"
 dependencies = [
  "astral-yaml",
+ "insta",
  "serde",
  "serde_json",
  "yaml_serde",

@@ -68,8 +68,8 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
-        line_bounds: Cell::new((usize::MAX, 0)),
-        colon_cache: Cell::new((usize::MAX, None)),
+        line_bounds: Cell::new(None),
+        colon_cache: Cell::new(None),
     }
     .stream()?;
 
@@ -89,8 +89,14 @@ struct Parser<'a> {
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
-    line_bounds: Cell<(usize, usize)>,
-    colon_cache: Cell<(usize, Option<usize>)>,
+    line_bounds: Cell<Option<Span>>,
+    colon_cache: Cell<Option<KeyLookahead>>,
+}
+
+#[derive(Clone, Copy)]
+struct KeyLookahead {
+    start: usize,
+    colon: Option<usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -118,14 +124,19 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn column(&self) -> usize {
-        let (mut start, end) = self.line_bounds.get();
-        if self.pos < start || self.pos > end {
-            start = self.source.as_bytes()[..self.pos]
+        let start = if let Some(bounds) = self.cached_line() {
+            bounds.start
+        } else {
+            let start = self.source.as_bytes()[..self.pos]
                 .iter()
                 .rposition(|b| matches!(b, b'\r' | b'\n'))
                 .map_or(0, |n| n + 1);
-            self.line_bounds.set((start, self.line_end()));
-        }
+            self.line_bounds.set(Some(Span {
+                start,
+                end: self.line_end(),
+            }));
+            start
+        };
 
         // Reuse line bounds across flow entries; repeated prefix scans are quadratic
         // on long lines. The range check also handles scalar-parser backtracking.
@@ -133,10 +144,15 @@ impl<'a> Parser<'a> {
         prefix.strip_prefix('\u{feff}').unwrap_or(prefix).len()
     }
 
+    fn cached_line(&self) -> Option<Span> {
+        self.line_bounds
+            .get()
+            .filter(|bounds| bounds.start <= self.pos && self.pos <= bounds.end)
+    }
+
     fn line_end(&self) -> usize {
-        let (start, end) = self.line_bounds.get();
-        if start <= self.pos && self.pos <= end {
-            return end;
+        if let Some(bounds) = self.cached_line() {
+            return bounds.end;
         }
 
         self.source.as_bytes()[self.pos..]
@@ -702,14 +718,20 @@ impl<'a> Parser<'a> {
 
     /// Finds a same-line implicit key separator outside quotes and flow brackets.
     fn simple_colon(&self) -> Option<usize> {
-        let (at, result) = self.colon_cache.get();
-        if at == self.pos {
-            return result;
+        if let Some(cached) = self
+            .colon_cache
+            .get()
+            .filter(|cached| cached.start == self.pos)
+        {
+            return cached.colon;
         }
 
-        let result = self.find_simple_colon();
-        self.colon_cache.set((self.pos, result));
-        result
+        let colon = self.find_simple_colon();
+        self.colon_cache.set(Some(KeyLookahead {
+            start: self.pos,
+            colon,
+        }));
+        colon
     }
 
     fn find_simple_colon(&self) -> Option<usize> {
@@ -830,6 +852,8 @@ impl<'a> Parser<'a> {
             } else {
                 let before = self.pos;
                 let key = self.inline(false, signed(indent), depth + 1)?;
+                self.spaces();
+
                 if self.source[before..self.pos].chars().count() > 1024
                     || self.source[before..self.pos].contains(['\r', '\n'])
                 {
@@ -837,7 +861,6 @@ impl<'a> Parser<'a> {
                         .error("an implicit key must fit on one line of at most 1024 characters"));
                 }
 
-                self.spaces();
                 key
             };
 
@@ -1542,13 +1565,17 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         let folded = self.byte() == Some(b'>');
         self.pos += 1;
-        let mut chomp = b' ';
+        let mut chomp = Chomping::Clip;
         let mut increment = None;
 
         for _ in 0..2 {
             match self.byte() {
-                Some(b @ (b'+' | b'-')) if chomp == b' ' => {
-                    chomp = b;
+                Some(b'+') if chomp == Chomping::Clip => {
+                    chomp = Chomping::Keep;
+                    self.pos += 1;
+                }
+                Some(b'-') if chomp == Chomping::Clip => {
+                    chomp = Chomping::Strip;
                     self.pos += 1;
                 }
                 Some(b @ b'1'..=b'9') if increment.is_none() => {
@@ -1574,6 +1601,7 @@ impl<'a> Parser<'a> {
         let mut lines: Vec<(&str, bool)> = Vec::new();
         let mut end = self.pos;
         let mut leading_indent = 0;
+        let mut has_content = false;
 
         while self.byte().is_some() {
             let line_start = self.pos;
@@ -1597,7 +1625,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
 
-                if lines.iter().all(|(s, _)| s.is_empty()) && leading_indent > required {
+                if !has_content && leading_indent > required {
                     return Err(self.error("leading empty line is over-indented"));
                 }
             } else if indent.is_none() {
@@ -1606,6 +1634,7 @@ impl<'a> Parser<'a> {
 
             let text_start = line_start + indent.unwrap_or(spaces).min(spaces);
             let text = &self.source[text_start..line_end];
+            has_content |= !text.is_empty();
             self.pos = line_end;
             self.newline();
             lines.push((text, text.starts_with([' ', '\t'])));
@@ -1679,7 +1708,14 @@ fn signed(value: usize) -> isize {
     isize::try_from(value).unwrap_or(isize::MAX)
 }
 
-fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: u8) -> String {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Chomping {
+    Clip,
+    Keep,
+    Strip,
+}
+
+fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: Chomping) -> String {
     let mut value = String::new();
 
     for (i, &(text, more)) in lines.iter().enumerate() {
@@ -1705,13 +1741,14 @@ fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: u8) -> String {
         value.push('\n');
     }
 
-    if chomp != b'+' {
+    if chomp != Chomping::Keep {
         let had_break = value.ends_with('\n');
         value.truncate(value.trim_end_matches('\n').len());
-        if chomp != b'-' && had_break && !value.is_empty() {
+        if chomp == Chomping::Clip && had_break && !value.is_empty() {
             value.push('\n');
         }
     }
+
     value
 }
 
