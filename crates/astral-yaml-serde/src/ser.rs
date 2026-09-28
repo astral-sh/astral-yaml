@@ -19,7 +19,7 @@ type Result<T> = std::result::Result<T, Error>;
 /// implementation violates the map protocol.
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {
-        output: String::new(),
+        output: String::with_capacity(128),
         depth: 0,
         tagged: false,
         yaml_tag: false,
@@ -48,6 +48,19 @@ impl Serializer {
     }
 
     fn quoted(&mut self, mut value: &str) {
+        const ESCAPE: [bool; 256] = {
+            let mut escape = [false; 256];
+            let mut byte = 0;
+
+            while byte < escape.len() {
+                escape[byte] =
+                    byte < 0x20 || matches!(byte, 0x22 | 0x5c | 0x7f | 0xc2 | 0xe2 | 0xef);
+                byte += 1;
+            }
+
+            escape
+        };
+
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push('"');
@@ -55,9 +68,7 @@ impl Serializer {
         // Copy runs of text until a possible escape. The non-ASCII characters
         // escaped below start with C2, E2, or EF; stopping at those leading bytes
         // or at ASCII preserves UTF-8 character boundaries.
-        while let Some(index) = value.bytes().position(|byte| {
-            byte < b' ' || matches!(byte, b'"' | b'\\' | 0x7f | 0xc2 | 0xe2 | 0xef)
-        }) {
+        while let Some(index) = value.bytes().position(|byte| ESCAPE[usize::from(byte)]) {
             self.output.push_str(&value[..index]);
             let c = value[index..].chars().next().unwrap();
 

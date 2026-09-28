@@ -44,6 +44,31 @@ where
 }
 
 #[test]
+fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
+    for (source, expected) in [
+        ("42", "42"),
+        ("null", "null"),
+        ("!!int '42'", "42"),
+        ("!!str false", "false"),
+    ] {
+        assert_eq!(from_str::<String>(source).unwrap(), expected);
+        assert_eq!(from_str::<&str>(source).unwrap(), expected);
+    }
+
+    for source in [
+        "[]",
+        "{}",
+        "!!int nope",
+        "!!bool 2",
+        "!!seq scalar",
+        "!Local x",
+    ] {
+        assert!(from_str::<String>(source).is_err(), "{source}");
+        assert!(from_str::<&str>(source).is_err(), "{source}");
+    }
+}
+
+#[test]
 fn derived_types() {
     let source = "name: astral\nenabled: TRUE\ncount: 0xff\nrate: 1.5\nargs: [one, 'two', \"three\\nfour\"]\noptional: null\n";
     let config: Configuration<'_> = from_str(source).unwrap();
