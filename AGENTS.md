@@ -18,3 +18,6 @@
   asserts for expected state/structure.
 
 - Tests should be table-driven where appropriate, rather than defining several nearly-identical test functions.
+
+- Where appropriate, tests should reference the section of the YAML specification they're testing for,
+  with a link to that section.
