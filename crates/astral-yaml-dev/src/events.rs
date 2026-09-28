@@ -118,7 +118,7 @@ pub fn events(stream: &Stream<'_>) -> String {
 
 // The suite's event convention decodes URI escapes (e.g. 6CK3). The parser's
 // public tag value preserves them as required by YAML 1.2.2 section 5.6.
-pub(crate) fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
+fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
     let mut bytes = tag.bytes();
     let mut decoded = Vec::new();
 
@@ -139,4 +139,18 @@ pub(crate) fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
         }
     }
     String::from_utf8(decoded).map_or_else(|_| tag.into(), std::borrow::Cow::Owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{event_tag, events};
+    use astral_yaml::parse;
+
+    #[test]
+    fn event_escaping() {
+        let stream = parse("\"\\0\\b\\t\\r\\n\\\\\"").unwrap();
+        assert!(events(&stream).contains("=VAL \"\\0\\b\\t\\r\\n\\\\\n"));
+        assert_eq!(event_tag("!%FF"), "!%FF");
+        assert_eq!(event_tag("!%C3%A9"), "!é");
+    }
 }
