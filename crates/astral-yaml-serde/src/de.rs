@@ -251,6 +251,17 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Self::float_value(scalar, kind)
     }
 
+    fn radix_integer_value(s: &Scalar<'_>, kind: ScalarType) -> Result<Option<u128>> {
+        if kind != ScalarType::Int || !(s.value.starts_with("0x") || s.value.starts_with("0o")) {
+            return Ok(None);
+        }
+
+        let (value, radix, span) = Self::integer_value(s, kind)?;
+        u128::from_str_radix(value, radix)
+            .map(Some)
+            .map_err(|_| Error::at("integer out of range", span))
+    }
+
     fn float_value(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
             return Err(Error::at("expected a number", s.span));
@@ -269,19 +280,21 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             return Ok(f64::NAN);
         }
 
-        if kind == ScalarType::Int && (s.value.starts_with("0x") || s.value.starts_with("0o")) {
-            let (value, radix, span) = Self::integer_value(s, kind)?;
-            let value = u128::from_str_radix(value, radix)
-                .map_err(|_| Error::at("integer out of range", span))?;
-
+        if let Some(value) = Self::radix_integer_value(s, kind)? {
             // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
             #[allow(clippy::cast_precision_loss)]
             return Ok(value as f64);
         }
 
-        s.value
+        let value: f64 = s
+            .value
             .parse()
-            .map_err(|_| Error::at("invalid float", s.span))
+            .map_err(|_| Error::at("invalid float", s.span))?;
+        if !value.is_finite() {
+            return Err(Error::at("float out of range", s.span));
+        }
+
+        Ok(value)
     }
 
     fn collection_tag(self, node: &Node<'_>, expected: &str) -> Result<()> {
@@ -563,7 +576,27 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.deserialize_f64(visitor)
+        let (scalar, kind) = self.scalar()?;
+
+        // Convert decimal text and radix integers directly to f32 to avoid
+        // double rounding through f64. Rust cannot parse YAML's .inf/.nan.
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+        let (value, finite_input) = if let Some(integer) = Self::radix_integer_value(scalar, kind)?
+        {
+            (integer as f32, true)
+        } else {
+            let wide = Self::float_value(scalar, kind)?;
+            (
+                scalar.value.parse::<f32>().unwrap_or(wide as f32),
+                wide.is_finite(),
+            )
+        };
+
+        if finite_input && !value.is_finite() {
+            return Err(Error::at("float out of range", scalar.span));
+        }
+
+        visitor.visit_f32(value)
     }
 
     fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -615,7 +648,18 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if matches!(self.node()?.kind, NodeKind::Scalar(_)) && self.scalar()?.1 == ScalarType::Null
+        let node = self.node()?;
+        let enum_tag = !self.ignore_tag
+            && node
+                .tag
+                .as_ref()
+                .is_some_and(|tag| tag.value.starts_with('!') && tag.value != "!");
+
+        // A local tag can select an enum variant inside Some(T). Let T consume
+        // that tag; resolving it as a core scalar here would reject the enum.
+        if !enum_tag
+            && matches!(node.kind, NodeKind::Scalar(_))
+            && self.scalar()?.1 == ScalarType::Null
         {
             visitor.visit_none()
         } else {

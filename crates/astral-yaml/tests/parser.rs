@@ -3,6 +3,43 @@ use std::borrow::Cow;
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
 #[test]
+fn json_surrogate_pairs_and_malformed_escapes() {
+    for value in [0x10000, 0x1d11e, 0x1f30d, 0x0010_ffff] {
+        let character = char::from_u32(value).unwrap();
+        let mut units = [0; 2];
+        character.encode_utf16(&mut units);
+        let source = format!(r#""before\u{:04X}\u{:04X}after""#, units[0], units[1]);
+        let stream = parse(&source).unwrap();
+        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+            panic!("expected scalar");
+        };
+
+        assert_eq!(scalar.value, format!("before{character}after"));
+        assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+    }
+
+    for source in [
+        r#""\uD800""#,
+        r#""\uD800"#,
+        r#""\uDC00""#,
+        r#""\uDC00\uD800""#,
+        r#""\uD800\uD800""#,
+        r#""\uD800\u0041""#,
+        r#""\uD800\uFFFF""#,
+        r#""\uD800x""#,
+        r#""\uD800\n""#,
+        r#""\uD800\u""#,
+        r#""\uD800\uZZZZ""#,
+        r#""\uD800 \uDC00""#,
+        r#""\uD800\U0000DC00""#,
+        r#""\U0000D800\uDC00""#,
+    ] {
+        let error = parse(source).unwrap_err();
+        assert!(error.span.slice(source).is_some(), "{source}");
+    }
+}
+
+#[test]
 fn block_scalar_eof_and_indentation_follow_the_test_suite() {
     // Follow the suite's EOF-as-line-break interpretation (yaml/yaml-test-suite#118).
     for style in ["|", ">"] {

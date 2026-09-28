@@ -157,6 +157,79 @@ fn core_resolution_and_numeric_limits() {
 }
 
 #[test]
+fn finite_float_overflow_is_an_error() {
+    for source in ["1e999", "-1e999", "!!float '1e999'"] {
+        let error = from_str::<f64>(source).unwrap_err();
+        assert_eq!(error.message, "float out of range");
+        assert!(error.span.unwrap().slice(source).is_some());
+    }
+
+    for source in [
+        "3.5e38",
+        "-3.5e38",
+        "340282366920938463463374607431768211455",
+        "0xffffffffffffffffffffffffffffffff",
+    ] {
+        assert!(from_str::<f64>(source).unwrap().is_finite());
+        assert_eq!(
+            from_str::<f32>(source).unwrap_err().message,
+            "float out of range"
+        );
+    }
+
+    for source in ["3.4028235e38", "1.0000000596046448", "1e-999", "-0.0"] {
+        assert_eq!(
+            from_str::<f32>(source).unwrap().to_bits(),
+            source.parse::<f32>().unwrap().to_bits()
+        );
+    }
+
+    assert_eq!(
+        from_str::<f32>("0xff").unwrap().to_bits(),
+        255_f32.to_bits()
+    );
+
+    // Just above a rounding midpoint: converting through f64 loses the +1.
+    let integer = (1_u128 << 64) + (1_u128 << 40) + 1;
+    let expected = integer.to_string().parse::<f32>().unwrap();
+    for source in [format!("0x{integer:x}"), format!("0o{integer:o}")] {
+        assert_eq!(
+            from_str::<f32>(&source).unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
+
+    assert!(from_str::<f32>(".nan").unwrap().is_nan());
+    assert_eq!(
+        from_str::<f32>(".inf").unwrap().to_bits(),
+        f32::INFINITY.to_bits()
+    );
+    assert_eq!(
+        from_str::<f32>("-.inf").unwrap().to_bits(),
+        f32::NEG_INFINITY.to_bits()
+    );
+    assert!(from_str::<f32>("'1.0'").is_err());
+}
+
+#[test]
+fn optional_tagged_enums() {
+    for (source, expected) in [
+        ("!Unit", Kind::Unit),
+        ("!Newtype text", Kind::Newtype("text".to_owned())),
+        ("!Tuple [1, true]", Kind::Tuple(1, true)),
+        ("!Struct {value: 2}", Kind::Struct { value: 2 }),
+        ("&mode !Unit", Kind::Unit),
+    ] {
+        assert_eq!(from_str::<Option<Kind>>(source).unwrap(), Some(expected));
+    }
+
+    assert_eq!(from_str::<Option<Kind>>("null").unwrap(), None);
+    assert!(from_str::<Option<String>>("!unknown value").is_err());
+    assert!(from_str::<Option<u32>>("!!int null").is_err());
+    assert!(from_str::<Option<Kind>>("!Unit value").is_err());
+}
+
+#[test]
 fn all_string_characters_and_complex_keys() {
     let mut text: String = (0..=255).filter_map(char::from_u32).collect();
     text.push_str("\u{2028}\u{2029}\u{feff}\u{fffe}\u{ffff}🌍");

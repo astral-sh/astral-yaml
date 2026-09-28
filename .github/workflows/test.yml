@@ -30,7 +30,7 @@ jobs:
         run: uv run --script scripts/verify-fixtures.py
 
       - name: Run unit, integration, and doc tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --all-features --locked
 
       - name: Compare fixtures with PyYAML
         run: cargo test -p astral-yaml --test real_world --locked -- --ignored

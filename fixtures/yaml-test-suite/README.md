@@ -2,8 +2,8 @@
 
 Vendored from the `data` branch of <https://github.com/yaml/yaml-test-suite>,
 revision `6ad3d2c62885d82fc349026c136ef560838fdf3d` (also in `REVISION`).
-All 402 `in.yaml` cases are included with their `test.event`, `error`, and `===`
-files. The files are unmodified. `LICENSE` is the upstream MIT license from
+All 402 `in.yaml` cases are included with their `test.event`, `error`, `===`, and
+available `in.json` files. The files are unmodified. `LICENSE` is the upstream MIT license from
 main revision `da267a5c4782e7361e82889e76c0dc7df0e1e870`.
 
 The parser's conformance test compares event streams for all valid inputs and

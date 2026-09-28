@@ -2,6 +2,8 @@
 
 pub mod benchmarks;
 mod events;
+#[cfg(feature = "saphyr")]
+pub mod saphyr;
 mod spans;
 
 pub use events::events;

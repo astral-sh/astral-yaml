@@ -57,7 +57,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks.
 
 ## Performance
 
-The [latest benchmarks](benchmarks/results/2026-09-25.csv) compare
+The [deserialization benchmarks](benchmarks/results/2026-09-25.csv) compare
 `astral-yaml-serde` with `yaml_serde` 0.10.7:
 
 | Fixture | Bytes | `astral-yaml-serde` | `yaml_serde` | Speedup |
@@ -71,4 +71,5 @@ value construction, and destruction. These are median times from eleven samples,
 measured on 2026-09-25 with Rust 1.98.1 on macOS arm64.
 
 See [benchmarks](benchmarks/README.md) for reproduction commands and measurements
-with `Spanned`.
+with `Spanned`, and the [serde-saphyr comparison](docs/serde-saphyr.md) for
+conformance results and timings against serde-saphyr 1.3.0.

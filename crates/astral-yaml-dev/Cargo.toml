@@ -7,11 +7,27 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+saphyr = ["dep:serde-saphyr"]
+
 [dependencies]
 astral-yaml.workspace = true
 astral-yaml-serde.workspace = true
 serde.workspace = true
+serde-saphyr = { workspace = true, optional = true }
 yaml_serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[test]]
+name = "saphyr"
+required-features = ["saphyr"]
+
+[[bench]]
+name = "saphyr"
+harness = false
+required-features = ["saphyr"]
 
 [lints]
 workspace = true

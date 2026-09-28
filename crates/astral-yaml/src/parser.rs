@@ -1497,15 +1497,21 @@ impl<'a> Parser<'a> {
                     _ => 8,
                 };
 
-                let mut value = 0u32;
+                let mut value = self.hex_escape(count)?;
 
-                for _ in 0..count {
-                    let digit = self
-                        .byte()
-                        .and_then(|b| char::from(b).to_digit(16))
-                        .ok_or_else(|| self.error("invalid hexadecimal escape"))?;
-                    value = (value << 4) | digit;
-                    self.pos += 1;
+                // JSON encodes non-BMP characters as two adjacent \u escapes.
+                if b == b'u' && (0xd800..=0xdbff).contains(&value) {
+                    if !self.source[self.pos..].starts_with("\\u") {
+                        return Err(self.error("expected a low-surrogate escape"));
+                    }
+
+                    self.pos += 2;
+                    let low = self.hex_escape(4)?;
+                    if !(0xdc00..=0xdfff).contains(&low) {
+                        return Err(self.error("expected a low surrogate"));
+                    }
+
+                    value = 0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
                 }
 
                 char::from_u32(value)
@@ -1515,6 +1521,21 @@ impl<'a> Parser<'a> {
         };
 
         Ok(c)
+    }
+
+    fn hex_escape(&mut self, count: usize) -> Result<u32> {
+        let mut value = 0u32;
+
+        for _ in 0..count {
+            let digit = self
+                .byte()
+                .and_then(|b| char::from(b).to_digit(16))
+                .ok_or_else(|| self.error("invalid hexadecimal escape"))?;
+            value = (value << 4) | digit;
+            self.pos += 1;
+        }
+
+        Ok(value)
     }
 
     fn block_scalar(&mut self, parent: isize) -> Result<NodeKind<'a>> {

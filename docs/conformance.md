@@ -21,6 +21,9 @@ events, require rejection of invalid inputs, and check spans for every UTF-8
 prefix. See [CONTRIBUTING.md](../CONTRIBUTING.md) for commands and
 [TRANSCRIPT.md](../TRANSCRIPT.md) for recorded test and fuzz results.
 
+The [serde-saphyr comparison](serde-saphyr.md) checks the same syntax corpus,
+constructed values, and regression cases against serde-saphyr 1.3.0.
+
 ## Parser disagreements
 
 The tests compare results with LibYAML and `yaml_serde`, with these exceptions:

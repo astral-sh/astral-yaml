@@ -11,9 +11,9 @@ uv run --only-dev --locked ty check --python .venv scripts
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-cargo test --workspace --locked
+cargo test --workspace --all-features --locked
 uv run --script scripts/verify-fixtures.py
 cargo test -p astral-yaml --test real_world --locked -- --ignored
 cargo xtask cov
@@ -34,6 +34,9 @@ Run the pinned YAML Test Suite:
 ```sh
 cargo test -p astral-yaml --test conformance
 ```
+
+The `saphyr` feature runs the [serde-saphyr comparison](docs/serde-saphyr.md) and
+requires Rust 1.89. The default workspace build still supports Rust 1.85.
 
 Review inline snapshots with `cargo-insta`:
 
