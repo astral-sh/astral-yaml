@@ -51,7 +51,7 @@ cargo insta test -p astral-yaml --test real_world --review
 
 ```sh
 cargo xtask fuzz
-cargo bench -p astral-yaml-dev --all-features --bench yaml --locked
+cargo bench -p astral-yaml-dev --bench yaml --locked
 ```
 
 `cargo xtask fuzz` runs all four targets for 60 seconds each. Additional arguments

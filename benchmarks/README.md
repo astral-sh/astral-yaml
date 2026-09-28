@@ -1,17 +1,23 @@
 # Benchmarks
 
 The benchmarks use [CodSpeed's Divan adapter](https://codspeed.io/docs/reference/codspeed-rust/divan).
-Run local timings from the repository root:
+Run Astral's benchmarks from the repository root:
 
 ```sh
-cargo bench -p astral-yaml-dev --all-features --bench yaml --locked
+cargo bench -p astral-yaml-dev --bench yaml --locked
+```
+
+To compare implementations, enable the `compare` feature and select its target:
+
+```sh
+cargo bench -p astral-yaml-dev --features compare --bench compare --locked
 ```
 
 Pass a filter after `--` to select benchmarks, or `--test` to run each once:
 
 ```sh
-cargo bench -p astral-yaml-dev --all-features --bench yaml --locked -- uv-ci
-cargo bench -p astral-yaml-dev --all-features --bench yaml --locked -- --test
+cargo bench -p astral-yaml-dev --bench yaml --locked -- uv-ci
+cargo bench -p astral-yaml-dev --bench yaml --locked -- --test
 ```
 
 ## Workloads
@@ -21,13 +27,17 @@ Each workload processes all documents in one of the three fixed
 
 | Benchmark | Operation |
 | --- | --- |
-| `deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>` with each implementation. |
 | `astral::parse` | Parse the YAML stream. |
+| `astral::deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>`. |
 | `astral::deserialize_spanned` | Parse and deserialize, collecting each document root's span and descendant comments. |
 | `astral::deserialize_spanned_fields` | Also wrap each top-level mapping value in `Spanned`. |
 | `astral::serialize` | Serialize previously deserialized values. |
 
-The deserialization comparisons put the fixture before the implementation so
+`astral::deserialize_services_128` deserializes a generated configuration into
+typed structs. All of these workloads run on Rust 1.85.
+
+The `compare` target requires Rust 1.89 and compares deserialization with
+`yaml_serde` and serde-saphyr. Names put the fixture before the implementation so
 results for the same input appear together. For example, omitting the file path:
 
 ```text
@@ -36,9 +46,8 @@ deserialize::uv-ci[serde-saphyr]
 deserialize::uv-ci[yaml_serde]
 ```
 
-`deserialize_services_128` compares Astral and serde-saphyr on a generated
-configuration deserialized into typed structs. The serde-saphyr benchmarks require the `saphyr`
-feature and Rust 1.89; omit `--all-features` to run the other workloads on Rust 1.85.
+Its `deserialize_services_128` group compares Astral and serde-saphyr on the
+same typed-struct workload.
 
 Fixture generation and correctness checks run outside measurements. Every
 measurement includes destruction of the output. Span collection includes
@@ -51,13 +60,26 @@ descendant comments; serde-saphyr uses the same
 pushes to `main`, and supports manual runs for backtesting. It uses CodSpeed's
 simulation mode on a GitHub-hosted Linux runner and authenticates uploads with
 OIDC. Enable the repository in CodSpeed to receive the reports; no token secret
-is needed. Main-branch runs supply the baseline for PR comparisons.
+is needed.
+
+Runs include only Astral's benchmarks unless the PR has the `benchmarks:compare`
+label or a manual dispatch enables **Compare implementations**. Adding or
+removing a PR label reruns the workflow with the current selection. Pushes to
+`main` run only Astral's benchmarks. To establish or refresh comparison baselines,
+dispatch the workflow on `main` with **Compare implementations** enabled.
 
 To check the instrumented suite locally:
 
 ```sh
-uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --all-features --locked -m simulation
-uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev -m simulation
+uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --bench yaml --locked -m simulation
+uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m simulation
+```
+
+To include comparisons:
+
+```sh
+uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare --bench yaml --bench compare --locked -m simulation
+uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --bench compare -m simulation
 ```
 
 Outside the CodSpeed runner, this checks that benchmarks execute but does not

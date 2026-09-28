@@ -6,10 +6,10 @@ The dependency versions are pinned in `Cargo.lock`.
 
 ```sh
 cargo test -p astral-yaml-dev --features saphyr --test saphyr --locked
-cargo bench -p astral-yaml-dev --features saphyr --bench yaml --locked
+cargo bench -p astral-yaml-dev --features compare --bench compare --locked
 ```
 
-The comparison requires Rust 1.89 and runs in CI. The public crates retain their
+The comparison tests require Rust 1.89 and run in CI. The public crates retain their
 Rust 1.85 minimum. See [benchmarks](../benchmarks/README.md#serde-saphyr) for timings
 and measurement details.
 

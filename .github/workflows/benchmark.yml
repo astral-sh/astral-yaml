@@ -2,9 +2,15 @@ name: Benchmark
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      compare:
+        description: Compare implementations
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -22,6 +28,9 @@ jobs:
       id-token: write # Authenticate uploads to CodSpeed with OIDC.
     env:
       RUSTUP_TOOLCHAIN: stable
+      COMPARE_IMPLEMENTATIONS: >-
+        ${{ (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmarks:compare')) ||
+            (github.event_name == 'workflow_dispatch' && inputs.compare) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,10 +44,20 @@ jobs:
         run: rustup toolchain install stable --profile minimal
 
       - name: Build benchmarks
-        run: uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --all-features --locked -m simulation
+        run: |
+          if [ "$COMPARE_IMPLEMENTATIONS" = "true" ]; then
+            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare --bench yaml --bench compare --locked -m simulation
+          else
+            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --bench yaml --locked -m simulation
+          fi
 
       - name: Run benchmarks
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
         with:
           mode: simulation
-          run: uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev -m simulation
+          run: |
+            if [ "$COMPARE_IMPLEMENTATIONS" = "true" ]; then
+              uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --bench compare -m simulation
+            else
+              uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m simulation
+            fi

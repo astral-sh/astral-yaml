@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [features]
+compare = ["saphyr"]
 saphyr = ["dep:serde-saphyr"]
 
 [dependencies]
@@ -28,6 +29,11 @@ required-features = ["saphyr"]
 [[bench]]
 name = "yaml"
 harness = false
+
+[[bench]]
+name = "compare"
+harness = false
+required-features = ["compare"]
 
 [lints]
 workspace = true
