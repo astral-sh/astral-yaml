@@ -215,13 +215,13 @@ fn strings_reject_explicit_non_string_core_tags() {
     }
 
     insta::assert_snapshot!(output, @r#"
-    "!!int 42": tag does not match string type at bytes 6..8
-    "!!int '42'": tag does not match string type at bytes 6..10
-    "!!bool true": tag does not match string type at bytes 7..11
-    "!!float 1.5": tag does not match string type at bytes 8..11
-    "!!null null": tag does not match string type at bytes 7..11
-    "!<tag:yaml.org,2002:int> 42": tag does not match string type at bytes 25..27
-    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": tag does not match string type at bytes 39..41
+    "!!int 42": tag does not match requested type at bytes 0..8
+    "!!int '42'": tag does not match requested type at bytes 0..10
+    "!!bool true": tag does not match requested type at bytes 0..11
+    "!!float 1.5": tag does not match requested type at bytes 0..11
+    "!!null null": tag does not match requested type at bytes 0..11
+    "!<tag:yaml.org,2002:int> 42": tag does not match requested type at bytes 0..27
+    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": tag does not match requested type at bytes 32..41
     "!!int nope": scalar does not match its tag at bytes 6..10
     "!!map 'string'": unsupported scalar tag at bytes 0..14
     "#);
@@ -252,7 +252,7 @@ fn string_tag_checks_apply_to_aliases_keys_and_wrapped_values() {
         } else {
             let error = result.unwrap_err();
             assert_eq!(borrowed.unwrap_err(), error);
-            assert_eq!(error.span.unwrap().slice(&source), Some("42"));
+            assert_eq!(error.span.unwrap().slice(&source), Some("&value !!int 42"));
             assert!(from_str::<Option<String>>(scalar).is_err());
             assert!(from_str::<Text>(scalar).is_err());
             assert!(from_str::<BTreeMap<String, u8>>(&format!("{{{scalar}: 1}}")).is_err());
