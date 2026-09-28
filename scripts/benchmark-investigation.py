@@ -101,6 +101,8 @@ def main() -> None:
             ],
             directory,
         )
+        profile = output / f"{label}-profile"
+        profile.mkdir(exist_ok=True)
         run(
             [
                 "codspeed",
@@ -109,7 +111,7 @@ def main() -> None:
                 "--mode",
                 "simulation",
                 "--profile-folder",
-                str(output / f"{label}-profile"),
+                str(profile),
                 "--setup-cache-dir",
                 str(Path.home() / ".cache/codspeed-action"),
                 "--",
