@@ -47,9 +47,14 @@ where
 fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
     for (source, expected) in [
         ("42", "42"),
+        ("true", "true"),
+        ("1.5", "1.5"),
         ("null", "null"),
         ("!!str '42'", "42"),
         ("!!str false", "false"),
+        ("! null", "null"),
+        ("!<tag:yaml.org,2002:str> 42", "42"),
+        ("%TAG !c! tag:yaml.org,2002:\n--- !c!str 42", "42"),
     ] {
         assert_eq!(from_str::<String>(source).unwrap(), expected);
         assert_eq!(from_str::<&str>(source).unwrap(), expected);

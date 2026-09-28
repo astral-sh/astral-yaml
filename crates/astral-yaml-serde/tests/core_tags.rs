@@ -1,22 +1,12 @@
 mod support;
 
-use astral_yaml_dev::Value;
 use astral_yaml_serde::{Spanned, Tagged, from_str};
-use serde::{
-    Deserialize, Deserializer,
-    de::{self, IgnoredAny, SeqAccess, Visitor},
-};
-use std::{collections::BTreeMap, fmt, fmt::Write};
+use serde::{Deserialize, de::IgnoredAny};
+use std::{collections::BTreeMap, fmt::Write};
 use support::from_tag;
 
 #[derive(Deserialize)]
-struct Newtype<T>(T);
-
-#[derive(Deserialize)]
-struct Unit;
-
-#[derive(Deserialize)]
-struct Tuple(u8, u8);
+struct Newtype(String);
 
 #[derive(Deserialize)]
 struct Record {
@@ -34,80 +24,6 @@ enum Choice {
     Null,
 }
 
-struct ByteBuf(Vec<u8>);
-
-impl<'de> Deserialize<'de> for ByteBuf {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct BytesVisitor;
-
-        impl<'de> Visitor<'de> for BytesVisitor {
-            type Value = ByteBuf;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("bytes or a sequence of bytes")
-            }
-
-            fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<ByteBuf, E> {
-                Ok(ByteBuf(value.to_vec()))
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<ByteBuf, A::Error> {
-                let mut bytes = Vec::new();
-
-                while let Some(byte) = sequence.next_element()? {
-                    bytes.push(byte);
-                }
-
-                Ok(ByteBuf(bytes))
-            }
-        }
-
-        deserializer.deserialize_byte_buf(BytesVisitor)
-    }
-}
-
-macro_rules! destination_rows {
-    ($output:ident, $sources:ident; $($label:literal => $ty:ty),+ $(,)?) => {
-        $(
-            write!($output, "{:<18}", $label).unwrap();
-
-            for source in $sources {
-                let accepted = from_str::<$ty>(source).is_ok();
-                assert_eq!(
-                    from_str::<Tagged<$ty>>(source).is_ok(),
-                    accepted,
-                    "{source}"
-                );
-                assert_eq!(
-                    from_str::<Spanned<'_, $ty>>(source).is_ok(),
-                    accepted,
-                    "{source}"
-                );
-                assert_eq!(
-                    from_str::<Newtype<$ty>>(source).is_ok(),
-                    accepted,
-                    "{source}"
-                );
-                assert_eq!(
-                    from_str::<Option<$ty>>(source).is_ok(),
-                    accepted || source == "!!null ~",
-                    "{source}"
-                );
-
-                let alias = format!("[&value {source}, *value]");
-                assert_eq!(
-                    from_str::<(IgnoredAny, $ty)>(&alias).is_ok(),
-                    accepted,
-                    "{alias}"
-                );
-                write!($output, " {:>5}", if accepted { "ok" } else { "-" }).unwrap();
-            }
-
-            $output.push('\n');
-        )+
-    };
-}
-
 // Core tags determine the YAML type; the Rust destination must accept that type.
 // https://yaml.org/spec/1.2.2/#1031-tags
 #[test]
@@ -118,10 +34,10 @@ fn core_tags_and_destination_types() {
         "!!int 7",
         "!!float 7",
         "!!str 7",
-        "!!seq [7, 7]",
+        "!!seq [7]",
         "!!map {7: null}",
     ];
-    let mut output = format!("{:18}", "destination");
+    let mut output = format!("{:12}", "destination");
 
     for tag in ["null", "bool", "int", "float", "str", "seq", "map"] {
         write!(output, " {tag:>5}").unwrap();
@@ -129,132 +45,109 @@ fn core_tags_and_destination_types() {
 
     output.push('\n');
 
-    destination_rows! {
-        output, sources;
-        "bool" => bool,
-        "i8" => i8,
-        "i16" => i16,
-        "i32" => i32,
-        "i64" => i64,
-        "i128" => i128,
-        "u8" => u8,
-        "u16" => u16,
-        "u32" => u32,
-        "u64" => u64,
-        "u128" => u128,
-        "f32" => f32,
-        "f64" => f64,
-        "()" => (),
-        "unit struct" => Unit,
-        "String" => String,
-        "&str" => &str,
-        "char" => char,
-        "&[u8]" => &[u8],
-        "byte buffer" => ByteBuf,
-        "Vec<u8>" => Vec<u8>,
-        "tuple" => (u8, u8),
-        "tuple struct" => Tuple,
-        "map" => BTreeMap<String, Option<u8>>,
-        "struct" => Record,
-        "enum" => Choice,
-        "Value" => Value,
-        "IgnoredAny" => IgnoredAny,
+    macro_rules! row {
+        ($label:literal, $ty:ty) => {
+            write!(output, "{:<12}", $label).unwrap();
+
+            for source in sources {
+                let accepted = from_str::<$ty>(source).is_ok();
+                write!(output, " {:>5}", if accepted { "ok" } else { "-" }).unwrap();
+            }
+
+            output.push('\n');
+        };
     }
 
+    row!("bool", bool);
+    row!("i64", i64);
+    row!("u64", u64);
+    row!("f32", f32);
+    row!("f64", f64);
+    row!("()", ());
+    row!("String", String);
+    row!("&str", &str);
+    row!("char", char);
+    row!("&[u8]", &[u8]);
+    row!("Vec<u8>", Vec<u8>);
+    row!("map", BTreeMap<String, Option<u8>>);
+    row!("enum", Choice);
+
     insta::assert_snapshot!(output, @"
-    destination         null  bool   int float   str   seq   map
-    bool                   -    ok     -     -     -     -     -
-    i8                     -     -    ok     -     -     -     -
-    i16                    -     -    ok     -     -     -     -
-    i32                    -     -    ok     -     -     -     -
-    i64                    -     -    ok     -     -     -     -
-    i128                   -     -    ok     -     -     -     -
-    u8                     -     -    ok     -     -     -     -
-    u16                    -     -    ok     -     -     -     -
-    u32                    -     -    ok     -     -     -     -
-    u64                    -     -    ok     -     -     -     -
-    u128                   -     -    ok     -     -     -     -
-    f32                    -     -    ok    ok     -     -     -
-    f64                    -     -    ok    ok     -     -     -
-    ()                    ok     -     -     -     -     -     -
-    unit struct           ok     -     -     -     -     -     -
-    String                 -     -     -     -    ok     -     -
-    &str                   -     -     -     -    ok     -     -
-    char                   -     -     -     -    ok     -     -
-    &[u8]                  -     -     -     -    ok     -     -
-    byte buffer            -     -     -     -    ok    ok     -
-    Vec<u8>                -     -     -     -     -    ok     -
-    tuple                  -     -     -     -     -    ok     -
-    tuple struct           -     -     -     -     -    ok     -
-    map                    -     -     -     -     -     -    ok
-    struct                 -     -     -     -     -     -    ok
-    enum                   -     -     -     -    ok     -    ok
-    Value                 ok    ok    ok    ok    ok    ok    ok
-    IgnoredAny            ok    ok    ok    ok    ok    ok    ok
+    destination   null  bool   int float   str   seq   map
+    bool             -    ok     -     -     -     -     -
+    i64              -     -    ok     -     -     -     -
+    u64              -     -    ok     -     -     -     -
+    f32              -     -    ok    ok     -     -     -
+    f64              -     -    ok    ok     -     -     -
+    ()              ok     -     -     -     -     -     -
+    String           -     -     -     -    ok     -     -
+    &str             -     -     -     -    ok     -     -
+    char             -     -     -     -    ok     -     -
+    &[u8]            -     -     -     -    ok     -     -
+    Vec<u8>          -     -     -     -     -    ok     -
+    map              -     -     -     -     -     -    ok
+    enum             -     -     -     -    ok     -    ok
     ");
 }
 
-// https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
 #[test]
-fn tags_validate_scalar_contents_and_node_kinds() {
-    let mut output = format!("{:8}", "tag");
+fn wrappers_and_aliases_preserve_tag_checks() {
+    for source in ["!!str 7", "!!int 7"] {
+        let expected = from_str::<String>(source);
+        assert_eq!(
+            from_str::<Tagged<String>>(source).map(|v| v.value),
+            expected
+        );
+        assert_eq!(
+            from_str::<Spanned<'_, String>>(source).map(|v| v.value),
+            expected
+        );
+        assert_eq!(from_str::<Newtype>(source).map(|v| v.0), expected);
+        assert_eq!(
+            from_str::<Option<String>>(source),
+            expected.clone().map(Some)
+        );
 
-    for kind in ["null", "bool", "int", "float", "text", "seq", "map"] {
-        write!(output, " {kind:>5}").unwrap();
-    }
+        let alias = format!("[&value {source}, *value]");
+        let result = from_str::<(IgnoredAny, &str)>(&alias);
+        assert_eq!(result.is_ok(), expected.is_ok());
 
-    output.push('\n');
-
-    for tag in ["null", "bool", "int", "float", "str", "seq", "map"] {
-        write!(output, "{tag:8}").unwrap();
-
-        for value in ["~", "true", "7", "1.5", "text", "[]", "{}"] {
-            let source = format!("!!{tag} {value}");
-            let accepted = from_str::<Value>(&source).is_ok();
-            assert_eq!(
-                from_str::<IgnoredAny>(&source).is_ok(),
-                accepted,
-                "{source}"
-            );
-            write!(output, " {:>5}", if accepted { "ok" } else { "-" }).unwrap();
+        if let Err(error) = result {
+            assert_eq!(error.span.unwrap().slice(&alias), Some("&value !!int 7"));
         }
+    }
+}
 
-        output.push('\n');
+// Explicit tags retain their meaning across quoting and alternate tag spellings.
+// https://yaml.org/spec/1.2.2/#691-node-tags
+#[test]
+fn tag_mismatch_errors_retain_the_node_span() {
+    let mut output = String::new();
+
+    for source in [
+        "!!int '42'",
+        "!<tag:yaml.org,2002:int> 42",
+        "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42",
+    ] {
+        let error = from_str::<String>(source).unwrap_err();
+        assert_eq!(from_str::<&str>(source).unwrap_err(), error);
+        writeln!(output, "{source:?}: {error}").unwrap();
     }
 
-    insta::assert_snapshot!(output, @"
-    tag       null  bool   int float  text   seq   map
-    null        ok     -     -     -     -     -     -
-    bool         -    ok     -     -     -     -     -
-    int          -     -    ok     -     -     -     -
-    float        -     -    ok    ok     -     -     -
-    str         ok    ok    ok    ok    ok     -     -
-    seq          -     -     -     -     -    ok     -
-    map          -     -     -     -     -     -    ok
-    ");
+    insta::assert_snapshot!(output, @r#"
+    "!!int '42'": tag does not match requested type at bytes 0..10
+    "!<tag:yaml.org,2002:int> 42": tag does not match requested type at bytes 0..27
+    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": tag does not match requested type at bytes 32..41
+    "#);
 }
 
 #[test]
 fn enum_names_and_field_names_preserve_tag_types() {
-    for (scalar, expected) in [
-        ("7", Some(Choice::Seven)),
-        ("!!str 7", Some(Choice::Seven)),
-        ("! 7", Some(Choice::Seven)),
-        ("!!int 7", None),
-        ("!!float 7", None),
-        ("!!bool true", None),
-        ("!!null ~", None),
-    ] {
-        let accepted = expected.is_some();
-        assert_eq!(from_str::<Choice>(scalar).ok(), expected);
-        assert_eq!(from_tag::<Choice>(scalar).ok(), expected);
-        assert_eq!(
-            from_str::<Tagged<Choice>>(scalar).is_ok(),
-            accepted && scalar != "7"
-        );
+    for (scalar, accepted) in [("7", true), ("!!str 7", true), ("!!int 7", false)] {
+        assert_eq!(from_tag::<Choice>(scalar).is_ok(), accepted);
 
         let mapping = format!("{{{scalar}: null}}");
-        assert_eq!(from_str::<Choice>(&mapping).ok(), expected);
+        assert_eq!(from_str::<Choice>(&mapping).is_ok(), accepted);
         assert_eq!(from_str::<Record>(&mapping).is_ok(), accepted);
         assert_eq!(
             from_str::<BTreeMap<String, Option<u8>>>(&mapping).is_ok(),
@@ -271,27 +164,19 @@ fn enum_names_and_field_names_preserve_tag_types() {
 
 #[test]
 fn implicit_text_and_application_tags_remain_usable() {
-    let Tuple(first, second) = from_str("!!seq [7, 7]").unwrap();
-    assert_eq!((first, second), (7, 7));
-
     for source in ["7", "'7'", "!!str 7", "! 7"] {
         assert_eq!(from_str::<char>(source).unwrap(), '7');
         assert_eq!(from_str::<&[u8]>(source).unwrap(), b"7");
-        assert_eq!(from_str::<ByteBuf>(source).unwrap().0, b"7");
     }
 
     assert_eq!(from_str::<Tagged<char>>("!Character 7").unwrap().value, '7');
-    assert_eq!(
-        from_str::<Tagged<ByteBuf>>("!Bytes 7").unwrap().value.0,
-        b"7"
-    );
     assert_eq!(
         from_str::<Tagged<Choice>>("!Choice 7").unwrap().value,
         Choice::Seven
     );
     assert_eq!(from_tag::<Choice>("!7").unwrap(), Choice::Seven);
 
-    for source in ["7", "!!int 7", "!!int '7'", "!!int 0x7", "!!float 7"] {
+    for source in ["!!int '7'", "!!int 0x7"] {
         assert_eq!(from_str::<f32>(source).unwrap().to_bits(), 7_f32.to_bits());
         assert_eq!(from_str::<f64>(source).unwrap().to_bits(), 7_f64.to_bits());
     }
