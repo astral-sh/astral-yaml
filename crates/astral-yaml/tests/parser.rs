@@ -57,6 +57,54 @@ fn line_tracking_survives_scalar_lookahead() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#54-line-break-characters
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+#[test]
+fn scalar_scans_preserve_content_and_spans_across_line_endings() {
+    for newline in ["\n", "\r", "\r\n"] {
+        for padding in [0, 15, 31, 64] {
+            let prefix = format!("{}é", "a".repeat(padding));
+
+            for (body, expected) in [
+                (
+                    format!("{prefix}:url#fragment \t"),
+                    format!("{prefix}:url#fragment"),
+                ),
+                (
+                    format!("{prefix}\n  continued\t"),
+                    format!("{prefix} continued"),
+                ),
+                (format!("'{prefix}''tail'"), format!("{prefix}'tail")),
+                (format!("\"{prefix}\\\"tail\""), format!("{prefix}\"tail")),
+                (
+                    format!("\"{prefix}\n  continued\""),
+                    format!("{prefix} continued"),
+                ),
+            ] {
+                let body = body.replace('\n', newline);
+                let source = format!("key: {body} # {prefix}comment{newline}last: done{newline}");
+                let stream = parse(&source).unwrap();
+                let root = stream.node(stream.documents()[0].root).unwrap();
+                let NodeKind::Mapping { entries, .. } = &root.kind else {
+                    panic!("expected mapping");
+                };
+                let NodeKind::Scalar(scalar) = &stream.node(entries[0].value).unwrap().kind else {
+                    panic!("expected scalar");
+                };
+
+                assert_eq!(scalar.value, expected, "{source:?}");
+                assert_eq!(
+                    scalar.span.slice(&source),
+                    Some(body.trim_end_matches([' ', '\t']))
+                );
+                assert_eq!(stream.comments().len(), 1);
+                assert_eq!(stream.comments()[0].text, format!(" {prefix}comment"));
+                assert_eq!(entries.len(), 2);
+            }
+        }
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn json_surrogate_pairs_and_malformed_escapes() {
@@ -699,9 +747,23 @@ fn flow_values_require_separation_after_yaml_keys() {
 
 #[test]
 fn large_flow_collections_and_line_backtracking() {
-    let source = format!("[{}]", "0,".repeat(30_000));
-    let stream = parse(&source).unwrap();
-    assert_eq!(stream.nodes().len(), 30_001);
+    for item in ["0,", "\"\\n\","] {
+        let source = format!("[{}]", item.repeat(30_000));
+        let stream = parse(&source).unwrap();
+        assert_eq!(stream.nodes().len(), 30_001);
+    }
+
+    for (source, expected) in [
+        ("a#".repeat(30_000), "a#".repeat(30_000)),
+        (format!("\"{}\"", "\\n".repeat(30_000)), "\n".repeat(30_000)),
+    ] {
+        let stream = parse(&source).unwrap();
+        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+            panic!("expected scalar");
+        };
+
+        assert_eq!(scalar.value, expected);
+    }
 
     for ending in ["\n", "\r", "\r\n"] {
         let source = format!(

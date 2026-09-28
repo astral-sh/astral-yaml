@@ -308,6 +308,17 @@ fn serialization_preserves_text_and_escape_spelling() {
     "#);
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
+#[test]
+fn serialization_escapes_ascii_at_different_offsets() {
+    for padding in [0, 15, 16, 31, 32, 63, 64] {
+        for byte in 0..=127 {
+            let text = format!("{}{}tail", "a".repeat(padding), char::from(byte));
+            roundtrip(&text);
+        }
+    }
+}
+
 #[test]
 fn located_failures_and_document_count() {
     for source in ["", "---\n---\n", "[", "256"] {

@@ -280,6 +280,17 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
     fn scalar(self, expected: ScalarType) -> Result<(&'s Scalar<'de>, ScalarType)> {
         let node = self.node()?;
+
+        // Text destinations accept every untagged scalar spelling, so they do
+        // not need implicit boolean or numeric classification.
+        if expected == ScalarType::String && node.tag.is_none() {
+            let NodeKind::Scalar(scalar) = &node.kind else {
+                return Err(Error::at("expected a scalar", node.span));
+            };
+
+            return Ok((scalar, ScalarType::String));
+        }
+
         self.reject_tag(node)?;
         let value = self.scalar_value(node)?;
         self.check_core_tag(node, YamlType::Scalar(expected))?;

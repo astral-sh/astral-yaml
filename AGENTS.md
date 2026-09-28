@@ -2,7 +2,8 @@
 
 - The YAML parser should be resilient to malformed and invalid inputs.
 
-- The core parser should have no external dependencies, and `astral-yaml-serde` should only have `serde` as a dependency.
+- Runtime dependencies are limited to `memchr` in the core parser, and
+  `astral-yaml`, `serde`, and `memchr` in `astral-yaml-serde`.
 
 - All library code should be 100% safe Rust, with no use of `unsafe` whatsoever.
 

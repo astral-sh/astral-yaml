@@ -85,7 +85,40 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --
 Outside the CodSpeed runner, this checks that benchmarks execute but does not
 collect performance measurements. Use `cargo bench` for local wall-clock timings.
 
-## Optimization results (2026-09-28)
+## Second optimization run (2026-09-28)
+
+Commit `0dbb599` is the baseline. The benchmark target and fixtures were unchanged.
+Both executables used Rust 1.98.1 and the workspace release profile on macOS 26.7
+with an Apple M5 Max (18 cores, 128 GiB RAM). CPU placement, frequency, and
+background load were not controlled.
+
+Each version ran five times, alternating order within each pair. Divan used
+64 iterations per sample, a minimum of one second per workload, and a maximum
+of 1.2 seconds. The table shows the median of each version's five run medians.
+The mean time reduction across the 16 equally weighted workloads was **11.56%**.
+
+| Workload | Before (µs) | After (µs) | Time reduction |
+| --- | ---: | ---: | ---: |
+| `deserialize/kubernetes-guestbook` | 14.460 | 13.780 | 4.7% |
+| `deserialize/openapi-petstore` | 17.340 | 15.820 | 8.8% |
+| `deserialize/uv-ci` | 32.780 | 27.780 | 15.3% |
+| `deserialize_services_128` | 122.700 | 110.400 | 10.0% |
+| `deserialize_spanned/kubernetes-guestbook` | 20.160 | 18.870 | 6.4% |
+| `deserialize_spanned/openapi-petstore` | 17.340 | 16.010 | 7.7% |
+| `deserialize_spanned/uv-ci` | 43.960 | 36.580 | 16.8% |
+| `deserialize_spanned_fields/kubernetes-guestbook` | 21.170 | 19.920 | 5.9% |
+| `deserialize_spanned_fields/openapi-petstore` | 17.450 | 16.010 | 8.3% |
+| `deserialize_spanned_fields/uv-ci` | 44.400 | 36.760 | 17.2% |
+| `parse/kubernetes-guestbook` | 8.323 | 7.407 | 11.0% |
+| `parse/openapi-petstore` | 10.220 | 8.440 | 17.4% |
+| `parse/uv-ci` | 19.570 | 14.490 | 26.0% |
+| `serialize/kubernetes-guestbook` | 2.262 | 2.147 | 5.1% |
+| `serialize/openapi-petstore` | 2.844 | 2.608 | 8.3% |
+| `serialize/uv-ci` | 5.894 | 4.934 | 16.3% |
+
+[Run medians](results/2026-09-28-hillclimb2.csv).
+
+## First optimization run (2026-09-28)
 
 Commit `e63f764` is the baseline for this run. The Astral benchmark target and
 fixtures were unchanged. Both executables used Rust 1.98.1 and

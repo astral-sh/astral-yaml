@@ -381,10 +381,7 @@ fn skip_trivia(source: &str, mut at: usize) -> usize {
         if byte.is_ascii_whitespace() {
             at += 1;
         } else if byte == b'#' {
-            at += bytes[at..]
-                .iter()
-                .position(|b| matches!(b, b'\r' | b'\n'))
-                .unwrap_or(bytes.len() - at);
+            at += memchr::memchr2(b'\r', b'\n', &bytes[at..]).unwrap_or(bytes.len() - at);
         } else {
             break;
         }
@@ -417,10 +414,7 @@ impl Lines {
         loop {
             charge(budget, Span::new(start, start).unwrap())?;
             let end = start
-                + bytes[start..]
-                    .iter()
-                    .position(|b| matches!(b, b'\r' | b'\n'))
-                    .unwrap_or(bytes.len() - start);
+                + memchr::memchr2(b'\r', b'\n', &bytes[start..]).unwrap_or(bytes.len() - start);
             let column_start = start
                 + if bytes[start..end].starts_with(b"\xef\xbb\xbf") {
                     3
