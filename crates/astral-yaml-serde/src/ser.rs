@@ -1,6 +1,6 @@
 mod tag;
 
-use crate::{Error, tagged};
+use crate::{Error, tagged, with::yaml_tag};
 use serde::{
     Serialize,
     ser::{self, SerializeMap, SerializeSeq},
@@ -22,6 +22,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
         output: String::new(),
         depth: 0,
         tagged: false,
+        yaml_tag: false,
     };
 
     value.serialize(&mut serializer)?;
@@ -33,6 +34,7 @@ struct Serializer {
     output: String,
     depth: usize,
     tagged: bool,
+    yaml_tag: bool,
 }
 
 impl Serializer {
@@ -47,6 +49,7 @@ impl Serializer {
 
     fn quoted(&mut self, mut value: &str) {
         self.tagged = false;
+        self.yaml_tag = false;
         self.output.push('"');
 
         // Copy runs of text until a possible escape. The non-ASCII characters
@@ -86,6 +89,7 @@ impl Serializer {
     fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
         self.enter()?;
         self.tagged = false;
+        self.yaml_tag = false;
         self.output.push(if mapping { '{' } else { '[' });
         Ok(Compound {
             serializer: self,
@@ -100,6 +104,12 @@ impl Serializer {
     }
 
     fn variant(&mut self, name: &str, mapping: bool) -> Result<Compound<'_>> {
+        if std::mem::take(&mut self.yaml_tag) {
+            self.enum_tag(name)?;
+            self.output.push(' ');
+            return self.compound(mapping);
+        }
+
         self.enter()?;
         self.output.push('{');
         self.quoted(name);
@@ -112,7 +122,23 @@ impl Serializer {
 
     fn number(&mut self, value: impl std::fmt::Display) {
         self.tagged = false;
+        self.yaml_tag = false;
         write!(self.output, "{value}").expect("String write");
+    }
+
+    fn enum_tag(&mut self, variant: &str) -> Result<()> {
+        if variant.is_empty() {
+            return Err(Error::new("an enum tag requires a nonempty variant name"));
+        }
+
+        if self.tagged {
+            return Err(Error::new("a YAML node cannot have multiple tags"));
+        }
+
+        let tag = ser::Serializer::serialize_str(tag::TagSerializer, &format!("!{variant}"))?;
+        self.output.push_str(&tag);
+        self.tagged = true;
+        Ok(())
     }
 }
 
@@ -153,6 +179,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_bool(self, value: bool) -> Result<()> {
         self.tagged = false;
+        self.yaml_tag = false;
         self.output.push_str(if value { "true" } else { "false" });
         Ok(())
     }
@@ -173,6 +200,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_f64(self, value: f64) -> Result<()> {
         self.tagged = false;
+        self.yaml_tag = false;
         if value.is_nan() {
             self.output.push_str(".nan");
         } else if value.is_infinite() {
@@ -226,6 +254,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_unit(self) -> Result<()> {
         self.tagged = false;
+        self.yaml_tag = false;
         self.output.push_str("null");
         Ok(())
     }
@@ -235,15 +264,25 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_unit_variant(self, _: &'static str, _: u32, variant: &'static str) -> Result<()> {
+        if std::mem::take(&mut self.yaml_tag) {
+            self.enum_tag(variant)?;
+            self.tagged = false;
+            return Ok(());
+        }
+
         self.serialize_str(variant)
     }
 
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
-        _: &'static str,
+        name: &'static str,
         value: &T,
     ) -> Result<()> {
-        self.serialize_some(value)
+        let previous = self.yaml_tag;
+        self.yaml_tag |= name == yaml_tag::NAME;
+        let result = self.serialize_some(value);
+        self.yaml_tag = previous;
+        result
     }
 
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
@@ -253,6 +292,12 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         variant: &'static str,
         value: &T,
     ) -> Result<()> {
+        if std::mem::take(&mut self.yaml_tag) {
+            self.enum_tag(variant)?;
+            self.output.push(' ');
+            return self.serialize_some(value);
+        }
+
         let mut map = self.compound(true)?;
         map.serialize_entry(variant, value)?;
         SerializeMap::end(map)
@@ -278,6 +323,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
             self.enter()?;
             self.tagged = true;
+            self.yaml_tag = false;
             return Ok(Compound {
                 serializer: self,
                 first: true,

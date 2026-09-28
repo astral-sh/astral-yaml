@@ -6,6 +6,8 @@ mod ser;
 mod spanned;
 mod tagged;
 
+pub mod with;
+
 pub use comments::{AttachedComment, CommentPlacement};
 pub use de::{from_document, from_str, from_stream};
 pub use error::Error;

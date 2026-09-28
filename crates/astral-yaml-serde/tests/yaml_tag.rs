@@ -1,0 +1,340 @@
+mod support;
+
+use astral_yaml_serde::{Spanned, Tagged, from_str, to_string, with::yaml_tag};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
+use std::collections::BTreeMap;
+use support::{YamlTag, from_tag};
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+enum Message {
+    Ready,
+    Text(String),
+    Pair(u8, bool),
+    Config { enabled: bool },
+}
+
+#[test]
+fn enums_use_strings_and_maps_by_default() {
+    for (value, yaml) in [
+        (Message::Ready, "\"Ready\"\n"),
+        (Message::Text("hello".into()), "{? \"Text\": \"hello\"}\n"),
+        (Message::Pair(1, true), "{\"Pair\": [1, true]}\n"),
+        (
+            Message::Config { enabled: true },
+            "{\"Config\": {? \"enabled\": true}}\n",
+        ),
+    ] {
+        assert_eq!(to_string(&value).unwrap(), yaml);
+        assert_eq!(from_str::<Message>(yaml).unwrap(), value);
+    }
+}
+
+#[test]
+fn explicit_tags_require_opt_in_including_ignored_values_and_keys() {
+    #[derive(Debug, Deserialize)]
+    struct Empty {}
+
+    for source in [
+        "!Text hello",
+        "!Ready",
+        "!Pair [1, true]",
+        "!Config {enabled: true}",
+        "!!str hello",
+        "!!int 42",
+        "!!bool true",
+        "!!null null",
+        "!!seq []",
+        "!!map {}",
+        "! null",
+        "!<tag:example.org,2026:text> hello",
+        "[!Text hello]",
+        "{unknown: !Text hello}",
+        "{!Text key: value}",
+        "{!!str key: value}",
+        "[&x !Text hello, *x]",
+    ] {
+        let error = from_str::<IgnoredAny>(source).unwrap_err();
+        assert_eq!(
+            error.message, "explicit YAML tags require Tagged<T> or with::yaml_tag",
+            "{source}"
+        );
+        assert!(error.span.unwrap().slice(source).is_some());
+        assert!(from_str::<serde_json::Value>(source).is_err());
+        assert!(from_str::<yaml_serde::Value>(source).is_err());
+    }
+
+    assert!(from_str::<Empty>("{ignored: !!int 42}").is_err());
+    assert!(from_str::<Option<u32>>("!!int 42").is_err());
+    assert!(from_str::<Spanned<'_, String>>("!!str hello").is_err());
+    assert!(from_str::<Vec<u8>>("!!seq [1]").is_err());
+    assert!(from_str::<BTreeMap<String, u8>>("!!map {x: 1}").is_err());
+    assert!(from_str::<Message>("!Text hello").is_err());
+}
+
+#[test]
+fn adapter_roundtrips_every_variant_shape() {
+    for (yaml, expected) in [
+        ("!Ready", Message::Ready),
+        ("!Text \"hello\"", Message::Text("hello".into())),
+        ("!Pair [1, true]", Message::Pair(1, true)),
+        (
+            "!Config {? \"enabled\": true}",
+            Message::Config { enabled: true },
+        ),
+    ] {
+        let value = from_tag::<Message>(yaml).unwrap();
+        assert_eq!(value, expected);
+        assert_eq!(to_string(&YamlTag(value)).unwrap(), format!("{yaml}\n"));
+        assert_eq!(
+            from_tag::<Message>(&format!("&a {yaml}")).unwrap(),
+            expected
+        );
+    }
+
+    assert_eq!(from_tag::<Message>("Ready").unwrap(), Message::Ready);
+    assert_eq!(from_tag::<Message>("!Ready null").unwrap(), Message::Ready);
+    assert_eq!(
+        from_tag::<Message>("{Text: hello}").unwrap(),
+        Message::Text("hello".into())
+    );
+    for yaml in [
+        "!Ready value",
+        "!Ready []",
+        "!Ready ''",
+        "!Unknown x",
+        "!!str Ready",
+        "! Ready",
+        "!<tag:example.org,2026:Ready>",
+    ] {
+        assert!(from_tag::<Message>(yaml).is_err(), "{yaml}");
+    }
+}
+
+#[test]
+fn mixed_enums_buffer_tags_only_when_opted_in() {
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    enum Mixed {
+        Ready,
+        Text(String),
+        Pair(u8, bool),
+        Config {
+            enabled: bool,
+        },
+        #[serde(untagged)]
+        Number(u32),
+    }
+
+    for (source, expected) in [
+        ("!Ready", Mixed::Ready),
+        ("!Ready null", Mixed::Ready),
+        ("!Text hello", Mixed::Text("hello".into())),
+        ("!Pair [1, true]", Mixed::Pair(1, true)),
+        ("!Config {enabled: true}", Mixed::Config { enabled: true }),
+        ("42", Mixed::Number(42)),
+    ] {
+        let value = from_tag::<Mixed>(source).unwrap();
+        assert_eq!(value, expected);
+        let encoded = to_string(&YamlTag(value)).unwrap();
+        assert_eq!(from_tag::<Mixed>(&encoded).unwrap(), expected);
+        assert_eq!(from_str::<Mixed>(source).is_err(), source.starts_with('!'));
+    }
+
+    let values = from_str::<Vec<YamlTag<Mixed>>>("[&a !Text hello, 42, *a]").unwrap();
+    assert_eq!(values[0], values[2]);
+    for source in [
+        "!Ready value",
+        "!Ready ''",
+        "!Unknown hello",
+        "!Pair [1]",
+        "!Text []",
+        "!Config {enabled: !!bool true}",
+    ] {
+        assert!(from_tag::<Mixed>(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn adapter_scope_survives_transparent_wrappers_but_stops_at_children() {
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    enum Outer {
+        Inner(Message),
+        Explicit(YamlTag<Message>),
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct Newtype(Message);
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct Config {
+        #[serde(with = "astral_yaml_serde::with::yaml_tag")]
+        tagged: Option<Newtype>,
+        ordinary: Message,
+    }
+
+    let source = "tagged: !Text hello\nordinary: {Text: world}";
+    let value = from_str::<Config>(source).unwrap();
+    let encoded = to_string(&value).unwrap();
+    assert!(encoded.contains("!Text"));
+    assert!(encoded.contains("{? \"Text\": \"world\"}"));
+    assert_eq!(from_str::<Config>(&encoded).unwrap(), value);
+    assert!(from_str::<Config>("tagged: !Ready\nordinary: !Ready").is_err());
+    let value = from_str::<Config>("tagged: null\nordinary: Ready").unwrap();
+    assert_eq!(
+        from_str::<Config>(&to_string(&value).unwrap()).unwrap(),
+        value
+    );
+
+    for source in ["!Inner {Text: hello}", "!Explicit !Text hello"] {
+        // The second spelling puts two tags on the same node, which YAML forbids.
+        assert_eq!(
+            from_tag::<Outer>(source).is_ok(),
+            source.starts_with("!Inner")
+        );
+    }
+    let value = from_tag::<Outer>("!Inner {Text: hello}").unwrap();
+    assert_eq!(
+        from_tag::<Outer>(&to_string(&YamlTag(value)).unwrap()).unwrap(),
+        Outer::Inner(Message::Text("hello".into()))
+    );
+    assert!(to_string(&YamlTag(Outer::Explicit(YamlTag(Message::Ready)))).is_err());
+    assert!(from_tag::<Vec<Message>>("[!Ready]").is_err());
+    assert!(from_tag::<Message>("!Config {enabled: !!bool true}").is_err());
+}
+
+#[test]
+fn explicit_wrappers_preserve_tags_and_metadata() {
+    #[derive(Debug, Deserialize)]
+    enum Borrowed<'a> {
+        Text(#[serde(borrow)] &'a str),
+    }
+
+    let source = "# greeting\n!Text hello # inline\n";
+    let value = from_tag::<Spanned<'_, Message>>(source).unwrap();
+    assert_eq!(value.value, Message::Text("hello".into()));
+    assert_eq!(value.span.slice(source), Some("!Text hello"));
+    assert_eq!(value.comments.len(), 2);
+
+    let Borrowed::Text(text) = from_tag::<Borrowed<'_>>(source).unwrap();
+    assert!(std::ptr::eq(text.as_ptr(), source[17..].as_ptr()));
+    assert_eq!(
+        from_str::<Tagged<String>>("!Text hello").unwrap().tag,
+        "!Text"
+    );
+    assert_eq!(
+        from_str::<Option<Tagged<u32>>>("!!int '42'")
+            .unwrap()
+            .unwrap()
+            .value,
+        42
+    );
+    assert!(
+        to_string(&Tagged {
+            tag: "!Outer".into(),
+            value: YamlTag(Message::Ready)
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn renamed_variants_validate_tag_names() {
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    enum Renamed {
+        #[serde(rename = "some-name", alias = "old-name")]
+        Name,
+        #[serde(rename = "a,b")]
+        Punctuation,
+        #[serde(rename = "not a URI")]
+        Invalid,
+        #[serde(rename = "")]
+        Empty,
+    }
+
+    assert_eq!(from_tag::<Renamed>("!old-name").unwrap(), Renamed::Name);
+    assert_eq!(to_string(&YamlTag(Renamed::Name)).unwrap(), "!some-name\n");
+    assert_eq!(
+        to_string(&YamlTag(Renamed::Punctuation)).unwrap(),
+        "!<!a,b>\n"
+    );
+    assert_eq!(
+        from_tag::<Renamed>("!<!a,b>").unwrap(),
+        Renamed::Punctuation
+    );
+    assert!(to_string(&YamlTag(Renamed::Invalid)).is_err());
+    assert!(to_string(&YamlTag(Renamed::Empty)).is_err());
+
+    let error = yaml_tag::deserialize::<Message, _>(serde::de::value::U8Deserializer::<
+        serde::de::value::Error,
+    >::new(1))
+    .unwrap_err();
+    assert!(error.to_string().contains("an enum with YAML tags enabled"));
+}
+
+#[derive(Debug)]
+struct BufferedMap;
+
+impl<'de> Deserialize<'de> for BufferedMap {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MapVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for MapVisitor {
+            type Value = BufferedMap;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a buffered map")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<BufferedMap, A::Error> {
+                assert_eq!(map.size_hint(), Some(1));
+                let key = map.next_key::<String>()?.unwrap();
+                if key == "partial" {
+                    return Ok(BufferedMap);
+                }
+
+                if key == "key" {
+                    map.next_key::<String>()?;
+                }
+
+                map.next_value::<u8>()?;
+                assert_eq!(map.size_hint(), Some(0));
+                if key == "value" {
+                    map.next_value::<u8>()?;
+                }
+
+                assert!(map.next_key::<String>()?.is_none());
+                Ok(BufferedMap)
+            }
+        }
+
+        deserializer.deserialize_any(MapVisitor)
+    }
+}
+
+#[test]
+fn tag_buffering_enforces_map_consumption() {
+    from_tag::<BufferedMap>("!normal 1").unwrap();
+    for (source, expected) in [
+        ("!partial 1", "tagged mapping was not fully consumed"),
+        ("!key 1", "mapping key has no value"),
+        ("!value 1", "mapping value has no key"),
+    ] {
+        let error = from_tag::<BufferedMap>(source).unwrap_err();
+        assert_eq!(error.message, expected);
+        assert_eq!(error.span.unwrap().slice(source), Some(source));
+    }
+}
+
+#[test]
+fn recursive_opt_in_remains_bounded() {
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    enum Recursive {
+        Children(Vec<YamlTag<Recursive>>),
+    }
+
+    let error = from_tag::<Recursive>("&self !Children [*self]").unwrap_err();
+    assert!(error.message.contains("resource limit"));
+}

@@ -1,10 +1,13 @@
-use astral_yaml_serde::{Error, from_str, to_string};
+mod support;
+
+use astral_yaml_serde::{Error, Tagged, from_str, to_string};
 use serde::{
     Deserialize, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
     ser::{self, SerializeMap},
 };
 use std::{collections::BTreeMap, fmt};
+use support::YamlTag;
 
 #[test]
 fn every_integer_width_checks_its_boundaries() {
@@ -27,7 +30,11 @@ fn every_integer_width_checks_its_boundaries() {
 
 #[test]
 fn numeric_and_type_errors_are_located() {
-    from_str::<()>("!!null null").unwrap();
+    from_str::<Tagged<()>>("!!null null").unwrap();
+    assert_eq!(
+        from_str::<Tagged<f64>>("!!float 0xff").unwrap_err().message,
+        "invalid float"
+    );
     assert_eq!(from_str::<f64>("0o10").unwrap().to_bits(), 8.0f64.to_bits());
 
     for source in [
@@ -160,11 +167,17 @@ enum Variant {
 
 #[test]
 fn enum_payloads_and_aliases() {
-    assert_eq!(from_str::<Variant>("{Unit: null}").unwrap(), Variant::Unit);
-    assert_eq!(from_str::<Variant>("! Unit").unwrap(), Variant::Unit);
     assert_eq!(
-        from_str::<Vec<Variant>>("[&a !Unit, *a]").unwrap(),
-        [Variant::Unit, Variant::Unit]
+        support::from_tag::<Variant>("{Unit: null}").unwrap(),
+        Variant::Unit
+    );
+    assert_eq!(
+        from_str::<Tagged<Variant>>("! Unit").unwrap().value,
+        Variant::Unit
+    );
+    assert_eq!(
+        from_str::<Vec<YamlTag<Variant>>>("[&a !Unit, *a]").unwrap(),
+        [YamlTag(Variant::Unit), YamlTag(Variant::Unit)]
     );
 
     for source in [

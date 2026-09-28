@@ -85,6 +85,16 @@ fn expanded_tags_and_core_types() {
     roundtrip(&from_str::<Tagged<Option<String>>>("!Maybe null").unwrap());
     roundtrip(&from_str::<Tagged<Vec<u32>>>("!!seq [1, 2]").unwrap());
     roundtrip(&from_str::<Tagged<BTreeMap<String, u32>>>("!!map {a: 1}").unwrap());
+    assert_eq!(
+        from_str::<Tagged<bool>>("!!bool yes").unwrap_err().message,
+        "scalar does not match its tag"
+    );
+    assert_eq!(
+        from_str::<Tagged<String>>("!!seq text")
+            .unwrap_err()
+            .message,
+        "unsupported scalar tag"
+    );
 
     for source in [
         "!!bool yes",
@@ -92,6 +102,8 @@ fn expanded_tags_and_core_types() {
         "!!seq {}",
         "!!map []",
         "!!str []",
+        "!!seq text",
+        "!!map text",
     ] {
         assert!(
             from_str::<Tagged<serde::de::IgnoredAny>>(source).is_err(),
@@ -123,7 +135,7 @@ fn collections_enums_and_nested_tags() {
 
     roundtrip(&from_str::<Tagged<Mode>>("!Envelope Ready").unwrap());
     roundtrip(&from_str::<Tagged<Mode>>("!Envelope {Text: hello}").unwrap());
-    roundtrip(&from_str::<Tagged<Vec<Mode>>>("!Modes [!Ready, !Text hello]").unwrap());
+    roundtrip(&from_str::<Tagged<Vec<Mode>>>("!Modes [Ready, {Text: hello}]").unwrap());
     roundtrip(&from_str::<Tagged<(u8, bool)>>("!Pair [1, true]").unwrap());
     roundtrip(&from_str::<Tagged<Vec<Tagged<String>>>>("!Texts [!Text hello]").unwrap());
     assert_eq!(
@@ -136,7 +148,7 @@ fn collections_enums_and_nested_tags() {
 }
 
 #[test]
-fn generic_yaml_values_preserve_local_tags() {
+fn generic_yaml_values_reject_local_tags() {
     #[derive(Debug, Deserialize, PartialEq)]
     enum Mixed {
         Text(String),
@@ -153,18 +165,15 @@ fn generic_yaml_values_preserve_local_tags() {
         "!Config {key: !Text hello}",
         "[&x !Text hello, *x]",
     ] {
-        assert_eq!(
-            from_str::<yaml_serde::Value>(source).unwrap(),
-            yaml_serde::from_str::<yaml_serde::Value>(source).unwrap(),
-            "{source}"
-        );
+        assert!(from_str::<yaml_serde::Value>(source).is_err(), "{source}");
+        assert!(yaml_serde::from_str::<yaml_serde::Value>(source).is_ok());
         assert!(from_str::<serde_json::Value>(source).is_err());
     }
 
     let error = from_str::<Vec<Mixed>>("[!Text hello, 42]").unwrap_err();
     assert_eq!(
         error.message,
-        "untagged and internally tagged enums do not support enum input"
+        "explicit YAML tags require Tagged<T> or with::yaml_tag"
     );
     assert_eq!(
         error.span.unwrap().slice("[!Text hello, 42]"),
@@ -183,10 +192,9 @@ fn tag_uri_escapes_retain_their_spelling() {
     let encoded = to_string(&tagged).unwrap();
     assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
 
-    let yaml_serde::Value::Tagged(value) = from_str::<yaml_serde::Value>(&encoded).unwrap() else {
-        panic!("expected a tagged value");
-    };
-    assert_eq!(value.tag.to_string(), "!%12");
+    let value = from_str::<Tagged<yaml_serde::Value>>(&encoded).unwrap();
+    assert_eq!(value.tag, "!%12");
+    assert_eq!(value.value, yaml_serde::Value::Null);
 
     let yaml_serde::Value::Tagged(reference) =
         yaml_serde::from_str::<yaml_serde::Value>(&encoded).unwrap()
@@ -221,7 +229,7 @@ fn tags_in_mapping_keys() {
         "{!Items [1]: a, !Other [1]: b}",
         "{!Config {a: 1}: a, !Other {a: 1}: b}",
     ] {
-        assert!(from_str::<yaml_serde::Value>(source).is_ok(), "{source}");
+        assert!(from_str::<yaml_serde::Value>(source).is_err(), "{source}");
     }
 
     let text_keys =
@@ -301,20 +309,10 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
 }
 
 #[test]
-fn recursive_tagged_values_remain_bounded() {
+fn recursive_tagged_values_require_opt_in_at_every_node() {
     for source in ["&self !Sequence [*self]", "&self !Mapping {next: *self}"] {
-        assert!(
-            from_str::<yaml_serde::Value>(source)
-                .unwrap_err()
-                .message
-                .contains("resource limit")
-        );
-        assert!(
-            from_str::<serde::de::IgnoredAny>(source)
-                .unwrap_err()
-                .message
-                .contains("resource limit")
-        );
+        assert!(from_str::<yaml_serde::Value>(source).is_err());
+        assert!(from_str::<serde::de::IgnoredAny>(source).is_err());
         assert!(from_str::<Tagged<serde::de::IgnoredAny>>(source).is_err());
     }
 }

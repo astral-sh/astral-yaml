@@ -1,4 +1,7 @@
-use crate::{AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned, tagged};
+use crate::{
+    AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned, tagged,
+    with::yaml_tag,
+};
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
     schema::{ScalarType, classify},
@@ -28,6 +31,7 @@ fn is_core_tag(tag: &str) -> bool {
 ///
 /// Plain and quoted scalars without escapes can be borrowed from the input.
 /// Aliases are visited with depth and work budgets, including cyclic aliases.
+/// Explicit YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
 ///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
@@ -71,6 +75,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         depth: 0,
         ignore_tag: false,
         tag_consumed: false,
+        yaml_tag: false,
     })
     .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
 }
@@ -91,6 +96,8 @@ struct Deserializer<'s, 'de> {
     ignore_tag: bool,
     // Core tags still affect payload resolution after Tagged captures them.
     tag_consumed: bool,
+    // Enable local tags as enum names for this value only.
+    yaml_tag: bool,
 }
 
 impl<'s, 'de> Deserializer<'s, 'de> {
@@ -142,6 +149,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             depth: self.depth + 1,
             ignore_tag: false,
             tag_consumed: false,
+            yaml_tag: false,
             ..self
         }
     }
@@ -183,6 +191,36 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         })
     }
 
+    fn tagged_mapping<V: Visitor<'de>>(
+        self,
+        node: &'s Node<'de>,
+        variant: &'s str,
+        visitor: V,
+    ) -> Result<V::Value> {
+        // Serde's untagged-enum buffer accepts maps but rejects enum input.
+        // Keep this conversion confined to the explicitly opted-in node.
+        let mut map = TagMapping {
+            enumeration: Enumeration {
+                de: self,
+                variant,
+                value: Some(self.id),
+                tagged: true,
+            },
+            index: 0,
+        };
+        let value = visitor
+            .visit_map(&mut map)
+            .map_err(|error: Error| error.located(node.span))?;
+        if map.index != 2 {
+            return Err(Error::at(
+                "tagged mapping was not fully consumed",
+                node.span,
+            ));
+        }
+
+        Ok(value)
+    }
+
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         let comments =
             self.context
@@ -211,7 +249,43 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn scalar(self) -> Result<(&'s Scalar<'de>, ScalarType)> {
-        self.scalar_value(self.node()?)
+        let node = self.node()?;
+        self.reject_tag(node)?;
+        self.scalar_value(node)
+    }
+
+    fn reject_tag(self, node: &Node<'_>) -> Result<()> {
+        if !self.tag_consumed && node.tag.is_some() {
+            return Err(Error::at(
+                "explicit YAML tags require Tagged<T> or with::yaml_tag",
+                node.span,
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn enum_tag(self, node: &'s Node<'de>) -> Option<&'s str> {
+        node.tag
+            .as_ref()
+            .filter(|_| self.yaml_tag && !self.tag_consumed)
+            .and_then(|tag| tag.value.strip_prefix('!'))
+            .filter(|name| !name.is_empty())
+    }
+
+    fn variant_name(self, name: &'s str) -> Result<de::value::StrDeserializer<'s, Error>> {
+        let remaining = self
+            .context
+            .scalar_budget
+            .get()
+            .checked_sub(name.len())
+            .ok_or_else(|| {
+                let node = self.context.stream.node(self.id).unwrap();
+                Error::at("expanded scalar byte limit exceeded", node.span)
+            })?;
+        self.context.scalar_budget.set(remaining);
+
+        Ok(de::value::StrDeserializer::new(name))
     }
 
     #[inline]
@@ -496,6 +570,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn map_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
+        self.reject_tag(node)?;
         let NodeKind::Mapping { entries, .. } = &node.kind else {
             return Err(Error::at("expected a mapping", node.span));
         };
@@ -526,6 +601,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn seq_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
+        self.reject_tag(node)?;
         let NodeKind::Sequence { items, .. } = &node.kind else {
             return Err(Error::at("expected a sequence", node.span));
         };
@@ -581,23 +657,11 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.raw_node()?;
 
-        if !self.ignore_tag {
-            if let Some(variant) = node
-                .tag
-                .as_ref()
-                .and_then(|tag| tag.value.strip_prefix('!'))
-                .filter(|variant| !variant.is_empty())
-            {
-                return visitor
-                    .visit_enum(Enumeration {
-                        de: self,
-                        variant,
-                        value: Some(self.id),
-                        tagged: true,
-                    })
-                    .map_err(|error: Error| error.located(node.span));
-            }
+        if let Some(variant) = self.enum_tag(node) {
+            return self.tagged_mapping(node, variant, visitor);
         }
+
+        self.reject_tag(node)?;
 
         match &node.kind {
             NodeKind::Sequence { .. } => self.seq_node(node, visitor),
@@ -730,15 +794,10 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
-        let enum_tag = !self.ignore_tag
-            && node
-                .tag
-                .as_ref()
-                .is_some_and(|tag| tag.value.starts_with('!') && tag.value != "!");
-
-        // A local tag can select an enum variant inside Some(T). Let T consume
-        // that tag; resolving it as a core scalar here would reject the enum.
-        if !enum_tag
+        // Preserve explicit tags for an inner Tagged<T> or yaml_tag adapter.
+        // The inner type decides whether the tag is permitted.
+        let explicit_tag = node.tag.is_some() && !self.tag_consumed;
+        if !explicit_tag
             && matches!(node.kind, NodeKind::Scalar(_))
             && self.scalar()?.1 == ScalarType::Null
         {
@@ -784,6 +843,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         self.node()?;
         visitor.visit_newtype_struct(Self {
             depth: self.depth + 1,
+            yaml_tag: self.yaml_tag || name == yaml_tag::NAME,
             ..self
         })
     }
@@ -825,21 +885,16 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         visitor: V,
     ) -> Result<V::Value> {
         let node = self.node()?;
-        if let Some(tag) = node
-            .tag
-            .as_ref()
-            .filter(|_| !self.tag_consumed)
-            .and_then(|tag| tag.value.strip_prefix('!'))
-        {
-            if !tag.is_empty() {
-                return visitor.visit_enum(Enumeration {
-                    de: self,
-                    variant: tag,
-                    value: Some(self.id),
-                    tagged: true,
-                });
-            }
+        if let Some(tag) = self.enum_tag(node) {
+            return visitor.visit_enum(Enumeration {
+                de: self,
+                variant: tag,
+                value: Some(self.id),
+                tagged: true,
+            });
         }
+
+        self.reject_tag(node)?;
 
         match &node.kind {
             NodeKind::Scalar(_) => {
@@ -1002,6 +1057,41 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
     }
 }
 
+struct TagMapping<'s, 'de> {
+    enumeration: Enumeration<'s, 'de>,
+    index: u8,
+}
+
+impl<'de> MapAccess<'de> for TagMapping<'_, 'de> {
+    type Error = Error;
+
+    fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
+        match self.index {
+            0 => {
+                let name = self.enumeration.de.variant_name(self.enumeration.variant)?;
+                let key = seed.deserialize(name)?;
+                self.index = 1;
+                Ok(Some(key))
+            }
+            1 => Err(Error::new("mapping key has no value")),
+            _ => Ok(None),
+        }
+    }
+
+    fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
+        if self.index != 1 {
+            return Err(Error::new("mapping value has no key"));
+        }
+
+        self.index = 2;
+        seed.deserialize(self.enumeration.payload(self.enumeration.de.id)?)
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(usize::from(self.index != 2))
+    }
+}
+
 struct Enumeration<'s, 'de> {
     de: Deserializer<'s, 'de>,
     variant: &'s str,
@@ -1027,19 +1117,7 @@ impl<'de> EnumAccess<'de> for Enumeration<'_, 'de> {
     type Variant = Self;
 
     fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self)> {
-        let remaining = self
-            .de
-            .context
-            .scalar_budget
-            .get()
-            .checked_sub(self.variant.len())
-            .ok_or_else(|| {
-                let node = self.de.context.stream.node(self.de.id).unwrap();
-                Error::at("expanded scalar byte limit exceeded", node.span)
-            })?;
-        self.de.context.scalar_budget.set(remaining);
-
-        let variant = seed.deserialize(de::value::StrDeserializer::<Error>::new(self.variant))?;
+        let variant = seed.deserialize(self.de.variant_name(self.variant)?)?;
         Ok((variant, self))
     }
 }
@@ -1050,15 +1128,7 @@ impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
     fn unit_variant(self) -> Result<()> {
         match self.value {
             None => Ok(()),
-            Some(id) if self.tagged => {
-                let node = self.de.child(id).node()?;
-                if matches!(&node.kind, NodeKind::Scalar(s) if s.value.is_empty()) {
-                    Ok(())
-                } else {
-                    Err(Error::at("expected an empty unit variant", node.span))
-                }
-            }
-            Some(id) => <()>::deserialize(self.de.child(id)),
+            Some(id) => <()>::deserialize(self.payload(id)?),
         }
     }
 
@@ -1110,9 +1180,15 @@ mod tests {
             depth: 0,
             ignore_tag: false,
             tag_consumed: false,
+            yaml_tag: true,
         };
 
-        for name in [crate::spanned::NAME, crate::tagged::NAME, "Transparent"] {
+        for name in [
+            crate::spanned::NAME,
+            crate::tagged::NAME,
+            crate::with::yaml_tag::NAME,
+            "Transparent",
+        ] {
             de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
                 .unwrap();
         }
@@ -1138,6 +1214,7 @@ mod tests {
                 depth: 0,
                 ignore_tag: false,
                 tag_consumed: false,
+                yaml_tag: false,
             };
             let access = super::Enumeration {
                 de,
@@ -1181,6 +1258,7 @@ mod tests {
                 depth: 0,
                 ignore_tag: false,
                 tag_consumed: false,
+                yaml_tag: false,
             };
 
             let result = crate::Spanned::<crate::Spanned<'_, u8>>::deserialize(de);
@@ -1284,6 +1362,7 @@ mod tests {
             depth: 0,
             ignore_tag: false,
             tag_consumed: false,
+            yaml_tag: false,
         };
 
         de.node().unwrap();
@@ -1325,6 +1404,7 @@ mod tests {
             depth: 0,
             ignore_tag: true,
             tag_consumed: true,
+            yaml_tag: false,
         };
 
         assert_eq!(de.scalar().unwrap().0.value, "abc");
@@ -1336,12 +1416,13 @@ mod tests {
             Deserializer {
                 ignore_tag: false,
                 tag_consumed: false,
+                yaml_tag: false,
                 ..de
             }
             .scalar()
             .unwrap_err()
             .message,
-            "unsupported scalar tag"
+            "explicit YAML tags require Tagged<T> or with::yaml_tag"
         );
     }
 }

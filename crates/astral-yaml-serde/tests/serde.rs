@@ -1,9 +1,12 @@
-use astral_yaml_serde::{from_str, from_stream, to_string};
+mod support;
+
+use astral_yaml_serde::{Tagged, from_str, from_stream, to_string};
 use serde::{
     Deserialize, Serialize,
-    de::{self, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor},
+    de::{self, MapAccess, SeqAccess, Visitor},
 };
 use std::{collections::BTreeMap, fmt, fmt::Write};
+use support::from_tag;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Configuration<'a> {
@@ -76,19 +79,22 @@ fn derived_types() {
     roundtrip(&Some("null".to_owned()));
     roundtrip(&None::<String>);
     assert_eq!(
-        from_str::<Kind>("!Newtype abc").unwrap(),
+        from_tag::<Kind>("!Newtype abc").unwrap(),
         Kind::Newtype("abc".into())
     );
     assert_eq!(
-        from_str::<Kind>("!Tuple [7, false]").unwrap(),
+        from_tag::<Kind>("!Tuple [7, false]").unwrap(),
         Kind::Tuple(7, false)
     );
     assert_eq!(
-        from_str::<Kind>("!Struct {value: -2}").unwrap(),
+        from_tag::<Kind>("!Struct {value: -2}").unwrap(),
         Kind::Struct { value: -2 }
     );
-    assert_eq!(from_str::<Kind>("!Unit").unwrap(), Kind::Unit);
-    assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
+    assert_eq!(from_tag::<Kind>("!Unit").unwrap(), Kind::Unit);
+    assert_eq!(
+        from_str::<Tagged<Kind>>("! Unit").unwrap().value,
+        Kind::Unit
+    );
 }
 
 #[test]
@@ -132,8 +138,8 @@ fn core_resolution_and_numeric_limits() {
     assert!(from_str::<i8>("128").is_err());
     assert!(from_str::<i32>("'42'").is_err());
 
-    assert_eq!(from_str::<i32>("!!int '42'").unwrap(), 42);
-    assert_eq!(from_str::<String>("!!str 42").unwrap(), "42");
+    assert_eq!(from_str::<Tagged<i32>>("!!int '42'").unwrap().value, 42);
+    assert_eq!(from_str::<Tagged<String>>("!!str 42").unwrap().value, "42");
     assert!(from_str::<bool>("!!bool yes").is_err());
     assert!(from_str::<String>("!unknown value").is_err());
 
@@ -158,7 +164,7 @@ fn core_resolution_and_numeric_limits() {
 
 #[test]
 fn finite_float_overflow_is_an_error() {
-    for source in ["1e999", "-1e999", "!!float '1e999'"] {
+    for source in ["1e999", "-1e999"] {
         let error = from_str::<f64>(source).unwrap_err();
         assert_eq!(error.message, "float out of range");
         assert!(error.span.unwrap().slice(source).is_some());
@@ -220,7 +226,7 @@ fn optional_tagged_enums() {
         ("!Struct {value: 2}", Kind::Struct { value: 2 }),
         ("&mode !Unit", Kind::Unit),
     ] {
-        assert_eq!(from_str::<Option<Kind>>(source).unwrap(), Some(expected));
+        assert_eq!(from_tag::<Option<Kind>>(source).unwrap(), Some(expected));
     }
 
     assert_eq!(from_str::<Option<Kind>>("null").unwrap(), None);
@@ -346,11 +352,6 @@ impl<'de> Deserialize<'de> for Anything {
 
                 Ok(Anything)
             }
-
-            fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<Anything, A::Error> {
-                let (_, payload) = data.variant::<String>()?;
-                payload.newtype_variant()
-            }
         }
 
         deserializer.deserialize_any(AnyVisitor)
@@ -360,7 +361,8 @@ impl<'de> Deserialize<'de> for Anything {
 #[test]
 fn arbitrary_values_and_alias_limits() {
     from_str::<Anything>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
-    from_str::<Anything>("!Values [!Text hello, !Count 42]").unwrap();
+    assert!(from_str::<Anything>("!Values [!Text hello, !Count 42]").is_err());
+    from_tag::<Anything>("!Values [hello, 42]").unwrap();
     assert!(from_str::<Anything>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Anything>("&a [*a]").is_err());
 
@@ -459,5 +461,5 @@ fn collection_tags_must_match_the_requested_type() {
         assert!(from_str::<Anything>(source).is_err(), "{source}");
     }
 
-    from_str::<Anything>("!!map {a: !!seq [1]}").unwrap();
+    from_str::<Tagged<BTreeMap<String, Tagged<Vec<u8>>>>>("!!map {a: !!seq [1]}").unwrap();
 }

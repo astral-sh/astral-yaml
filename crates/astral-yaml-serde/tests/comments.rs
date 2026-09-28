@@ -176,12 +176,13 @@ fn aliases_collect_use_site_comments_without_importing_targets() {
 #[test]
 fn properties_and_block_scalar_headers_belong_to_their_node() {
     let source = "value: &value # anchor\n  !!str # tag\n  |- # scalar\n    # scalar content\n";
-    let value: Spanned<'_, BTreeMap<String, Spanned<'_, String>>> = from_str(source).unwrap();
+    let value: Spanned<'_, BTreeMap<String, Spanned<'_, astral_yaml_serde::Tagged<String>>>> =
+        from_str(source).unwrap();
     assert_eq!(
         comments(&value["value"]),
         [(" anchor", Inline), (" tag", Inline), (" scalar", Inline)]
     );
-    assert_eq!(value["value"].value, "# scalar content");
+    assert_eq!(value["value"].value.value, "# scalar content");
 
     let source = "&items # anchor\n- 1\n";
     let value: Spanned<'_, Vec<Spanned<'_, u8>>> = from_str(source).unwrap();

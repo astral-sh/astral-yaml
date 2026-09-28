@@ -5,15 +5,23 @@ tags and aliases without constructing application values. `astral-yaml-serde`
 uses the core schema and rejects duplicate mapping keys. YAML 1.1 merge keys are
 not expanded; timestamps and spellings such as `yes` and `no` remain strings.
 
-The serde adapter accepts local tags as enum variants. Generic deserialization
-passes them through Serde's enum interface, allowing YAML value types to preserve
-them. `Tagged<T>` captures an explicit local, global, or core tag with its typed
+The serde adapter rejects explicit tags by default, including core tags, tags
+on ignored fields, and tags reached through aliases. Implicit core-schema
+resolution still applies. Enums use variant names for unit variants and singleton
+mappings otherwise, unless Serde attributes select another representation.
+
+`#[serde(with = "astral_yaml_serde::with::yaml_tag")]` on an enum field enables
+local tags such as `!Text hello`. Unit variants serialize as empty tagged nodes;
+empty and null payloads deserialize as unit. The adapter also accepts ordinary
+enum names and singleton mappings. For mixed tagged/untagged enums, it exposes
+local tags to Serde's buffer as singleton mappings. It applies through options
+and newtypes, but nested values require their own opt-in.
+
+`Tagged<T>` captures an explicit local, global, or core tag with its typed
 payload; untagged input is rejected. Tag handles are expanded, and tag URIs retain
 their percent-escape spelling. Core tags still validate the payload's type.
-
-Serde's internal buffer rejects enum input, so local tags inside derived mixed
-tagged/untagged enums remain unsupported. A singleton mapping such as
-`{Text: hello}` works in place of `!Text hello` for those enums.
+Like `Spanned`, this wrapper requires direct access to the YAML deserializer;
+Serde's intermediate buffers cannot retain this metadata.
 
 Mapping-key comparison includes application tags. Application-tagged scalar keys
 are compared by their tag and scalar text; the adapter cannot infer a custom

@@ -51,7 +51,36 @@ assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 
 Note that `Spanned` has an interior lifetime, so it cannot be used with `DeserializeOwned`.
 
-Use `Tagged<T>` to retain an explicit YAML tag with a typed payload:
+Enums use variant names for unit variants and singleton mappings for variants
+with payloads. Serde's representation attributes, including `untagged`, still
+apply. Deserialization rejects explicit YAML tags by default, including core tags
+such as `!!str`.
+
+Use `with::yaml_tag` on an enum field to opt into local YAML tags:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize, Serialize)]
+enum Message {
+    Text(String),
+    #[serde(untagged)]
+    Number(u32),
+}
+
+#[derive(Deserialize, Serialize)]
+struct Config {
+    #[serde(with = "astral_yaml_serde::with::yaml_tag")]
+    message: Message,
+}
+
+let config: Config = astral_yaml_serde::from_str("message: !Text hello").unwrap();
+```
+
+The adapter supports mixed tagged/untagged enums. It applies to the annotated
+value through options and newtypes; nested values require their own opt-in.
+
+Use `Tagged<T>` to retain an explicit local, global, or core tag with a typed payload:
 
 ```rust
 use astral_yaml_serde::{Tagged, from_str};

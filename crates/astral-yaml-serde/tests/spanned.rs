@@ -1,7 +1,10 @@
+mod support;
+
 use astral_yaml::{Source, Span};
 use astral_yaml_serde::{Spanned, from_document, from_str, from_stream, to_string};
 use serde::{Deserialize, Serialize, de};
 use std::collections::{BTreeMap, HashMap};
+use support::{YamlTag, from_tag};
 
 #[test]
 fn scalars_retain_their_lexical_spans() {
@@ -9,7 +12,7 @@ fn scalars_retain_their_lexical_spans() {
         ("  hello # comment\n", "hello", "hello"),
         ("'héllo'", "héllo", "'héllo'"),
         ("\"a\\nb\"", "a\nb", "\"a\\nb\""),
-        ("!!str &name 42", "42", "!!str &name 42"),
+        ("&name 42", "42", "&name 42"),
         (
             "|-\n  hello\n  world\n",
             "hello\nworld",
@@ -145,13 +148,13 @@ enum Kind<'a> {
 #[test]
 fn enum_tags_are_consumed_once_through_transparent_wrappers() {
     for source in ["Unit", "!Unit", "{Unit: null}"] {
-        let value: Spanned<'_, Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_tag(source).unwrap();
         assert_eq!(*value, Kind::Unit);
         assert_eq!(value.span.slice(source), Some(source));
     }
 
     for source in ["!Newtype 42", "{Newtype: 42}"] {
-        let value: Spanned<'_, Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_tag(source).unwrap();
         let Kind::Newtype(payload) = value.value else {
             panic!("expected a newtype variant");
         };
@@ -174,7 +177,7 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
         "!Struct {value: 42}",
         "!Map {value: 42}",
     ] {
-        let value: Spanned<'_, Kind> = from_str(source).unwrap();
+        let value: Spanned<'_, Kind> = from_tag(source).unwrap();
         let number = match value.value {
             Kind::Tuple(number, false) | Kind::Struct { value: number } => number,
             Kind::Map(mut values) => values.remove("value").unwrap(),
@@ -186,7 +189,11 @@ fn enum_tags_are_consumed_once_through_transparent_wrappers() {
     }
 
     let source = "[&value !Newtype 42, *value]";
-    let values: Vec<Spanned<'_, Kind>> = from_str(source).unwrap();
+    let values: Vec<Spanned<'_, Kind>> = from_str::<Vec<YamlTag<Spanned<'_, Kind>>>>(source)
+        .unwrap()
+        .into_iter()
+        .map(|value| value.0)
+        .collect();
     assert_eq!(values[1].span.slice(source), Some("*value"));
     let Kind::Newtype(payload) = &values[1].value else {
         panic!("expected a newtype variant");
@@ -323,8 +330,8 @@ fn ignored_tagged_payloads_preserve_alias_spans() {
     }
 
     let source = "[&a !Value 42, *a]";
-    let values: Vec<Ignored> = from_str(source).unwrap();
-    let Ignored::Value(value) = &values[1];
+    let values: Vec<YamlTag<Ignored>> = from_str(source).unwrap();
+    let Ignored::Value(value) = &values[1].0;
     assert_eq!(value.span.slice(source), Some("*a"));
 }
 

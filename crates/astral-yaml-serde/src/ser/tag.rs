@@ -44,7 +44,14 @@ impl ser::Serializer for TagSerializer {
             return Err(Error::new("invalid YAML tag"));
         }
 
-        Ok(spelling)
+        if tag.strip_prefix('!').is_some_and(|name| {
+            name.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        }) {
+            Ok(tag.to_owned())
+        } else {
+            Ok(spelling)
+        }
     }
 
     reject! {

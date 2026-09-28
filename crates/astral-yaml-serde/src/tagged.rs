@@ -24,9 +24,10 @@ pub(crate) const NAME: &str = "$astral_yaml::Tagged";
 /// Serialization with this crate emits the tag and payload as one YAML node.
 /// Deserialization requires this crate's deserializer.
 ///
-/// Serde's buffering for mixed tagged/untagged enums rejects tagged nodes before
-/// this wrapper can read them. Placing `Tagged<T>` inside such an enum does not
-/// bypass that limitation.
+/// This wrapper must reach the YAML deserializer directly. Serde's buffering for
+/// derived untagged enums and flattened fields happens before their payload
+/// types are visited, so a wrapper inside such a buffer cannot opt into tags.
+/// Use [`crate::with::yaml_tag`] to interpret local tags as enum variant names.
 ///
 /// ```
 /// use astral_yaml_serde::{Tagged, from_str, to_string};
