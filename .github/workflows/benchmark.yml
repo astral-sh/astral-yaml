@@ -35,6 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -61,3 +62,14 @@ jobs:
             else
               uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m simulation
             fi
+
+      - name: Investigate parser performance
+        run: uv run --only-dev --locked python scripts/benchmark-investigation.py
+
+      - name: Save investigation results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-investigation
+          path: target/investigation
+          retention-days: 7
