@@ -50,6 +50,79 @@ def run(command: list[str], directory: Path) -> str:
     return result.stdout
 
 
+def build_and_profile(label: str, directory: Path, output: Path) -> Path:
+    build = run(
+        [
+            "cargo",
+            "bench",
+            "-p",
+            "astral-yaml-dev",
+            "--bench",
+            "yaml",
+            "--locked",
+            "--no-run",
+            "--message-format=json",
+        ],
+        directory,
+    )
+    for line in build.splitlines():
+        artifact = json.loads(line)
+        if artifact.get("executable") and artifact["target"]["name"] == "yaml":
+            binary = output / label
+            shutil.copy2(artifact["executable"], binary)
+
+    run(
+        [
+            "uv",
+            "run",
+            "--only-dev",
+            "--locked",
+            "cargo",
+            "codspeed",
+            "build",
+            "-p",
+            "astral-yaml-dev",
+            "--bench",
+            "yaml",
+            "--locked",
+            "-m",
+            "simulation",
+        ],
+        directory,
+    )
+    profile = output / f"{label}-profile"
+    profile.mkdir(exist_ok=True)
+    run(
+        [
+            "codspeed",
+            "run",
+            "--skip-upload",
+            "--mode",
+            "simulation",
+            "--profile-folder",
+            str(profile),
+            "--setup-cache-dir",
+            str(Path.home() / ".cache/codspeed-action"),
+            "--",
+            "uv",
+            "run",
+            "--only-dev",
+            "--locked",
+            "cargo",
+            "codspeed",
+            "run",
+            "-p",
+            "astral-yaml-dev",
+            "--bench",
+            "yaml",
+            "-m",
+            "simulation",
+        ],
+        directory,
+    )
+    return output / label
+
+
 def main() -> None:
     root = Path.cwd()
     output = root / "target/investigation"
@@ -60,81 +133,29 @@ def main() -> None:
     run(["git", "worktree", "add", "--detach", str(baseline), "0dbb599"], root)
     binaries: dict[str, Path] = {}
 
-    for label, directory in (("candidate", root), ("baseline", baseline)):
-        build = run(
-            [
-                "cargo",
-                "bench",
-                "-p",
-                "astral-yaml-dev",
-                "--bench",
-                "yaml",
-                "--locked",
-                "--no-run",
-                "--message-format=json",
-            ],
-            directory,
-        )
-        for line in build.splitlines():
-            artifact = json.loads(line)
-            if artifact.get("executable") and artifact["target"]["name"] == "yaml":
-                binary = output / label
-                shutil.copy2(artifact["executable"], binary)
-                binaries[label] = binary
+    parser = root / "crates/astral-yaml/src/parser.rs"
+    original = parser.read_text()
+    variants = {
+        "small-arena": original.replace(
+            ".min(1024).min(options.max_nodes)", ".min(128).min(options.max_nodes)"
+        ),
+        "arena-16": original.replace("source.len() / 32", "source.len() / 16"),
+        "arena-12": original.replace("source.len() / 32", "source.len() / 12"),
+        "arena-8": original.replace("source.len() / 32", "source.len() / 8"),
+    }
+    try:
+        for label, directory in (("candidate", root), ("baseline", baseline)):
+            binaries[label] = build_and_profile(label, directory, output)
+        for label, text in variants.items():
+            parser.write_text(text)
+            (output / f"{label}.rs").write_text(text)
+            binaries[label] = build_and_profile(label, root, output)
+    finally:
+        parser.write_text(original)
 
-        run(
-            [
-                "uv",
-                "run",
-                "--only-dev",
-                "--locked",
-                "cargo",
-                "codspeed",
-                "build",
-                "-p",
-                "astral-yaml-dev",
-                "--bench",
-                "yaml",
-                "--locked",
-                "-m",
-                "simulation",
-            ],
-            directory,
-        )
-        profile = output / f"{label}-profile"
-        profile.mkdir(exist_ok=True)
-        run(
-            [
-                "codspeed",
-                "run",
-                "--skip-upload",
-                "--mode",
-                "simulation",
-                "--profile-folder",
-                str(profile),
-                "--setup-cache-dir",
-                str(Path.home() / ".cache/codspeed-action"),
-                "--",
-                "uv",
-                "run",
-                "--only-dev",
-                "--locked",
-                "cargo",
-                "codspeed",
-                "run",
-                "-p",
-                "astral-yaml-dev",
-                "--bench",
-                "yaml",
-                "-m",
-                "simulation",
-            ],
-            directory,
-        )
-
-    results: dict[str, list[dict[str, float]]] = {"baseline": [], "candidate": []}
-    for repetition in range(5):
-        pair = ["baseline", "candidate"]
+    results: dict[str, list[dict[str, float]]] = {name: [] for name in binaries}
+    for repetition in range(2):
+        pair = list(binaries)
         if repetition % 2:
             pair.reverse()
 
@@ -144,9 +165,9 @@ def main() -> None:
                     str(binaries[label]),
                     "--bench",
                     "--min-time",
-                    "1",
+                    "0.25",
                     "--max-time",
-                    "1.2",
+                    "0.3",
                     "--sample-size",
                     "64",
                     "--color",
@@ -158,15 +179,20 @@ def main() -> None:
             results[label].append(medians(measured))
 
     (output / "medians.json").write_text(json.dumps(results, indent=2) + "\n")
-    reductions = []
-    for name in results["baseline"][0]:
-        old = statistics.median(item[name] for item in results["baseline"])
-        new = statistics.median(item[name] for item in results["candidate"])
-        reduction = 100 * (1 - new / old)
-        reductions.append(reduction)
-        print(f"{name}: {old:.3f} -> {new:.3f} us; {reduction:.1f}% less time")
+    for label in binaries:
+        if label == "baseline":
+            continue
 
-    print(f"Mean time reduction: {statistics.mean(reductions):.2f}%")
+        reductions = []
+        print(f"\nVariant: {label}")
+        for name in results["baseline"][0]:
+            old = statistics.median(item[name] for item in results["baseline"])
+            new = statistics.median(item[name] for item in results[label])
+            reduction = 100 * (1 - new / old)
+            reductions.append(reduction)
+            print(f"{name}: {old:.3f} -> {new:.3f} us; {reduction:.1f}% less time")
+
+        print(f"Mean time reduction: {statistics.mean(reductions):.2f}%")
     for binary in binaries.values():
         binary.unlink()
 
