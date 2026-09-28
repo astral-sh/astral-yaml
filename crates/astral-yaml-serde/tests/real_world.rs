@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
+use astral_yaml_dev::Value;
 use serde::Deserialize;
-use yaml_serde::Value;
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -24,12 +24,6 @@ fn astral(source: &str) -> Vec<Value> {
         .collect()
 }
 
-fn reference(source: &str) -> Vec<Value> {
-    yaml_serde::Deserializer::from_str(source)
-        .map(|document| Value::deserialize(document).unwrap())
-        .collect()
-}
-
 #[test]
 fn real_world_values_comments_and_serialization() {
     for fixture in manifest() {
@@ -37,15 +31,12 @@ fn real_world_values_comments_and_serialization() {
         let source = fs::read_to_string(root().join(&name)).unwrap();
 
         if !fixture.valid_yaml_1_2.unwrap_or(true) {
-            // The reference reader accepts Sentry's under-indented flow delimiter.
             assert!(astral_yaml_serde::from_str::<Value>(&source).is_err());
-            assert!(!reference(&source).is_empty());
             continue;
         }
 
         let stream = astral_yaml::parse(&source).unwrap();
         let values = astral(&source);
-        assert_eq!(values, reference(&source), "{name}");
 
         if stream.documents().len() == 1 {
             let wrapped: astral_yaml_serde::Spanned<'_, Value> =
@@ -65,23 +56,10 @@ fn real_world_values_comments_and_serialization() {
                 value,
                 "{name}"
             );
-            assert_eq!(
-                yaml_serde::from_str::<Value>(&yaml).unwrap(),
-                value,
-                "reference reader: {name}"
-            );
         }
 
         assert!(
             astral_yaml_serde::from_document::<Value>(&stream, stream.documents().len()).is_err()
         );
-    }
-}
-
-// https://yaml.org/spec/1.2.2/#742-flow-mappings
-#[test]
-fn flow_key_and_value_separation_matches_reference() {
-    for source in ["{a: [b]}", "{'a':[b]}", "{[]:value}"] {
-        assert_eq!(astral(source), reference(source), "{source}");
     }
 }

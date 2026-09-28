@@ -64,7 +64,6 @@ fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
         );
         assert!(error.span.unwrap().slice(source).is_some());
         assert!(from_str::<serde_json::Value>(source).is_err());
-        assert!(from_str::<yaml_serde::Value>(source).is_err());
     }
 
     assert!(from_str::<Empty>("{ignored: !Count 42}").is_err());

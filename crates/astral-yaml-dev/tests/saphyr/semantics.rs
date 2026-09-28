@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, fmt::Debug, fs, path::Path};
 
-use astral_yaml_dev::saphyr::{astral_documents, options};
+use astral_yaml_dev::{
+    Value as TestValue,
+    saphyr::{astral_documents, options},
+};
 use serde::{Deserialize, de::IgnoredAny};
 use serde_json::{Value, json};
 
@@ -238,8 +241,7 @@ fn real_world_values() {
                     .collect::<Result<Vec<_>, _>>()
                     .is_ok()
             );
-            let result =
-                serde_saphyr::from_multiple_with_options::<yaml_serde::Value>(&source, options());
+            let result = serde_saphyr::from_multiple_with_options::<TestValue>(&source, options());
             assert!(matches!(
                 result.unwrap_err().without_snippet(),
                 serde_saphyr::Error::Budget { .. }
@@ -247,10 +249,9 @@ fn real_world_values() {
             continue;
         }
 
-        let ours = astral_documents::<yaml_serde::Value>(&source).unwrap();
+        let ours = astral_documents::<TestValue>(&source).unwrap();
         let theirs =
-            serde_saphyr::from_multiple_with_options::<yaml_serde::Value>(&source, options())
-                .unwrap();
+            serde_saphyr::from_multiple_with_options::<TestValue>(&source, options()).unwrap();
         assert_eq!(ours, theirs, "{}", path.display());
         accepted += 1;
     }
@@ -285,8 +286,8 @@ fn numeric_range_and_non_finite_floats() {
         let ours = astral_yaml_serde::from_str::<f64>(source).unwrap();
         let theirs = serde_saphyr::from_str::<f64>(source).unwrap();
         assert!(ours.to_bits() == theirs.to_bits() || (ours.is_nan() && theirs.is_nan()));
-        assert!(astral_yaml_serde::from_str::<yaml_serde::Value>(source).is_ok());
-        assert!(serde_saphyr::from_str::<yaml_serde::Value>(source).is_err());
+        assert!(astral_yaml_serde::from_str::<TestValue>(source).is_ok());
+        assert!(serde_saphyr::from_str::<TestValue>(source).is_err());
     }
 }
 

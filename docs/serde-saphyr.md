@@ -83,8 +83,7 @@ identical:
   use Astral's adapter and serde-saphyr's defaults.
 - Astral's `Tagged<T>` wrapper captures a tag and its typed payload.
   serde-saphyr's default generic deserialization drops application tags;
-  Astral requires an explicit opt-in even when deserializing into
-  `yaml_serde::Value`.
+  Astral requires an explicit opt-in, including for generic values.
 - serde-saphyr provides extensions such as binary decoding and includes. Those
   are outside Astral's current core-schema interface.
 

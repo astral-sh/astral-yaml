@@ -3,8 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use astral_yaml_dev::Value;
 use astral_yaml_dev::benchmarks::{FIXTURES, astral, reference};
-use yaml_serde::Value;
 
 fn sample(source: &str, parse: fn(&str) -> Vec<Value>) -> f64 {
     let start = Instant::now();
@@ -22,7 +22,7 @@ fn sample(source: &str, parse: fn(&str) -> Vec<Value>) -> f64 {
 }
 
 fn main() {
-    println!("Equivalent workload: YAML stream -> Vec<yaml_serde::Value>, including drop");
+    println!("Equivalent workload: YAML stream -> Vec<astral_yaml_dev::Value>, including drop");
     println!("11 samples per implementation, >=200 ms each, alternating order");
     println!("fixture,bytes,astral_us,yaml_serde_us,speedup");
 

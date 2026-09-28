@@ -109,9 +109,10 @@ The [deserialization benchmarks](benchmarks/results/2026-09-25.csv) compare
 | Kubernetes Guestbook | 3,366 | 22.30 µs | 59.30 µs | 2.66× |
 | OpenAPI Petstore | 5,479 | 27.47 µs | 74.50 µs | 2.71× |
 
-Both implementations deserialize into `Vec<yaml_serde::Value>`, including parsing,
+These measurements used `Vec<yaml_serde::Value>`, including parsing,
 value construction, and destruction. These are median times from eleven samples,
-measured on 2026-09-25 with Rust 1.98.1 on macOS arm64.
+measured on 2026-09-25 with Rust 1.98.1 on macOS arm64. Current benchmarks use
+`astral_yaml_dev::Value`; the recorded timings predate that change.
 
 See [benchmarks](benchmarks/README.md) for reproduction commands and measurements
 with `Spanned`, and the [serde-saphyr comparison](docs/serde-saphyr.md) for

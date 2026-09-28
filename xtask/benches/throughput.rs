@@ -1,3 +1,4 @@
+use astral_yaml_dev::Value;
 use astral_yaml_dev::benchmarks;
 use astral_yaml_serde::{Spanned, from_document, from_str, to_string};
 use serde::Deserialize;
@@ -7,7 +8,6 @@ use std::{
     hint::black_box,
     time::{Duration, Instant},
 };
-use yaml_serde::Value;
 
 type Fields<'a> = Spanned<'a, BTreeMap<String, Spanned<'a, Value>>>;
 

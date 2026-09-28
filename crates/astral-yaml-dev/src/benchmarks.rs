@@ -1,7 +1,7 @@
 //! Fixed benchmark fixtures and equivalent deserialization workloads.
 
+use crate::Value;
 use serde::Deserialize;
-use yaml_serde::Value;
 
 /// Historical benchmark inputs, kept fixed as the test corpus grows.
 pub const FIXTURES: &[(&str, &str)] = &[

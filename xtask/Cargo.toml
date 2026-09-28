@@ -19,7 +19,6 @@ serde_json.workspace = true
 astral-yaml.workspace = true
 astral-yaml-dev.workspace = true
 astral-yaml-serde.workspace = true
-yaml_serde.workspace = true
 
 [[bin]]
 name = "xtask"

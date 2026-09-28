@@ -1,5 +1,65 @@
-use crate::{events, events::event_tag, spans::validate_parts, validate_spans};
+use crate::{Value, events, events::event_tag, spans::validate_parts, validate_spans};
 use astral_yaml::{Span, parse};
+
+#[test]
+fn test_values_preserve_scalar_and_collection_types() {
+    for (source, expected) in [
+        ("null", Value::Null),
+        ("true", Value::Bool(true)),
+        ("-42", Value::Integer(-42)),
+        ("18446744073709551615", Value::Unsigned(u64::MAX)),
+        ("1.5", Value::Float(1.5)),
+        (".nan", Value::Float(f64::NAN)),
+        (".inf", Value::Float(f64::INFINITY)),
+        ("hello", Value::String("hello".to_owned())),
+        ("[null]", Value::Sequence(vec![Value::Null])),
+        (
+            "{[true]: false}",
+            Value::Mapping(vec![(
+                Value::Sequence(vec![Value::Bool(true)]),
+                Value::Bool(false),
+            )]),
+        ),
+    ] {
+        let value = astral_yaml_serde::from_str::<Value>(source).unwrap();
+        assert_eq!(value, expected, "{source}");
+
+        let yaml = astral_yaml_serde::to_string(&value).unwrap();
+        assert_eq!(
+            astral_yaml_serde::from_str::<Value>(&yaml).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
+    for (left, right, equal) in [
+        ("{a: 1, b: 2}", "{b: 2, a: 1}", true),
+        ("{a: 1}", "{b: 1}", false),
+        ("{a: 1}", "{a: 2}", false),
+        ("{a: 1}", "{}", false),
+        ("{[true]: 1}", "{[1]: 1}", false),
+        ("[1, 2]", "[2, 1]", false),
+        ("1", "1.0", false),
+        (".nan", ".nan", true),
+        (".inf", "-.inf", false),
+    ] {
+        let left = astral_yaml_serde::from_str::<Value>(left).unwrap();
+        let right = astral_yaml_serde::from_str::<Value>(right).unwrap();
+        assert_eq!(left == right, equal, "{left:?} == {right:?}");
+    }
+
+    assert_eq!(Value::Integer(42), Value::Unsigned(42));
+    assert_eq!(Value::Unsigned(42), Value::Integer(42));
+    assert_ne!(Value::Integer(-1), Value::Unsigned(u64::MAX));
+
+    let entry = (Value::Null, Value::Bool(true));
+    assert_ne!(
+        Value::Mapping(vec![entry.clone(), entry.clone()]),
+        Value::Mapping(vec![entry, (Value::Null, Value::Bool(false))]),
+    );
+}
 
 #[test]
 fn event_escaping() {

@@ -11,6 +11,9 @@ cargo bench -p xtask --bench throughput
 parsing, deserialization with and without spans, and serialization. Both use the
 same three [fixtures](../fixtures/real-world/README.md).
 
+Current value workloads use `astral_yaml_dev::Value`. The recorded value timings
+below used `yaml_serde::Value` and predate that change. Typed workloads are unchanged.
+
 The `real_world` and `throughput` results are from 2026-09-25, using Rust 1.98.1
 and the workspace's release profile on one macOS arm64 host, without CPU isolation
 or frequency control. All timings cover the entire fixture and include destruction
@@ -18,10 +21,9 @@ of the output.
 
 ## Deserialization
 
-The benchmark checks that both implementations produce equal
-`Vec<yaml_serde::Value>` results before timing parsing and deserialization. Times
-are medians of eleven samples of at least 200 ms, after warmup, with alternating
-implementation order.
+The benchmark checks that both implementations produce equal values before
+timing parsing and deserialization. Times are medians of eleven samples of at
+least 200 ms, after warmup, with alternating implementation order.
 
 | Fixture | Bytes | `astral-yaml-serde` | `yaml_serde` 0.10.7 | Speedup |
 | --- | ---: | ---: | ---: | ---: |
@@ -39,7 +41,7 @@ cargo bench -p astral-yaml-dev --features saphyr --bench saphyr --locked
 
 This compares serde-saphyr 1.3.0 with Astral, using
 [comparison settings](../docs/serde-saphyr.md#behavior-differences). Both
-deserialize the three fixtures into `Vec<yaml_serde::Value>`. A generated
+deserialize the three fixtures into vectors of values. A generated
 configuration of 128 services also measures deserialization into typed structs.
 Results are checked for equality before timing; parsing and destruction are
 included. Comment capture and resource limits remain enabled.
@@ -63,7 +65,7 @@ the [comparison](../docs/serde-saphyr.md); no performance optimizations were mad
 
 ## Spans and serialization
 
-`unspanned` deserializes each document into `yaml_serde::Value`. `spanned` adds
+`unspanned` deserializes each document into `astral_yaml_dev::Value`. `spanned` adds
 `Spanned` to each document root; `spanned-fields` also wraps each top-level mapping
 value. Both collect descendant comments. Deserialization includes parsing;
 serialization starts from existing values.

@@ -1,3 +1,4 @@
+use astral_yaml_dev::Value;
 use astral_yaml_serde::{Spanned, Tagged, from_str, to_string};
 use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeTupleStruct};
 use std::{collections::BTreeMap, fmt::Debug};
@@ -8,7 +9,6 @@ where
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<Tagged<T>>(&yaml).unwrap(), value, "{yaml}");
-    assert!(yaml_serde::from_str::<yaml_serde::Value>(&yaml).is_ok());
 }
 
 #[test]
@@ -167,8 +167,7 @@ fn generic_yaml_values_reject_local_tags() {
         "!Config {key: !Text hello}",
         "[&x !Text hello, *x]",
     ] {
-        assert!(from_str::<yaml_serde::Value>(source).is_err(), "{source}");
-        assert!(yaml_serde::from_str::<yaml_serde::Value>(source).is_ok());
+        assert!(from_str::<Value>(source).is_err(), "{source}");
         assert!(from_str::<serde_json::Value>(source).is_err());
     }
 
@@ -190,27 +189,12 @@ fn generic_yaml_values_reject_local_tags() {
 // https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 #[test]
 fn tag_uri_characters_retain_their_spelling() {
-    // LibYAML decodes percent escapes and rejects hashes; YAML preserves both.
-    for (source, reference_tag) in [("!%12", Some("!\u{12}")), ("!#", None)] {
+    for source in ["!%12", "!#"] {
         let tagged = from_str::<Tagged<()>>(source).unwrap();
         assert_eq!(tagged.tag, source);
 
         let encoded = to_string(&tagged).unwrap();
         assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
-        let value = from_str::<Tagged<yaml_serde::Value>>(&encoded).unwrap();
-        assert_eq!(value.tag, source);
-        assert_eq!(value.value, yaml_serde::Value::Null);
-
-        let reference = yaml_serde::from_str::<yaml_serde::Value>(&encoded);
-        if let Some(expected) = reference_tag {
-            let yaml_serde::Value::Tagged(reference) = reference.unwrap() else {
-                panic!("expected a tagged value");
-            };
-
-            assert_eq!(reference.tag.to_string(), expected);
-        } else {
-            assert!(reference.is_err());
-        }
     }
 }
 
@@ -230,7 +214,7 @@ fn tags_in_mapping_keys() {
         "{!Items [1]: a, !Other [1]: b}",
         "{!Config {a: 1}: a, !Other {a: 1}: b}",
     ] {
-        assert!(from_str::<yaml_serde::Value>(source).is_err(), "{source}");
+        assert!(from_str::<Value>(source).is_err(), "{source}");
     }
 
     let text_keys =
@@ -244,7 +228,7 @@ fn tags_in_mapping_keys() {
         "{!Config {a: 1, b: 2}: a, !Config {b: 2, a: 1}: b}",
     ] {
         assert_eq!(
-            from_str::<yaml_serde::Value>(source).unwrap_err().message,
+            from_str::<Value>(source).unwrap_err().message,
             "duplicate mapping key",
             "{source}"
         );
@@ -313,7 +297,7 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
 #[test]
 fn recursive_tagged_values_require_opt_in_at_every_node() {
     for source in ["&self !Sequence [*self]", "&self !Mapping {next: *self}"] {
-        assert!(from_str::<yaml_serde::Value>(source).is_err());
+        assert!(from_str::<Value>(source).is_err());
         assert!(from_str::<serde::de::IgnoredAny>(source).is_err());
         assert!(from_str::<Tagged<serde::de::IgnoredAny>>(source).is_err());
     }

@@ -47,7 +47,8 @@ constructed values, and regression cases against serde-saphyr 1.3.0.
 
 ## Parser disagreements
 
-The tests compare results with LibYAML and `yaml_serde`, with these exceptions:
+The [differential tests](../crates/astral-yaml-dev/tests/yaml_serde/) compare
+results with LibYAML through `yaml_serde`, with these exceptions:
 
 - **EOF:** The parser follows the suite's interpretation of EOF as an implicit
   final line break. For example, `"|\n  text"` produces `"text\n"`. LibYAML omits

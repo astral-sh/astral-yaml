@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use astral_yaml_dev::Value;
 use astral_yaml_dev::{
     benchmarks::FIXTURES,
     saphyr::{astral_documents, options},
 };
 use serde::Deserialize;
-use yaml_serde::Value;
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

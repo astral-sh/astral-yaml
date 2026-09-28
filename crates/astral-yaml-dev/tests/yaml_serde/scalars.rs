@@ -1,5 +1,7 @@
 //! Compare generated scalar syntax with `yaml_serde` without using our serializer.
 
+use astral_yaml_dev::Value;
+
 fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
     for source in [
         scalar.to_owned(),
@@ -7,7 +9,7 @@ fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
         format!("- {scalar}"),
         format!("outer:\n  value: {}", scalar.replace('\n', "\n  ")),
     ] {
-        let actual = astral_yaml_serde::from_str::<yaml_serde::Value>(&source);
+        let actual = astral_yaml_serde::from_str::<Value>(&source);
         if invalid_comment_indent {
             assert!(actual.is_err(), "{source:?}");
             continue;
@@ -20,7 +22,7 @@ fn check_block_presentations(scalar: &str, invalid_comment_indent: bool) {
         } else {
             format!("{source}\n")
         };
-        let reference = yaml_serde::from_str::<yaml_serde::Value>(&terminated);
+        let reference = yaml_serde::from_str::<Value>(&terminated);
 
         match (actual, reference) {
             (Ok(actual), Ok(expected)) => assert_eq!(actual, expected, "{source:?}"),
@@ -104,8 +106,8 @@ fn quoted_scalar_folding_and_escapes_match_reference() {
                         format!("[{scalar}]"),
                         format!("value: {scalar}"),
                     ] {
-                        let actual = astral_yaml_serde::from_str::<yaml_serde::Value>(&source);
-                        let expected = yaml_serde::from_str::<yaml_serde::Value>(&source);
+                        let actual = astral_yaml_serde::from_str::<Value>(&source);
+                        let expected = yaml_serde::from_str::<Value>(&source);
                         assert_eq!(actual.unwrap(), expected.unwrap(), "{source:?}");
                         cases += 1;
                     }
