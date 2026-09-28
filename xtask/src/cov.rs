@@ -89,12 +89,8 @@ fn collect_sources(directory: &Path, sources: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry?.path();
 
         if path.is_dir() {
-            if path.file_name().is_some_and(|name| name != "tests") {
-                collect_sources(&path, sources)?;
-            }
-        } else if path.extension().is_some_and(|ext| ext == "rs")
-            && path.file_name().is_some_and(|name| name != "tests.rs")
-        {
+            collect_sources(&path, sources)?;
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
             sources.push(path);
         }
     }
