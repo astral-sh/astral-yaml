@@ -1,27 +1,76 @@
 # Benchmarks
 
-Run from the repository root:
+The benchmarks use [CodSpeed's Divan adapter](https://codspeed.io/docs/reference/codspeed-rust/divan).
+Run local timings from the repository root:
 
 ```sh
-cargo bench -p xtask --bench real_world
-cargo bench -p xtask --bench throughput
+cargo bench -p astral-yaml-dev --all-features --bench yaml --locked
 ```
 
-`real_world` compares deserialization with `yaml_serde`. `throughput` measures
-parsing, deserialization with and without spans, and serialization. Both use the
-same three [fixtures](../fixtures/real-world/README.md).
+Pass a filter after `--` to select benchmarks, or `--test` to run each once:
 
-Current value workloads use `astral_yaml_dev::Value`. The recorded value timings
-below used `yaml_serde::Value` and predate that change. Typed workloads are unchanged.
+```sh
+cargo bench -p astral-yaml-dev --all-features --bench yaml --locked -- uv-ci
+cargo bench -p astral-yaml-dev --all-features --bench yaml --locked -- --test
+```
+
+## Workloads
+
+Each workload processes all documents in one of the three fixed
+[fixtures](../fixtures/real-world/README.md):
+
+| Benchmark | Operation |
+| --- | --- |
+| `parse` | Parse the YAML stream. |
+| `deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>`. |
+| `deserialize_spanned` | Also collect each document root's span and descendant comments. |
+| `deserialize_spanned_fields` | Also wrap each top-level mapping value in `Spanned`. |
+| `serialize` | Serialize previously deserialized values. |
+| `deserialize_yaml_serde` | Parse and deserialize into the same value type with `yaml_serde`. |
+| `deserialize_saphyr` | Parse and deserialize into the same value type with serde-saphyr. |
+
+`services_128` compares Astral and serde-saphyr on a generated configuration
+deserialized into typed structs. The serde-saphyr benchmarks require the `saphyr`
+feature and Rust 1.89; omit `--all-features` to run the other workloads on Rust 1.85.
+
+Fixture generation and correctness checks run outside measurements. Every
+measurement includes destruction of the output. Span collection includes
+descendant comments; serde-saphyr uses the same
+[comparison settings](../docs/serde-saphyr.md#behavior-differences) as its tests.
+
+## CodSpeed
+
+[`benchmark.yml`](../.github/workflows/benchmark.yml) runs on pull requests and
+pushes to `main`, and supports manual runs for backtesting. It uses CodSpeed's
+simulation mode on a GitHub-hosted Linux runner and authenticates uploads with
+OIDC. Enable the repository in CodSpeed to receive the reports; no token secret
+is needed. Main-branch runs supply the baseline for PR comparisons.
+
+To check the instrumented suite locally:
+
+```sh
+uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --all-features --locked -m simulation
+uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev -m simulation
+```
+
+Outside the CodSpeed runner, this checks that benchmarks execute but does not
+collect performance measurements. Use `cargo bench` for local wall-clock timings.
+
+## Recorded timings
+
+The following results come from the previous timing harnesses. Value workloads
+used `yaml_serde::Value`; current workloads use `astral_yaml_dev::Value`. The
+typed workload is unchanged. These wall-clock measurements are not comparable
+to CodSpeed's simulated timings.
 
 The `real_world` and `throughput` results are from 2026-09-25, using Rust 1.98.1
 and the workspace's release profile on one macOS arm64 host, without CPU isolation
 or frequency control. All timings cover the entire fixture and include destruction
 of the output.
 
-## Deserialization
+### Deserialization
 
-The benchmark checks that both implementations produce equal values before
+The benchmark checked that both implementations produced equal values before
 timing parsing and deserialization. Times are medians of eleven samples of at
 least 200 ms, after warmup, with alternating implementation order.
 
@@ -33,11 +82,7 @@ least 200 ms, after warmup, with alternating implementation order.
 
 Source: [`optimized` rows](results/2026-09-25.csv).
 
-## serde-saphyr
-
-```sh
-cargo bench -p astral-yaml-dev --features saphyr --bench saphyr --locked
-```
+### serde-saphyr
 
 This compares serde-saphyr 1.3.0 with Astral, using
 [comparison settings](../docs/serde-saphyr.md#behavior-differences). Both
@@ -48,7 +93,7 @@ included. Comment capture and resource limits remain enabled.
 
 Measured on 2026-09-28 with Rust 1.98.1, the workspace's release profile, and
 macOS 26.7 on an Apple M5 Max (18 cores, 128 GiB RAM). CPU placement and frequency
-were not controlled. Each run takes eleven samples of at least 200 ms per
+were not controlled. Each run took eleven samples of at least 200 ms per
 implementation after warmup, alternating order. The table shows the median of
 three run medians.
 
@@ -63,14 +108,14 @@ three run medians.
 iteration counts. These measurements include the correctness fixes described in
 the [comparison](../docs/serde-saphyr.md); no performance optimizations were made.
 
-## Spans and serialization
+### Spans and serialization
 
-`unspanned` deserializes each document into `astral_yaml_dev::Value`. `spanned` adds
-`Spanned` to each document root; `spanned-fields` also wraps each top-level mapping
-value. Both collect descendant comments. Deserialization includes parsing;
-serialization starts from existing values.
+`unspanned` deserialized each document into `yaml_serde::Value`. `spanned` added
+`Spanned` to each document root; `spanned-fields` also wrapped each top-level mapping
+value. Both collected descendant comments. Deserialization included parsing;
+serialization started from existing values.
 
-Each run takes the median of eleven samples of at least 150 ms, after warmup.
+Each run took the median of eleven samples of at least 150 ms, after warmup.
 The table shows the median of three runs, in µs.
 
 | Fixture | `unspanned` | `spanned` | `spanned-fields` | `serialize` |
@@ -80,23 +125,3 @@ The table shows the median of three runs, in µs.
 | OpenAPI Petstore | 27.976 | 28.248 | 28.087 | 3.418 |
 
 Source: [`candidate` rows](results/2026-09-25-throughput.csv), which omit `parse`.
-
-To select a workload, set `ASTRAL_BENCH_FIXTURE` to `uv-ci`,
-`kubernetes-guestbook`, or `openapi-petstore`, and `ASTRAL_BENCH_MODE` to a mode
-above. For profiling, `ASTRAL_BENCH_PROFILE=1` runs each selected operation for
-20 seconds.
-
-## Comparing revisions
-
-Build each revision with `cargo bench -p xtask --bench throughput --no-run`.
-Save each executable at a separate path, then run:
-
-```sh
-uv run --script scripts/compare-throughput.py /path/to/baseline /path/to/candidate \
-  --runs 3 --output /tmp/throughput.csv
-```
-
-The script alternates executable order and writes the measurements to CSV,
-excluding `parse`. For each workload, it pairs baseline and candidate times from
-each run and requires a median time reduction of at least 20%. It exits with an
-error if any workload misses that target.

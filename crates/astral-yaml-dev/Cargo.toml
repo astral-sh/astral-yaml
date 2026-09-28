@@ -18,6 +18,7 @@ serde-saphyr = { workspace = true, optional = true }
 yaml_serde.workspace = true
 
 [dev-dependencies]
+divan.workspace = true
 serde_json.workspace = true
 
 [[test]]
@@ -25,9 +26,8 @@ name = "saphyr"
 required-features = ["saphyr"]
 
 [[bench]]
-name = "saphyr"
+name = "yaml"
 harness = false
-required-features = ["saphyr"]
 
 [lints]
 workspace = true

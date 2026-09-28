@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Coverage, fuzzing, and performance tooling for astral-yaml"
+description = "Coverage and fuzzing tooling for astral-yaml"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,20 +15,7 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-[dev-dependencies]
-astral-yaml.workspace = true
-astral-yaml-dev.workspace = true
-astral-yaml-serde.workspace = true
-
 [[bin]]
 name = "xtask"
 test = false
 bench = false
-
-[[bench]]
-name = "real_world"
-harness = false
-
-[[bench]]
-name = "throughput"
-harness = false

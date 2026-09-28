@@ -22,6 +22,7 @@ astral-yaml-serde = { version = "0.1.0", path = "crates/astral-yaml-serde" }
 astral-yaml-dev = { path = "crates/astral-yaml-dev" }
 
 clap = { version = "4.6.7", features = ["derive"] }
+divan = { package = "codspeed-divan-compat", version = "5.0.2" }
 insta = "1.48.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
