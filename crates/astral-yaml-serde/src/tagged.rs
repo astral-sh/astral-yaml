@@ -22,6 +22,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Tagged";
 /// does. The payload can also borrow from the input. Use
 /// [`crate::Spanned`] around this wrapper to retain source spans and comments.
 /// Serialization with this crate emits the tag and payload as one YAML node.
+/// Explicit core tags must match the emitted content. For example, `!!int`
+/// permits the string payload `"42"`, but `!!map` requires a mapping payload.
 /// Deserialization requires this crate's deserializer.
 ///
 /// `Option<T>` resolves `!!null` as `None`. To capture that tag, put this wrapper

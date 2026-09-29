@@ -443,6 +443,43 @@ fn serialization_recursion_limit() {
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
+fn serialization_rejects_duplicate_mapping_keys() {
+    use astral_yaml_dev::Value;
+
+    for (left, right, duplicate) in [
+        ("text", "text", true),
+        ("42", "0x2a", true),
+        ("-0.0", "0.0", true),
+        (".nan", ".nan", true),
+        ("[1, true]", "[1, true]", true),
+        ("{a: 1, b: 2}", "{b: 2, a: 1}", true),
+        ("1", "1.0", false),
+        ("'null'", "null", false),
+    ] {
+        let key = |source| astral_yaml_serde::from_str::<Value>(source).unwrap();
+        let value = Value::Mapping(vec![
+            (key(left), Value::Integer(1)),
+            (key(right), Value::Integer(2)),
+        ]);
+        let result = astral_yaml_serde::to_string(&value);
+        if duplicate {
+            assert_eq!(
+                result.unwrap_err().message,
+                "duplicate mapping key",
+                "{left}: {right}"
+            );
+        } else {
+            let source = result.unwrap();
+            assert_eq!(
+                astral_yaml_serde::from_str::<Value>(&source).unwrap(),
+                value
+            );
+        }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
+#[test]
 fn mapping_key_uniqueness_uses_core_types() {
     for source in [
         "{a: 1, a: 2}",

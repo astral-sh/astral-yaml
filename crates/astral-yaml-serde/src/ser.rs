@@ -1,6 +1,7 @@
+mod keys;
 mod tag;
 
-use crate::{Error, tagged, with::yaml_tag};
+use crate::{Error, schema::YamlType, tagged, with::yaml_tag};
 use serde::{
     Serialize,
     ser::{self, SerializeMap, SerializeSeq},
@@ -15,13 +16,15 @@ type Result<T> = std::result::Result<T, Error>;
 /// Enums use a name for unit variants and a single-entry mapping otherwise.
 ///
 /// # Errors
-/// Returns an error if the value exceeds the nesting limit or its `Serialize`
-/// implementation violates the map protocol.
+/// Returns an error for a tag/content mismatch, duplicate mapping keys, an
+/// exceeded resource limit, or a `Serialize` implementation that violates the
+/// map protocol.
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {
         output: String::with_capacity(128),
         depth: 0,
         tagged: false,
+        core_tag: None,
         yaml_tag: false,
     };
 
@@ -34,6 +37,7 @@ struct Serializer {
     output: String,
     depth: usize,
     tagged: bool,
+    core_tag: Option<YamlType>,
     yaml_tag: bool,
 }
 
@@ -47,7 +51,7 @@ impl Serializer {
         Ok(())
     }
 
-    fn quoted(&mut self, mut value: &str) {
+    fn quoted(&mut self, mut value: &str) -> Result<()> {
         const ESCAPE: [bool; 256] = {
             let mut escape = [false; 256];
             let mut byte = 0;
@@ -61,6 +65,7 @@ impl Serializer {
             escape
         };
 
+        Serializer::check_scalar_tag(self.core_tag.take(), value)?;
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push('"');
@@ -74,7 +79,7 @@ impl Serializer {
         if plain {
             self.output.push_str(value);
             self.output.push('"');
-            return;
+            return Ok(());
         }
 
         // Copy runs of text until a possible escape. The non-ASCII characters
@@ -107,9 +112,11 @@ impl Serializer {
 
         self.output.push_str(value);
         self.output.push('"');
+        Ok(())
     }
 
     fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
+        self.check_collection_tag(mapping)?;
         self.enter()?;
         self.tagged = false;
         self.yaml_tag = false;
@@ -117,6 +124,7 @@ impl Serializer {
         Ok(Compound {
             serializer: self,
             first: true,
+            keys: keys::Keys::default(),
             state: if mapping {
                 CompoundState::MapKey
             } else {
@@ -134,8 +142,9 @@ impl Serializer {
         }
 
         self.enter()?;
+        self.check_collection_tag(true)?;
         self.output.push('{');
-        self.quoted(name);
+        self.quoted(name)?;
         self.output.push_str(": ");
 
         let mut compound = self.compound(mapping)?;
@@ -143,10 +152,33 @@ impl Serializer {
         Ok(compound)
     }
 
-    fn number(&mut self, value: impl std::fmt::Display) {
+    fn number(&mut self, value: impl std::fmt::Display) -> Result<()> {
         self.tagged = false;
         self.yaml_tag = false;
+        let start = self.output.len();
         write!(self.output, "{value}").expect("String write");
+        Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
+    }
+
+    fn check_scalar_tag(tag: Option<YamlType>, value: &str) -> Result<()> {
+        if tag.is_some_and(|tag| !tag.matches_scalar(value)) {
+            return Err(Error::new("serialized value does not match its YAML tag"));
+        }
+
+        Ok(())
+    }
+
+    fn check_collection_tag(&mut self, mapping: bool) -> Result<()> {
+        let actual = if mapping {
+            YamlType::Mapping
+        } else {
+            YamlType::Sequence
+        };
+        if self.core_tag.take().is_some_and(|tag| tag != actual) {
+            return Err(Error::new("serialized value does not match its YAML tag"));
+        }
+
+        Ok(())
     }
 
     fn enum_tag(&mut self, variant: &str) -> Result<()> {
@@ -169,8 +201,7 @@ macro_rules! integer {
     ($($method:ident : $ty:ty),* $(,)?) => {
         $(
             fn $method(self, value: $ty) -> Result<()> {
-                self.number(value);
-                Ok(())
+                self.number(value)
             }
         )*
     };
@@ -201,21 +232,25 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_bool(self, value: bool) -> Result<()> {
+        let value = if value { "true" } else { "false" };
+        Serializer::check_scalar_tag(self.core_tag.take(), value)?;
         self.tagged = false;
         self.yaml_tag = false;
-        self.output.push_str(if value { "true" } else { "false" });
+        self.output.push_str(value);
         Ok(())
     }
 
     fn serialize_f32(self, value: f32) -> Result<()> {
         if value.is_finite() {
             let start = self.output.len();
-            self.number(value);
+            self.tagged = false;
+            self.yaml_tag = false;
+            write!(self.output, "{value}").expect("String write");
             if !self.output[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0");
             }
 
-            Ok(())
+            Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
         } else {
             self.serialize_f64(f64::from(value))
         }
@@ -224,6 +259,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_f64(self, value: f64) -> Result<()> {
         self.tagged = false;
         self.yaml_tag = false;
+        let start = self.output.len();
         if value.is_nan() {
             self.output.push_str(".nan");
         } else if value.is_infinite() {
@@ -233,24 +269,21 @@ impl<'a> ser::Serializer for &'a mut Serializer {
                 ".inf"
             });
         } else {
-            let start = self.output.len();
-            self.number(value);
+            write!(self.output, "{value}").expect("String write");
             if !self.output[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0");
             }
         }
 
-        Ok(())
+        Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
     }
 
     fn serialize_char(self, value: char) -> Result<()> {
-        self.quoted(value.encode_utf8(&mut [0; 4]));
-        Ok(())
+        self.quoted(value.encode_utf8(&mut [0; 4]))
     }
 
     fn serialize_str(self, value: &str) -> Result<()> {
-        self.quoted(value);
-        Ok(())
+        self.quoted(value)
     }
 
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
@@ -258,7 +291,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
         for byte in value {
             seq.separator();
-            seq.serializer.number(byte);
+            seq.serializer.number(byte)?;
         }
 
         SerializeSeq::end(seq)
@@ -276,6 +309,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_unit(self) -> Result<()> {
+        Serializer::check_scalar_tag(self.core_tag.take(), "null")?;
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push_str("null");
@@ -350,6 +384,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
             return Ok(Compound {
                 serializer: self,
                 first: true,
+                keys: keys::Keys::default(),
                 state: CompoundState::Tag,
                 variant: false,
             });
@@ -400,6 +435,7 @@ enum CompoundState {
 struct Compound<'a> {
     serializer: &'a mut Serializer,
     first: bool,
+    keys: keys::Keys,
     state: CompoundState,
     variant: bool,
 }
@@ -455,6 +491,10 @@ impl SerializeSeq for Compound<'_> {
         match self.state {
             CompoundState::Tag => {
                 let tag = value.serialize(tag::TagSerializer)?;
+                self.serializer.core_tag = tag
+                    .strip_prefix("!<")
+                    .and_then(|tag| tag.strip_suffix('>'))
+                    .and_then(YamlType::from_tag);
                 self.serializer.output.push_str(&tag);
                 self.serializer.output.push(' ');
                 self.state = CompoundState::TaggedValue;
@@ -512,7 +552,10 @@ impl SerializeMap for Compound<'_> {
 
         self.separator();
         self.serializer.output.push_str("? ");
+        let start = self.serializer.output.len();
         key.serialize(&mut *self.serializer)?;
+        self.keys
+            .insert(&self.serializer.output, start..self.serializer.output.len())?;
         self.serializer.output.push_str(": ");
         self.state = CompoundState::MapValue;
         Ok(())
