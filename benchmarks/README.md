@@ -85,49 +85,7 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --
 Outside the CodSpeed runner, this checks that benchmarks execute but does not
 collect performance measurements. Use `cargo bench` for local wall-clock timings.
 
-## Second optimization run (2026-09-28)
-
-Commit `0dbb599` is the baseline. The benchmark target and fixtures were unchanged.
-Both executables used Rust 1.98.1 and the workspace release profile on macOS 26.7
-with an Apple M5 Max (18 cores, 128 GiB RAM). CPU placement, frequency, and
-background load were not controlled.
-
-Each version ran five times, alternating order within each pair. Divan used
-64 iterations per sample, a minimum of one second per workload, and a maximum
-of 1.2 seconds. The table shows the median of each version's five run medians.
-The mean time reduction across the 16 equally weighted workloads was **15.03%**.
-
-| Workload | Before (µs) | After (µs) | Time reduction |
-| --- | ---: | ---: | ---: |
-| `deserialize/kubernetes-guestbook` | 14.360 | 12.470 | 13.2% |
-| `deserialize/openapi-petstore` | 17.020 | 14.700 | 13.6% |
-| `deserialize/uv-ci` | 32.130 | 26.840 | 16.5% |
-| `deserialize_services_128` | 119.800 | 106.500 | 11.1% |
-| `deserialize_spanned/kubernetes-guestbook` | 19.930 | 17.310 | 13.1% |
-| `deserialize_spanned/openapi-petstore` | 17.070 | 14.650 | 14.2% |
-| `deserialize_spanned/uv-ci` | 42.970 | 35.450 | 17.5% |
-| `deserialize_spanned_fields/kubernetes-guestbook` | 21.050 | 18.340 | 12.9% |
-| `deserialize_spanned_fields/openapi-petstore` | 17.210 | 14.820 | 13.9% |
-| `deserialize_spanned_fields/uv-ci` | 43.520 | 35.670 | 18.0% |
-| `parse/kubernetes-guestbook` | 8.131 | 6.478 | 20.3% |
-| `parse/openapi-petstore` | 9.961 | 7.831 | 21.4% |
-| `parse/uv-ci` | 18.980 | 14.020 | 26.1% |
-| `serialize/kubernetes-guestbook` | 2.235 | 2.107 | 5.7% |
-| `serialize/openapi-petstore` | 2.733 | 2.501 | 8.5% |
-| `serialize/uv-ci` | 5.699 | 4.876 | 14.4% |
-
-[Run medians](results/2026-09-28-hillclimb2.csv).
-
-The [Linux follow-up](https://github.com/astral-sh/astral-yaml/actions/runs/36574445336)
-compared `294d476` with the same baseline on one GitHub-hosted runner with two
-AMD EPYC 9V74 vCPUs, using Rust 1.98.1. Each version ran twice, reversing order
-between runs, with 64 iterations per sample and 0.25–0.3 seconds per workload.
-The mean time reduction was **7.98%**. Kubernetes and OpenAPI serialization took
-6.9% and 2.4% more time, respectively; the other 14 workloads improved.
-These shorter runs do not establish a 10% native improvement on this CPU.
-[Linux run medians](results/2026-09-29-hillclimb2-linux.csv).
-
-## First optimization run (2026-09-28)
+## Optimization results (2026-09-28)
 
 Commit `e63f764` is the baseline for this run. The Astral benchmark target and
 fixtures were unchanged. Both executables used Rust 1.98.1 and
