@@ -65,6 +65,18 @@ impl Serializer {
         self.yaml_tag = false;
         self.output.push('"');
 
+        // Reduce the whole string so the compiler can check printable ASCII
+        // in parallel. Strings with escapes or Unicode use the scanner below.
+        #[allow(clippy::needless_bitwise_bool)]
+        let plain = value.bytes().fold(true, |plain, byte| {
+            plain & ((b' '..=b'~').contains(&byte) & (byte != b'"') & (byte != b'\\'))
+        });
+        if plain {
+            self.output.push_str(value);
+            self.output.push('"');
+            return;
+        }
+
         // Copy runs of text until a possible escape. The non-ASCII characters
         // escaped below start with C2, E2, or EF; stopping at those leading bytes
         // or at ASCII preserves UTF-8 character boundaries.

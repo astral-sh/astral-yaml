@@ -60,9 +60,9 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         source,
         pos: 0,
         options,
-        // Start with a bounded estimate; large scalars should not reserve an
-        // arena proportional to their byte length.
-        nodes: Vec::with_capacity((source.len() / 32).min(128).min(options.max_nodes)),
+        // Reserve for short mapping keys and values, while bounding unused
+        // capacity for inputs dominated by a few large scalars.
+        nodes: Vec::with_capacity((source.len() / 8).min(1024).min(options.max_nodes)),
         documents: Vec::new(),
         comments: Vec::new(),
         anchors: HashMap::new(),
@@ -71,6 +71,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         document_end_markers: Vec::new(),
         elements: 0,
         line_start: 0,
+        line_end_cache: Cell::new(None),
         colon_cache: Cell::new(None),
     }
     .stream()?;
@@ -92,6 +93,7 @@ struct Parser<'a> {
     document_end_markers: Vec<Span>,
     elements: usize,
     line_start: usize,
+    line_end_cache: Cell<Option<Span>>,
     colon_cache: Cell<Option<KeyLookahead>>,
 }
 
@@ -99,6 +101,7 @@ struct Parser<'a> {
 struct KeyLookahead {
     start: usize,
     colon: Option<usize>,
+    plain_end: Option<usize>,
 }
 
 impl<'a> Parser<'a> {
@@ -131,10 +134,19 @@ impl<'a> Parser<'a> {
     }
 
     fn line_end(&self) -> usize {
-        self.source.as_bytes()[self.pos..]
-            .iter()
-            .position(|b| matches!(b, b'\r' | b'\n'))
-            .map_or(self.source.len(), |n| self.pos + n)
+        if let Some(line) = self.line_end_cache.get() {
+            if line.start <= self.pos && self.pos <= line.end {
+                return line.end;
+            }
+        }
+
+        let end = memchr::memchr2(b'\r', b'\n', &self.source.as_bytes()[self.pos..])
+            .map_or(self.source.len(), |n| self.pos + n);
+        self.line_end_cache.set(Some(Span {
+            start: self.line_start,
+            end,
+        }));
+        end
     }
 
     fn spaces(&mut self) {
@@ -227,6 +239,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    #[inline]
     fn leading_spaces(&self) -> usize {
         let start = self.pos - self.column();
         self.source[start..]
@@ -235,6 +248,7 @@ impl<'a> Parser<'a> {
             .count()
     }
 
+    #[inline]
     fn document_boundary(&self) -> bool {
         match self.byte() {
             None => true,
@@ -269,6 +283,7 @@ impl<'a> Parser<'a> {
         self.byte() == Some(b) && self.next_byte().is_none_or(is_space)
     }
 
+    #[inline]
     fn marker(&self, marker: &str) -> bool {
         self.rest().starts_with(marker)
             && self.column() == 0
@@ -709,15 +724,17 @@ impl<'a> Parser<'a> {
             return cached.colon;
         }
 
-        let colon = self.find_simple_colon();
-        self.colon_cache.set(Some(KeyLookahead {
+        let mut lookahead = KeyLookahead {
             start: self.pos,
-            colon,
-        }));
-        colon
+            colon: None,
+            plain_end: None,
+        };
+        lookahead.colon = self.find_simple_colon(&mut lookahead);
+        self.colon_cache.set(Some(lookahead));
+        lookahead.colon
     }
 
-    fn find_simple_colon(&self) -> Option<usize> {
+    fn find_simple_colon(&self, lookahead: &mut KeyLookahead) -> Option<usize> {
         let bytes = self.source.as_bytes();
         let mut i = self.pos;
 
@@ -734,23 +751,30 @@ impl<'a> Parser<'a> {
 
         let plain = bytes.get(i).is_some_and(|b| !b"[{'\"".contains(b));
         if plain {
-            // Plain keys cannot open quoted or flow syntax. Skip their content
-            // in runs, checking only separators, comments, and line endings.
-            loop {
-                let remaining = &bytes[i..];
-                i += remaining
-                    .iter()
-                    .position(|b| matches!(b, b':' | b'#' | b'\r' | b'\n'))
-                    .unwrap_or(remaining.len());
+            let content_start = i;
+            let line_end = self.line_end();
 
-                match bytes.get(i) {
-                    None | Some(b'\r' | b'\n') => return None,
-                    Some(b'#') if i == self.pos || is_space(bytes[i - 1]) => return None,
-                    Some(b':') if bytes.get(i + 1).is_none_or(|b| is_space(*b)) => {
-                        return Some(i);
+            // Plain keys cannot open quoted or flow syntax. Skip their content
+            // in runs, checking only separators and comments on this line.
+            loop {
+                let remaining = &bytes[i..line_end];
+                i += memchr::memchr2(b':', b'#', remaining).unwrap_or(remaining.len());
+
+                let colon = match bytes.get(i) {
+                    None | Some(b'\r' | b'\n') => None,
+                    Some(b'#') if i == self.pos || is_space(bytes[i - 1]) => None,
+                    Some(b':') if bytes.get(i + 1).is_none_or(|b| is_space(*b)) => Some(i),
+                    _ => {
+                        i += 1;
+                        continue;
                     }
-                    _ => i += 1,
+                };
+
+                if content_start == self.pos {
+                    lookahead.plain_end = Some(i);
                 }
+
+                return colon;
             }
         }
 
@@ -837,8 +861,9 @@ impl<'a> Parser<'a> {
                 let key = self.inline(false, signed(indent), depth + 1)?;
                 self.spaces();
 
-                if self.source[before..self.pos].chars().count() > 1024
-                    || self.source[before..self.pos].contains(['\r', '\n'])
+                let key_source = &self.source[before..self.pos];
+                if (key_source.len() > 1024 && key_source.chars().count() > 1024)
+                    || self.line_start > before
                 {
                     return Err(self
                         .error("an implicit key must fit on one line of at most 1024 characters"));
@@ -869,13 +894,7 @@ impl<'a> Parser<'a> {
                         self.empty(at)?
                     }
                 } else {
-                    if !explicit && (self.simple_colon().is_some() || self.indicator(b'-')) {
-                        return Err(
-                            self.error("compact mapping is not allowed after an implicit key")
-                        );
-                    }
-
-                    self.block(signed(indent), depth + 1, true)?
+                    self.mapping_value(indent, depth + 1, explicit)?
                 }
             } else if explicit {
                 self.empty(self.nodes[key.0].span.end)?
@@ -906,6 +925,23 @@ impl<'a> Parser<'a> {
         };
 
         Ok(id)
+    }
+
+    #[inline]
+    fn mapping_value(&mut self, indent: usize, depth: usize, explicit: bool) -> Result<NodeId> {
+        if !explicit && (self.simple_colon().is_some() || self.indicator(b'-')) {
+            return Err(self.error("compact mapping is not allowed after an implicit key"));
+        }
+
+        if !explicit && !matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>' | b'?' | b':')) {
+            // Lookahead has ruled out a block collection. Parse the inline
+            // value without repeating block dispatch.
+            let value = self.inline(false, signed(indent), depth)?;
+            self.finish_line()?;
+            Ok(value)
+        } else {
+            self.block(signed(indent), depth, true)
+        }
     }
 
     fn tag_prefix(&self, handle: &str) -> Option<&str> {
@@ -1030,6 +1066,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    #[inline]
     fn inline(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeId> {
         self.check_depth(depth)?;
 
@@ -1286,26 +1323,25 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // The block-mapping lookahead has already scanned this implicit key.
-    // Its separator ends the scalar, apart from trailing separation space.
-    fn cached_plain_key(&mut self) -> Option<NodeKind<'a>> {
+    // Mapping lookahead already scanned the first line of a plain scalar,
+    // whether it found a key separator or an ordinary value. Advance to its
+    // delimiter and return the end of the content, excluding trailing spaces.
+    fn reuse_plain_lookahead(&mut self) -> usize {
         let start = self.pos;
-        let colon = self
+        let Some(scanned_end) = self
             .colon_cache
             .get()
-            .filter(|cached| cached.start == start)?
-            .colon?;
-        let value = self.source[start..colon].trim_end_matches([' ', '\t']);
-        self.pos = start + value.len();
+            .filter(|cached| cached.start == start)
+            .and_then(|cached| cached.plain_end)
+        else {
+            return start;
+        };
 
-        Some(NodeKind::Scalar(Scalar {
-            value: Cow::Borrowed(value),
-            style: ScalarStyle::Plain,
-            span: Span {
-                start,
-                end: self.pos,
-            },
-        }))
+        self.pos = scanned_end;
+        start
+            + self.source[start..scanned_end]
+                .trim_end_matches([' ', '\t'])
+                .len()
     }
 
     fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'a>> {
@@ -1320,15 +1356,21 @@ impl<'a> Parser<'a> {
             return Err(self.error("invalid plain scalar start"));
         }
 
-        if !flow {
-            if let Some(key) = self.cached_plain_key() {
-                return Ok(key);
-            }
-        }
-
         let mut end = start;
         let mut value: Option<String> = None;
         let mut segment = start;
+
+        if !flow {
+            end = self.reuse_plain_lookahead();
+            if self.pos > start && self.byte() == Some(b':') {
+                self.pos = end;
+                return Ok(NodeKind::Scalar(Scalar {
+                    value: Cow::Borrowed(&self.source[start..end]),
+                    style: ScalarStyle::Plain,
+                    span: Span { start, end },
+                }));
+            }
+        }
 
         loop {
             match self.byte() {
@@ -1507,15 +1549,13 @@ impl<'a> Parser<'a> {
                 _ => {
                     // Quotes, escapes, and line breaks are ASCII, so a byte
                     // scan also stops at a UTF-8 character boundary.
-                    let remaining = &self.source.as_bytes()[self.pos..];
-                    self.pos += remaining
-                        .iter()
-                        .position(|&byte| {
-                            byte == quote
-                                || matches!(byte, b'\r' | b'\n')
-                                || (quote == b'"' && byte == b'\\')
-                        })
-                        .unwrap_or(remaining.len());
+                    let remaining = &self.source.as_bytes()[self.pos..self.line_end()];
+                    let delimiter = if quote == b'"' {
+                        memchr::memchr2(quote, b'\\', remaining)
+                    } else {
+                        memchr::memchr(quote, remaining)
+                    };
+                    self.pos += delimiter.unwrap_or(remaining.len());
                 }
             }
         }

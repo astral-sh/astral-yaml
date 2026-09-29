@@ -9,6 +9,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+memchr.workspace = true
+
 [dev-dependencies]
 astral-yaml-dev.workspace = true
 insta.workspace = true

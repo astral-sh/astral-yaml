@@ -24,6 +24,7 @@ astral-yaml-dev = { path = "crates/astral-yaml-dev" }
 clap = { version = "4.6.7", features = ["derive"] }
 divan = { package = "codspeed-divan-compat", version = "5.0.2" }
 insta = "1.48.0"
+memchr = "2.8.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-saphyr = "=1.3.0"

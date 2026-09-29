@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 astral-yaml.workspace = true
+memchr.workspace = true
 serde.workspace = true
 
 [lints]
