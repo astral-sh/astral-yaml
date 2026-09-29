@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("prometheus-prometheus-documentation-examples-prometheus-digitalocean-beaf2fb0"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "scrape_configs" [plain @4:1..4:15]: sequence [block]
+        - mapping [block]
+          "job_name" [plain @6:5..6:13]: "prometheus" [double-quoted @6:15..6:27]
+          "static_configs" [plain @7:5..7:19]: sequence [block]
+            - mapping [block]
+              "targets" [plain @8:9..8:16]: sequence [flow]
+                - "localhost:9090" [double-quoted @8:19..8:35]
+        - mapping [block]
+          "job_name" [plain @11:5..11:13]: "node" [double-quoted @11:15..11:21]
+          "digitalocean_sd_configs" [plain @13:5..13:28]: sequence [block]
+            - mapping [block]
+              "authorization" [plain @14:9..14:22]: mapping [block]
+                "credentials" [plain @15:11..15:22]: "<replace with a Personal Access Token>" [double-quoted @15:24..15:64]
+          "relabel_configs" [plain @16:5..16:20]: sequence [block]
+            - mapping [block]
+              "source_labels" [plain @18:9..18:22]: sequence [flow]
+                - "__meta_digitalocean_tags" [plain @18:25..18:49]
+              "regex" [plain @19:9..19:14]: ".*,monitoring,.*" [double-quoted @19:16..19:34]
+              "action" [plain @20:9..20:15]: "keep" [plain @20:17..20:21]
+            - mapping [block]
+              "source_labels" [plain @23:9..23:22]: sequence [flow]
+                - "__meta_digitalocean_public_ipv6" [plain @23:25..23:56]
+              "target_label" [plain @24:9..24:21]: "__address__" [plain @24:23..24:34]
+              "replacement" [plain @25:9..25:20]: "[$1]:9100" [double-quoted @25:22..25:33]
+    "#);
+}

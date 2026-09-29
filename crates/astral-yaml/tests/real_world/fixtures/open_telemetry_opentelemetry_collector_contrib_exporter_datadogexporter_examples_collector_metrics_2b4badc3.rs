@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("open-telemetry-opentelemetry-collector-contrib-exporter-datadogexporter-examples-collector-metrics-2b4badc3"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "receivers" [plain @1:1..1:10]: mapping [block]
+        "prometheus" [plain @2:3..2:13]: mapping [block]
+          "config" [plain @3:5..3:11]: mapping [block]
+            "scrape_configs" [plain @4:7..4:21]: sequence [block]
+              - mapping [block]
+                "job_name" [plain @5:9..5:17]: "otelcol" [single-quoted @5:19..5:28]
+                "scrape_interval" [plain @6:9..6:24]: "10s" [plain @6:26..6:29]
+                "static_configs" [plain @7:9..7:23]: sequence [block]
+                  - mapping [block]
+                    "targets" [plain @8:11..8:18]: sequence [flow]
+                      - "0.0.0.0:8888" [single-quoted @8:21..8:35]
+      "exporters" [plain @10:1..10:10]: mapping [block]
+        "datadog" [plain @11:3..11:10]: mapping [block]
+          "api" [plain @12:5..12:8]: mapping [block]
+            "site" [plain @13:7..13:11]: "${env:DD_SITE}" [plain @13:13..13:27]
+            "key" [plain @14:7..14:10]: "${env:DD_API_KEY}" [plain @14:12..14:29]
+          "sending_queue" [plain @15:5..15:18]: mapping [block]
+            "batch" [plain @16:7..16:12]: "" [plain @16:13..16:13]
+      "service" [plain @18:1..18:8]: mapping [block]
+        "pipelines" [plain @19:3..19:12]: mapping [block]
+          "metrics" [plain @20:5..20:12]: mapping [block]
+            "receivers" [plain @21:7..21:16]: sequence [flow]
+              - "prometheus" [plain @21:19..21:29]
+            "exporters" [plain @22:7..22:16]: sequence [flow]
+              - "datadog" [plain @22:19..22:26]
+    "#);
+}

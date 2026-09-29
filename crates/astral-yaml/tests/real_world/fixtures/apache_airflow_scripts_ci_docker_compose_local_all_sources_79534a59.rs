@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("apache-airflow-scripts-ci-docker-compose-local-all-sources-79534a59"), @r#"
+    document 1 (start: ---, end: implicit)
+    mapping [block]
+      "services" [plain @18:1..18:9]: mapping [block]
+        "airflow" [plain @19:3..19:10]: mapping [block]
+          "stdin_open" [plain @20:5..20:15]: "true" [plain @20:17..20:21]
+          "tty" [plain @21:5..21:8]: "true" [plain @21:10..21:14]
+          "environment" [plain @22:5..22:16]: sequence [block]
+            - "AIRFLOW__CORE__PLUGINS_FOLDER=/files/plugins" [plain @23:9..23:53]
+          "volumes" [plain @29:5..29:12]: sequence [block]
+            - "../../../.bash_aliases:/root/.bash_aliases:cached" [plain @30:9..30:58]
+            - "../../../.bash_history:/root/.bash_history:cached" [plain @31:9..31:58]
+            - "../../../.inputrc:/root/.inputrc:cached" [plain @32:9..32:48]
+            - "../../../tmp:/tmp:cached" [plain @33:9..33:33]
+            - "../../../:/opt/airflow:cached" [plain @34:9..34:38]
+            - "root-airflow-volume:/root/airflow/" [plain @35:9..35:43]
+            - "airflow-cache-volume:/root/.cache" [plain @36:9..36:42]
+      "volumes" [plain @37:1..37:8]: mapping [block]
+        "root-airflow-volume" [plain @38:3..38:22]: mapping [block]
+          "labels" [plain @39:5..39:11]: mapping [block]
+            "org.apache.airflow.breeze" [plain @40:7..40:32]: "true" [double-quoted @40:34..40:40]
+            "org.apache.airflow.breeze.worktree" [plain @41:7..41:41]: "${BREEZE_WORKTREE_PATH:-}" [double-quoted @41:43..41:70]
+        "airflow-cache-volume" [plain @42:3..42:23]: mapping [block]
+          "labels" [plain @43:5..43:11]: mapping [block]
+            "org.apache.airflow.breeze" [plain @44:7..44:32]: "true" [double-quoted @44:34..44:40]
+            "org.apache.airflow.breeze.worktree" [plain @45:7..45:41]: "${BREEZE_WORKTREE_PATH:-}" [double-quoted @45:43..45:70]
+    "#);
+}

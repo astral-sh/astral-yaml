@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("docker-awesome-compose-nginx-nodejs-redis-compose-f3827869"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "services" [plain @2:1..2:9]: mapping [block]
+        "redis" [plain @3:3..3:8]: mapping [block]
+          "image" [plain @4:5..4:10]: "redislabs/redismod" [single-quoted @4:12..4:32]
+          "ports" [plain @5:5..5:10]: sequence [block]
+            - "6379:6379" [single-quoted @6:9..6:20]
+        "web1" [plain @7:3..7:7]: mapping [block]
+          "restart" [plain @8:5..8:12]: "on-failure" [plain @8:14..8:24]
+          "build" [plain @9:5..9:10]: "./web" [plain @9:12..9:17]
+          "hostname" [plain @10:5..10:13]: "web1" [plain @10:15..10:19]
+          "ports" [plain @11:5..11:10]: sequence [block]
+            - "81:5000" [single-quoted @12:9..12:18]
+        "web2" [plain @13:3..13:7]: mapping [block]
+          "restart" [plain @14:5..14:12]: "on-failure" [plain @14:14..14:24]
+          "build" [plain @15:5..15:10]: "./web" [plain @15:12..15:17]
+          "hostname" [plain @16:5..16:13]: "web2" [plain @16:15..16:19]
+          "ports" [plain @17:5..17:10]: sequence [block]
+            - "82:5000" [single-quoted @18:9..18:18]
+        "nginx" [plain @19:3..19:8]: mapping [block]
+          "build" [plain @20:5..20:10]: "./nginx" [plain @20:12..20:19]
+          "ports" [plain @21:5..21:10]: sequence [block]
+            - "80:80" [single-quoted @22:7..22:14]
+          "depends_on" [plain @23:5..23:15]: sequence [block]
+            - "web1" [plain @24:7..24:11]
+            - "web2" [plain @25:7..25:11]
+    "#);
+}

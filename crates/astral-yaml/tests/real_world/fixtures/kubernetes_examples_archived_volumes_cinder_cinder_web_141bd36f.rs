@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("kubernetes-examples-archived-volumes-cinder-cinder-web-141bd36f"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @1:1..1:11]: "v1" [plain @1:13..1:15]
+      "kind" [plain @2:1..2:5]: "Pod" [plain @2:7..2:10]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "cinder-web" [plain @4:9..4:19]
+      "spec" [plain @5:1..5:5]: mapping [block]
+        "containers" [plain @6:3..6:13]: sequence [block]
+          - mapping [block]
+            "name" [plain @7:7..7:11]: "web" [plain @7:13..7:16]
+            "image" [plain @8:7..8:12]: "nginx" [plain @8:14..8:19]
+            "ports" [plain @9:7..9:12]: sequence [block]
+              - mapping [block]
+                "name" [plain @10:11..10:15]: "web" [plain @10:17..10:20]
+                "containerPort" [plain @11:11..11:24]: "80" [plain @11:26..11:28]
+                "protocol" [plain @12:11..12:19]: "tcp" [plain @12:21..12:24]
+            "volumeMounts" [plain @13:7..13:19]: sequence [block]
+              - mapping [block]
+                "name" [plain @14:11..14:15]: "html-volume" [plain @14:17..14:28]
+                "mountPath" [plain @15:11..15:20]: "/usr/share/nginx/html" [double-quoted @15:22..15:45]
+        "volumes" [plain @16:3..16:10]: sequence [block]
+          - mapping [block]
+            "name" [plain @17:7..17:11]: "html-volume" [plain @17:13..17:24]
+            "cinder" [plain @18:7..18:13]: mapping [block]
+              "volumeID" [plain @20:9..20:17]: "volume_ID" [plain @20:19..20:28]
+              "fsType" [plain @21:9..21:15]: "ext4" [plain @21:17..21:21]
+    "#);
+}

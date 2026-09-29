@@ -1,0 +1,161 @@
+steps:
+  - wait
+
+  - name: ":s3: Upload Binaries to S3"
+    command: ".buildkite/steps/publish-to-s3.sh"
+    env:
+      CODENAME: "stable"
+    plugins:
+      - aws-assume-role-with-web-identity#v1.4.0:
+          role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+          session-tags:
+            - organization_slug
+            - organization_id
+            - pipeline_slug
+            - build_branch
+      - ecr#v2.7.0:
+          login: true
+          account-ids: "032379705303"
+      - docker#v5.8.0:
+          image: "032379705303.dkr.ecr.us-east-1.amazonaws.com/deploytools:2022.07"
+          environment:
+            - "AWS_ACCESS_KEY_ID"
+            - "AWS_SECRET_ACCESS_KEY"
+            - "AWS_SESSION_TOKEN"
+          propagate-environment: true
+          mount-buildkite-agent: true
+
+  - name: ":octocat: :rocket: Create Github Release (if necessary)"
+    command: ".buildkite/steps/github-release.sh"
+    env:
+      CODENAME: "stable"
+    plugins:
+      - aws-assume-role-with-web-identity#v1.4.0:
+          role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+          session-tags:
+            - organization_slug
+            - organization_id
+            - pipeline_slug
+            - build_branch
+      - ecr#v2.7.0:
+          login: true
+          account-ids: "032379705303"
+      - docker#v5.8.0:
+          environment:
+            - "AWS_ACCESS_KEY_ID"
+            - "AWS_SECRET_ACCESS_KEY"
+            - "AWS_SESSION_TOKEN"
+          image: "032379705303.dkr.ecr.us-east-1.amazonaws.com/deploytools:2022.07"
+          propagate-environment: true
+          mount-buildkite-agent: true
+
+  - name: ":redhat: Publish RPM Package"
+    command: ".buildkite/steps/publish-rpm-package.sh"
+    env:
+      CODENAME: "stable"
+      RPM_S3_BUCKET: "yum.buildkite.com"
+    plugins:
+      - aws-assume-role-with-web-identity#v1.4.0:
+          role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+          session-tags:
+            - organization_slug
+            - organization_id
+            - pipeline_slug
+            - build_branch
+      - docker#v5.8.0:
+          environment:
+            - "AWS_ACCESS_KEY_ID"
+            - "AWS_SECRET_ACCESS_KEY"
+            - "AWS_SESSION_TOKEN"
+          image: "buildkite/agent:3.55.0-ubuntu"
+          entrypoint: bash
+          propagate-environment: true
+          mount-buildkite-agent: true
+          volumes:
+            - "/yum.buildkite.com"
+    retry:
+      automatic:
+        - exit_status: 1
+          limit: 3
+
+  - name: ":debian: Publish Debian Package"
+    command: ".buildkite/steps/publish-debian-package.sh"
+    env:
+      CODENAME: "stable"
+      DEB_S3_BUCKET: "apt.buildkite.com/buildkite-agent"
+    plugins:
+      - aws-assume-role-with-web-identity#v1.4.0:
+          role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+          session-tags:
+            - organization_slug
+            - organization_id
+            - pipeline_slug
+            - build_branch
+      - ecr#v2.7.0:
+          login: true
+          account-ids: "032379705303"
+      - docker#v5.8.0:
+          environment:
+            - "AWS_ACCESS_KEY_ID"
+            - "AWS_SECRET_ACCESS_KEY"
+            - "AWS_SESSION_TOKEN"
+          image: "032379705303.dkr.ecr.us-east-1.amazonaws.com/deploytools:2022.07"
+          propagate-environment: true
+          mount-buildkite-agent: true
+          tmpfs:
+            - "/root/.gnupg"
+
+  - group: ":docker: Publish Docker Images"
+    steps:
+      - name: ":docker: Publish Docker Images to {{matrix.registry}}"
+        command: ".buildkite/steps/publish-docker-images.sh"
+        env:
+          CODENAME: "stable"
+          REGISTRY: "{{matrix.registry}}"
+        plugins:
+          - aws-assume-role-with-web-identity#v1.4.0:
+              role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+              session-tags:
+                - organization_slug
+                - organization_id
+                - pipeline_slug
+                - build_branch
+          - ecr#v2.7.0:
+              login: true
+              account-ids: "445615400570"
+        matrix:
+          setup:
+            registry:
+              - docker.io
+              - ghcr.io
+              - packages.buildkite.com
+          adjustments:
+            - with: { registry: "packages.buildkite.com" }
+              soft_fail: true
+
+  - wait
+
+  - name: ":beer: Publish Homebrew Package"
+    command: ".buildkite/steps/release-homebrew.sh"
+    artifact_paths: "pkg/*.rb;pkg/*.json"
+    env:
+      CODENAME: "stable"
+    plugins:
+      - aws-assume-role-with-web-identity#v1.4.0:
+          role-arn: arn:aws:iam::032379705303:role/pipeline-buildkite-agent-release-stable
+          session-tags:
+            - organization_slug
+            - organization_id
+            - pipeline_slug
+            - build_branch
+      - ecr#v2.7.0:
+          login: true
+          account-ids: "032379705303"
+      - docker#v5.8.0:
+          environment:
+            - "AWS_ACCESS_KEY_ID"
+            - "AWS_SECRET_ACCESS_KEY"
+            - "AWS_SESSION_TOKEN"
+          image: "032379705303.dkr.ecr.us-east-1.amazonaws.com/deploytools:2022.07"
+          propagate-environment: true
+          mount-buildkite-agent: true

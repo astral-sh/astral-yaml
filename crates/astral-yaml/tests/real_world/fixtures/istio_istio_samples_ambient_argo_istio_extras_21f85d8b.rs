@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("istio-istio-samples-ambient-argo-istio-extras-21f85d8b"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @1:1..1:11]: "argoproj.io/v1alpha1" [plain @1:13..1:33]
+      "kind" [plain @2:1..2:5]: "Application" [plain @2:7..2:18]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "istio-addons" [plain @4:9..4:21]
+        "namespace" [plain @5:3..5:12]: "argocd" [plain @5:14..5:20]
+        "finalizers" [plain @6:3..6:13]: sequence [block]
+          - "resources-finalizer.argocd.argoproj.io" [plain @7:7..7:45]
+      "spec" [plain @8:1..8:5]: mapping [block]
+        "project" [plain @9:3..9:10]: "default" [plain @9:12..9:19]
+        "source" [plain @10:3..10:9]: mapping [block]
+          "repoURL" [plain @11:5..11:12]: "https://github.com/istio/istio.git" [single-quoted @11:14..11:50]
+          "targetRevision" [plain @12:5..12:19]: "HEAD" [plain @12:21..12:25]
+          "path" [plain @13:5..13:9]: "samples/addons" [plain @13:11..13:25]
+          "directory" [plain @14:5..14:14]: mapping [block]
+            "exclude" [plain @15:7..15:14]: "loki.yaml" [plain @15:16..15:25]
+        "destination" [plain @16:3..16:14]: mapping [block]
+          "name" [plain @17:5..17:9]: "ambient-cluster" [plain @17:11..17:26]
+          "namespace" [plain @18:5..18:14]: "istio-system" [plain @18:16..18:28]
+        "syncPolicy" [plain @19:3..19:13]: mapping [block]
+          "automated" [plain @20:5..20:14]: mapping [block]
+            "prune" [plain @21:7..21:12]: "true" [plain @21:14..21:18]
+            "selfHeal" [plain @22:7..22:15]: "true" [plain @22:17..22:21]
+          "syncOptions" [plain @23:5..23:16]: sequence [block]
+            - "CreateNamespace=true" [plain @24:9..24:29]
+    "#);
+}

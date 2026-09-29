@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-workflows-examples-retry-backoff-309fb9e4"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @2:1..2:11]: "argoproj.io/v1alpha1" [plain @2:13..2:33]
+      "kind" [plain @3:1..3:5]: "Workflow" [plain @3:7..3:15]
+      "metadata" [plain @4:1..4:9]: mapping [block]
+        "generateName" [plain @5:3..5:15]: "retry-backoff-" [plain @5:17..5:31]
+        "labels" [plain @6:3..6:9]: mapping [block]
+          "workflows.argoproj.io/no-test" [plain @7:5..7:34]: "duration" [double-quoted @7:36..7:46]
+      "spec" [plain @8:1..8:5]: mapping [block]
+        "entrypoint" [plain @9:3..9:13]: "retry-backoff" [plain @9:15..9:28]
+        "templates" [plain @10:3..10:12]: sequence [block]
+          - mapping [block]
+            "name" [plain @11:5..11:9]: "retry-backoff" [plain @11:11..11:24]
+            "retryStrategy" [plain @12:5..12:18]: mapping [block]
+              "limit" [plain @13:7..13:12]: "10" [double-quoted @13:14..13:18]
+              "backoff" [plain @14:7..14:14]: mapping [block]
+                "duration" [plain @15:9..15:17]: "1" [double-quoted @15:19..15:22]
+                "factor" [plain @16:9..16:15]: "2" [double-quoted @16:17..16:20]
+                "maxDuration" [plain @17:9..17:20]: "1m" [double-quoted @17:22..17:26]
+                "cap" [plain @18:9..18:12]: "5" [double-quoted @18:14..18:17]
+            "container" [plain @19:5..19:14]: mapping [block]
+              "image" [plain @20:7..20:12]: "python:alpine3.23" [plain @20:14..20:31]
+              "command" [plain @21:7..21:14]: sequence [flow]
+                - "python" [double-quoted @21:17..21:25]
+                - "-c" [plain @21:27..21:29]
+              "args" [plain @23:7..23:11]: sequence [flow]
+                - "import random; import sys; exit_code = random.choice([0, 1, 1]); sys.exit(exit_code)" [double-quoted @23:14..23:100]
+    "#);
+}

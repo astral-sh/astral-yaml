@@ -1,0 +1,33 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("open-telemetry-opentelemetry-collector-contrib-examples-fault-tolerant-logs-collection-otel-col-config-583f13f2"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "receivers" [plain @1:1..1:10]: mapping [block]
+        "file_log" [plain @2:3..2:11]: mapping [block]
+          "include" [plain @3:5..3:12]: sequence [flow]
+            - "/var/log/busybox/simple.log" [plain @3:15..3:42]
+          "storage" [plain @4:5..4:12]: "file_storage/filelogreceiver" [plain @4:14..4:42]
+      "extensions" [plain @6:1..6:11]: mapping [block]
+        "file_storage/filelogreceiver" [plain @7:3..7:31]: mapping [block]
+          "directory" [plain @8:5..8:14]: "/var/lib/otelcol/file_storage/receiver" [plain @8:16..8:54]
+        "file_storage/otlpoutput" [plain @9:3..9:26]: mapping [block]
+          "directory" [plain @10:5..10:14]: "/var/lib/otelcol/file_storage/output" [plain @10:16..10:52]
+      "service" [plain @12:1..12:8]: mapping [block]
+        "extensions" [plain @13:3..13:13]: sequence [flow]
+          - "file_storage/filelogreceiver" [plain @13:16..13:44]
+          - "file_storage/otlpoutput" [plain @13:46..13:69]
+        "pipelines" [plain @14:3..14:12]: mapping [block]
+          "logs" [plain @15:5..15:9]: mapping [block]
+            "receivers" [plain @16:7..16:16]: sequence [flow]
+              - "file_log" [plain @16:19..16:27]
+            "exporters" [plain @17:7..17:16]: sequence [flow]
+              - "otlp_grpc/custom" [plain @17:19..17:35]
+            "processors" [plain @18:7..18:17]: sequence [flow]
+      "exporters" [plain @20:1..20:10]: mapping [block]
+        "otlp_grpc/custom" [plain @21:3..21:19]: mapping [block]
+          "endpoint" [plain @22:5..22:13]: "http://0.0.0.0:4242" [plain @22:15..22:34]
+          "sending_queue" [plain @23:5..23:18]: mapping [block]
+            "storage" [plain @24:7..24:14]: "file_storage/otlpoutput" [plain @24:16..24:39]
+    "#);
+}

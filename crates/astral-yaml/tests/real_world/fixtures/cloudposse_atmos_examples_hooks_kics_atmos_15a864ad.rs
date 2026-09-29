@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("cloudposse-atmos-examples-hooks-kics-atmos-15a864ad"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "base_path" [plain @1:1..1:10]: "./" [double-quoted @1:12..1:16]
+      "settings" [plain @3:1..3:9]: mapping [block]
+        "experimental" [plain @4:3..4:15]: "warn" [plain @4:17..4:21]
+      "components" [plain @6:1..6:11]: mapping [block]
+        "terraform" [plain @7:3..7:12]: mapping [block]
+          "base_path" [plain @8:5..8:14]: "components/terraform" [double-quoted @8:16..8:38]
+          "command" [plain @9:5..9:12]: "tofu" [plain @9:14..9:18]
+          "apply_auto_approve" [plain @10:5..10:23]: "false" [plain @10:25..10:30]
+          "deploy_run_init" [plain @11:5..11:20]: "true" [plain @11:22..11:26]
+          "init_run_reconfigure" [plain @12:5..12:25]: "true" [plain @12:27..12:31]
+          "auto_generate_backend_file" [plain @13:5..13:31]: "false" [plain @13:33..13:38]
+          "platforms" [plain @14:5..14:14]: sequence [block]
+            - "darwin_arm64" [plain @15:9..15:21]
+            - "linux_amd64" [plain @16:9..16:20]
+      "stacks" [plain @26:1..26:7]: mapping [block]
+        "base_path" [plain @27:3..27:12]: "stacks" [double-quoted @27:14..27:22]
+        "included_paths" [plain @28:3..28:17]: sequence [block]
+          - "deploy/**/*" [double-quoted @29:7..29:20]
+        "excluded_paths" [plain @30:3..30:17]: sequence [block]
+          - "**/_defaults.yaml" [double-quoted @31:7..31:26]
+        "name_template" [plain @32:3..32:16]: "{{.vars.stage}}" [double-quoted @32:18..32:35]
+      "logs" [plain @33:1..33:5]: mapping [block]
+        "level" [plain @34:3..34:8]: "Info" [plain @34:10..34:14]
+        "file" [plain @35:3..35:7]: "/dev/stderr" [double-quoted @35:9..35:22]
+    "#);
+}

@@ -1,0 +1,87 @@
+type: google.api.Service
+config_version: 3
+name: devicestreaming.googleapis.com
+title: Device Streaming API
+
+apis:
+- name: google.cloud.devicestreaming.v1.DirectAccessService
+
+documentation:
+  summary: The Cloud API for device streaming usage.
+  overview: |-
+    The Developer Device Platform is a next-generation, commercial-grade
+    platform for remote device orchestration. It provides a managed device
+    farm for developers to build and test applications using remote
+    infrastructure, natively integrating with Google Cloud.
+
+    The **Device Streaming API** provides real-time, interactive access to
+    remote physical Android devices for live debugging, testing, and streaming
+    across physical device catalogs.
+
+    ### Key Features
+
+    - **Physical Device Access**: Securely access real physical Android
+    devices—including Google Pixel models and partner devices from Samsung,
+    Xiaomi, OPPO, OnePlus, vivo, and Transsion—to deploy and test applications
+    remotely. - **Direct ADB over SSL**: Establish direct ADB over SSL
+    connections for real-time device interaction (screen manipulation,
+    rotation, unfolding) and native integration with developer tooling,
+    Debugger, Profiler, Logcat, and Device Explorer. - **Automated Security &
+    Privacy**: Automatic data wiping and factory resets are performed after
+    every session to protect developer data and maintain device security. -
+    **Google Cloud Integration**: Fully integrated with Cloud Logging, Cloud
+    IAM, and Google Cloud billing.
+
+    For more details, see the [Developer Device Platform
+    documentation](https://docs.cloud.google.com/developer-device-platform).
+
+authentication:
+  rules:
+  - selector: 'google.cloud.devicestreaming.v1.DirectAccessService.*'
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/cloud-platform
+
+publishing:
+  new_issue_uri: https://issuetracker.google.com/issues/new?component=1767292&template=2112325
+  documentation_uri: https://cloud.google.com/device-streaming/docs
+  api_short_name: devicestreaming
+  github_label: 'api: devicestreaming'
+  doc_tag_prefix: devicestreaming
+  organization: CLOUD
+  library_settings:
+  - version: google.cloud.devicestreaming.v1
+    launch_stage: GA
+    java_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    cpp_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    php_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    python_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    node_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    dotnet_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    ruby_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+    go_settings:
+      common:
+        destinations:
+        - PACKAGE_MANAGER
+  rest_reference_documentation_uri: https://docs.cloud.google.com/device-streaming/docs/reference/rest

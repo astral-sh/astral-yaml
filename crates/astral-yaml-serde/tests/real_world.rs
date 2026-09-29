@@ -1,42 +1,27 @@
-use std::{fs, path::PathBuf};
-
-use astral_yaml_dev::Value;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Fixture {
-    file: String,
-    valid_yaml_1_2: Option<bool>,
-}
-
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/real-world")
-}
-
-fn manifest() -> Vec<Fixture> {
-    serde_json::from_str(include_str!("../../../fixtures/real-world/manifest.json")).unwrap()
-}
-
-fn astral(source: &str) -> Vec<Value> {
-    let stream = astral_yaml::parse(source).unwrap();
-    (0..stream.documents().len())
-        .map(|index| astral_yaml_serde::from_document(&stream, index).unwrap())
-        .collect()
-}
+use astral_yaml_dev::{Value, fixtures::manifest};
 
 #[test]
 fn real_world_values_comments_and_serialization() {
     for fixture in manifest() {
-        let name = fixture.file;
-        let source = fs::read_to_string(root().join(&name)).unwrap();
+        let name = &fixture.file;
+        let source = fixture.source();
 
-        if !fixture.valid_yaml_1_2.unwrap_or(true) {
+        if !fixture.valid_syntax() {
             assert!(astral_yaml_serde::from_str::<Value>(&source).is_err());
             continue;
         }
 
         let stream = astral_yaml::parse(&source).unwrap();
-        let values = astral(&source);
+        let values: Result<Vec<Value>, _> = (0..stream.documents().len())
+            .map(|index| astral_yaml_serde::from_document(&stream, index))
+            .collect();
+
+        if let Some(expected) = fixture.serde_error {
+            assert_eq!(values.unwrap_err().message, expected, "{name}");
+            continue;
+        }
+
+        let values = values.unwrap_or_else(|error| panic!("{name}: {error}"));
 
         if stream.documents().len() == 1 {
             let wrapped: astral_yaml_serde::Spanned<'_, Value> =

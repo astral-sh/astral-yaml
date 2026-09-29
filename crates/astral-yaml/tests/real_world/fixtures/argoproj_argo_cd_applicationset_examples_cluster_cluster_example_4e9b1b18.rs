@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-cd-applicationset-examples-cluster-cluster-example-4e9b1b18"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @1:1..1:11]: "argoproj.io/v1alpha1" [plain @1:13..1:33]
+      "kind" [plain @2:1..2:5]: "ApplicationSet" [plain @2:7..2:21]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "guestbook" [plain @4:9..4:18]
+      "spec" [plain @5:1..5:5]: mapping [block]
+        "goTemplate" [plain @6:3..6:13]: "true" [plain @6:15..6:19]
+        "goTemplateOptions" [plain @7:3..7:20]: sequence [flow]
+          - "missingkey=error" [double-quoted @7:23..7:41]
+        "generators" [plain @8:3..8:13]: sequence [block]
+          - mapping [block]
+            "clusters" [plain @9:5..9:13]: mapping [flow]
+        "template" [plain @10:3..10:11]: mapping [block]
+          "metadata" [plain @11:5..11:13]: mapping [block]
+            "name" [plain @12:7..12:11]: "{{.name}}-guestbook" [single-quoted @12:13..12:34]
+          "spec" [plain @13:5..13:9]: mapping [block]
+            "project" [plain @14:7..14:14]: "default" [double-quoted @14:16..14:25]
+            "source" [plain @15:7..15:13]: mapping [block]
+              "repoURL" [plain @16:9..16:16]: "https://github.com/argoproj/argocd-example-apps/" [plain @16:18..16:66]
+              "targetRevision" [plain @17:9..17:23]: "HEAD" [plain @17:25..17:29]
+              "path" [plain @18:9..18:13]: "guestbook" [plain @18:15..18:24]
+            "destination" [plain @19:7..19:18]: mapping [block]
+              "server" [plain @20:9..20:15]: "{{.server}}" [single-quoted @20:17..20:30]
+              "namespace" [plain @21:9..21:18]: "guestbook" [plain @21:20..21:29]
+    "#);
+}

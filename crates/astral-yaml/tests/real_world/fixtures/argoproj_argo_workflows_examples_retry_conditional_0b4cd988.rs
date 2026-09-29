@@ -1,0 +1,58 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-workflows-examples-retry-conditional-0b4cd988"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @4:1..4:11]: "argoproj.io/v1alpha1" [plain @4:13..4:33]
+      "kind" [plain @5:1..5:5]: "Workflow" [plain @5:7..5:15]
+      "metadata" [plain @6:1..6:9]: mapping [block]
+        "generateName" [plain @7:3..7:15]: "retry-script-" [plain @7:17..7:30]
+        "labels" [plain @8:3..8:9]: mapping [block]
+          "workflows.argoproj.io/no-test" [plain @9:5..9:34]: "environment" [double-quoted @9:36..9:49]
+      "spec" [plain @10:1..10:5]: mapping [block]
+        "entrypoint" [plain @11:3..11:13]: "main" [plain @11:15..11:19]
+        "templates" [plain @12:3..12:12]: sequence [block]
+          - mapping [block]
+            "name" [plain @13:7..13:11]: "main" [plain @13:13..13:17]
+            "steps" [plain @14:7..14:12]: sequence [block]
+              - sequence [block]
+                - mapping [block]
+                  "name" [plain @15:13..15:17]: "safe-to-retry" [plain @15:19..15:32]
+                  "template" [plain @16:13..16:21]: "safe-to-retry" [plain @16:23..16:36]
+              - sequence [block]
+                - mapping [block]
+                  "name" [plain @17:13..17:17]: "retry" [plain @17:19..17:24]
+                  "template" [plain @18:13..18:21]: "retry-script" [plain @18:23..18:35]
+                  "arguments" [plain @19:13..19:22]: mapping [block]
+                    "parameters" [plain @20:15..20:25]: sequence [block]
+                      - mapping [block]
+                        "name" [plain @21:19..21:23]: "safe-to-retry" [plain @21:25..21:38]
+                        "value" [plain @22:19..22:24]: "{{steps.safe-to-retry.outputs.result}}" [double-quoted @22:26..22:66]
+          - mapping [block]
+            "name" [plain @24:7..24:11]: "safe-to-retry" [plain @24:13..24:26]
+            "script" [plain @25:7..25:13]: mapping [block]
+              "image" [plain @26:9..26:14]: "python:alpine3.23" [plain @26:16..26:33]
+              "command" [plain @27:9..27:16]: sequence [flow]
+                - "python" [double-quoted @27:19..27:27]
+              "source" [plain @28:9..28:15]: literal [@28:17..31:1]
+                "print(\"true\")\n"
+          - mapping [block]
+            "name" [plain @31:7..31:11]: "retry-script" [plain @31:13..31:25]
+            "inputs" [plain @32:7..32:13]: mapping [block]
+              "parameters" [plain @33:9..33:19]: sequence [block]
+                - mapping [block]
+                  "name" [plain @34:15..34:19]: "safe-to-retry" [plain @34:21..34:34]
+            "retryStrategy" [plain @35:7..35:20]: mapping [block]
+              "limit" [plain @36:9..36:14]: "10" [double-quoted @36:16..36:20]
+              "expression" [plain @41:9..41:19]: "asInt(lastRetry.exitCode) > 1 && lastRetry.status != \"Error\" && asInt(lastRetry.duration) < 120 && ({{inputs.parameters.safe-to-retry}} == true || lastRetry.message matches 'imminent node shutdown|pod deleted')" [folded @41:21..46:1]
+            "script" [plain @46:7..46:13]: mapping [block]
+              "image" [plain @47:9..47:14]: "python:alpine3.23" [plain @47:16..47:33]
+              "command" [plain @48:9..48:16]: sequence [flow]
+                - "python" [double-quoted @48:19..48:27]
+              "source" [plain @50:9..50:15]: literal [@50:17..55:1]
+                "import random;\n"
+                "import sys;\n"
+                "exit_code = random.choice([1, 2]);\n"
+                "sys.exit(exit_code)\n"
+    "#);
+}

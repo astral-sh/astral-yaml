@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("istio-istio-samples-bookinfo-networking-virtual-service-reviews-jason-v2-v3-3443b882"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @1:1..1:11]: "networking.istio.io/v1" [plain @1:13..1:35]
+      "kind" [plain @2:1..2:5]: "VirtualService" [plain @2:7..2:21]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "reviews" [plain @4:9..4:16]
+      "spec" [plain @5:1..5:5]: mapping [block]
+        "hosts" [plain @6:3..6:8]: sequence [block]
+          - "reviews" [plain @7:5..7:12]
+        "http" [plain @8:3..8:7]: sequence [block]
+          - mapping [block]
+            "match" [plain @9:5..9:10]: sequence [block]
+              - mapping [block]
+                "headers" [plain @10:7..10:14]: mapping [block]
+                  "end-user" [plain @11:9..11:17]: mapping [block]
+                    "exact" [plain @12:11..12:16]: "jason" [plain @12:18..12:23]
+            "route" [plain @13:5..13:10]: sequence [block]
+              - mapping [block]
+                "destination" [plain @14:7..14:18]: mapping [block]
+                  "host" [plain @15:9..15:13]: "reviews" [plain @15:15..15:22]
+                  "subset" [plain @16:9..16:15]: "v2" [plain @16:17..16:19]
+          - mapping [block]
+            "route" [plain @17:5..17:10]: sequence [block]
+              - mapping [block]
+                "destination" [plain @18:7..18:18]: mapping [block]
+                  "host" [plain @19:9..19:13]: "reviews" [plain @19:15..19:22]
+                  "subset" [plain @20:9..20:15]: "v3" [plain @20:17..20:19]
+    "#);
+}

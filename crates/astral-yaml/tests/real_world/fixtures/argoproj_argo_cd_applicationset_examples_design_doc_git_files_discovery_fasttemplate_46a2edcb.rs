@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-cd-applicationset-examples-design-doc-git-files-discovery-fasttemplate-46a2edcb"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @35:1..35:11]: "argoproj.io/v1alpha1" [plain @35:13..35:33]
+      "kind" [plain @36:1..36:5]: "ApplicationSet" [plain @36:7..36:21]
+      "metadata" [plain @37:1..37:9]: mapping [block]
+        "name" [plain @38:3..38:7]: "guestbook" [plain @38:9..38:18]
+      "spec" [plain @39:1..39:5]: mapping [block]
+        "generators" [plain @40:3..40:13]: sequence [block]
+          - mapping [block]
+            "git" [plain @41:5..41:8]: mapping [block]
+              "repoURL" [plain @42:7..42:14]: "https://github.com/infra-team/cluster-deployments.git" [plain @42:16..42:69]
+              "files" [plain @43:7..43:12]: sequence [block]
+                - mapping [block]
+                  "path" [plain @44:9..44:13]: "**/config.json" [double-quoted @44:15..44:31]
+        "template" [plain @45:3..45:11]: mapping [block]
+          "metadata" [plain @46:5..46:13]: mapping [block]
+            "name" [plain @47:7..47:11]: "{{cluster.name}}-guestbook" [single-quoted @47:13..47:41]
+          "spec" [plain @48:5..48:9]: mapping [block]
+            "source" [plain @49:7..49:13]: mapping [block]
+              "repoURL" [plain @50:9..50:16]: "https://github.com/infra-team/cluster-deployments.git" [plain @50:18..50:71]
+              "targetRevision" [plain @51:9..51:23]: "HEAD" [plain @51:25..51:29]
+              "path" [plain @52:9..52:13]: "apps/guestbook" [plain @52:15..52:29]
+            "destination" [plain @53:7..53:18]: mapping [block]
+              "server" [plain @54:9..54:15]: "{{cluster.address}}" [single-quoted @54:17..54:38]
+              "namespace" [plain @55:9..55:18]: "guestbook" [plain @55:20..55:29]
+    "#);
+}

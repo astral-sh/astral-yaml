@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("dagster-io-dagster-examples-docs-snippets-docs-snippets-integrations-airlift-v2-represent-airflow-dags-in-dagster-compo-0953944c"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "type" [plain @1:1..1:5]: "dagster_airlift.core.components.AirflowInstanceComponent" [plain @1:7..1:63]
+      "attributes" [plain @3:1..3:11]: mapping [block]
+        "name" [plain @4:3..4:7]: "my_airflow" [plain @4:9..4:19]
+        "auth" [plain @5:3..5:7]: mapping [block]
+          "type" [plain @6:5..6:9]: "basic_auth" [plain @6:11..6:21]
+          "webserver_url" [plain @7:5..7:18]: "{{ env(\"AIRFLOW_WEBSERVER_URL\") }}" [single-quoted @7:20..7:56]
+          "username" [plain @8:5..8:13]: "{{ env(\"AIRFLOW_USERNAME\") }}" [single-quoted @8:15..8:46]
+          "password" [plain @9:5..9:13]: "{{ env(\"AIRFLOW_PASSWORD\") }}" [single-quoted @9:15..9:46]
+        "mappings" [plain @11:3..11:11]: sequence [block]
+          - mapping [block]
+            "dag_id" [plain @12:5..12:11]: "upload_source_data" [plain @12:13..12:31]
+            "assets" [plain @13:5..13:11]: sequence [block]
+              - mapping [block]
+                "spec" [plain @14:9..14:13]: mapping [block]
+                  "key" [plain @15:11..15:14]: "order_data" [plain @15:16..15:26]
+              - mapping [block]
+                "spec" [plain @16:9..16:13]: mapping [block]
+                  "key" [plain @17:11..17:14]: "activity_data" [plain @17:16..17:29]
+              - mapping [block]
+                "spec" [plain @18:9..18:13]: mapping [block]
+                  "key" [plain @19:11..19:14]: "aggregated_user_data" [plain @19:16..19:36]
+                  "deps" [plain @20:11..20:15]: sequence [flow]
+                    - "order_data" [plain @20:18..20:28]
+                    - "activity_data" [plain @20:30..20:43]
+    "#);
+}

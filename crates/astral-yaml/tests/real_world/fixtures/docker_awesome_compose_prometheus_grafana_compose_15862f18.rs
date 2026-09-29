@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("docker-awesome-compose-prometheus-grafana-compose-15862f18"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "services" [plain @1:1..1:9]: mapping [block]
+        "prometheus" [plain @2:3..2:13]: mapping [block]
+          "image" [plain @3:5..3:10]: "prom/prometheus" [plain @3:12..3:27]
+          "container_name" [plain @4:5..4:19]: "prometheus" [plain @4:21..4:31]
+          "command" [plain @5:5..5:12]: sequence [block]
+            - "--config.file=/etc/prometheus/prometheus.yml" [single-quoted @6:9..6:55]
+          "ports" [plain @7:5..7:10]: sequence [block]
+            - "9090:9090" [plain @8:9..8:18]
+          "restart" [plain @9:5..9:12]: "unless-stopped" [plain @9:14..9:28]
+          "volumes" [plain @10:5..10:12]: sequence [block]
+            - "./prometheus:/etc/prometheus" [plain @11:9..11:37]
+            - "prom_data:/prometheus" [plain @12:9..12:30]
+        "grafana" [plain @13:3..13:10]: mapping [block]
+          "image" [plain @14:5..14:10]: "grafana/grafana" [plain @14:12..14:27]
+          "container_name" [plain @15:5..15:19]: "grafana" [plain @15:21..15:28]
+          "ports" [plain @16:5..16:10]: sequence [block]
+            - "3000:3000" [plain @17:9..17:18]
+          "restart" [plain @18:5..18:12]: "unless-stopped" [plain @18:14..18:28]
+          "environment" [plain @19:5..19:16]: sequence [block]
+            - "GF_SECURITY_ADMIN_USER=admin" [plain @20:9..20:37]
+            - "GF_SECURITY_ADMIN_PASSWORD=grafana" [plain @21:9..21:43]
+          "volumes" [plain @22:5..22:12]: sequence [block]
+            - "./grafana:/etc/grafana/provisioning/datasources" [plain @23:9..23:56]
+      "volumes" [plain @24:1..24:8]: mapping [block]
+        "prom_data" [plain @25:3..25:12]: "" [plain @25:13..25:13]
+    "#);
+}

@@ -7,7 +7,7 @@
 
 import json
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import yaml
 from yaml import events, tokens
@@ -15,6 +15,7 @@ from yaml import events, tokens
 
 class Fixture(TypedDict):
     file: str
+    python_error: NotRequired[str]
 
 
 class Expectations(TypedDict):
@@ -103,11 +104,19 @@ def main() -> None:
     for fixture in fixtures:
         path = root / fixture["file"]
         source = path.read_bytes().decode("utf-8")
-        expected = expectations(source, yaml.BaseLoader)
+        expected = expectations(source, yaml.CBaseLoader)
 
         # Check both the Python parser and the LibYAML-backed parser. No schema
         # resolution occurs: plain `on`, for example, remains scalar text.
-        assert expected == expectations(source, yaml.CBaseLoader), path
+        if "python_error" in fixture:
+            try:
+                expectations(source, yaml.BaseLoader)
+            except yaml.YAMLError as error:
+                assert fixture["python_error"] in str(error), (path, error)
+            else:
+                raise AssertionError(f"Python parser now accepts {path}")
+        else:
+            assert expected == expectations(source, yaml.BaseLoader), path
 
         results.append({"file": fixture["file"], **expected})
 

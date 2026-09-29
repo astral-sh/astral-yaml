@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("googlecloudplatform-microservices-demo-kustomize-components-network-policies-network-policy-redis-207ff445"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @15:1..15:11]: "networking.k8s.io/v1" [plain @15:13..15:33]
+      "kind" [plain @16:1..16:5]: "NetworkPolicy" [plain @16:7..16:20]
+      "metadata" [plain @17:1..17:9]: mapping [block]
+        "name" [plain @18:3..18:7]: "redis-cart" [plain @18:9..18:19]
+      "spec" [plain @19:1..19:5]: mapping [block]
+        "podSelector" [plain @20:3..20:14]: mapping [block]
+          "matchLabels" [plain @21:5..21:16]: mapping [block]
+            "app" [plain @22:7..22:10]: "redis-cart" [plain @22:12..22:22]
+        "policyTypes" [plain @23:3..23:14]: sequence [block]
+          - "Ingress" [plain @24:5..24:12]
+          - "Egress" [plain @25:5..25:11]
+        "ingress" [plain @26:3..26:10]: sequence [block]
+          - mapping [block]
+            "from" [plain @27:5..27:9]: sequence [block]
+              - mapping [block]
+                "podSelector" [plain @28:7..28:18]: mapping [block]
+                  "matchLabels" [plain @29:9..29:20]: mapping [block]
+                    "app" [plain @30:11..30:14]: "cartservice" [plain @30:16..30:27]
+            "ports" [plain @31:5..31:10]: sequence [block]
+              - mapping [block]
+                "port" [plain @32:8..32:12]: "6379" [plain @32:14..32:18]
+                "protocol" [plain @33:8..33:16]: "TCP" [plain @33:18..33:21]
+        "egress" [plain @34:3..34:9]: sequence [block]
+          - mapping [flow]
+    "#);
+}

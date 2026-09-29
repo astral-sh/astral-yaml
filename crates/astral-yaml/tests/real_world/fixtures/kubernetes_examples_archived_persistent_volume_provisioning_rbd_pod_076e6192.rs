@@ -1,0 +1,33 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("kubernetes-examples-archived-persistent-volume-provisioning-rbd-pod-076e6192"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @1:1..1:11]: "v1" [plain @1:13..1:15]
+      "kind" [plain @2:1..2:5]: "ReplicationController" [plain @2:7..2:28]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "server" [plain @4:9..4:15]
+      "spec" [plain @5:1..5:5]: mapping [block]
+        "replicas" [plain @6:3..6:11]: "1" [plain @6:13..6:14]
+        "selector" [plain @7:3..7:11]: mapping [block]
+          "role" [plain @8:5..8:9]: "server" [plain @8:11..8:17]
+        "template" [plain @9:3..9:11]: mapping [block]
+          "metadata" [plain @10:5..10:13]: mapping [block]
+            "labels" [plain @11:7..11:13]: mapping [block]
+              "role" [plain @12:9..12:13]: "server" [plain @12:15..12:21]
+          "spec" [plain @13:5..13:9]: mapping [block]
+            "containers" [plain @14:7..14:17]: sequence [block]
+              - mapping [block]
+                "name" [plain @15:9..15:13]: "server" [plain @15:15..15:21]
+                "image" [plain @16:9..16:14]: "nginx" [plain @16:16..16:21]
+                "volumeMounts" [plain @17:9..17:21]: sequence [block]
+                  - mapping [block]
+                    "mountPath" [plain @18:13..18:22]: "/var/lib/www/html" [plain @18:24..18:41]
+                    "name" [plain @19:13..19:17]: "mypvc" [plain @19:19..19:24]
+            "volumes" [plain @20:7..20:14]: sequence [block]
+              - mapping [block]
+                "name" [plain @21:11..21:15]: "mypvc" [plain @21:17..21:22]
+                "persistentVolumeClaim" [plain @22:11..22:32]: mapping [block]
+                  "claimName" [plain @23:13..23:22]: "claim1" [plain @23:24..23:30]
+    "#);
+}

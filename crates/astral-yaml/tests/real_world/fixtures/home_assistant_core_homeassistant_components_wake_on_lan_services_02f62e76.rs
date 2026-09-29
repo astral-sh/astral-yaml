@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("home-assistant-core-homeassistant-components-wake-on-lan-services-02f62e76"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "send_magic_packet" [plain @1:1..1:18]: mapping [block]
+        "fields" [plain @2:3..2:9]: mapping [block]
+          "mac" [plain @3:5..3:8]: mapping [block]
+            "required" [plain @4:7..4:15]: "true" [plain @4:17..4:21]
+            "example" [plain @5:7..5:14]: "aa:bb:cc:dd:ee:ff" [double-quoted @5:16..5:35]
+            "selector" [plain @6:7..6:15]: mapping [block]
+              "text" [plain @7:9..7:13]: "" [plain @7:14..7:14]
+          "secureon_password" [plain @8:5..8:22]: mapping [block]
+            "example" [plain @9:7..9:14]: "11:22:33:44:55:66" [double-quoted @9:16..9:35]
+            "selector" [plain @10:7..10:15]: mapping [block]
+              "text" [plain @11:9..11:13]: mapping [block]
+                "type" [plain @12:11..12:15]: "password" [plain @12:17..12:25]
+          "broadcast_address" [plain @13:5..13:22]: mapping [block]
+            "example" [plain @14:7..14:14]: "192.168.255.255" [plain @14:16..14:31]
+            "selector" [plain @15:7..15:15]: mapping [block]
+              "text" [plain @16:9..16:13]: "" [plain @16:14..16:14]
+          "broadcast_port" [plain @17:5..17:19]: mapping [block]
+            "default" [plain @18:7..18:14]: "9" [plain @18:16..18:17]
+            "selector" [plain @19:7..19:15]: mapping [block]
+              "number" [plain @20:9..20:15]: mapping [block]
+                "min" [plain @21:11..21:14]: "1" [plain @21:16..21:17]
+                "max" [plain @22:11..22:14]: "65535" [plain @22:16..22:21]
+                "mode" [plain @23:11..23:15]: "box" [double-quoted @23:17..23:22]
+    "#);
+}

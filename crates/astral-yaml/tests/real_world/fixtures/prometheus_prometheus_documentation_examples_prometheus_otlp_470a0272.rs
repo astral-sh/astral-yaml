@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("prometheus-prometheus-documentation-examples-prometheus-otlp-470a0272"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "global" [plain @2:1..2:7]: mapping [block]
+        "evaluation_interval" [plain @3:3..3:22]: "15s" [plain @3:24..3:27]
+      "otlp" [plain @5:1..5:5]: mapping [block]
+        "promote_resource_attributes" [plain @7:3..7:30]: sequence [block]
+          - "service.instance.id" [plain @8:7..8:26]
+          - "service.name" [plain @9:7..9:19]
+          - "service.namespace" [plain @10:7..10:24]
+          - "cloud.availability_zone" [plain @11:7..11:30]
+          - "cloud.region" [plain @12:7..12:19]
+          - "container.name" [plain @13:7..13:21]
+          - "deployment.environment.name" [plain @14:7..14:34]
+          - "k8s.cluster.name" [plain @15:7..15:23]
+          - "k8s.container.name" [plain @16:7..16:25]
+          - "k8s.cronjob.name" [plain @17:7..17:23]
+          - "k8s.daemonset.name" [plain @18:7..18:25]
+          - "k8s.deployment.name" [plain @19:7..19:26]
+          - "k8s.job.name" [plain @20:7..20:19]
+          - "k8s.namespace.name" [plain @21:7..21:25]
+          - "k8s.pod.name" [plain @22:7..22:19]
+          - "k8s.replicaset.name" [plain @23:7..23:26]
+          - "k8s.statefulset.name" [plain @24:7..24:27]
+        "translation_strategy" [plain @26:3..26:23]: "NoUTF8EscapingWithSuffixes" [plain @26:25..26:51]
+      "storage" [plain @28:1..28:8]: mapping [block]
+        "tsdb" [plain @30:3..30:7]: mapping [block]
+          "out_of_order_time_window" [plain @31:5..31:29]: "30m" [plain @31:31..31:34]
+    "#);
+}
