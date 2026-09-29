@@ -135,21 +135,14 @@ def main() -> None:
 
     parser = root / "crates/astral-yaml/src/parser.rs"
     original = parser.read_text()
-    variants = {
-        "small-arena": original.replace(
-            ".min(1024).min(options.max_nodes)", ".min(128).min(options.max_nodes)"
-        ),
-        "arena-16": original.replace("source.len() / 32", "source.len() / 16"),
-        "arena-12": original.replace("source.len() / 32", "source.len() / 12"),
-        "arena-8": original.replace("source.len() / 32", "source.len() / 8"),
-    }
     try:
         for label, directory in (("candidate", root), ("baseline", baseline)):
             binaries[label] = build_and_profile(label, directory, output)
-        for label, text in variants.items():
-            parser.write_text(text)
-            (output / f"{label}.rs").write_text(text)
-            binaries[label] = build_and_profile(label, root, output)
+        for patch in sorted((root / "scripts/benchmark-variants").glob("*.patch")):
+            parser.write_text(original)
+            run(["git", "apply", str(patch)], root)
+            (output / f"{patch.stem}.rs").write_text(parser.read_text())
+            binaries[patch.stem] = build_and_profile(patch.stem, root, output)
     finally:
         parser.write_text(original)
 

@@ -1,0 +1,45 @@
+--- a/crates/astral-yaml/src/parser.rs
++++ b/crates/astral-yaml/src/parser.rs
+@@ -140,7 +140,7 @@
+             }
+         }
+
+-        let end = memchr::memchr2(b'\r', b'\n', &self.source.as_bytes()[self.pos..])
++        let end = find_either(&self.source.as_bytes()[self.pos..], b'\r', b'\n')
+             .map_or(self.source.len(), |n| self.pos + n);
+         self.line_end_cache.set(Some(Span {
+             start: self.line_start,
+@@ -758,7 +758,7 @@
+             // in runs, checking only separators and comments on this line.
+             loop {
+                 let remaining = &bytes[i..line_end];
+-                i += memchr::memchr2(b':', b'#', remaining).unwrap_or(remaining.len());
++                i += find_either(remaining, b':', b'#').unwrap_or(remaining.len());
+
+                 let colon = match bytes.get(i) {
+                     None | Some(b'\r' | b'\n') => None,
+@@ -1551,7 +1551,7 @@
+                     // scan also stops at a UTF-8 character boundary.
+                     let remaining = &self.source.as_bytes()[self.pos..self.line_end()];
+                     let delimiter = if quote == b'"' {
+-                        memchr::memchr2(quote, b'\\', remaining)
++                        find_either(remaining, quote, b'\\')
+                     } else {
+                         memchr::memchr(quote, remaining)
+                     };
+@@ -1730,6 +1730,15 @@
+     }
+ }
+
++#[inline]
++fn find_either(bytes: &[u8], first: u8, second: u8) -> Option<usize> {
++    if bytes.len() < 16 {
++        bytes.iter().position(|&byte| byte == first || byte == second)
++    } else {
++        memchr::memchr2(first, second, bytes)
++    }
++}
++
+ fn is_space(b: u8) -> bool {
+     matches!(b, b' ' | b'\t' | b'\r' | b'\n')
+ }

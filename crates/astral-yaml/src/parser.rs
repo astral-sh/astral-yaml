@@ -60,9 +60,9 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         source,
         pos: 0,
         options,
-        // Start with a bounded estimate; large scalars should not reserve an
-        // arena proportional to their byte length.
-        nodes: Vec::with_capacity((source.len() / 32).min(1024).min(options.max_nodes)),
+        // Reserve for short mapping keys and values, while bounding unused
+        // capacity for inputs dominated by a few large scalars.
+        nodes: Vec::with_capacity((source.len() / 8).min(1024).min(options.max_nodes)),
         documents: Vec::new(),
         comments: Vec::new(),
         anchors: HashMap::new(),
@@ -863,7 +863,7 @@ impl<'a> Parser<'a> {
 
                 let key_source = &self.source[before..self.pos];
                 if (key_source.len() > 1024 && key_source.chars().count() > 1024)
-                    || memchr::memchr2(b'\r', b'\n', key_source.as_bytes()).is_some()
+                    || self.line_start > before
                 {
                     return Err(self
                         .error("an implicit key must fit on one line of at most 1024 characters"));

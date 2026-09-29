@@ -95,26 +95,26 @@ background load were not controlled.
 Each version ran five times, alternating order within each pair. Divan used
 64 iterations per sample, a minimum of one second per workload, and a maximum
 of 1.2 seconds. The table shows the median of each version's five run medians.
-The mean time reduction across the 16 equally weighted workloads was **11.56%**.
+The mean time reduction across the 16 equally weighted workloads was **15.03%**.
 
 | Workload | Before (µs) | After (µs) | Time reduction |
 | --- | ---: | ---: | ---: |
-| `deserialize/kubernetes-guestbook` | 14.460 | 13.780 | 4.7% |
-| `deserialize/openapi-petstore` | 17.340 | 15.820 | 8.8% |
-| `deserialize/uv-ci` | 32.780 | 27.780 | 15.3% |
-| `deserialize_services_128` | 122.700 | 110.400 | 10.0% |
-| `deserialize_spanned/kubernetes-guestbook` | 20.160 | 18.870 | 6.4% |
-| `deserialize_spanned/openapi-petstore` | 17.340 | 16.010 | 7.7% |
-| `deserialize_spanned/uv-ci` | 43.960 | 36.580 | 16.8% |
-| `deserialize_spanned_fields/kubernetes-guestbook` | 21.170 | 19.920 | 5.9% |
-| `deserialize_spanned_fields/openapi-petstore` | 17.450 | 16.010 | 8.3% |
-| `deserialize_spanned_fields/uv-ci` | 44.400 | 36.760 | 17.2% |
-| `parse/kubernetes-guestbook` | 8.323 | 7.407 | 11.0% |
-| `parse/openapi-petstore` | 10.220 | 8.440 | 17.4% |
-| `parse/uv-ci` | 19.570 | 14.490 | 26.0% |
-| `serialize/kubernetes-guestbook` | 2.262 | 2.147 | 5.1% |
-| `serialize/openapi-petstore` | 2.844 | 2.608 | 8.3% |
-| `serialize/uv-ci` | 5.894 | 4.934 | 16.3% |
+| `deserialize/kubernetes-guestbook` | 14.360 | 12.470 | 13.2% |
+| `deserialize/openapi-petstore` | 17.020 | 14.700 | 13.6% |
+| `deserialize/uv-ci` | 32.130 | 26.840 | 16.5% |
+| `deserialize_services_128` | 119.800 | 106.500 | 11.1% |
+| `deserialize_spanned/kubernetes-guestbook` | 19.930 | 17.310 | 13.1% |
+| `deserialize_spanned/openapi-petstore` | 17.070 | 14.650 | 14.2% |
+| `deserialize_spanned/uv-ci` | 42.970 | 35.450 | 17.5% |
+| `deserialize_spanned_fields/kubernetes-guestbook` | 21.050 | 18.340 | 12.9% |
+| `deserialize_spanned_fields/openapi-petstore` | 17.210 | 14.820 | 13.9% |
+| `deserialize_spanned_fields/uv-ci` | 43.520 | 35.670 | 18.0% |
+| `parse/kubernetes-guestbook` | 8.131 | 6.478 | 20.3% |
+| `parse/openapi-petstore` | 9.961 | 7.831 | 21.4% |
+| `parse/uv-ci` | 18.980 | 14.020 | 26.1% |
+| `serialize/kubernetes-guestbook` | 2.235 | 2.107 | 5.7% |
+| `serialize/openapi-petstore` | 2.733 | 2.501 | 8.5% |
+| `serialize/uv-ci` | 5.699 | 4.876 | 14.4% |
 
 [Run medians](results/2026-09-28-hillclimb2.csv).
 

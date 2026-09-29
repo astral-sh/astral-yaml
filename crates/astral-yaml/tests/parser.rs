@@ -427,8 +427,18 @@ fn implicit_key_limits_include_separation_before_the_colon() {
         }
     }
 
-    for (source, accepted) in [("{key\n: value}", true), ("[key\n: value]", false)] {
-        assert_eq!(parse(source).is_ok(), accepted, "{source}");
+    for newline in ["\n", "\r", "\r\n"] {
+        for (source, accepted) in [
+            ("{key\n: value}", true),
+            ("[key\n: value]", false),
+            ("'key\n  tail': value", false),
+            ("\"key\\\n  tail\": value", false),
+            ("[key,\n  tail]: value", false),
+            ("\"key\\ntail\": value", true),
+        ] {
+            let source = source.replace('\n', newline);
+            assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
+        }
     }
 }
 
