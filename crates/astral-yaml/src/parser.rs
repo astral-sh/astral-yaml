@@ -477,7 +477,6 @@ impl<'a> Parser<'a> {
 
             while self.pos < end {
                 if self.byte() == Some(b'#')
-                    && self.pos > argument_start
                     && self.source.as_bytes()[self.pos - 1].is_ascii_whitespace()
                 {
                     break;
@@ -500,11 +499,13 @@ impl<'a> Parser<'a> {
                         return Err(self.error("duplicate YAML directive"));
                     }
 
-                    if words.len() != 1
-                        || !words[0].starts_with("1.")
-                        || words[0].len() < 3
-                        || !words[0][2..].bytes().all(|b| b.is_ascii_digit())
-                    {
+                    let valid = words.len() == 1
+                        && words[0].split_once('.').is_some_and(|(major, minor)| {
+                            major.trim_start_matches('0') == "1"
+                                && !minor.is_empty()
+                                && minor.bytes().all(|b| b.is_ascii_digit())
+                        });
+                    if !valid {
                         return Err(self.error("invalid YAML version directive"));
                     }
 
@@ -1459,6 +1460,19 @@ impl<'a> Parser<'a> {
         }))
     }
 
+    fn quoted_continuation(&self, parent: isize) -> Result<()> {
+        // A BOM inside a quoted scalar is content, not a document boundary.
+        if self.byte().is_none()
+            || self.marker("---")
+            || self.marker("...")
+            || signed(self.leading_spaces()) <= parent
+        {
+            return Err(self.error("invalid continuation of quoted scalar"));
+        }
+
+        Ok(())
+    }
+
     fn quoted(&mut self, parent: isize) -> Result<NodeKind<'a>> {
         let start = self.pos;
         let quote = self.byte().unwrap_or(b'"');
@@ -1515,9 +1529,7 @@ impl<'a> Parser<'a> {
                             self.spaces();
                         }
 
-                        if self.document_boundary() || signed(self.leading_spaces()) <= parent {
-                            return Err(self.error("invalid continuation of quoted scalar"));
-                        }
+                        self.quoted_continuation(parent)?;
                     } else {
                         text.push(self.escape()?);
                     }
@@ -1534,9 +1546,7 @@ impl<'a> Parser<'a> {
                         self.spaces();
                     }
 
-                    if self.document_boundary() || signed(self.leading_spaces()) <= parent {
-                        return Err(self.error("invalid continuation of quoted scalar"));
-                    }
+                    self.quoted_continuation(parent)?;
 
                     if breaks == 1 {
                         text.push(' ');
