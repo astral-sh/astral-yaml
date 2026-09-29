@@ -118,6 +118,15 @@ The mean time reduction across the 16 equally weighted workloads was **15.03%**.
 
 [Run medians](results/2026-09-28-hillclimb2.csv).
 
+The [Linux follow-up](https://github.com/astral-sh/astral-yaml/actions/runs/36574445336)
+compared `294d476` with the same baseline on one GitHub-hosted runner with two
+AMD EPYC 9V74 vCPUs, using Rust 1.98.1. Each version ran twice, reversing order
+between runs, with 64 iterations per sample and 0.25–0.3 seconds per workload.
+The mean time reduction was **7.98%**. Kubernetes and OpenAPI serialization took
+6.9% and 2.4% more time, respectively; the other 14 workloads improved.
+These shorter runs do not establish a 10% native improvement on this CPU.
+[Linux run medians](results/2026-09-29-hillclimb2-linux.csv).
+
 ## First optimization run (2026-09-28)
 
 Commit `e63f764` is the baseline for this run. The Astral benchmark target and
