@@ -51,8 +51,9 @@ same typed-struct workload.
 
 Fixture generation and correctness checks run outside measurements. Every
 measurement includes destruction of the output. Span collection includes
-descendant comments; serde-saphyr uses the same
-[comparison settings](../docs/serde-saphyr.md#behavior-differences) as its tests.
+descendant comments. serde-saphyr uses `strict_booleans: true`,
+`merge_keys: AsOrdinary`, and `reject_unsupported_tags: true`; comment capture
+and resource limits use its defaults.
 
 ## CodSpeed
 
@@ -150,8 +151,7 @@ Source: [`optimized` rows](results/2026-09-25.csv).
 
 ### serde-saphyr
 
-This compares serde-saphyr 1.3.0 with Astral, using
-[comparison settings](../docs/serde-saphyr.md#behavior-differences). Both
+This compares serde-saphyr 1.3.0 with Astral, using the settings above. Both
 deserialize the three fixtures into vectors of values. A generated
 configuration of 128 services also measures deserialization into typed structs.
 Results are checked for equality before timing; parsing and destruction are
@@ -171,8 +171,7 @@ three run medians.
 | 128 services (generated) | 26,686 | Typed structs | 150.786 µs | 885.376 µs | 5.87× |
 
 [Raw samples](results/2026-09-28-saphyr.csv) record time per iteration in ns and
-iteration counts. These measurements include the correctness fixes described in
-the [comparison](../docs/serde-saphyr.md); no performance optimizations were made.
+iteration counts.
 
 ### Spans and serialization
 

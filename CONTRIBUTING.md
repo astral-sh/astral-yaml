@@ -33,13 +33,10 @@ Run the pinned YAML Test Suite:
 
 ```sh
 cargo test -p astral-yaml --test conformance
+cargo test -p astral-yaml-serde --test conformance
 ```
 
-The `saphyr` feature runs the [serde-saphyr comparison](docs/serde-saphyr.md) and
-requires Rust 1.89. The default workspace build still supports Rust 1.85.
-
 The `yaml_serde` comparison runs with `cargo test -p astral-yaml-dev --test yaml_serde`.
-Both comparison suites use our test value type or concrete Rust types.
 
 Review inline snapshots with `cargo-insta`:
 

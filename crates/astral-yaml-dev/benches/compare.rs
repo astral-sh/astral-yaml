@@ -1,28 +1,29 @@
 use astral_yaml_dev::{Value, benchmarks};
 use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 
+fn saphyr_options() -> serde_saphyr::Options {
+    serde_saphyr::options! {
+        strict_booleans: true,
+        merge_keys: serde_saphyr::MergeKeyPolicy::AsOrdinary,
+        reject_unsupported_tags: true,
+    }
+}
+
 fn main() {
     for &(_, source) in FIXTURES {
         let values = benchmarks::astral(source);
         assert_eq!(values, benchmarks::reference(source));
         assert_eq!(
             values,
-            serde_saphyr::from_multiple_with_options::<Value>(
-                source,
-                astral_yaml_dev::saphyr::options(),
-            )
-            .unwrap()
+            serde_saphyr::from_multiple_with_options::<Value>(source, saphyr_options()).unwrap()
         );
     }
 
     let source = services_fixture();
     assert_eq!(
         documents::<ServiceConfig>(&source),
-        serde_saphyr::from_multiple_with_options::<ServiceConfig>(
-            &source,
-            astral_yaml_dev::saphyr::options(),
-        )
-        .unwrap()
+        serde_saphyr::from_multiple_with_options::<ServiceConfig>(&source, saphyr_options())
+            .unwrap()
     );
 
     divan::main();
@@ -34,7 +35,7 @@ mod deserialize {
     use astral_yaml_dev::{Value, benchmarks};
     use divan::{Bencher, black_box};
 
-    use super::{documents, fixture};
+    use super::{documents, fixture, saphyr_options};
 
     #[derive(Clone, Copy, Debug)]
     enum Implementation {
@@ -74,7 +75,7 @@ mod deserialize {
                 black_box(
                     serde_saphyr::from_multiple_with_options::<Value>(
                         black_box(source),
-                        astral_yaml_dev::saphyr::options(),
+                        saphyr_options(),
                     )
                     .unwrap(),
                 );
@@ -100,8 +101,9 @@ mod deserialize {
 
 mod deserialize_services_128 {
     use astral_yaml_dev::benchmarks::{ServiceConfig, documents, services_fixture};
-    use astral_yaml_dev::saphyr::options;
     use divan::{Bencher, black_box};
+
+    use super::saphyr_options;
 
     #[divan::bench(name = "astral-yaml")]
     fn astral(bencher: Bencher) {
@@ -120,7 +122,7 @@ mod deserialize_services_128 {
             black_box(
                 serde_saphyr::from_multiple_with_options::<ServiceConfig>(
                     black_box(&source),
-                    options(),
+                    saphyr_options(),
                 )
                 .unwrap(),
             );

@@ -114,6 +114,5 @@ value construction, and destruction. These are median times from eleven samples,
 measured on 2026-09-25 with Rust 1.98.1 on macOS arm64. Current benchmarks use
 `astral_yaml_dev::Value`; the recorded timings predate that change.
 
-See [benchmarks](benchmarks/README.md) for the CodSpeed suite and recorded measurements
-with `Spanned`, and the [serde-saphyr comparison](docs/serde-saphyr.md) for
-conformance results and timings against serde-saphyr 1.3.0.
+See [benchmarks](benchmarks/README.md) for the CodSpeed suite, measurements with
+`Spanned`, and timings against serde-saphyr 1.3.0.

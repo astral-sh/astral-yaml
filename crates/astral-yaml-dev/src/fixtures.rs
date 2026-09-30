@@ -12,11 +12,8 @@ pub struct Fixture {
     pub valid_yaml_1_2: Option<bool>,
     pub serde_error: Option<String>,
     pub python_error: Option<String>,
-    pub saphyr_error: Option<String>,
     #[serde(default)]
     pub leading_zero_integers: usize,
-    #[serde(default)]
-    pub saphyr_null_documents: usize,
 }
 
 impl Fixture {

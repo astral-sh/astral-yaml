@@ -92,11 +92,6 @@ accept it; PyYAML's Python parser rejects it. `python_error` pins that rejection
 and the syntax and span comparison still runs against LibYAML.
 
 Three inputs use plain decimal integers with leading zeroes. YAML 1.2 core
-resolves `0755` as the integer 755. `yaml_serde` leaves it as a string, while
-serde-saphyr returns a float. `leading_zero_integers` records the number of these
-differences; comparison tests check their values and reject other differences.
-
-The serde-saphyr comparison also records dropped null documents in
-`saphyr_null_documents` and specific rejections in `saphyr_error`. These include
-Sentry's alias budget, Google's indentation error, and a Prometheus configuration
-that exceeds serde-saphyr's consecutive-comment limit.
+resolves `0755` as the integer 755. `yaml_serde` leaves it as a string.
+`leading_zero_integers` records the number of these differences; comparison
+tests check their values and reject other differences.

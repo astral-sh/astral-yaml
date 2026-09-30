@@ -117,8 +117,7 @@
     "bytes": 32768,
     "valid_yaml_1_2": false,
     "rejection": "Closing flow delimiter is not indented beyond its enclosing mapping (YAML 1.2.2 sections 6.1 and 7.4.1).",
-    "category": "compose",
-    "saphyr_error": "budget breached: AliasAnchorRatio"
+    "category": "compose"
   },
   {
     "file": "airflow-compose.yaml",
@@ -1806,8 +1805,7 @@
     "bytes": 1152,
     "file": "istio-istio-samples-bookinfo-networking-destination-rule-all-mtls-0a6c577c.yaml",
     "sha256": "b8d45f291bf5682c975836f2ee7ef3d668dc2fc420ad83c5b79469fd09bf7f4c",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -1851,8 +1849,7 @@
     "bytes": 1478,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-ratings-0cebe00b.yaml",
     "sha256": "8d6537e0b5dd3edef1a6a7c189f16993a8c1f7deefe8f36d9976520a40173cd0",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -1907,8 +1904,7 @@
     "bytes": 1456,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-db-1c513d31.yaml",
     "sha256": "82b3226091cdf39ac0c7fceaa5e41337c46256c0a1f9403b0f084a1017bc5b30",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -1952,8 +1948,7 @@
     "bytes": 8402,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-psa-2241080d.yaml",
     "sha256": "307ea1796659930dd641fd91c4c175dff589518c39ce041fdcb1a67ab7354d12",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -1986,8 +1981,7 @@
     "bytes": 920,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-versions-24cf9964.yaml",
     "sha256": "e0749a9e56b4fe8a22fc131138d3dcf0daad3915cad8243991e86e5ceb3d8797",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -1999,8 +1993,7 @@
     "file": "istio-istio-samples-jwt-server-jwt-server-26226f99.yaml",
     "sha256": "bd2a6c778c8ac2e4f74388e81d9d7569fc8037ea6143fdc3379ca332c382c6b7",
     "license": "LICENSE-istio-istio",
-    "leading_zero_integers": 1,
-    "saphyr_null_documents": 1
+    "leading_zero_integers": 1
   },
   {
     "repository": "istio/istio",
@@ -2022,8 +2015,7 @@
     "bytes": 964,
     "file": "istio-istio-samples-bookinfo-gateway-api-route-all-v1-28564a20.yaml",
     "sha256": "e257edab22bf77b822ecd3e79e2b23f5dbb8a853ace9c18959a2162426dfb0b3",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -2078,8 +2070,7 @@
     "bytes": 7859,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-350d760a.yaml",
     "sha256": "ec82aaf76a031b83b26126da65e04e56c5791f0825ee2382d5c05801d4406bc5",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -2101,8 +2092,7 @@
     "bytes": 988,
     "file": "istio-istio-samples-bookinfo-platform-kube-bookinfo-ratings-discovery-3b5931f5.yaml",
     "sha256": "0b483f99476631fbaf2f08b2ecb42fb2a01787b7a26ef046837f82accc965811",
-    "license": "LICENSE-istio-istio",
-    "saphyr_null_documents": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -2644,8 +2634,7 @@
     "sha256": "9d04962fdae8c4b56d7dc2da3f57704f3339a22e65716d93716e99cff1d453fa",
     "license": "LICENSE-prometheus-prometheus",
     "notice": "NOTICE-prometheus-prometheus",
-    "notice_path": "NOTICE",
-    "saphyr_error": "too many consecutive comments before resolving collection entry"
+    "notice_path": "NOTICE"
   },
   {
     "repository": "prometheus/prometheus",
@@ -3654,8 +3643,7 @@
     "sha256": "dce1e131cc043a8210a9097d8700d0b1298e85c31013c6a7b7daf66d9058135f",
     "license": "LICENSE-googleapis-googleapis",
     "valid_yaml_1_2": false,
-    "rejection": "Quoted scalar continuation is less indented than its enclosing mapping (YAML 1.2.2 sections 6.1 and 7.3.2).",
-    "saphyr_error": "invalid indentation in multiline quoted scalar"
+    "rejection": "Quoted scalar continuation is less indented than its enclosing mapping (YAML 1.2.2 sections 6.1 and 7.3.2)."
   },
   {
     "repository": "googleapis/googleapis",
