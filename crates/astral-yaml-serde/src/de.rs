@@ -32,6 +32,11 @@ fn is_core_tag(tag: &str) -> bool {
 /// boolean, or null loses its original text and cannot be read as a string.
 /// Quote the scalar or use `!!str` when a buffered field needs its text.
 ///
+/// Distinct YAML mapping keys can deserialize into equal Rust keys. Serde's
+/// standard map implementations keep the last value when that happens.
+/// [`serde_with::MapPreventDuplicates`](https://docs.rs/serde_with/latest/serde_with/struct.MapPreventDuplicates.html)
+/// can reject these collisions.
+///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {

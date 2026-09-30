@@ -842,6 +842,27 @@ fn mapping_key_uniqueness_uses_core_types() {
     );
 }
 
+#[test]
+fn serde_maps_replace_equal_deserialized_keys() {
+    #[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+    enum Theme {
+        #[serde(alias = "light")]
+        Light,
+    }
+
+    for (source, key, expected) in [
+        ("{1: first, '1': second}", "1", "second"),
+        ("{'1': second, 1: first}", "1", "first"),
+        ("{true: first, 'true': second}", "true", "second"),
+    ] {
+        let value = from_str::<BTreeMap<String, String>>(source).unwrap();
+        assert_eq!(value, BTreeMap::from([(key.into(), expected.into())]));
+    }
+
+    let value = from_str::<BTreeMap<Theme, String>>("{Light: first, light: second}").unwrap();
+    assert_eq!(value, BTreeMap::from([(Theme::Light, "second".into())]));
+}
+
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn mapping_key_uniqueness_across_mapping_sizes() {

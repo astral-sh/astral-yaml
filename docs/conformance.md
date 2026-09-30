@@ -35,6 +35,32 @@ are compared by their tag and scalar text; the adapter cannot infer a custom
 tag's canonical form. Applications that assign additional equivalences to these
 keys must check them when constructing their values.
 
+The duplicate check compares YAML keys before deserializing them into Rust.
+Distinct YAML keys can deserialize into equal Rust keys. For example, in
+`{1: first, "1": second}`, the keys are a YAML integer and string, but both
+deserialize to `"1"` in a `BTreeMap<String, String>`. Serde's standard maps keep
+the last value, so the result contains only `"1": "second"`.
+
+To reject collisions between deserialized keys, apply a map adapter such as
+[`serde_with::MapPreventDuplicates`](https://docs.rs/serde_with/latest/serde_with/struct.MapPreventDuplicates.html)
+to each map that needs the check:
+
+```rust
+use serde::Deserialize;
+use serde_with::{MapPreventDuplicates, serde_as};
+use std::collections::BTreeMap;
+
+#[serde_as]
+#[derive(Deserialize)]
+struct Config {
+    #[serde_as(as = "MapPreventDuplicates<_, _>")]
+    values: BTreeMap<String, String>,
+}
+
+let source = r#"values: {1: first, "1": second}"#;
+assert!(astral_yaml_serde::from_str::<Config>(source).is_err());
+```
+
 `Source::from_bytes` accepts UTF-8, UTF-16, and UTF-32, with or without a BOM and in
 either byte order where applicable. Source spans use decoded UTF-8 byte offsets;
 `Source::original_span` maps them back to the original encoded bytes.
