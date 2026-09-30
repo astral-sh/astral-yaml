@@ -115,8 +115,7 @@ structs with native derives for Serde and Deser.
 | OpenAPI Petstore | 5,479 | 14.805 µs | 44.885 µs | 69.250 µs | 114.300 µs |
 | 128 services (typed) | 26,686 | 107.950 µs | 229.600 µs | — | 887.050 µs |
 
-[Run medians](results/2026-09-30-deser-yaml.csv) include sample and iteration
-counts. To repeat one round, use `--sort name`; use `--sortr name` to reverse it:
+To repeat one round, use `--sort name`; use `--sortr name` to reverse it:
 
 ```sh
 cargo bench -p astral-yaml-dev --features compare --bench compare --locked -- --sample-size 64 --min-time 1 --max-time 1.2 --sort name
@@ -153,7 +152,7 @@ All 16 workloads took at least 15% less time.
 | `serialize/openapi-petstore` | 3.515 | 2.859 | 18.7% |
 | `serialize/uv-ci` | 8.033 | 5.861 | 27.0% |
 
-[Run medians](results/2026-09-28-hillclimb.csv). To use the same sampling settings:
+To use the same sampling settings:
 
 ```sh
 cargo bench -p astral-yaml-dev --bench yaml --locked -- --sample-size 64 --min-time 1 --max-time 1.2
@@ -183,8 +182,6 @@ least 200 ms, after warmup, with alternating implementation order.
 | Kubernetes Guestbook | 3,366 | 22.30 µs | 59.30 µs | 2.66× |
 | OpenAPI Petstore | 5,479 | 27.47 µs | 74.50 µs | 2.71× |
 
-Source: [`optimized` rows](results/2026-09-25.csv).
-
 ### serde-saphyr
 
 This compares serde-saphyr 1.3.0 with Astral, using the settings above. Both
@@ -206,9 +203,6 @@ three run medians.
 | OpenAPI Petstore | 5,479 | Values | 27.144 µs | 120.758 µs | 4.45× |
 | 128 services (generated) | 26,686 | Typed structs | 150.786 µs | 885.376 µs | 5.87× |
 
-[Raw samples](results/2026-09-28-saphyr.csv) record time per iteration in ns and
-iteration counts.
-
 ### Spans and serialization
 
 `unspanned` deserialized each document into `yaml_serde::Value`. `spanned` added
@@ -224,5 +218,3 @@ The table shows the median of three runs, in µs.
 | uv CI workflow | 51.816 | 64.869 | 64.960 | 7.612 |
 | Kubernetes Guestbook | 22.675 | 29.828 | 29.858 | 2.888 |
 | OpenAPI Petstore | 27.976 | 28.248 | 28.087 | 3.418 |
-
-Source: [`candidate` rows](results/2026-09-25-throughput.csv), which omit `parse`.
