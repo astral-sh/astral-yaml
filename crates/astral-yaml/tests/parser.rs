@@ -745,6 +745,78 @@ fn implicit_key_must_end_at_the_mapping_separator() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#733-plain-style
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test]
+fn collection_keys_allow_quotes_inside_plain_scalars() {
+    for source in [
+        "[flo']: block",
+        "[f\"ow]: block",
+        "[http:\"foo]: block",
+        "[{firs\"t: Sammy}]: block",
+        "[\"a]b\", 'c''d']: block",
+        "[!local 'a]b']: block",
+        "[{\"key\":'a]b'}]: block",
+    ] {
+        let stream = parse(source).unwrap_or_else(|error| panic!("{source:?}: {error}"));
+        let root = stream.node(stream.documents()[0].root).unwrap();
+        let NodeKind::Mapping { entries, .. } = &root.kind else {
+            panic!("expected a mapping: {source:?}");
+        };
+        assert_eq!(entries.len(), 1, "{source:?}");
+        assert!(matches!(
+            stream.node(entries[0].key).unwrap().kind,
+            NodeKind::Sequence { .. }
+        ));
+        let NodeKind::Scalar(value) = &stream.node(entries[0].value).unwrap().kind else {
+            panic!("expected a scalar value: {source:?}");
+        };
+        assert_eq!(value.value, "block", "{source:?}");
+    }
+
+    let stream = parse("[flo']: block").unwrap();
+    insta::assert_snapshot!(astral_yaml_dev::events(&stream), @"
+    +STR
+    +DOC
+    +MAP
+    +SEQ []
+    =VAL :flo'
+    -SEQ
+    =VAL :block
+    -MAP
+    -DOC
+    -STR
+    ");
+}
+
+// https://yaml.org/spec/1.2.2/#61-indentation-spaces
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test]
+fn block_collections_reject_invalid_indentation_and_compact_values() {
+    for source in [
+        "a: ?",
+        "a: ? # comment\n",
+        "- a: ?\n",
+        "foo:\n  a: 1\n \tb: 2\n",
+        "foo:\n  a: 1\n\t b: 2\n",
+        "foo:\n - a: 1\n  \tb: 2\n",
+        "foo:\n  - a\n \t- b\n",
+    ] {
+        assert!(parse(source).is_err(), "{source:?}");
+    }
+
+    for source in [
+        "a: ?foo",
+        "a: '?'",
+        "a:\n  ?\n",
+        "? a\n: ?\n",
+        "[\n\ta,\n\tb\n]",
+        "foo:\n  a: 1\n\t\n  b: 2\n",
+    ] {
+        assert!(parse(source).is_ok(), "{source:?}");
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test]
 fn tag_prefixes_obey_the_first_character_rule() {
