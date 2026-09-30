@@ -417,6 +417,34 @@ fn generated_nested_values_roundtrip() {
     }
 }
 
+#[test]
+fn punctuation_heavy_strings_roundtrip_as_keys_and_values() {
+    use astral_yaml_dev::Value;
+
+    let fragments = [
+        "", "-", "?", ":", ",", "[", "]", "{", "}", "#", "&", "*", "!", "|", ">", "'", "\"", "%",
+        "@", "`", "\\", "---", "...", "null", "true", "0x1f", "0o17", "1e3", ".nan", "é", "🌍",
+        "\0", "\t", "\n",
+    ];
+
+    for fragment in fragments {
+        for adjacent in ["", "a", " ", ":", "#", "\n", "1"] {
+            for text in [
+                format!("{fragment}{adjacent}"),
+                format!("{adjacent}{fragment}"),
+            ] {
+                let text = Value::String(text);
+                let value = Value::Sequence(vec![
+                    text.clone(),
+                    Value::Mapping(vec![(text.clone(), text)]),
+                ]);
+
+                roundtrip(&value);
+            }
+        }
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn serialization_escapes_at_different_offsets() {
