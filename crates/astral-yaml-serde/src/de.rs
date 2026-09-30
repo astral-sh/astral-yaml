@@ -410,6 +410,60 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             .map_err(|_| Error::at("integer out of range", span))
     }
 
+    fn wide_radix_float(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
+        let (digits, radix, span) = Self::integer_value(s, kind)?;
+        let digit_bits = if radix == 16 { 4 } else { 3 };
+        let mut significand = 0_u64;
+        let mut significant_bits = 0;
+        let mut discarded_bits = 0;
+        let mut guard = false;
+        let mut sticky = false;
+
+        for digit in digits.bytes() {
+            let digit = char::from(digit)
+                .to_digit(radix)
+                .expect("classified integer has valid digits");
+
+            for position in (0..digit_bits).rev() {
+                let bit = (digit >> position) & 1;
+                if significant_bits == 0 && bit == 0 {
+                    continue;
+                }
+
+                if significant_bits < f64::MANTISSA_DIGITS {
+                    significand = (significand << 1) | u64::from(bit);
+                    significant_bits += 1;
+                } else {
+                    if discarded_bits == 0 {
+                        guard = bit != 0;
+                    } else {
+                        sticky |= bit != 0;
+                    }
+
+                    discarded_bits += 1;
+                    let mantissa_bits = i32::try_from(f64::MANTISSA_DIGITS)
+                        .expect("f64 mantissa width fits in i32");
+                    if discarded_bits > f64::MAX_EXP - mantissa_bits {
+                        return Err(Error::at("float out of range", span));
+                    }
+                }
+            }
+        }
+
+        // Round to nearest, ties to even, before scaling by a power of two.
+        if guard && (sticky || significand & 1 != 0) {
+            significand += 1;
+        }
+
+        #[allow(clippy::cast_precision_loss)]
+        let value = (significand as f64) * 2_f64.powi(discarded_bits);
+        if !value.is_finite() {
+            return Err(Error::at("float out of range", span));
+        }
+
+        Ok(value)
+    }
+
     fn float_value(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
             return Err(Error::at("expected a number", s.span));
@@ -428,10 +482,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             return Ok(f64::NAN);
         }
 
-        if let Some(value) = Self::radix_integer_value(s, kind)? {
-            // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
-            #[allow(clippy::cast_precision_loss)]
-            return Ok(value as f64);
+        match Self::radix_integer_value(s, kind) {
+            Ok(Some(value)) => {
+                // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
+                #[allow(clippy::cast_precision_loss)]
+                return Ok(value as f64);
+            }
+            Err(_) => return Self::wide_radix_float(s, kind),
+            Ok(None) => {}
         }
 
         let value: f64 = s
@@ -721,11 +779,15 @@ impl Key<'_> {
     }
 }
 
-macro_rules! signed {
+macro_rules! integer_methods {
     ($($method:ident => $visit:ident : $ty:ty),* $(,)?) => {
         $(
             fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
                 let (value, radix, span) = self.integer()?;
+                let value = value
+                    .strip_prefix('-')
+                    .filter(|digits| digits.bytes().all(|digit| digit == b'0'))
+                    .unwrap_or(value);
                 let number = <$ty>::from_str_radix(value, radix)
                     .map_err(|_| Error::at("integer out of range", span))?;
 
@@ -791,7 +853,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         }
     }
 
-    signed! {
+    integer_methods! {
         deserialize_i8 => visit_i8: i8,
         deserialize_i16 => visit_i16: i16,
         deserialize_i32 => visit_i32: i32,

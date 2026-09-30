@@ -211,6 +211,57 @@ fn core_resolution_and_numeric_limits() {
     assert_eq!(value["copy"], serde_json::json!({"<<": {"answer": 42}}));
 }
 
+// https://yaml.org/spec/1.2.2/#10213-integer
+#[test]
+fn unsigned_integers_accept_negative_zero() {
+    macro_rules! check {
+        ($($ty:ty),* $(,)?) => {
+            $(
+                for source in ["-0", "-00", "!!int '-0'"] {
+                    assert_eq!(from_str::<$ty>(source).unwrap(), 0, "{source}");
+                }
+
+                assert!(from_str::<$ty>("-1").is_err());
+            )*
+        };
+    }
+
+    check!(u8, u16, u32, u64, u128);
+}
+
+// https://yaml.org/spec/1.2.2/#10213-integer
+#[test]
+fn wide_radix_integers_round_to_f64() {
+    let two_to_128 = 2_f64.powi(128);
+    let halfway = format!("0x1{}8{}", "0".repeat(13), "0".repeat(18));
+    let above_halfway = format!("0x1{}8{}1", "0".repeat(13), "0".repeat(17));
+    let max_f64 = format!("0x{}8{}", "f".repeat(13), "0".repeat(242));
+    let below_overflow = format!("0x{}b{}", "f".repeat(13), "f".repeat(242));
+    let overflow = format!("0x{}c{}", "f".repeat(13), "0".repeat(242));
+
+    for (source, expected) in [
+        (format!("0x1{}", "0".repeat(32)), two_to_128),
+        (format!("0o1{}", "0".repeat(43)), 2_f64.powi(129)),
+        (format!("!!int {halfway}"), two_to_128),
+        (above_halfway, f64::from_bits(two_to_128.to_bits() + 1)),
+        (max_f64, f64::MAX),
+        (below_overflow, f64::MAX),
+        (format!("0x{}1", "0".repeat(300)), 1.0),
+    ] {
+        assert_eq!(
+            from_str::<f64>(&source).unwrap().to_bits(),
+            expected.to_bits(),
+            "{source}"
+        );
+    }
+
+    assert_eq!(
+        from_str::<f64>(&overflow).unwrap_err().message,
+        "float out of range"
+    );
+    assert!(from_str::<f32>(&format!("0x1{}", "0".repeat(32))).is_err());
+}
+
 // https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn finite_float_overflow_is_an_error() {
