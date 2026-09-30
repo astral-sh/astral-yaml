@@ -37,23 +37,31 @@ Each workload processes all documents in one of the three fixed
 typed structs. All of these workloads run on Rust 1.85.
 
 The `compare` target requires Rust 1.89 and compares deserialization with
-`yaml_serde` and serde-saphyr. Names put the fixture before the implementation so
-results for the same input appear together. For example, omitting the file path:
+`deser-yaml`, `yaml_serde`, and serde-saphyr. Names put the fixture before the
+implementation so results for the same input appear together. For example,
+omitting the file path:
 
 ```text
 deserialize::uv-ci[astral-yaml]
+deserialize::uv-ci[deser-yaml]
 deserialize::uv-ci[serde-saphyr]
 deserialize::uv-ci[yaml_serde]
 ```
 
-Its `deserialize_services_128` group compares Astral and serde-saphyr on the
-same typed-struct workload.
+Its `deserialize_services_128` group compares Astral, `deser-yaml`, and
+serde-saphyr on the same typed-struct workload.
 
 Fixture generation and correctness checks run outside measurements. Every
-measurement includes destruction of the output. Span collection includes
-descendant comments. serde-saphyr uses `strict_booleans: true`,
-`merge_keys: AsOrdinary`, and `reject_unsupported_tags: true`; comment capture
-and resource limits use its defaults.
+measurement includes destruction of the output. The dynamic workloads use
+`astral_yaml_dev::Value` for the Serde implementations and `deser_value::Value`
+for `deser-yaml`; the latter also retains scalar spellings and formatting hints.
+Span collection includes descendant comments. `deser-yaml` uses its default
+features and YAML 1.2 with merge keys disabled and location tracking off; it does
+not collect comments.
+Astral's parser records spans and comments even for unspanned deserialization.
+serde-saphyr uses `strict_booleans: true`, `merge_keys: AsOrdinary`, and
+`reject_unsupported_tags: true`; comment capture and resource limits use its
+defaults.
 
 ## CodSpeed
 
@@ -85,6 +93,34 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --
 
 Outside the CodSpeed runner, this checks that benchmarks execute but does not
 collect performance measurements. Use `cargo bench` for local wall-clock timings.
+
+## Implementation comparison (2026-09-30)
+
+These measurements use `deser-yaml` 0.9.1, `yaml_serde` 0.10.7, and
+serde-saphyr 1.3.0, with Astral's source at `d00cbaf`. They ran on macOS 26.7
+with an Apple M5 Max (18 cores, 128 GiB RAM), Rust 1.98.1, and the workspace
+release profile. CPU placement and frequency were not controlled.
+
+The table shows the median of six run medians. Divan used 64 iterations per
+sample, a minimum of one second per workload, and a maximum of 1.2 seconds.
+Runs alternated between ascending and descending benchmark order. Times include
+parsing, construction, and destruction. The three fixture rows use dynamic values
+with the representation difference described above; the service row uses the same
+structs with native derives for Serde and Deser.
+
+| Workload | Bytes | Astral | `deser-yaml` | `yaml_serde` | serde-saphyr |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| uv CI workflow | 11,602 | 26.685 µs | 70.925 µs | 136.850 µs | 189.650 µs |
+| Kubernetes Guestbook | 3,366 | 12.470 µs | 35.680 µs | 54.555 µs | 101.800 µs |
+| OpenAPI Petstore | 5,479 | 14.805 µs | 44.885 µs | 69.250 µs | 114.300 µs |
+| 128 services (typed) | 26,686 | 107.950 µs | 229.600 µs | — | 887.050 µs |
+
+[Run medians](results/2026-09-30-deser-yaml.csv) include sample and iteration
+counts. To repeat one round, use `--sort name`; use `--sortr name` to reverse it:
+
+```sh
+cargo bench -p astral-yaml-dev --features compare --bench compare --locked -- --sample-size 64 --min-time 1 --max-time 1.2 --sort name
+```
 
 ## Optimization results (2026-09-28)
 

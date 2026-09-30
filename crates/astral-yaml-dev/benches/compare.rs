@@ -2,6 +2,44 @@ use astral_yaml_dev::{Value, benchmarks};
 use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 use serde::Deserialize;
 
+fn deser_documents<'a, T: deser::Deserialize<'a>>(source: &'a str) -> Vec<T> {
+    let config = deser_yaml::DeserializerConfig::new().merge_keys(false);
+    let mut deserializer = deser_yaml::Deserializer::from_str_with_config(source, &config);
+
+    deserializer.iter::<T>().collect::<Result<_, _>>().unwrap()
+}
+
+fn normalize_deser_value(value: &deser_value::Value) -> Value {
+    use deser::ImplicitValue;
+    use deser_value::Kind;
+
+    match value.kind() {
+        Kind::Null => Value::Null,
+        Kind::Bool(value) => Value::Bool(*value),
+        Kind::U64(value) => Value::Unsigned(*value),
+        Kind::I64(value) => Value::Integer(*value),
+        Kind::F32(value) => Value::Float(f64::from(*value)),
+        Kind::F64(value) => Value::Float(*value),
+        Kind::Str(value) | Kind::Lexical(value) => Value::String(value.clone()),
+        Kind::Implicit(value) => match value.value() {
+            ImplicitValue::Null => Value::Null,
+            ImplicitValue::Bool(value) => Value::Bool(value),
+            ImplicitValue::U64(value) => Value::Unsigned(value),
+            ImplicitValue::I64(value) => Value::Integer(value),
+            ImplicitValue::F64(value) => Value::Float(value),
+            other => panic!("unsupported implicit Deser value: {other:?}"),
+        },
+        Kind::Seq(values) => Value::Sequence(values.iter().map(normalize_deser_value).collect()),
+        Kind::Map(entries) => Value::Mapping(
+            entries
+                .iter()
+                .map(|(key, value)| (normalize_deser_value(key), normalize_deser_value(value)))
+                .collect(),
+        ),
+        _ => panic!("unsupported Deser value: {value:?}"),
+    }
+}
+
 fn yaml_serde_documents(source: &str) -> Vec<Value> {
     yaml_serde::Deserializer::from_str(source)
         .map(|document| Value::deserialize(document).unwrap())
@@ -24,6 +62,14 @@ fn main() {
             values,
             serde_saphyr::from_multiple_with_options::<Value>(source, saphyr_options()).unwrap()
         );
+        let deser_values = deser_documents::<deser_value::Value>(source);
+        assert_eq!(
+            values,
+            deser_values
+                .iter()
+                .map(normalize_deser_value)
+                .collect::<Vec<_>>()
+        );
     }
 
     let source = services_fixture();
@@ -31,6 +77,10 @@ fn main() {
         documents::<ServiceConfig>(&source),
         serde_saphyr::from_multiple_with_options::<ServiceConfig>(&source, saphyr_options())
             .unwrap()
+    );
+    assert_eq!(
+        documents::<ServiceConfig>(&source),
+        deser_documents::<ServiceConfig>(&source)
     );
 
     divan::main();
@@ -42,13 +92,14 @@ mod deserialize {
     use astral_yaml_dev::Value;
     use divan::{Bencher, black_box};
 
-    use super::{documents, fixture, saphyr_options, yaml_serde_documents};
+    use super::{deser_documents, documents, fixture, saphyr_options, yaml_serde_documents};
 
     #[derive(Clone, Copy, Debug)]
     enum Implementation {
         Astral,
         YamlSerde,
         Saphyr,
+        DeserYaml,
     }
 
     impl fmt::Display for Implementation {
@@ -57,6 +108,7 @@ mod deserialize {
                 Self::Astral => "astral-yaml",
                 Self::YamlSerde => "yaml_serde",
                 Self::Saphyr => "serde-saphyr",
+                Self::DeserYaml => "deser-yaml",
             })
         }
     }
@@ -65,6 +117,7 @@ mod deserialize {
         Implementation::Astral,
         Implementation::YamlSerde,
         Implementation::Saphyr,
+        Implementation::DeserYaml,
     ];
 
     fn run(bencher: Bencher, name: &str, implementation: Implementation) {
@@ -86,6 +139,9 @@ mod deserialize {
                     )
                     .unwrap(),
                 );
+            }),
+            Implementation::DeserYaml => bencher.bench_local(|| {
+                black_box(deser_documents::<deser_value::Value>(black_box(source)));
             }),
         }
     }
@@ -110,7 +166,7 @@ mod deserialize_services_128 {
     use astral_yaml_dev::benchmarks::{ServiceConfig, documents, services_fixture};
     use divan::{Bencher, black_box};
 
-    use super::saphyr_options;
+    use super::{deser_documents, saphyr_options};
 
     #[divan::bench(name = "astral-yaml")]
     fn astral(bencher: Bencher) {
@@ -133,6 +189,15 @@ mod deserialize_services_128 {
                 )
                 .unwrap(),
             );
+        });
+    }
+
+    #[divan::bench(name = "deser-yaml")]
+    fn deser(bencher: Bencher) {
+        let source = services_fixture();
+
+        bencher.bench_local(|| {
+            black_box(deser_documents::<ServiceConfig>(black_box(&source)));
         });
     }
 }
