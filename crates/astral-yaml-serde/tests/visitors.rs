@@ -37,12 +37,8 @@ fn numeric_and_type_errors_are_located() {
     );
     assert_eq!(from_str::<f64>("0o10").unwrap().to_bits(), 8.0f64.to_bits());
 
-    for source in [
-        "text",
-        "[]",
-        "!!float 0xff",
-        "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-    ] {
+    let overflowing_integer = format!("0x{}", "f".repeat(257));
+    for source in ["text", "[]", "!!float 0xff", &overflowing_integer] {
         let error = from_str::<f64>(source).unwrap_err();
         assert!(error.span.is_some(), "{source}");
     }
