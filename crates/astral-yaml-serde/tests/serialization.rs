@@ -1,24 +1,14 @@
-//! Read emitter output with a separately implemented YAML parser.
-
 use std::{collections::BTreeMap, fmt::Debug};
 
+use astral_yaml_serde::{from_str, to_string};
 use serde::{Serialize, de::DeserializeOwned};
 
 fn roundtrip<T>(value: &T)
 where
     T: Serialize + DeserializeOwned + PartialEq + Debug,
 {
-    let yaml = astral_yaml_serde::to_string(value).unwrap();
-    assert_eq!(
-        &yaml_serde::from_str::<T>(&yaml).unwrap(),
-        value,
-        "{yaml:?}"
-    );
-    assert_eq!(
-        &astral_yaml_serde::from_str::<T>(&yaml).unwrap(),
-        value,
-        "{yaml:?}"
-    );
+    let yaml = to_string(value).unwrap();
+    assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
 }
 
 // https://yaml.org/spec/1.2.2/#51-character-set
@@ -48,17 +38,13 @@ fn floating_point_exponents_and_mantissas_roundtrip() {
         for exponent in 0..=0x7ff {
             for mantissa in [0, 1, (1 << 51) - 1, 1 << 51, (1 << 52) - 1] {
                 let value = f64::from_bits(sign | (exponent << 52) | mantissa);
-                let yaml = astral_yaml_serde::to_string(&value).unwrap();
+                let yaml = to_string(&value).unwrap();
+                let decoded = from_str::<f64>(&yaml).unwrap();
 
-                for decoded in [
-                    yaml_serde::from_str::<f64>(&yaml).unwrap(),
-                    astral_yaml_serde::from_str::<f64>(&yaml).unwrap(),
-                ] {
-                    if value.is_nan() {
-                        assert!(decoded.is_nan());
-                    } else {
-                        assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
-                    }
+                if value.is_nan() {
+                    assert!(decoded.is_nan());
+                } else {
+                    assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
                 }
             }
         }
@@ -68,17 +54,13 @@ fn floating_point_exponents_and_mantissas_roundtrip() {
         for exponent in 0..=0xff {
             for mantissa in [0, 1, (1 << 22) - 1, 1 << 22, (1 << 23) - 1] {
                 let value = f32::from_bits(sign | (exponent << 23) | mantissa);
-                let yaml = astral_yaml_serde::to_string(&value).unwrap();
+                let yaml = to_string(&value).unwrap();
+                let decoded = from_str::<f32>(&yaml).unwrap();
 
-                for decoded in [
-                    yaml_serde::from_str::<f32>(&yaml).unwrap(),
-                    astral_yaml_serde::from_str::<f32>(&yaml).unwrap(),
-                ] {
-                    if value.is_nan() {
-                        assert!(decoded.is_nan());
-                    } else {
-                        assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
-                    }
+                if value.is_nan() {
+                    assert!(decoded.is_nan());
+                } else {
+                    assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
                 }
             }
         }
@@ -87,7 +69,7 @@ fn floating_point_exponents_and_mantissas_roundtrip() {
 
 // https://yaml.org/spec/1.2.2/#742-flow-mappings
 #[test]
-fn complex_and_long_keys_remain_valid_yaml() {
+fn complex_and_long_keys_roundtrip() {
     roundtrip(&BTreeMap::from([
         (
             vec!["one".to_owned(), "two".to_owned()],

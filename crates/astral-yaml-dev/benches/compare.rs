@@ -1,5 +1,12 @@
 use astral_yaml_dev::{Value, benchmarks};
 use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
+use serde::Deserialize;
+
+fn yaml_serde_documents(source: &str) -> Vec<Value> {
+    yaml_serde::Deserializer::from_str(source)
+        .map(|document| Value::deserialize(document).unwrap())
+        .collect()
+}
 
 fn saphyr_options() -> serde_saphyr::Options {
     serde_saphyr::options! {
@@ -12,7 +19,7 @@ fn saphyr_options() -> serde_saphyr::Options {
 fn main() {
     for &(_, source) in FIXTURES {
         let values = benchmarks::astral(source);
-        assert_eq!(values, benchmarks::reference(source));
+        assert_eq!(values, yaml_serde_documents(source));
         assert_eq!(
             values,
             serde_saphyr::from_multiple_with_options::<Value>(source, saphyr_options()).unwrap()
@@ -32,10 +39,10 @@ fn main() {
 mod deserialize {
     use std::fmt;
 
-    use astral_yaml_dev::{Value, benchmarks};
+    use astral_yaml_dev::Value;
     use divan::{Bencher, black_box};
 
-    use super::{documents, fixture, saphyr_options};
+    use super::{documents, fixture, saphyr_options, yaml_serde_documents};
 
     #[derive(Clone, Copy, Debug)]
     enum Implementation {
@@ -69,7 +76,7 @@ mod deserialize {
                 black_box(documents::<Value>(black_box(source)));
             }),
             Implementation::YamlSerde => bencher.bench_local(|| {
-                black_box(benchmarks::reference(black_box(source)));
+                black_box(yaml_serde_documents(black_box(source)));
             }),
             Implementation::Saphyr => bencher.bench_local(|| {
                 black_box(

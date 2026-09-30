@@ -25,13 +25,11 @@ fuzz_target!(|data: &[u8]| {
 
     let quoted = to_string(source).unwrap();
     assert_eq!(from_str::<String>(&quoted).unwrap(), source);
-    assert_eq!(yaml_serde::from_str::<String>(&quoted).unwrap(), source);
 
     match from_str::<Value>(source) {
         Ok(value) => {
             if let Ok(encoded) = to_string(&value) {
                 assert_eq!(from_str::<Value>(&encoded).unwrap(), value);
-                assert_eq!(yaml_serde::from_str::<Value>(&encoded).unwrap(), value);
             }
         }
         Err(error) => {

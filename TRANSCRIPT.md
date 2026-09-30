@@ -29,9 +29,8 @@ and CR input, alias targets, shell text, scalar styles, and root comment lists.
 Generated tests check 73,728 block scalar presentations and 3,258 quoted scalar
 presentations. Serializer tests check all 1,112,064 Unicode scalar values, 23,040
 f32/f64 sign/exponent/mantissa combinations, wide integers, long keys, and
-collection-valued keys. The comparison accounts for the
-[EOF and indentation disagreements](docs/conformance.md#parser-disagreements)
-with LibYAML.
+collection-valued keys. The comparison accounted for the
+[EOF and indentation interpretations](docs/conformance.md#parsing-details).
 
 Span and comment tests cover borrowing, implicit nulls, aliases, enum tags,
 original-byte mapping, parent/child overlap, ignored fields, document boundaries,

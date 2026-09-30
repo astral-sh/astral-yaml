@@ -185,7 +185,6 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite() {
     }
 
     // A tab after the detected spaces is content (YAML 1.2.2 example 8.2).
-    // LibYAML incorrectly rejects this when indentation is inferred.
     for (source, expected) in [
         ("|\n  \ttext\n", "\ttext\n"),
         (">\n  \t\n  text\n", "\t\ntext\n"),

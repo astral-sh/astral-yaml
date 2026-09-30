@@ -15,7 +15,6 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 cargo test --workspace --all-features --locked
 uv run --script scripts/verify-fixtures.py
-cargo test -p astral-yaml --test real_world --locked -- --ignored
 cargo xtask cov
 ```
 
@@ -35,8 +34,6 @@ Run the pinned YAML Test Suite:
 cargo test -p astral-yaml --test conformance
 cargo test -p astral-yaml-serde --test conformance
 ```
-
-The `yaml_serde` comparison runs with `cargo test -p astral-yaml-dev --test yaml_serde`.
 
 Review inline snapshots with `cargo-insta`:
 

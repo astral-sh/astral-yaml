@@ -44,31 +44,16 @@ constructed values and check that the other 16 are rejected for non-core tags.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for commands and
 [TRANSCRIPT.md](../TRANSCRIPT.md) for recorded test and fuzz results.
 
-## Parser disagreements
+## Parsing details
 
-The [differential tests](../crates/astral-yaml-dev/tests/yaml_serde/) compare
-results with LibYAML through `yaml_serde`, with these exceptions:
+The parser follows the test suite's interpretation of EOF as an implicit final
+line break. For example, `"|\n  text"` produces `"text\n"`. The specification is
+ambiguous here; see [issue 118](https://github.com/yaml/yaml-test-suite/issues/118).
 
-- **EOF:** The parser follows the suite's interpretation of EOF as an implicit
-  final line break. For example, `"|\n  text"` produces `"text\n"`. LibYAML omits
-  the final break. The specification is ambiguous here; see
-  [issue 118](https://github.com/yaml/yaml-test-suite/issues/118).
-- **Block-scalar indentation:** An indented `#` can be scalar content. Leading
-  empty lines more indented than that content must be rejected. LibYAML can
-  accept them by treating the content as a comment. See suite case `S98Z` and
-  [issue 37](https://github.com/yaml/yaml-test-suite/issues/37).
-- **Tabs:** A tab after the detected block-scalar indentation is content
-  (spec example 8.2). LibYAML can reject it when indentation is inferred.
-- **Flow keys:** The parser accepts `{:foo}` as the key `:foo` with an empty value.
-  `yaml_serde` rejects it.
-- **Tag URIs:** The parser preserves percent-escape spelling in tags, as required
-  by [YAML 1.2.2 §5.6](https://yaml.org/spec/1.2.2/#56-miscellaneous-characters).
-  LibYAML decodes it: `!%12` becomes a tag containing a control character in
-  `yaml_serde`. LibYAML also rejects `#` inside tag URIs, which §5.6 permits.
-
-The [Sentry Compose fixture](../fixtures/real-world/README.md) is another rejection
-case: a closing flow delimiter is under-indented. PyYAML accepts it; astral-yaml
-rejects it.
+An indented `#` can be block-scalar content. Leading empty lines more indented
+than that content are rejected; see suite case `S98Z` and
+[issue 37](https://github.com/yaml/yaml-test-suite/issues/37). A tab after the
+detected block-scalar indentation is content (spec example 8.2).
 
 ## Spans and comments
 
