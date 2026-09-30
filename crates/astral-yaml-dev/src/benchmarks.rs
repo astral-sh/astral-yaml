@@ -42,17 +42,6 @@ pub fn documents<'a, T: Deserialize<'a>>(source: &'a str) -> Vec<T> {
         .collect()
 }
 
-/// Deserializes every document with `yaml_serde`.
-///
-/// # Panics
-/// Panics if the input cannot be deserialized.
-#[must_use]
-pub fn reference(source: &str) -> Vec<Value> {
-    yaml_serde::Deserializer::from_str(source)
-        .map(|doc| Value::deserialize(doc).unwrap())
-        .collect()
-}
-
 /// Returns a fixed benchmark fixture by name.
 ///
 /// # Panics

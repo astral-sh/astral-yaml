@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [features]
-compare = ["dep:serde-saphyr"]
+compare = ["dep:serde-saphyr", "dep:yaml_serde"]
 
 [dependencies]
 astral-yaml.workspace = true
@@ -16,7 +16,7 @@ astral-yaml-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr = { workspace = true, optional = true }
-yaml_serde.workspace = true
+yaml_serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 divan.workspace = true

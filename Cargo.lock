@@ -100,8 +100,6 @@ dependencies = [
  "astral-yaml-dev",
  "insta",
  "memchr",
- "serde",
- "serde_json",
 ]
 
 [[package]]

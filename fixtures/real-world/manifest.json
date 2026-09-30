@@ -1683,8 +1683,7 @@
     "bytes": 150,
     "file": "argoproj-argo-cd-applicationset-examples-template-override-default-guestbook-ui-svc-3f99ec02.yaml",
     "sha256": "004fdc14a47cd62149d7c2da86ece26a43b647054226fb1fcbc5b7448a35e0e0",
-    "license": "LICENSE-argoproj-argo-cd",
-    "python_error": "found character '\\t' that cannot start any token"
+    "license": "LICENSE-argoproj-argo-cd"
   },
   {
     "repository": "argoproj/argo-cd",
@@ -1992,8 +1991,7 @@
     "bytes": 5237,
     "file": "istio-istio-samples-jwt-server-jwt-server-26226f99.yaml",
     "sha256": "bd2a6c778c8ac2e4f74388e81d9d7569fc8037ea6143fdc3379ca332c382c6b7",
-    "license": "LICENSE-istio-istio",
-    "leading_zero_integers": 1
+    "license": "LICENSE-istio-istio"
   },
   {
     "repository": "istio/istio",
@@ -3973,8 +3971,7 @@
     "bytes": 1368,
     "file": "ansible-awx-tools-docker-compose-ansible-roles-sources-tasks-vault-tls-3c2f7cf7.yaml",
     "sha256": "b896780b3472fc7a55c17a79fa0a6c477c5d450e421c6cb6947e8215ff4f2919",
-    "license": "LICENSE-ansible-awx",
-    "leading_zero_integers": 1
+    "license": "LICENSE-ansible-awx"
   },
   {
     "repository": "ansible/awx",
@@ -4073,8 +4070,7 @@
     "bytes": 3120,
     "file": "ansible-awx-tools-docker-compose-minikube-minikube-tasks-main-5cf07bd0.yaml",
     "sha256": "354123528e44b9c3d8bf7698fff67f4a73b09be49f3a29fe8251ddc1502e72e8",
-    "license": "LICENSE-ansible-awx",
-    "leading_zero_integers": 4
+    "license": "LICENSE-ansible-awx"
   },
   {
     "repository": "ansible/awx",

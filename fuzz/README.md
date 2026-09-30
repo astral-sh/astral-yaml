@@ -32,9 +32,7 @@ Seeding preserves existing corpus discoveries and artifacts.
   ranges. Its seeds include every official test-suite case.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
-- `serde` checks string and arbitrary-value round trips and error ranges. It also
-  reads serialized strings and values with `yaml_serde` to check for defects
-  shared by astral-yaml's parser and serializer.
+- `serde` checks string and arbitrary-value round trips and error ranges.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.

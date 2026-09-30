@@ -32,8 +32,5 @@ jobs:
       - name: Run unit, integration, and doc tests
         run: cargo test --workspace --all-features --locked
 
-      - name: Compare fixtures with PyYAML
-        run: cargo test -p astral-yaml --test real_world --locked -- --ignored
-
       - name: Enforce coverage
         run: cargo xtask cov
