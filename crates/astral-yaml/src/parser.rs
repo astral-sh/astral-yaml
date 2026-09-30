@@ -704,6 +704,10 @@ impl<'a> Parser<'a> {
             if self.boundary() || self.column() != indent || !self.indicator(b'-') {
                 break;
             }
+
+            if self.source[self.line_start..self.pos].contains('\t') {
+                return Err(self.error("tab in block indentation"));
+            }
         }
 
         self.nodes[id.0].span.end = end;
@@ -779,8 +783,18 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.find_complex_key_colon(i)
+    }
+
+    fn find_complex_key_colon(&self, start: usize) -> Option<usize> {
+        let bytes = self.source.as_bytes();
+        let mut i = start;
         let mut quote = None;
         let mut level = 0usize;
+        // Quotes only start a quoted scalar at a node boundary; elsewhere
+        // they are ordinary characters in a plain scalar.
+        let mut plain = false;
+        let mut json_node = false;
 
         while let Some(&b) = bytes.get(i) {
             if matches!(b, b'\r' | b'\n') {
@@ -794,18 +808,71 @@ impl<'a> Parser<'a> {
                 }
 
                 if b == q {
+                    if q == b'\'' && bytes.get(i + 1) == Some(&q) {
+                        i += 2;
+                        continue;
+                    }
+
                     quote = None;
+                    plain = true;
+                    json_node = true;
                 }
             } else {
                 match b {
-                    b'\'' | b'"' => quote = Some(b),
-                    b'[' | b'{' => level += 1,
-                    b']' | b'}' => level = level.saturating_sub(1),
+                    b'\'' | b'"' if !plain => quote = Some(b),
+                    b'[' | b'{' => {
+                        level += 1;
+                        plain = false;
+                        json_node = false;
+                    }
+                    b']' | b'}' => {
+                        level = level.saturating_sub(1);
+                        plain = true;
+                        json_node = true;
+                    }
+                    b',' if level > 0 => {
+                        plain = false;
+                        json_node = false;
+                    }
                     b'#' if i == self.pos || is_space(bytes[i - 1]) => break,
                     b':' if level == 0 && bytes.get(i + 1).is_none_or(|b| is_space(*b)) => {
                         return Some(i);
                     }
-                    _ => {}
+                    b':' if level > 0
+                        && (json_node
+                            || bytes
+                                .get(i + 1)
+                                .is_none_or(|b| is_space(*b) || b",]}".contains(b))) =>
+                    {
+                        plain = false;
+                        json_node = false;
+                    }
+                    b'?' if !plain && bytes.get(i + 1).is_none_or(|b| is_space(*b)) => {}
+                    b'!' | b'&' | b'*' if !plain => {
+                        let alias = b == b'*';
+                        let verbatim_tag = b == b'!' && bytes.get(i + 1) == Some(&b'<');
+                        i += 1;
+                        while bytes.get(i).is_some_and(|b| {
+                            !is_space(*b)
+                                && if verbatim_tag {
+                                    *b != b'>'
+                                } else {
+                                    !b"[]{},".contains(b)
+                                }
+                        }) {
+                            i += 1;
+                        }
+                        if verbatim_tag && bytes.get(i) == Some(&b'>') {
+                            i += 1;
+                        }
+                        plain = alias;
+                        continue;
+                    }
+                    b' ' | b'\t' => {}
+                    _ => {
+                        plain = true;
+                        json_node = false;
+                    }
                 }
             }
             i += 1;
@@ -917,6 +984,10 @@ impl<'a> Parser<'a> {
             {
                 break;
             }
+
+            if self.source[self.line_start..self.pos].contains('\t') {
+                return Err(self.error("tab in block indentation"));
+            }
         }
 
         self.nodes[id.0].span.end = end;
@@ -930,7 +1001,9 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn mapping_value(&mut self, indent: usize, depth: usize, explicit: bool) -> Result<NodeId> {
-        if !explicit && (self.simple_colon().is_some() || self.indicator(b'-')) {
+        if !explicit
+            && (self.simple_colon().is_some() || self.indicator(b'-') || self.indicator(b'?'))
+        {
             return Err(self.error("compact mapping is not allowed after an implicit key"));
         }
 
