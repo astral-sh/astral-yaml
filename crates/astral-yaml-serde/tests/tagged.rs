@@ -236,6 +236,76 @@ fn tags_in_mapping_keys() {
 }
 
 #[test]
+fn serialization_compares_tagged_mapping_keys_by_yaml_identity() {
+    #[derive(Eq, Ord, PartialEq, PartialOrd, Serialize)]
+    #[serde(untagged)]
+    enum Key<'a> {
+        Plain(&'a str),
+        Tagged(Tagged<&'a str>),
+    }
+
+    for (tag, left, right, duplicate) in [
+        ("tag:yaml.org,2002:int", "01", "1", true),
+        ("tag:yaml.org,2002:float", "1", "1.0", true),
+        ("tag:yaml.org,2002:bool", "true", "TRUE", true),
+        ("tag:yaml.org,2002:null", "null", "~", true),
+        ("tag:yaml.org,2002:str", "01", "1", false),
+        ("!Application", "01", "1", false),
+    ] {
+        let key = |value| Tagged {
+            tag: tag.into(),
+            value,
+        };
+        let mapping = BTreeMap::from([(key(left), 1), (key(right), 2)]);
+        let result = to_string(&mapping);
+        assert_eq!(result.is_err(), duplicate, "{tag}: {left}, {right}");
+        if let Err(error) = result {
+            assert_eq!(error.message, "duplicate mapping key");
+        }
+    }
+
+    let mapping = BTreeMap::from([
+        (Key::Plain("text"), 1),
+        (
+            Key::Tagged(Tagged {
+                tag: "tag:yaml.org,2002:str".into(),
+                value: "text",
+            }),
+            2,
+        ),
+    ]);
+    assert_eq!(
+        to_string(&mapping).unwrap_err().message,
+        "duplicate mapping key"
+    );
+
+    let invalid_key = BTreeMap::from([(
+        Tagged {
+            tag: "tag:yaml.org,2002:int".into(),
+            value: "text",
+        },
+        1,
+    )]);
+    assert_eq!(
+        to_string(&invalid_key).unwrap_err().message,
+        "serialized value does not match its YAML tag"
+    );
+}
+
+#[test]
+fn serialized_complex_keys_obey_the_parser_byte_budget() {
+    let limit = astral_yaml::ParseOptions::default().max_input_bytes;
+    let key = Tagged {
+        tag: "!Large".into(),
+        value: "x".repeat(limit),
+    };
+    let mapping = BTreeMap::from([(key, 0)]);
+    let error = to_string(&mapping).unwrap_err();
+    assert_eq!(error.message, "input byte limit exceeded");
+    assert!(error.span.is_none());
+}
+
+#[test]
 fn spans_comments_and_aliases() {
     let source = "# greeting\n!Text hello # inline\n";
     let value = from_str::<Spanned<'_, Tagged<String>>>(source).unwrap();
@@ -291,6 +361,106 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
     assert_eq!(
         to_string(&value).unwrap_err().message,
         "a YAML node cannot have multiple tags"
+    );
+}
+
+#[test]
+fn serialization_checks_core_tag_content() {
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
+    for (source, compatible) in [
+        ("null", &["str", "null"][..]),
+        ("true", &["str", "bool"]),
+        ("42", &["str", "int", "float"]),
+        ("1.5", &["str", "float"]),
+        (".inf", &["str", "float"]),
+        (".nan", &["str", "float"]),
+        ("'42'", &["str", "int", "float"]),
+        ("'0x10'", &["str", "int"]),
+        ("'0o10'", &["str", "int"]),
+        ("'true'", &["str", "bool"]),
+        ("''", &["str", "null"]),
+        ("text", &["str"]),
+        ("[]", &["seq"]),
+        ("[1, true]", &["seq"]),
+        ("{}", &["map"]),
+        ("{answer: 42}", &["map"]),
+    ] {
+        let value = from_str::<Value>(source).unwrap();
+        for tag in ["str", "null", "bool", "int", "float", "seq", "map"] {
+            let tagged = Tagged {
+                tag: format!("tag:yaml.org,2002:{tag}"),
+                value: &value,
+            };
+            let result = to_string(&tagged);
+            assert_eq!(result.is_ok(), compatible.contains(&tag), "{tag}: {source}");
+
+            if let Ok(yaml) = result {
+                let expected = from_str::<Value>(&format!("!!{tag} {source}")).unwrap();
+                assert_eq!(from_str::<Value>(&yaml).unwrap(), expected, "{yaml}");
+            }
+        }
+    }
+}
+
+#[test]
+fn core_tag_checks_follow_enum_shapes_and_transparent_wrappers() {
+    #[derive(Serialize)]
+    enum Mode {
+        Ready,
+        Text(String),
+        Pair(u8, bool),
+        Config { enabled: bool },
+    }
+
+    for (value, tag) in [
+        (Mode::Ready, "str"),
+        (Mode::Text("text".into()), "map"),
+        (Mode::Pair(1, true), "map"),
+        (Mode::Config { enabled: true }, "map"),
+    ] {
+        for declared in ["str", "seq", "map"] {
+            let tagged = Tagged {
+                tag: format!("tag:yaml.org,2002:{declared}"),
+                value: Some(&value),
+            };
+            let yaml = to_string(&tagged);
+            assert_eq!(yaml.is_ok(), tag == declared);
+            if let Ok(yaml) = yaml {
+                assert!(from_str::<Value>(&yaml).is_ok(), "{yaml}");
+            }
+        }
+    }
+
+    for value in [1.0_f32, f32::INFINITY, f32::NAN] {
+        assert!(
+            to_string(&Tagged {
+                tag: "tag:yaml.org,2002:int".into(),
+                value
+            })
+            .is_err()
+        );
+        assert!(
+            to_string(&Tagged {
+                tag: "tag:yaml.org,2002:float".into(),
+                value
+            })
+            .is_ok()
+        );
+    }
+
+    assert!(
+        to_string(&Tagged {
+            tag: "tag:yaml.org,2002:map".into(),
+            value: 'x'
+        })
+        .is_err()
+    );
+    assert!(
+        to_string(&Tagged {
+            tag: "tag:yaml.org,2002:seq".into(),
+            value: None::<u8>
+        })
+        .is_err()
     );
 }
 

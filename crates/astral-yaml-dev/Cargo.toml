@@ -15,12 +15,12 @@ saphyr = ["dep:serde-saphyr"]
 astral-yaml.workspace = true
 astral-yaml-serde.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde-saphyr = { workspace = true, optional = true }
 yaml_serde.workspace = true
 
 [dev-dependencies]
 divan.workspace = true
-serde_json.workspace = true
 
 [[test]]
 name = "saphyr"

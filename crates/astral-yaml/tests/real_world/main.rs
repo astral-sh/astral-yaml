@@ -1,27 +1,14 @@
 mod display;
 mod fixtures;
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, process::Command};
 
-use astral_yaml_dev::{events, validate_spans};
+use astral_yaml_dev::{
+    events,
+    fixtures::{manifest, root, with_line_breaks},
+    validate_spans,
+};
 use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Fixture {
-    file: String,
-    valid_yaml_1_2: Option<bool>,
-}
-
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/real-world")
-}
-
-fn manifest() -> Vec<Fixture> {
-    serde_json::from_str(include_str!(
-        "../../../../fixtures/real-world/manifest.json"
-    ))
-    .unwrap()
-}
 
 fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
     for node in stream.nodes() {
@@ -53,11 +40,12 @@ fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
 fn check_fixture(name: &str) -> String {
     let source = fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap();
     let stream = astral_yaml::parse(&source).unwrap();
+    validate_spans(&stream).unwrap();
     assert_alias_targets(&stream);
     let tree = display::tree(&stream);
 
     for line_break in ["\r\n", "\r"] {
-        let converted = source.replace('\n', line_break);
+        let converted = with_line_breaks(&source, line_break);
         let converted_stream = astral_yaml::parse(&converted).unwrap();
         assert_eq!(
             display::tree(&converted_stream),
@@ -88,10 +76,10 @@ fn every_fixture_has_an_inline_snapshot() {
     assert_eq!(actual, expected);
 
     for fixture in manifest() {
-        let source = fs::read_to_string(root().join(&fixture.file)).unwrap();
+        let source = fixture.source();
         assert_eq!(
             astral_yaml::parse(&source).is_ok(),
-            fixture.valid_yaml_1_2.unwrap_or(true),
+            fixture.valid_syntax(),
             "{}",
             fixture.file
         );
@@ -198,9 +186,9 @@ fn syntax_and_scalar_spans_match_pyyaml() {
 
     for (oracle, fixture) in oracles.iter().zip(fixtures) {
         assert_eq!(oracle.file, fixture.file);
-        let source = fs::read_to_string(root().join(&fixture.file)).unwrap();
+        let source = fixture.source();
 
-        if !fixture.valid_yaml_1_2.unwrap_or(true) {
+        if !fixture.valid_syntax() {
             // PyYAML accepts this input; the inline diagnostic pins our rejection.
             assert!(astral_yaml::parse(&source).is_err());
             continue;
@@ -211,7 +199,7 @@ fn syntax_and_scalar_spans_match_pyyaml() {
         assert_eq!(events(&stream), oracle.events, "{}", fixture.file);
 
         for line_break in ["\r\n", "\r"] {
-            let converted = source.replace('\n', line_break);
+            let converted = with_line_breaks(&source, line_break);
             let converted_stream = astral_yaml::parse(&converted).unwrap();
             validate_spans(&converted_stream).unwrap();
             assert_eq!(events(&converted_stream), oracle.events, "{}", fixture.file);

@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("dagster-io-dagster-examples-assets-modern-data-stack-dbt-project-profiles-0c2e58ad"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "mds_dbt" [plain @1:1..1:8]: mapping [block]
+        "target" [plain @2:3..2:9]: "prod" [plain @2:11..2:15]
+        "outputs" [plain @3:3..3:10]: mapping [block]
+          "prod" [plain @4:5..4:9]: mapping [block]
+            "type" [plain @5:7..5:11]: "postgres" [plain @5:13..5:21]
+            "host" [plain @6:7..6:11]: "localhost" [plain @6:13..6:22]
+            "port" [plain @7:7..7:11]: "5432" [plain @7:13..7:17]
+            "user" [plain @8:7..8:11]: "postgres" [plain @8:13..8:21]
+            "pass" [plain @9:7..9:11]: "password" [plain @9:13..9:21]
+            "dbname" [plain @10:7..10:13]: "postgres_replica" [plain @10:15..10:31]
+            "schema" [plain @11:7..11:13]: "public" [plain @11:15..11:21]
+            "threads" [plain @12:7..12:14]: "2" [plain @12:16..12:17]
+            "keepalives_idle" [plain @13:7..13:22]: "0" [plain @13:24..13:25]
+          "skip_airbyte" [plain @14:5..14:17]: mapping [block]
+            "type" [plain @15:7..15:11]: "postgres" [plain @15:13..15:21]
+            "host" [plain @16:7..16:11]: "localhost" [plain @16:13..16:22]
+            "port" [plain @17:7..17:11]: "5432" [plain @17:13..17:17]
+            "user" [plain @18:7..18:11]: "postgres" [plain @18:13..18:21]
+            "pass" [plain @19:7..19:11]: "password" [plain @19:13..19:21]
+            "dbname" [plain @20:7..20:13]: "postgres" [plain @20:15..20:23]
+            "schema" [plain @21:7..21:13]: "public" [plain @21:15..21:21]
+            "threads" [plain @22:7..22:14]: "2" [plain @22:16..22:17]
+            "keepalives_idle" [plain @23:7..23:22]: "0" [plain @23:24..23:25]
+    "#);
+}

@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("docker-awesome-compose-nginx-flask-mongo-compose-9097c56c"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "services" [plain @1:1..1:9]: mapping [block]
+        "web" [plain @2:3..2:6]: mapping [block]
+          "image" [plain @3:5..3:10]: "nginx" [plain @3:12..3:17]
+          "volumes" [plain @4:5..4:12]: sequence [block]
+            - "./nginx/nginx.conf:/tmp/nginx.conf" [plain @5:9..5:43]
+          "environment" [plain @6:5..6:16]: sequence [block]
+            - "FLASK_SERVER_ADDR=backend:9091" [plain @7:9..7:39]
+          "command" [plain @8:5..8:12]: "/bin/bash -c \"envsubst < /tmp/nginx.conf > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'\"" [plain @8:14..8:114]
+          "ports" [plain @9:5..9:10]: sequence [block]
+            - "80:80" [plain @10:9..10:14]
+          "depends_on" [plain @11:5..11:15]: sequence [block]
+            - "backend" [plain @12:9..12:16]
+        "backend" [plain @14:3..14:10]: mapping [block]
+          "build" [plain @15:5..15:10]: mapping [block]
+            "context" [plain @16:7..16:14]: "flask" [plain @16:16..16:21]
+            "target" [plain @17:7..17:13]: "builder" [plain @17:15..17:22]
+          "stop_signal" [plain @20:5..20:16]: "SIGINT" [plain @20:18..20:24]
+          "environment" [plain @21:5..21:16]: sequence [block]
+            - "FLASK_SERVER_PORT=9091" [plain @22:9..22:31]
+          "volumes" [plain @23:5..23:12]: sequence [block]
+            - "./flask:/src" [plain @24:9..24:21]
+          "depends_on" [plain @25:5..25:15]: sequence [block]
+            - "mongo" [plain @26:10..26:15]
+        "mongo" [plain @28:3..28:8]: mapping [block]
+          "image" [plain @29:5..29:10]: "mongo" [plain @29:12..29:17]
+    "#);
+}

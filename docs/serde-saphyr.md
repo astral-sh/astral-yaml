@@ -1,6 +1,6 @@
 # Comparison with serde-saphyr
 
-Compared on 2026-09-28 against [serde-saphyr 1.3.0](https://github.com/bourumir-wyngs/serde-saphyr/tree/93e634c680c4ae4bff6a0b8f841077868725547d)
+Compared on 2026-09-29 against [serde-saphyr 1.3.0](https://github.com/bourumir-wyngs/serde-saphyr/tree/93e634c680c4ae4bff6a0b8f841077868725547d)
 and its parser, granit-parser 1.3.0 (`e9941f06f9a1c43dba847808af356ec383f874e3`).
 The dependency versions are pinned in `Cargo.lock`.
 
@@ -24,12 +24,16 @@ Both parsers were tested against all 402 unmodified cases in the
 | Invalid syntax rejected | 94/94 | 93/94 |
 | Valid event streams match the suite | 308/308 | 308/308 |
 | Constructible JSON expectations match | 263/263 | 263/263 |
-| Accepted real-world fixtures produce equal values | 11/11 | 11/11 |
 
 Granit accepts `9C9N`, an under-indented flow sequence. Its upstream test
 [explicitly permits this](https://github.com/bourumir-wyngs/serde-saphyr/blob/93e634c680c4ae4bff6a0b8f841077868725547d/tests/test_suite/y_9C9N.rs).
 The Sentry Compose fixture exposes the same syntax difference. serde-saphyr later
 rejects that fixture because its alias-to-anchor ratio exceeds the default budget.
+
+The [real-world corpus](../fixtures/real-world/README.md) now contains 632 inputs.
+Its comparison checks accepted values, expected rejections, dropped null
+documents, and scalar-resolution differences. A Prometheus configuration exceeds
+serde-saphyr's consecutive-comment limit. The manifest pins that rejection.
 
 Event comparison normalizes granit's numeric anchor IDs, implicit empty scalars
 (represented as `~`), and document-end markers (which omit explicitness).
@@ -71,6 +75,9 @@ identical:
   `1_000` even with these settings. Astral treats them as strings under the core
   schema. serde-saphyr's defaults also expand merge keys and accept YAML 1.1
   booleans.
+- Plain leading-zero decimal integers such as `0755` deserialize as floats in
+  serde-saphyr's generic value path. Astral resolves them as integers; the corpus
+  comparisons check the number and values of these differences.
 - Astral rejects `{null: a, ~: b}` as duplicate keys; serde-saphyr 1.3.0 accepts it.
 - Both accept `.inf` and `.nan` as typed floats. serde-saphyr rejects them through
   `deserialize_any` by default; Astral passes them to the visitor.

@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("open-telemetry-opentelemetry-collector-contrib-examples-couchbase-docker-compose-3980b445"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "version" [plain @1:1..1:8]: "3" [double-quoted @1:10..1:13]
+      "services" [plain @2:1..2:9]: mapping [block]
+        "couchbase" [plain @3:3..3:12]: mapping [block]
+          "image" [plain @4:5..4:10]: "couchbase:enterprise-7.1.0@sha256:6ea8fc49bde775bb4999f59add71dc7e016c7ec6c00a286729c395a1948c0356" [plain @4:12..4:110]
+          "ports" [plain @5:5..5:10]: sequence [block]
+            - "8091:8091" [plain @6:9..6:18]
+          "deploy" [plain @7:5..7:11]: mapping [block]
+            "resources" [plain @8:7..8:16]: mapping [block]
+              "limits" [plain @9:9..9:15]: mapping [block]
+                "cpus" [plain @10:11..10:15]: "0.50" [double-quoted @10:17..10:23]
+                "memory" [plain @11:11..11:17]: "1512M" [plain @11:19..11:24]
+        "opentelemetry-collector-contrib" [plain @12:3..12:34]: mapping [block]
+          "image" [plain @13:5..13:10]: "otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1" [plain @13:12..13:128]
+          "command" [plain @14:5..14:12]: sequence [flow]
+            - "--config=/etc/otel-collector-config.yml" [double-quoted @14:15..14:56]
+          "volumes" [plain @15:5..15:12]: sequence [block]
+            - "./otel-collector-config.yaml:/etc/otel-collector-config.yml" [plain @16:9..16:68]
+          "depends_on" [plain @17:5..17:15]: sequence [block]
+            - "couchbase" [plain @18:9..18:18]
+        "prometheus" [plain @19:3..19:13]: mapping [block]
+          "image" [plain @20:5..20:10]: "prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e" [plain @20:12..20:107]
+          "volumes" [plain @21:5..21:12]: sequence [block]
+            - "./prometheus-config.yaml:/etc/prometheus/prometheus.yml" [plain @22:9..22:64]
+          "ports" [plain @23:5..23:10]: sequence [block]
+            - "9090:9090" [plain @24:9..24:18]
+    "#);
+}

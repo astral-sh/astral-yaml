@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("spring-projects-spring-boot-smoke-test-spring-boot-smoke-test-reactive-oauth2-client-src-main-resources-application-2aced611"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "spring" [plain @1:1..1:7]: mapping [block]
+        "security" [plain @2:3..2:11]: mapping [block]
+          "oauth2" [plain @3:5..3:11]: mapping [block]
+            "client" [plain @4:7..4:13]: mapping [block]
+              "registration" [plain @5:9..5:21]: mapping [block]
+                "github-client-1" [plain @6:11..6:26]: mapping [block]
+                  "client-id" [plain @7:13..7:22]: "${APP-CLIENT-ID}" [plain @7:24..7:40]
+                  "client-secret" [plain @8:13..8:26]: "${APP-CLIENT-SECRET}" [plain @8:28..8:48]
+                  "client-name" [plain @9:13..9:24]: "Github user" [plain @9:26..9:37]
+                  "provider" [plain @10:13..10:21]: "github" [plain @10:23..10:29]
+                  "scope" [plain @11:13..11:18]: "user" [plain @11:20..11:24]
+                  "redirect-uri" [plain @12:13..12:25]: "http://localhost:8080/login/oauth2/code/github" [plain @12:27..12:73]
+                "github-client-2" [plain @13:11..13:26]: mapping [block]
+                  "client-id" [plain @14:13..14:22]: "${APP-CLIENT-ID}" [plain @14:24..14:40]
+                  "client-secret" [plain @15:13..15:26]: "${APP-CLIENT-SECRET}" [plain @15:28..15:48]
+                  "client-name" [plain @16:13..16:24]: "Github email" [plain @16:26..16:38]
+                  "provider" [plain @17:13..17:21]: "github" [plain @17:23..17:29]
+                  "scope" [plain @18:13..18:18]: "user:email" [plain @18:20..18:30]
+                  "redirect-uri" [plain @19:13..19:25]: "http://localhost:8080/login/oauth2/code/github" [plain @19:27..19:73]
+                "yahoo-oidc" [plain @20:11..20:21]: mapping [block]
+                  "client-id" [plain @21:13..21:22]: "${YAHOO-CLIENT-ID}" [plain @21:24..21:42]
+                  "client-secret" [plain @22:13..22:26]: "${YAHOO-CLIENT-SECRET}" [plain @22:28..22:50]
+              "provider" [plain @23:9..23:17]: mapping [block]
+                "yahoo-oidc" [plain @24:11..24:21]: mapping [block]
+                  "issuer-uri" [plain @25:13..25:23]: "https://api.login.yahoo.com" [plain @25:25..25:52]
+    "#);
+}

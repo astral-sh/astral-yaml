@@ -123,3 +123,8 @@ limit. Serialization also limits nesting.
 
 Numeric values must fit the requested Rust type. The parser can still recognize
 numeric syntax outside machine integer ranges.
+
+Mapping-key comparison uses 128-bit integer magnitudes and 64-bit floats,
+independently of the destination key type. Serialization also rejects duplicate
+keys and core-tag/content mismatches. Non-string keys are checked using the
+parser's default limits.

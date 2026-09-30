@@ -1,7 +1,8 @@
-use std::{collections::BTreeMap, fmt::Debug, fs, path::Path};
+use std::{collections::BTreeMap, fmt::Debug};
 
 use astral_yaml_dev::{
     Value as TestValue,
+    fixtures::{manifest, scalar_differences},
     saphyr::{astral_documents, options},
 };
 use serde::{Deserialize, de::IgnoredAny};
@@ -224,39 +225,80 @@ fn complex_keys_and_duplicate_identity() {
 
 #[test]
 fn real_world_values() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/real-world");
-    let mut accepted = 0;
+    for fixture in manifest() {
+        let source = fixture.source();
+        let ours = astral_documents::<TestValue>(&source);
+        let theirs = serde_saphyr::from_multiple_with_options::<TestValue>(&source, options());
+        assert_eq!(astral_yaml::parse(&source).is_ok(), fixture.valid_syntax());
 
-    for entry in fs::read_dir(root).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_none_or(|extension| extension != "yaml") {
-            continue;
-        }
-
-        let source = fs::read_to_string(&path).unwrap();
-        if path.file_name().unwrap() == "sentry-compose.yaml" {
-            assert!(astral_yaml::parse(&source).is_err());
+        if let Some(expected) = &fixture.saphyr_error {
             assert!(
-                serde_saphyr::granit_parser::Parser::new_from_str(&source)
-                    .collect::<Result<Vec<_>, _>>()
-                    .is_ok()
+                theirs
+                    .unwrap_err()
+                    .without_snippet()
+                    .to_string()
+                    .contains(expected),
+                "{}",
+                fixture.file
             );
-            let result = serde_saphyr::from_multiple_with_options::<TestValue>(&source, options());
-            assert!(matches!(
-                result.unwrap_err().without_snippet(),
-                serde_saphyr::Error::Budget { .. }
-            ));
+            assert_eq!(ours.is_ok(), fixture.valid_syntax());
             continue;
         }
 
-        let ours = astral_documents::<TestValue>(&source).unwrap();
-        let theirs =
-            serde_saphyr::from_multiple_with_options::<TestValue>(&source, options()).unwrap();
-        assert_eq!(ours, theirs, "{}", path.display());
-        accepted += 1;
-    }
+        if !fixture.valid_syntax() {
+            assert!(ours.is_err());
+            assert!(theirs.is_ok(), "{}", fixture.file);
+            continue;
+        }
 
-    assert_eq!(accepted, 11);
+        if let Some(expected) = fixture.serde_error {
+            assert_eq!(ours.unwrap_err().message, expected, "{}", fixture.file);
+            let expected = if expected == "duplicate mapping key" {
+                "duplicate mapping key"
+            } else {
+                "unsupported tag"
+            };
+            assert!(
+                theirs
+                    .unwrap_err()
+                    .without_snippet()
+                    .to_string()
+                    .contains(expected),
+                "{}",
+                fixture.file
+            );
+            continue;
+        }
+
+        let mut ours = ours.unwrap();
+        let theirs = theirs.unwrap_or_else(|error| panic!("{}: {error}", fixture.file));
+        let documents = ours.len();
+        ours.retain(|value| !matches!(value, TestValue::Null));
+        assert_eq!(
+            documents - ours.len(),
+            fixture.saphyr_null_documents,
+            "{}",
+            fixture.file
+        );
+        assert_eq!(ours.len(), theirs.len(), "{}", fixture.file);
+
+        // serde-saphyr resolves plain leading-zero integers as floats.
+        let differences: usize = ours
+            .iter()
+            .zip(&theirs)
+            .map(|(ours, theirs)| {
+                scalar_differences(ours, theirs, |ours, theirs| {
+                    matches!((ours, theirs), (TestValue::Unsigned(number), TestValue::Float(float))
+                    if u32::try_from(*number).is_ok_and(|number| f64::from(number).to_bits() == float.to_bits()))
+                })
+            })
+            .sum();
+        assert_eq!(
+            differences, fixture.leading_zero_integers,
+            "{}",
+            fixture.file
+        );
+    }
 }
 
 // https://yaml.org/spec/1.2.2/#10214-floating-point

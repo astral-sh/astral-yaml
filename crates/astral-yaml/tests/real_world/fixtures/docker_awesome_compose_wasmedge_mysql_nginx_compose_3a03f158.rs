@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("docker-awesome-compose-wasmedge-mysql-nginx-compose-3a03f158"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "services" [plain @1:1..1:9]: mapping [block]
+        "frontend" [plain @2:3..2:11]: mapping [block]
+          "image" [plain @3:5..3:10]: "nginx:alpine" [plain @3:12..3:24]
+          "ports" [plain @4:5..4:10]: sequence [block]
+            - "8090:80" [plain @5:9..5:16]
+          "volumes" [plain @6:5..6:12]: sequence [block]
+            - "./frontend:/usr/share/nginx/html" [plain @7:9..7:41]
+        "backend" [plain @9:3..9:10]: mapping [block]
+          "image" [plain @10:5..10:10]: "demo-microservice" [plain @10:12..10:29]
+          "platform" [plain @11:5..11:13]: "wasi/wasm" [plain @11:15..11:24]
+          "build" [plain @12:5..12:10]: mapping [block]
+            "context" [plain @13:7..13:14]: "backend/" [plain @13:16..13:24]
+          "ports" [plain @14:5..14:10]: sequence [block]
+            - "8080:8080" [plain @15:9..15:18]
+          "environment" [plain @16:5..16:16]: mapping [block]
+            "DATABASE_URL" [plain @17:7..17:19]: "mysql://root:whalehello@db:3306/mysql" [plain @17:21..17:58]
+            "RUST_BACKTRACE" [plain @18:7..18:21]: "full" [plain @18:23..18:27]
+          "restart" [plain @19:5..19:12]: "unless-stopped" [plain @19:14..19:28]
+          "runtime" [plain @20:5..20:12]: "io.containerd.wasmedge.v1" [plain @20:14..20:39]
+        "db" [plain @22:3..22:5]: mapping [block]
+          "image" [plain @23:5..23:10]: "mariadb:10.9" [plain @23:12..23:24]
+          "environment" [plain @24:5..24:16]: mapping [block]
+            "MYSQL_ROOT_PASSWORD" [plain @25:7..25:26]: "whalehello" [plain @25:28..25:38]
+    "#);
+}

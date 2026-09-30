@@ -1,0 +1,33 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-cd-applicationset-examples-design-doc-git-directory-discovery-055cd98e"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @24:1..24:11]: "argoproj.io/v1alpha1" [plain @24:13..24:33]
+      "kind" [plain @25:1..25:5]: "ApplicationSet" [plain @25:7..25:21]
+      "metadata" [plain @26:1..26:9]: mapping [block]
+        "name" [plain @27:3..27:7]: "cluster-addons" [plain @27:9..27:23]
+      "spec" [plain @28:1..28:5]: mapping [block]
+        "goTemplate" [plain @29:3..29:13]: "true" [plain @29:15..29:19]
+        "goTemplateOptions" [plain @30:3..30:20]: sequence [flow]
+          - "missingkey=error" [double-quoted @30:23..30:41]
+        "generators" [plain @31:3..31:13]: sequence [block]
+          - mapping [block]
+            "git" [plain @32:5..32:8]: mapping [block]
+              "repoURL" [plain @33:7..33:14]: "https://github.com/infra-team/cluster-deployments.git" [plain @33:16..33:69]
+              "directories" [plain @34:7..34:18]: sequence [block]
+                - mapping [block]
+                  "path" [plain @35:9..35:13]: "add-ons/*" [plain @35:15..35:24]
+        "template" [plain @36:3..36:11]: mapping [block]
+          "metadata" [plain @37:5..37:13]: mapping [block]
+            "name" [plain @38:7..38:11]: "{{.path.basename}}" [single-quoted @38:13..38:33]
+          "spec" [plain @39:5..39:9]: mapping [block]
+            "source" [plain @40:7..40:13]: mapping [block]
+              "repoURL" [plain @41:9..41:16]: "https://github.com/infra-team/cluster-deployments.git" [plain @41:18..41:71]
+              "targetRevision" [plain @42:9..42:23]: "HEAD" [plain @42:25..42:29]
+              "path" [plain @43:9..43:13]: "{{.path.path}}" [single-quoted @43:15..43:31]
+            "destination" [plain @44:7..44:18]: mapping [block]
+              "server" [plain @45:9..45:15]: "http://kubernetes.default.svc" [plain @45:17..45:46]
+              "namespace" [plain @46:9..46:18]: "{{.path.basename}}" [single-quoted @46:20..46:40]
+    "#);
+}

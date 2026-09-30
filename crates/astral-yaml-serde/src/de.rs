@@ -1,6 +1,6 @@
 use crate::{
-    AttachedComment, CommentPlacement, Error, comments::CommentCache, spanned, tagged,
-    with::yaml_tag,
+    AttachedComment, CommentPlacement, Error, comments::CommentCache, schema::YamlType, spanned,
+    tagged, with::yaml_tag,
 };
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
@@ -13,40 +13,6 @@ use serde::de::{
 use std::{borrow::Cow, cell::Cell, collections::HashSet};
 
 type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum YamlType {
-    Scalar(ScalarType),
-    Sequence,
-    Mapping,
-}
-
-impl YamlType {
-    fn from_tag(tag: &str) -> Option<Self> {
-        match tag {
-            "tag:yaml.org,2002:str" => Some(Self::Scalar(ScalarType::String)),
-            "tag:yaml.org,2002:null" => Some(Self::Scalar(ScalarType::Null)),
-            "tag:yaml.org,2002:bool" => Some(Self::Scalar(ScalarType::Bool)),
-            "tag:yaml.org,2002:int" => Some(Self::Scalar(ScalarType::Int)),
-            "tag:yaml.org,2002:float" => Some(Self::Scalar(ScalarType::Float)),
-            "tag:yaml.org,2002:seq" => Some(Self::Sequence),
-            "tag:yaml.org,2002:map" => Some(Self::Mapping),
-            _ => None,
-        }
-    }
-
-    fn accepts(self, declared: Self) -> bool {
-        // Floating-point destinations also accept YAML integers.
-        self == declared
-            || matches!(
-                (self, declared),
-                (
-                    Self::Scalar(ScalarType::Float),
-                    Self::Scalar(ScalarType::Int)
-                )
-            )
-    }
-}
 
 fn is_core_tag(tag: &str) -> bool {
     tag == "!" || YamlType::from_tag(tag).is_some()
@@ -112,6 +78,32 @@ struct Context<'s, 'de> {
     budget: Cell<usize>,
     scalar_budget: Cell<usize>,
     comments: CommentCache<'de>,
+}
+
+/// Canonical identity for a serialized mapping key. String identities use the
+/// serializer's quoting so they compare with its allocation-free string path.
+pub(crate) fn canonical_key(source: &str) -> Result<String> {
+    let stream = astral_yaml::parse(source)?;
+    // The serializer emits exactly one node for each key.
+    let document = &stream.documents()[0];
+    let context = Context {
+        stream: &stream,
+        budget: Cell::new(1_000_000),
+        scalar_budget: Cell::new(64 * 1024 * 1024),
+        comments: CommentCache::new(0),
+    };
+    let key = Deserializer {
+        context: &context,
+        id: document.root,
+        depth: 0,
+        tag_state: TagState::Unconsumed,
+        yaml_tag: false,
+    }
+    .key()?;
+
+    let mut identity = String::new();
+    key.write_identity(&mut identity);
+    Ok(identity)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -687,6 +679,46 @@ enum Key<'a> {
     Sequence(Vec<Self>),
     Mapping(Vec<(Self, Self)>),
     Tagged(&'a str, Box<Self>),
+}
+
+impl Key<'_> {
+    fn write_identity(&self, output: &mut String) {
+        use std::fmt::Write;
+
+        match self {
+            Self::Null => output.push_str("n;"),
+            Self::Bool(value) => output.push_str(if *value { "b1;" } else { "b0;" }),
+            Self::String(value) => {
+                let quoted = crate::to_string(value).expect("strings serialize without errors");
+                output.push_str(quoted.strip_suffix('\n').unwrap());
+            }
+            Self::Integer(negative, magnitude) => {
+                write!(output, "i{}{magnitude};", if *negative { '-' } else { '+' })
+                    .expect("String write");
+            }
+            Self::Float(bits) => write!(output, "f{bits:x};").expect("String write"),
+            Self::Sequence(items) => {
+                output.push('[');
+                for item in items {
+                    item.write_identity(output);
+                }
+                output.push(']');
+            }
+            Self::Mapping(entries) => {
+                output.push('{');
+                for (key, value) in entries {
+                    key.write_identity(output);
+                    value.write_identity(output);
+                }
+                output.push('}');
+            }
+            Self::Tagged(tag, value) => {
+                output.push('t');
+                Self::String(tag).write_identity(output);
+                value.write_identity(output);
+            }
+        }
+    }
 }
 
 macro_rules! signed {

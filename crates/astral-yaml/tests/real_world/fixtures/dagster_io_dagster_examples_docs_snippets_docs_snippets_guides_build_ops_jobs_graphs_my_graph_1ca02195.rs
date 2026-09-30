@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("dagster-io-dagster-examples-docs-snippets-docs-snippets-guides-build-ops-jobs-graphs-my-graph-1ca02195"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "name" [plain @1:1..1:5]: "some_example" [plain @1:7..1:19]
+      "description" [plain @2:1..2:12]: "blah blah blah" [plain @2:14..2:28]
+      "ops" [plain @3:1..3:4]: sequence [block]
+        - mapping [block]
+          "def" [plain @4:5..4:8]: "add_one" [plain @4:10..4:17]
+          "alias" [plain @5:5..5:10]: "A" [plain @5:12..5:13]
+        - mapping [block]
+          "def" [plain @6:5..6:8]: "add_one" [plain @6:10..6:17]
+          "alias" [plain @7:5..7:10]: "B" [plain @7:12..7:13]
+          "deps" [plain @8:5..8:9]: mapping [block]
+            "num" [plain @9:7..9:10]: mapping [block]
+              "op" [plain @10:9..10:11]: "A" [plain @10:13..10:14]
+        - mapping [block]
+          "def" [plain @11:5..11:8]: "add_two" [plain @11:10..11:17]
+          "alias" [plain @12:5..12:10]: "C" [plain @12:12..12:13]
+          "deps" [plain @13:5..13:9]: mapping [block]
+            "num" [plain @14:7..14:10]: mapping [block]
+              "op" [plain @15:9..15:11]: "A" [plain @15:13..15:14]
+        - mapping [block]
+          "def" [plain @16:5..16:8]: "subtract" [plain @16:10..16:18]
+          "deps" [plain @17:5..17:9]: mapping [block]
+            "left" [plain @18:7..18:11]: mapping [block]
+              "op" [plain @19:9..19:11]: "B" [plain @19:13..19:14]
+            "right" [plain @20:7..20:12]: mapping [block]
+              "op" [plain @21:9..21:11]: "C" [plain @21:13..21:14]
+    "#);
+}

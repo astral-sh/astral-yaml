@@ -1,0 +1,30 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("argoproj-argo-cd-applicationset-examples-design-doc-git-directory-discovery-fasttemplate-3e900950"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "apiVersion" [plain @24:1..24:11]: "argoproj.io/v1alpha1" [plain @24:13..24:33]
+      "kind" [plain @25:1..25:5]: "ApplicationSet" [plain @25:7..25:21]
+      "metadata" [plain @26:1..26:9]: mapping [block]
+        "name" [plain @27:3..27:7]: "cluster-addons" [plain @27:9..27:23]
+      "spec" [plain @28:1..28:5]: mapping [block]
+        "generators" [plain @29:3..29:13]: sequence [block]
+          - mapping [block]
+            "git" [plain @30:5..30:8]: mapping [block]
+              "repoURL" [plain @31:7..31:14]: "https://github.com/infra-team/cluster-deployments.git" [plain @31:16..31:69]
+              "directories" [plain @32:7..32:18]: sequence [block]
+                - mapping [block]
+                  "path" [plain @33:9..33:13]: "add-ons/*" [plain @33:15..33:24]
+        "template" [plain @34:3..34:11]: mapping [block]
+          "metadata" [plain @35:5..35:13]: mapping [block]
+            "name" [plain @36:7..36:11]: "{{path.basename}}" [single-quoted @36:13..36:32]
+          "spec" [plain @37:5..37:9]: mapping [block]
+            "source" [plain @38:7..38:13]: mapping [block]
+              "repoURL" [plain @39:9..39:16]: "https://github.com/infra-team/cluster-deployments.git" [plain @39:18..39:71]
+              "targetRevision" [plain @40:9..40:23]: "HEAD" [plain @40:25..40:29]
+              "path" [plain @41:9..41:13]: "{{path}}" [single-quoted @41:15..41:25]
+            "destination" [plain @42:7..42:18]: mapping [block]
+              "server" [plain @43:9..43:15]: "http://kubernetes.default.svc" [plain @43:17..43:46]
+              "namespace" [plain @44:9..44:18]: "{{path.basename}}" [single-quoted @44:20..44:39]
+    "#);
+}

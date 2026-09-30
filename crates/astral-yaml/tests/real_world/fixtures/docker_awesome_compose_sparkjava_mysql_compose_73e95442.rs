@@ -1,0 +1,32 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("docker-awesome-compose-sparkjava-mysql-compose-73e95442"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "services" [plain @1:1..1:9]: mapping [block]
+        "backend" [plain @2:3..2:10]: mapping [block]
+          "build" [plain @3:5..3:10]: "backend" [plain @3:12..3:19]
+          "ports" [plain @4:5..4:10]: sequence [block]
+            - "8080:8080" [plain @5:9..5:18]
+          "secrets" [plain @6:5..6:12]: sequence [block]
+            - "db-password" [plain @7:9..7:20]
+        "db" [plain @8:3..8:5]: mapping [block]
+          "image" [plain @10:5..10:10]: "mariadb:10.6.4-focal" [plain @10:12..10:32]
+          "restart" [plain @13:5..13:12]: "always" [plain @13:14..13:20]
+          "secrets" [plain @14:5..14:12]: sequence [block]
+            - "db-password" [plain @15:9..15:20]
+          "volumes" [plain @16:5..16:12]: sequence [block]
+            - "db-data:/var/lib/mysql" [plain @17:9..17:31]
+          "environment" [plain @18:5..18:16]: sequence [block]
+            - "MYSQL_DATABASE=example" [plain @19:9..19:31]
+            - "MYSQL_ROOT_PASSWORD_FILE=/run/secrets/db-password" [plain @20:9..20:58]
+          "expose" [plain @21:5..21:11]: sequence [block]
+            - "3306" [plain @22:9..22:13]
+            - "33060" [plain @23:9..23:14]
+      "volumes" [plain @24:1..24:8]: mapping [block]
+        "db-data" [plain @25:3..25:10]: "" [plain @25:11..25:11]
+      "secrets" [plain @26:1..26:8]: mapping [block]
+        "db-password" [plain @27:3..27:14]: mapping [block]
+          "file" [plain @28:5..28:9]: "db/password.txt" [plain @28:11..28:26]
+    "#);
+}

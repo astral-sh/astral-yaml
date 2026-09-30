@@ -480,6 +480,26 @@ fn json_compatible_quoted_characters() {
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test]
+fn byte_order_marks_are_content_inside_quoted_continuations() {
+    for (quote, escaped) in [('\'', false), ('"', false), ('"', true)] {
+        for line_break in ["\n", "\r\n", "\r"] {
+            let escape = if escaped { "\\" } else { "" };
+            let separator = if escaped { "" } else { " " };
+            let source = format!("{quote}a{escape}{line_break}\u{feff}b{quote}");
+            let stream = parse(&source).unwrap();
+            let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+                panic!("expected a scalar");
+            };
+
+            assert_eq!(scalar.value, format!("a{separator}\u{feff}b"));
+            assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+            assert!(stream.byte_order_marks().is_empty());
+        }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#52-character-encodings
+#[test]
 fn document_byte_order_marks() {
     for source in [
         "\u{feff}---\nx\n",
@@ -511,6 +531,60 @@ fn metadata_respects_the_element_budget() {
     }
 
     assert!(parse_with_options("# a\n# b\n", options).is_ok());
+}
+
+// https://yaml.org/spec/1.2.2/#68-directives
+#[test]
+fn directive_parameters_and_comments_are_separate() {
+    for (header, arguments, comment) in [
+        ("%FOO", "", None),
+        ("%FOO # comment", "", Some(" comment")),
+        ("%FOO\t# comment", "", Some(" comment")),
+        ("%FOO bar#hash # comment", "bar#hash", Some(" comment")),
+        ("%FOO bar baz", "bar baz", None),
+    ] {
+        for newline in ["\n", "\r", "\r\n"] {
+            let source = format!("{header}{newline}--- value{newline}");
+            let stream = parse(&source).unwrap();
+            let directive = &stream.documents()[0].directives[0];
+            assert_eq!(directive.arguments, arguments, "{source:?}");
+            assert_eq!(
+                stream.comments().first().map(|comment| comment.text),
+                comment,
+                "{source:?}"
+            );
+
+            for comment in stream.comments() {
+                assert_eq!(
+                    comment.span.slice(&source),
+                    Some(format!("#{}", comment.text).as_str())
+                );
+            }
+        }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#681-yaml-directives
+#[test]
+fn yaml_versions_have_decimal_components() {
+    for (version, accepted) in [
+        ("1.1", true),
+        ("1.2", true),
+        ("1.3", true),
+        ("01.02", true),
+        ("0001.0002", true),
+        ("2.0", false),
+        ("1", false),
+        ("1.", false),
+        (".2", false),
+        ("+1.2", false),
+        ("1.2.3", false),
+        ("1.2 extra", false),
+        ("1.２", false),
+    ] {
+        let source = format!("%YAML {version}\n--- value\n");
+        assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
+    }
 }
 
 // https://yaml.org/spec/1.2.2/#68-directives

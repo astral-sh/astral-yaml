@@ -1,0 +1,33 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("cloudposse-atmos-examples-demo-component-versions-atmos-1d0a01c3"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "base_path" [plain @2:1..2:10]: "./" [double-quoted @2:12..2:16]
+      "components" [plain @4:1..4:11]: mapping [block]
+        "terraform" [plain @5:3..5:12]: mapping [block]
+          "base_path" [plain @6:5..6:14]: "components/terraform" [double-quoted @6:16..6:38]
+          "apply_auto_approve" [plain @7:5..7:23]: "false" [plain @7:25..7:30]
+          "deploy_run_init" [plain @8:5..8:20]: "true" [plain @8:22..8:26]
+          "init_run_reconfigure" [plain @9:5..9:25]: "true" [plain @9:27..9:31]
+          "auto_generate_backend_file" [plain @10:5..10:31]: "false" [plain @10:33..10:38]
+      "stacks" [plain @12:1..12:7]: mapping [block]
+        "base_path" [plain @13:3..13:12]: "stacks" [double-quoted @13:14..13:22]
+        "included_paths" [plain @14:3..14:17]: sequence [block]
+          - "deploy/**/*" [double-quoted @15:7..15:20]
+        "excluded_paths" [plain @16:3..16:17]: sequence [block]
+          - "**/_defaults.yaml" [double-quoted @17:7..17:26]
+        "name_template" [plain @18:3..18:16]: "{{.vars.stage}}" [double-quoted @18:18..18:35]
+      "vendor" [plain @19:1..19:7]: mapping [block]
+        "base_path" [plain @20:3..20:12]: "./vendor.yaml" [double-quoted @20:14..20:29]
+      "logs" [plain @22:1..22:5]: mapping [block]
+        "file" [plain @23:3..23:7]: "/dev/stderr" [double-quoted @23:9..23:22]
+        "level" [plain @24:3..24:8]: "Info" [plain @24:10..24:14]
+      "commands" [plain @26:1..26:9]: sequence [block]
+        - mapping [block]
+          "name" [plain @27:3..27:7]: "test" [double-quoted @27:9..27:15]
+          "description" [plain @28:3..28:14]: "Run all tests" [double-quoted @28:16..28:31]
+          "steps" [plain @29:3..29:8]: sequence [block]
+            - "atmos vendor pull --everything" [plain @30:5..30:35]
+    "#);
+}

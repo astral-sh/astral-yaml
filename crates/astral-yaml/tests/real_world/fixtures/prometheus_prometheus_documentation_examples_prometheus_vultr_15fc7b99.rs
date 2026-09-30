@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("prometheus-prometheus-documentation-examples-prometheus-vultr-15fc7b99"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "scrape_configs" [plain @4:1..4:15]: sequence [block]
+        - mapping [block]
+          "job_name" [plain @6:5..6:13]: "prometheus" [double-quoted @6:15..6:27]
+          "static_configs" [plain @7:5..7:19]: sequence [block]
+            - mapping [block]
+              "targets" [plain @8:9..8:16]: sequence [flow]
+                - "localhost:9090" [double-quoted @8:19..8:35]
+        - mapping [block]
+          "job_name" [plain @11:5..11:13]: "node" [double-quoted @11:15..11:21]
+          "vultr_sd_configs" [plain @12:5..12:21]: sequence [block]
+            - mapping [block]
+              "authorization" [plain @13:9..13:22]: mapping [block]
+                "credentials" [plain @14:11..14:22]: "<replace with a Personal Access Token>" [double-quoted @14:24..14:64]
+          "relabel_configs" [plain @15:5..15:20]: sequence [block]
+            - mapping [block]
+              "source_labels" [plain @17:9..17:22]: sequence [flow]
+                - "__meta_vultr_instance_tags" [plain @17:25..17:51]
+              "regex" [plain @18:9..18:14]: ".*,monitoring,.*" [double-quoted @18:16..18:34]
+              "action" [plain @19:9..19:15]: "keep" [plain @19:17..19:21]
+            - mapping [block]
+              "source_labels" [plain @22:9..22:22]: sequence [flow]
+                - "__meta_vultr_instance_main_ipv6" [plain @22:25..22:56]
+              "target_label" [plain @23:9..23:21]: "__address__" [plain @23:23..23:34]
+              "replacement" [plain @24:9..24:20]: "[$1]:9100" [double-quoted @24:22..24:33]
+    "#);
+}

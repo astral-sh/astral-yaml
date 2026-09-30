@@ -1,0 +1,31 @@
+#[test]
+fn snapshot() {
+    insta::assert_snapshot!(crate::check_fixture("kubernetes-examples-archived-volumes-azure-disk-claim-managed-disk-managed-ssd-pod-uses-managed-ssd-113ce1ff"), @r#"
+    document 1 (start: implicit, end: implicit)
+    mapping [block]
+      "kind" [plain @1:1..1:5]: "Pod" [plain @1:7..1:10]
+      "apiVersion" [plain @2:1..2:11]: "v1" [plain @2:13..2:15]
+      "metadata" [plain @3:1..3:9]: mapping [block]
+        "name" [plain @4:3..4:7]: "pod-uses-managed-ssd-5g" [plain @4:9..4:32]
+        "labels" [plain @5:3..5:9]: mapping [block]
+          "name" [plain @6:5..6:9]: "storage" [plain @6:11..6:18]
+      "spec" [plain @7:1..7:5]: mapping [block]
+        "containers" [plain @8:3..8:13]: sequence [block]
+          - mapping [block]
+            "image" [plain @9:5..9:10]: "nginx" [plain @9:12..9:17]
+            "name" [plain @10:5..10:9]: "az-c-01" [plain @10:11..10:18]
+            "command" [plain @11:5..11:12]: sequence [block]
+              - "/bin/sh" [plain @12:7..12:14]
+              - "-c" [plain @13:7..13:9]
+              - "while true; do echo $(date) >> /mnt/managed/outfile; sleep 1; done" [plain @14:7..14:73]
+            "volumeMounts" [plain @15:5..15:17]: sequence [block]
+              - mapping [block]
+                "name" [plain @16:7..16:11]: "managed01" [plain @16:13..16:22]
+                "mountPath" [plain @17:7..17:16]: "/mnt/managed" [plain @17:18..17:30]
+        "volumes" [plain @18:3..18:10]: sequence [block]
+          - mapping [block]
+            "name" [plain @19:5..19:9]: "managed01" [plain @19:11..19:20]
+            "persistentVolumeClaim" [plain @20:5..20:26]: mapping [block]
+              "claimName" [plain @21:7..21:16]: "dd-managed-ssd-5g" [plain @21:18..21:35]
+    "#);
+}

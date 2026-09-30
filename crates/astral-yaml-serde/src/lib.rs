@@ -2,6 +2,7 @@
 mod comments;
 mod de;
 mod error;
+mod schema;
 mod ser;
 mod spanned;
 mod tagged;
