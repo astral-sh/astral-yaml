@@ -310,10 +310,13 @@ fn serialization_preserves_text_and_escape_spelling() {
 
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
-fn serialization_escapes_ascii_at_different_offsets() {
-    for padding in [0, 15, 16, 31, 32, 63, 64] {
-        for byte in 0..=127 {
-            let text = format!("{}{}tail", "a".repeat(padding), char::from(byte));
+fn serialization_escapes_at_different_offsets() {
+    for padding in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 31, 32, 63, 64] {
+        let characters = (0..=255).filter_map(char::from_u32).chain([
+            '\u{2028}', '\u{2029}', '\u{feff}', '\u{fffe}', '\u{ffff}', '中', '🌍',
+        ]);
+        for character in characters {
+            let text = format!("{}{character}tail", "a".repeat(padding));
             roundtrip(&text);
         }
     }
@@ -425,6 +428,8 @@ fn arbitrary_values_and_alias_limits() {
 
 #[test]
 fn serialization_recursion_limit() {
+    use astral_yaml_dev::Value;
+
     struct Recursive;
 
     impl Serialize for Recursive {
@@ -439,6 +444,18 @@ fn serialization_recursion_limit() {
             .message
             .contains("nesting")
     );
+
+    let mut nested = Value::Null;
+    for _ in 0..63 {
+        nested = Value::Sequence(vec![nested]);
+    }
+
+    to_string(&nested).unwrap();
+    nested = Value::Sequence(vec![nested]);
+    assert_eq!(
+        to_string(&nested).unwrap_err().message,
+        "serialization nesting limit exceeded"
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
@@ -447,6 +464,11 @@ fn serialization_rejects_duplicate_mapping_keys() {
     use astral_yaml_dev::Value;
 
     for (left, right, duplicate) in [
+        ("''", "''", true),
+        ("ab", "ab", true),
+        ("abc", "abc", true),
+        ("abcd", "abcd", true),
+        ("abcde0", "abcde1", false),
         ("text", "text", true),
         ("42", "0x2a", true),
         ("-0.0", "0.0", true),
@@ -457,24 +479,53 @@ fn serialization_rejects_duplicate_mapping_keys() {
         ("'null'", "null", false),
     ] {
         let key = |source| astral_yaml_serde::from_str::<Value>(source).unwrap();
-        let value = Value::Mapping(vec![
-            (key(left), Value::Integer(1)),
-            (key(right), Value::Integer(2)),
-        ]);
-        let result = astral_yaml_serde::to_string(&value);
-        if duplicate {
-            assert_eq!(
-                result.unwrap_err().message,
-                "duplicate mapping key",
-                "{left}: {right}"
-            );
-        } else {
-            let source = result.unwrap();
-            assert_eq!(
-                astral_yaml_serde::from_str::<Value>(&source).unwrap(),
-                value
-            );
+        for preceding in [0, 30, 31] {
+            let mut entries: Vec<_> = (0..preceding)
+                .map(|index| (Value::String(format!("prefix-{index}")), Value::Null))
+                .collect();
+            entries.extend([
+                (key(left), Value::Integer(1)),
+                (key(right), Value::Integer(2)),
+            ]);
+            let value = Value::Mapping(entries);
+            let result = astral_yaml_serde::to_string(&value);
+            if duplicate {
+                assert_eq!(
+                    result.unwrap_err().message,
+                    "duplicate mapping key",
+                    "{left}: {right}"
+                );
+            } else {
+                let source = result.unwrap();
+                assert_eq!(
+                    astral_yaml_serde::from_str::<Value>(&source).unwrap(),
+                    value
+                );
+            }
         }
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
+#[test]
+fn serialized_mapping_keys_are_scoped_to_each_mapping() {
+    use astral_yaml_dev::Value;
+
+    for width in [1, 31, 32] {
+        // Equal-length keys sharing a prefix must still compare their full text.
+        let mut entries: Vec<_> = (0..width)
+            .map(|index| (Value::String(format!("shared-{index:03}")), Value::Null))
+            .collect();
+        entries.push((Value::Unsigned(1), Value::Null));
+        let child = Value::Mapping(entries.clone());
+        entries.push((
+            Value::String("children".into()),
+            Value::Sequence(vec![child.clone(), child]),
+        ));
+        let parent = Value::Mapping(entries);
+
+        // Reuse key storage after both nested and sibling mappings close.
+        roundtrip(&Value::Sequence(vec![parent.clone(), parent]));
     }
 }
 

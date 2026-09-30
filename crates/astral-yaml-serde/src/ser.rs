@@ -10,6 +10,8 @@ use std::fmt::Write;
 
 type Result<T> = std::result::Result<T, Error>;
 
+const MAX_DEPTH: usize = 63;
+
 /// Serializes a value as a YAML 1.2 document in flow style.
 ///
 /// Strings are quoted to preserve their type under core-schema resolution.
@@ -19,13 +21,15 @@ type Result<T> = std::result::Result<T, Error>;
 /// Returns an error for a tag/content mismatch, duplicate mapping keys, an
 /// exceeded resource limit, or a `Serialize` implementation that violates the
 /// map protocol.
+#[inline]
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {
-        output: String::with_capacity(128),
+        output: String::new(),
         depth: 0,
         tagged: false,
         core_tag: None,
         yaml_tag: false,
+        keys: keys::Keys::default(),
     };
 
     value.serialize(&mut serializer)?;
@@ -39,19 +43,125 @@ struct Serializer {
     tagged: bool,
     core_tag: Option<YamlType>,
     yaml_tag: bool,
+    keys: keys::Keys,
 }
 
 impl Serializer {
     fn enter(&mut self) -> Result<()> {
-        if self.depth >= 63 {
+        if self.depth >= MAX_DEPTH {
             return Err(Error::new("serialization nesting limit exceeded"));
+        }
+
+        if self.depth == 0 {
+            self.output.reserve(1024);
         }
 
         self.depth += 1;
         Ok(())
     }
 
-    fn quoted(&mut self, mut value: &str) -> Result<()> {
+    #[inline]
+    fn quoted(&mut self, value: &str) {
+        self.tagged = false;
+        self.yaml_tag = false;
+        if value.len() >= 64 {
+            self.output.reserve(value.len() + 3);
+            self.output.push('"');
+            self.quoted_long(value);
+            self.output.push('"');
+            return;
+        }
+
+        // Check eight bytes at a time without alignment requirements. The last
+        // word overlaps its predecessor when the length is not a multiple of eight.
+        #[allow(clippy::needless_bitwise_bool)]
+        let escaped = if value.len() >= 8 {
+            let mut chunks = value.as_bytes().chunks_exact(8);
+            let mut escaped = chunks.by_ref().fold(false, |escaped, chunk| {
+                escaped | Self::word_needs_escape(u64::from_ne_bytes(chunk.try_into().unwrap()))
+            });
+
+            if !chunks.remainder().is_empty() {
+                let last = &value.as_bytes()[value.len() - 8..];
+                escaped |= Self::word_needs_escape(u64::from_ne_bytes(last.try_into().unwrap()));
+            }
+
+            escaped
+        } else if value.len() >= 4 {
+            let first = u32::from_ne_bytes(value.as_bytes()[..4].try_into().unwrap());
+            let last = u32::from_ne_bytes(value.as_bytes()[value.len() - 4..].try_into().unwrap());
+            Self::word_needs_escape(u64::from(first) | (u64::from(last) << 32))
+        } else {
+            value.bytes().fold(false, |escaped, byte| {
+                escaped | !(b' '..=b'~').contains(&byte) | (byte == b'"') | (byte == b'\\')
+            })
+        };
+
+        if self.output.is_empty() {
+            self.output.reserve(value.len() + 3);
+        }
+
+        self.output.push('"');
+
+        if escaped {
+            self.escaped(value);
+        } else {
+            self.output.push_str(value);
+        }
+
+        self.output.push('"');
+    }
+
+    #[inline]
+    fn word_needs_escape(word: u64) -> bool {
+        const ONES: u64 = 0x0101_0101_0101_0101;
+        const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+        const SPACES: u64 = 0x2020_2020_2020_2020;
+
+        // High bits detect non-ASCII bytes. Adding one detects DEL; subtracting
+        // spaces detects controls. Carries and borrows cannot hide the first
+        // offending byte, and printable ASCII causes neither.
+        let non_printable = word | word.wrapping_add(ONES) | word.wrapping_sub(SPACES);
+
+        // XOR turns quotes and backslashes into zero bytes. The zero-byte test
+        // sets a high bit if either character occurs anywhere in the word.
+        let quotes = word ^ u64::from_ne_bytes([b'"'; 8]);
+        let slashes = word ^ u64::from_ne_bytes([b'\\'; 8]);
+        let escaped_quotes = quotes.wrapping_sub(ONES) & !quotes;
+        let escaped_slashes = slashes.wrapping_sub(ONES) & !slashes;
+
+        (non_printable | escaped_quotes | escaped_slashes) & HIGH_BITS != 0
+    }
+
+    #[inline(never)]
+    fn quoted_long(&mut self, value: &str) {
+        // Quotes, backslashes, and line breaks use memchr below. Other controls
+        // and non-ASCII text use the full escape scanner.
+        #[allow(clippy::needless_bitwise_bool)]
+        let unusual = value.bytes().fold(false, |unusual, byte| {
+            unusual | (!(b' '..=b'~').contains(&byte) & (byte != b'\n'))
+        });
+
+        if unusual {
+            self.escaped(value);
+        } else {
+            let mut start = 0;
+            for index in memchr::memchr3_iter(b'"', b'\\', b'\n', value.as_bytes()) {
+                self.output.push_str(&value[start..index]);
+                self.output.push_str(match value.as_bytes()[index] {
+                    b'"' => "\\\"",
+                    b'\\' => "\\\\",
+                    _ => "\\n",
+                });
+                start = index + 1;
+            }
+            self.output.push_str(&value[start..]);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn escaped(&mut self, mut value: &str) {
         const ESCAPE: [bool; 256] = {
             let mut escape = [false; 256];
             let mut byte = 0;
@@ -64,23 +174,6 @@ impl Serializer {
 
             escape
         };
-
-        Serializer::check_scalar_tag(self.core_tag.take(), value)?;
-        self.tagged = false;
-        self.yaml_tag = false;
-        self.output.push('"');
-
-        // Reduce the whole string so the compiler can check printable ASCII
-        // in parallel. Strings with escapes or Unicode use the scanner below.
-        #[allow(clippy::needless_bitwise_bool)]
-        let plain = value.bytes().fold(true, |plain, byte| {
-            plain & ((b' '..=b'~').contains(&byte) & (byte != b'"') & (byte != b'\\'))
-        });
-        if plain {
-            self.output.push_str(value);
-            self.output.push('"');
-            return Ok(());
-        }
 
         // Copy runs of text until a possible escape. The non-ASCII characters
         // escaped below start with C2, E2, or EF; stopping at those leading bytes
@@ -111,20 +204,25 @@ impl Serializer {
         }
 
         self.output.push_str(value);
-        self.output.push('"');
-        Ok(())
     }
 
+    #[inline]
     fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
-        self.check_collection_tag(mapping)?;
-        self.enter()?;
+        // Nested collections without a core tag only need a depth increment.
+        if self.depth == 0 || self.depth >= MAX_DEPTH || self.core_tag.is_some() {
+            self.enter_compound(mapping)?;
+        } else {
+            self.depth += 1;
+        }
+
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push(if mapping { '{' } else { '[' });
+        let key_scope = self.keys.scope();
         Ok(Compound {
             serializer: self,
             first: true,
-            keys: keys::Keys::default(),
+            key_scope,
             state: if mapping {
                 CompoundState::MapKey
             } else {
@@ -132,6 +230,12 @@ impl Serializer {
             },
             variant: false,
         })
+    }
+
+    #[cold]
+    fn enter_compound(&mut self, mapping: bool) -> Result<()> {
+        self.check_collection_tag(mapping)?;
+        self.enter()
     }
 
     fn variant(&mut self, name: &str, mapping: bool) -> Result<Compound<'_>> {
@@ -144,7 +248,7 @@ impl Serializer {
         self.enter()?;
         self.check_collection_tag(true)?;
         self.output.push('{');
-        self.quoted(name)?;
+        self.quoted(name);
         self.output.push_str(": ");
 
         let mut compound = self.compound(mapping)?;
@@ -157,11 +261,33 @@ impl Serializer {
         self.yaml_tag = false;
         let start = self.output.len();
         write!(self.output, "{value}").expect("String write");
-        Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
+        self.check_written_scalar_tag(start)
     }
 
-    fn check_scalar_tag(tag: Option<YamlType>, value: &str) -> Result<()> {
-        if tag.is_some_and(|tag| !tag.matches_scalar(value)) {
+    // Most values have no explicit core tag, so only clear the slot when set.
+    #[inline]
+    fn check_scalar_tag(&mut self, value: &str) -> Result<()> {
+        if let Some(tag) = self.core_tag {
+            self.core_tag = None;
+            Self::check_tagged_scalar(tag, value)?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn check_written_scalar_tag(&mut self, start: usize) -> Result<()> {
+        if let Some(tag) = self.core_tag {
+            self.core_tag = None;
+            Self::check_tagged_scalar(tag, &self.output[start..])?;
+        }
+
+        Ok(())
+    }
+
+    #[cold]
+    fn check_tagged_scalar(tag: YamlType, value: &str) -> Result<()> {
+        if !tag.matches_scalar(value) {
             return Err(Error::new("serialized value does not match its YAML tag"));
         }
 
@@ -174,8 +300,11 @@ impl Serializer {
         } else {
             YamlType::Sequence
         };
-        if self.core_tag.take().is_some_and(|tag| tag != actual) {
-            return Err(Error::new("serialized value does not match its YAML tag"));
+        if let Some(tag) = self.core_tag {
+            self.core_tag = None;
+            if tag != actual {
+                return Err(Error::new("serialized value does not match its YAML tag"));
+            }
         }
 
         Ok(())
@@ -233,7 +362,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_bool(self, value: bool) -> Result<()> {
         let value = if value { "true" } else { "false" };
-        Serializer::check_scalar_tag(self.core_tag.take(), value)?;
+        self.check_scalar_tag(value)?;
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push_str(value);
@@ -250,7 +379,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
                 self.output.push_str(".0");
             }
 
-            Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
+            self.check_written_scalar_tag(start)
         } else {
             self.serialize_f64(f64::from(value))
         }
@@ -275,15 +404,17 @@ impl<'a> ser::Serializer for &'a mut Serializer {
             }
         }
 
-        Serializer::check_scalar_tag(self.core_tag.take(), &self.output[start..])
+        self.check_written_scalar_tag(start)
     }
 
     fn serialize_char(self, value: char) -> Result<()> {
-        self.quoted(value.encode_utf8(&mut [0; 4]))
+        self.serialize_str(value.encode_utf8(&mut [0; 4]))
     }
 
     fn serialize_str(self, value: &str) -> Result<()> {
-        self.quoted(value)
+        self.check_scalar_tag(value)?;
+        self.quoted(value);
+        Ok(())
     }
 
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
@@ -309,7 +440,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_unit(self) -> Result<()> {
-        Serializer::check_scalar_tag(self.core_tag.take(), "null")?;
+        self.check_scalar_tag("null")?;
         self.tagged = false;
         self.yaml_tag = false;
         self.output.push_str("null");
@@ -381,10 +512,11 @@ impl<'a> ser::Serializer for &'a mut Serializer {
             self.enter()?;
             self.tagged = true;
             self.yaml_tag = false;
+            let key_scope = self.keys.scope();
             return Ok(Compound {
                 serializer: self,
                 first: true,
-                keys: keys::Keys::default(),
+                key_scope,
                 state: CompoundState::Tag,
                 variant: false,
             });
@@ -435,7 +567,7 @@ enum CompoundState {
 struct Compound<'a> {
     serializer: &'a mut Serializer,
     first: bool,
-    keys: keys::Keys,
+    key_scope: keys::Scope,
     state: CompoundState,
     variant: bool,
 }
@@ -463,6 +595,12 @@ impl Compound<'_> {
 
         if self.state == CompoundState::MapValue {
             return Err(Error::new("mapping key has no value"));
+        }
+
+        if self.state == CompoundState::MapKey {
+            self.serializer
+                .keys
+                .finish(&self.serializer.output, self.key_scope)?;
         }
 
         self.serializer
@@ -554,8 +692,11 @@ impl SerializeMap for Compound<'_> {
         self.serializer.output.push_str("? ");
         let start = self.serializer.output.len();
         key.serialize(&mut *self.serializer)?;
-        self.keys
+        let signature = self
+            .serializer
+            .keys
             .insert(&self.serializer.output, start..self.serializer.output.len())?;
+        self.key_scope.insert(signature);
         self.serializer.output.push_str(": ");
         self.state = CompoundState::MapValue;
         Ok(())
