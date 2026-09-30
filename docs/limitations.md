@@ -19,10 +19,12 @@ Application-tagged scalar keys are compared by their tag and scalar text; the
 adapter cannot infer a custom tag's canonical form. Applications that assign
 additional equivalences to these keys must check them when constructing values.
 
-The duplicate check compares YAML keys before deserializing them into Rust.
-Distinct YAML keys can deserialize into equal Rust keys. For example, in
-`{1: first, "1": second}`, the keys are a YAML integer and string, but both
-deserialize to `"1"` in a `BTreeMap<String, String>`. Serde's standard maps keep
+The adapter rejects duplicate YAML keys before deserializing a mapping. Serde's
+`MapAccess` interface does not expose the destination key type's equality to the
+deserializer, so it cannot detect collisions between distinct YAML keys that
+deserialize into equal Rust keys. For example, in `{1: first, "1": second}`,
+the keys are a YAML integer and string, but both deserialize to `"1"` in a
+`BTreeMap<String, String>`. Serde's `BTreeMap` and `HashMap` implementations keep
 the last value, so the result contains only `"1": "second"`.
 
 To reject collisions between deserialized keys, apply a map adapter such as
