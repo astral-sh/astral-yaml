@@ -264,20 +264,23 @@ fn serialization_compares_tagged_mapping_keys_by_yaml_identity() {
         }
     }
 
-    let mapping = BTreeMap::from([
-        (Key::Plain("text"), 1),
-        (
-            Key::Tagged(Tagged {
-                tag: "tag:yaml.org,2002:str".into(),
-                value: "text",
-            }),
-            2,
-        ),
-    ]);
-    assert_eq!(
-        to_string(&mapping).unwrap_err().message,
-        "duplicate mapping key"
-    );
+    for text in ["", "a", "ab", "abc", "abcd", "ab\"cd", "λ😃"] {
+        let mapping = BTreeMap::from([
+            (Key::Plain(text), 1),
+            (
+                Key::Tagged(Tagged {
+                    tag: "tag:yaml.org,2002:str".into(),
+                    value: text,
+                }),
+                2,
+            ),
+        ]);
+        assert_eq!(
+            to_string(&mapping).unwrap_err().message,
+            "duplicate mapping key",
+            "{text:?}"
+        );
+    }
 
     let invalid_key = BTreeMap::from([(
         Tagged {
@@ -400,6 +403,35 @@ fn serialization_checks_core_tag_content() {
             }
         }
     }
+}
+
+#[test]
+fn core_tags_do_not_affect_following_values() {
+    #[derive(Debug, Deserialize, Serialize, PartialEq)]
+    struct Fields {
+        number: Tagged<i64>,
+        flag: bool,
+        text: Tagged<String>,
+        items: Vec<i64>,
+        sequence: Tagged<Vec<String>>,
+        after_sequence: String,
+        mapping: Tagged<BTreeMap<String, bool>>,
+        after_mapping: u8,
+    }
+
+    let source = r"{
+        number: !!int 42,
+        flag: true,
+        text: !!str hello,
+        items: [1],
+        sequence: !!seq [a],
+        after_sequence: after,
+        mapping: !!map {a: true},
+        after_mapping: 7,
+    }";
+    let value = from_str::<Fields>(source).unwrap();
+    let yaml = to_string(&value).unwrap();
+    assert_eq!(from_str::<Fields>(&yaml).unwrap(), value);
 }
 
 #[test]
