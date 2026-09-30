@@ -39,11 +39,10 @@ either byte order where applicable. Source spans use decoded UTF-8 byte offsets;
 All 402 cases in the pinned [YAML Test Suite](../fixtures/yaml-test-suite/README.md)
 pass: 308 valid inputs and 94 invalid inputs, with no exclusions. Tests compare
 events, require rejection of invalid inputs, and check spans for every UTF-8
-prefix. See [CONTRIBUTING.md](../CONTRIBUTING.md) for commands and
+prefix. Of the 279 cases with JSON expectations, the Serde tests compare 263
+constructed values and check that the other 16 are rejected for non-core tags.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for commands and
 [TRANSCRIPT.md](../TRANSCRIPT.md) for recorded test and fuzz results.
-
-The [serde-saphyr comparison](serde-saphyr.md) checks the same syntax corpus,
-constructed values, and regression cases against serde-saphyr 1.3.0.
 
 ## Parser disagreements
 

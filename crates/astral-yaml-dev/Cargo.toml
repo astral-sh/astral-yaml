@@ -8,8 +8,7 @@ license.workspace = true
 publish = false
 
 [features]
-compare = ["saphyr"]
-saphyr = ["dep:serde-saphyr"]
+compare = ["dep:serde-saphyr"]
 
 [dependencies]
 astral-yaml.workspace = true
@@ -21,10 +20,6 @@ yaml_serde.workspace = true
 
 [dev-dependencies]
 divan.workspace = true
-
-[[test]]
-name = "saphyr"
-required-features = ["saphyr"]
 
 [[bench]]
 name = "yaml"

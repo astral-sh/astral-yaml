@@ -131,14 +131,19 @@ fn core_resolution_and_numeric_limits() {
     for source in [
         "yes",
         "on",
+        "no",
+        "off",
         "NO",
         "Off",
         "0b11",
+        "+0xB",
+        "0XB",
         "1_000",
         "2001-12-15",
         "1:20",
     ] {
         assert_eq!(from_str::<String>(source).unwrap(), source);
+        assert_eq!(from_str::<serde_json::Value>(source).unwrap(), source);
         assert!(from_str::<bool>(source).is_err());
     }
 
@@ -162,6 +167,10 @@ fn core_resolution_and_numeric_limits() {
     );
     assert!(from_str::<f64>(".NaN").unwrap().is_nan());
 
+    for source in [".inf", "-.inf", ".nan"] {
+        assert!(from_str::<astral_yaml_dev::Value>(source).is_ok());
+    }
+
     assert!(from_str::<u8>("256").is_err());
     assert!(from_str::<u8>("-1").is_err());
     assert!(from_str::<i8>("128").is_err());
@@ -173,7 +182,9 @@ fn core_resolution_and_numeric_limits() {
     assert!(from_str::<String>("!unknown value").is_err());
 
     roundtrip(&i128::MIN);
+    roundtrip(&i128::MAX);
     roundtrip(&u128::MAX);
+    roundtrip(&(u128::from(u64::MAX) + 1));
     roundtrip(&f32::MIN_POSITIVE);
     roundtrip(&f64::MAX);
     roundtrip(&f64::INFINITY);
@@ -189,6 +200,15 @@ fn core_resolution_and_numeric_limits() {
             .to_bits(),
         (-0.0f64).to_bits()
     );
+
+    for value in [f64::MIN, f64::MIN_POSITIVE, f64::from_bits(1)] {
+        let yaml = to_string(&value).unwrap();
+        assert_eq!(from_str::<f64>(&yaml).unwrap().to_bits(), value.to_bits());
+    }
+
+    let source = "defaults: &defaults {answer: 42}\ncopy: {<<: *defaults}\n";
+    let value = from_str::<serde_json::Value>(source).unwrap();
+    assert_eq!(value["copy"], serde_json::json!({"<<": {"answer": 42}}));
 }
 
 // https://yaml.org/spec/1.2.2/#10214-floating-point
@@ -308,6 +328,44 @@ fn serialization_preserves_text_and_escape_spelling() {
     "#);
 }
 
+#[test]
+fn generated_nested_values_roundtrip() {
+    let strings = [
+        "",
+        "null",
+        "~",
+        "true",
+        "on",
+        "42",
+        "0x10",
+        "1e3",
+        "- item",
+        "# comment",
+        "a: b",
+        " leading",
+        "trailing ",
+        "a\nb\n",
+        "\n",
+        "\n\n",
+        "\r\n",
+        "quotes: \"'\\",
+        "\0\u{85}\u{2028}\u{fffe}\u{ffff}",
+        "é🌍中",
+    ];
+
+    for number in 0_u16..1024 {
+        let index = usize::from(number);
+        let text = strings[index % strings.len()];
+        let value = serde_json::json!({
+            "name": text,
+            "nested": [null, number % 2 == 0, number, -i64::from(number), f64::from(number) / 8.0],
+            "mapping": {text: [text, {"inner": strings[(index / strings.len()) % strings.len()]}]},
+        });
+
+        roundtrip(&value);
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn serialization_escapes_at_different_offsets() {
@@ -342,6 +400,69 @@ fn located_failures_and_document_count() {
 
     let stream = astral_yaml::parse("42").unwrap();
     assert_eq!(from_stream::<u64>(&stream).unwrap(), 42);
+}
+
+// https://yaml.org/spec/1.2.2/#81-block-scalar-styles
+// https://yaml.org/spec/1.2.2/#912-document-markers
+#[test]
+fn block_scalars_and_nulls_across_documents() {
+    for style in ["|", ">"] {
+        for (chomp, expected) in [("-", "text"), ("", "text\n"), ("+", "text\n\n")] {
+            for boundary in ["--- kept\n", "...\n--- kept\n", "---\tkept\n"] {
+                let source = format!("--- {style}{chomp}\ntext\n\n{boundary}");
+                let stream = astral_yaml::parse(&source).unwrap();
+                let documents: Vec<String> = (0..stream.documents().len())
+                    .map(|index| astral_yaml_serde::from_document(&stream, index).unwrap())
+                    .collect();
+                assert_eq!(documents, [expected, "kept"], "{source}");
+                assert!(from_str::<String>(&source).is_err());
+            }
+        }
+    }
+
+    let stream = astral_yaml::parse("--- null\n--- ''\n--- ~\n--- kept\n").unwrap();
+    let documents: Vec<serde_json::Value> = (0..stream.documents().len())
+        .map(|index| astral_yaml_serde::from_document(&stream, index).unwrap())
+        .collect();
+    assert_eq!(
+        serde_json::Value::Array(documents),
+        serde_json::json!([null, "", null, "kept"])
+    );
+}
+
+// https://yaml.org/spec/1.2.2/#52-character-encodings
+#[test]
+fn deserialize_encoded_streams() {
+    use astral_yaml::{Encoding, Source};
+
+    for encoding in [
+        Encoding::Utf8,
+        Encoding::Utf16Be,
+        Encoding::Utf16Le,
+        Encoding::Utf32Be,
+        Encoding::Utf32Le,
+    ] {
+        for bom in [false, true] {
+            let text = format!("{}message: 'é 🌍'\n", if bom { "\u{feff}" } else { "" });
+            let bytes: Vec<u8> = match encoding {
+                Encoding::Utf8 => text.as_bytes().to_vec(),
+                Encoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+                Encoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+                Encoding::Utf32Be => text
+                    .chars()
+                    .flat_map(|c| u32::from(c).to_be_bytes())
+                    .collect(),
+                Encoding::Utf32Le => text
+                    .chars()
+                    .flat_map(|c| u32::from(c).to_le_bytes())
+                    .collect(),
+            };
+            let source = Source::from_bytes(&bytes).unwrap();
+            let stream = source.parse().unwrap();
+            let value = from_stream::<serde_json::Value>(&stream).unwrap();
+            assert_eq!(value, serde_json::json!({"message": "é 🌍"}));
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -414,6 +535,11 @@ fn arbitrary_values_and_alias_limits() {
     from_tag::<Anything>("!Values [hello, 42]").unwrap();
     assert!(from_str::<Anything>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Anything>("&a [*a]").is_err());
+
+    for source in ["&self [*self]", "&self {next: *self}"] {
+        assert!(astral_yaml::parse(source).is_ok());
+        assert!(from_str::<de::IgnoredAny>(source).is_err());
+    }
 
     let mut bomb = "a: &a [0,0]\n".to_owned();
 
@@ -535,7 +661,12 @@ fn mapping_key_uniqueness_uses_core_types() {
     for source in [
         "{a: 1, a: 2}",
         "{1: a, 01: b}",
+        "{0xB: a, 11: b}",
+        "{0o13: a, 11: b}",
         "{0: a, -0: b}",
+        "{[0xB, -0]: a, [11, +0]: b}",
+        "{{0xB: 0o13}: a, {11: 11}: b}",
+        "{&key 0xB: a, *key : b}",
         "{true: a, TRUE: b}",
         "{null: a, ~: b}",
         "{1.0: a, 1e0: b}",
@@ -552,9 +683,31 @@ fn mapping_key_uniqueness_uses_core_types() {
         let error = from_str::<Anything>(source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
         assert!(error.span.is_some());
+        assert!(
+            from_str::<serde::de::IgnoredAny>(source).is_err(),
+            "{source}"
+        );
     }
 
     from_str::<Anything>("{1: a, '1': b, true: c, 'true': d}").unwrap();
+
+    let source = "{9007199254740992: first, 9007199254740993: second}";
+    assert_eq!(
+        from_str::<BTreeMap<u64, String>>(source).unwrap(),
+        BTreeMap::from([
+            (9_007_199_254_740_992, "first".into()),
+            (9_007_199_254_740_993, "second".into()),
+        ])
+    );
+
+    assert_eq!(
+        from_str::<BTreeMap<BTreeMap<String, i32>, i32>>("{{'null': 1}: 2}").unwrap(),
+        BTreeMap::from([(BTreeMap::from([("null".into(), 1)]), 2)])
+    );
+    assert_eq!(
+        from_str::<BTreeMap<Option<String>, String>>(": value\n").unwrap(),
+        BTreeMap::from([(None, "value".into())])
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison

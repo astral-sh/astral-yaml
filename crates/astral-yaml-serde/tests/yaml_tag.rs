@@ -83,8 +83,14 @@ fn core_tags_work_without_opt_in() {
     for (source, expected) in [
         ("!!str null", serde_json::json!("null")),
         ("!!int '42'", serde_json::json!(42)),
+        ("!!int -42", serde_json::json!(-42)),
+        ("!!int 0x2a", serde_json::json!(42)),
+        ("!!int 0o52", serde_json::json!(42)),
+        ("!!int |-\n  42", serde_json::json!(42)),
         ("!!float '1.5'", serde_json::json!(1.5)),
+        ("!!float >-\n  4.25", serde_json::json!(4.25)),
         ("!!bool 'true'", serde_json::json!(true)),
+        ("!!bool |-\n  true", serde_json::json!(true)),
         ("!!null null", serde_json::Value::Null),
         ("!!seq [!!int '1']", serde_json::json!([1])),
         (
@@ -100,6 +106,10 @@ fn core_tags_work_without_opt_in() {
             serde_json::json!(42),
         ),
         ("[&x !!int '42', *x]", serde_json::json!([42, 42])),
+        (
+            "{a: &n ! null, b: *n}",
+            serde_json::json!({"a": "null", "b": "null"}),
+        ),
     ] {
         assert_eq!(from_str::<serde_json::Value>(source).unwrap(), expected);
         from_str::<IgnoredAny>(source).unwrap();
@@ -129,10 +139,54 @@ fn core_tags_work_without_opt_in() {
         assert_eq!(value.value, None);
     }
 
-    assert_eq!(
-        from_str::<Option<String>>("!!str null").unwrap(),
-        Some("null".into())
-    );
+    for source in ["!!float -0", "!!float '-0'"] {
+        assert_eq!(
+            from_str::<f64>(source).unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+    }
+}
+
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
+#[test]
+fn null_like_strings_and_nulls_remain_distinct() {
+    for (source, expected) in [
+        ("!!str null", "null"),
+        ("!!str Null", "Null"),
+        ("!!str NULL", "NULL"),
+        ("!!str ~", "~"),
+        ("!!str", ""),
+        ("! null", "null"),
+        ("! ~", "~"),
+        ("!", ""),
+        ("'null'", "null"),
+        ("\"~\"", "~"),
+        ("''", ""),
+        ("\"\"", ""),
+        ("|\n", ""),
+        ("|-\n", ""),
+        ("|+\n", ""),
+        (">\n", ""),
+        (">-\n", ""),
+        (">+\n", ""),
+        ("|-\n  null\n", "null"),
+        (">-\n  null\n", "null"),
+    ] {
+        assert_eq!(
+            from_str::<Option<String>>(source).unwrap(),
+            Some(expected.into())
+        );
+        assert_eq!(from_str::<serde_json::Value>(source).unwrap(), expected);
+    }
+
+    for source in ["null", "Null", "NULL", "~", "---\n", "!!null ~"] {
+        assert_eq!(from_str::<Option<String>>(source).unwrap(), None);
+        assert_eq!(
+            from_str::<serde_json::Value>(source).unwrap(),
+            serde_json::Value::Null
+        );
+    }
+
     assert_eq!(
         from_str::<Vec<Option<String>>>("[&n !!null null, *n]").unwrap(),
         [None, None]
@@ -155,6 +209,16 @@ fn core_tags_still_validate_their_payloads() {
     ] {
         assert!(from_str::<IgnoredAny>(source).is_err(), "{source}");
         assert!(from_str::<serde_json::Value>(source).is_err(), "{source}");
+    }
+
+    for tag in ["!!int", "!!float", "!!bool"] {
+        for value in ["", "null", "~", "wrong"] {
+            let source = format!("{tag} {value}");
+            assert!(
+                from_str::<Option<serde_json::Value>>(&source).is_err(),
+                "{source}"
+            );
+        }
     }
 
     assert_eq!(
