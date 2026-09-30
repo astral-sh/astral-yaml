@@ -12,6 +12,11 @@ require an explicit opt-in, including on ignored fields and through aliases.
 Enums use variant names for unit variants and singleton mappings otherwise,
 unless Serde attributes select another representation.
 
+Serde buffers values for untagged enums, internally tagged enums, and flattened
+fields. If a plain scalar resolves as a number, boolean, or null, the buffer
+loses its text and cannot deserialize it into a string. Quote the scalar or use
+`!!str` to preserve it as a string in these contexts.
+
 `#[serde(with = "astral_yaml_serde::with::yaml_tag")]` on an enum field enables
 local tags such as `!Text hello`. Unit variants serialize as empty tagged nodes;
 empty and null payloads deserialize as unit. The adapter also accepts ordinary

@@ -27,6 +27,11 @@ fn is_core_tag(tag: &str) -> bool {
 /// tags also allow floating-point destinations. Strings, characters, scalar
 /// bytes, and enum names require string tags, but accept untagged scalar text.
 ///
+/// Serde buffers values for untagged enums, internally tagged enums, and
+/// flattened fields. In those buffers, a plain scalar resolved as a number,
+/// boolean, or null loses its original text and cannot be read as a string.
+/// Quote the scalar or use `!!str` when a buffered field needs its text.
+///
 /// # Errors
 /// Returns a located syntax, type, or resource-limit error.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
