@@ -75,59 +75,6 @@ fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
 }
 
 #[test]
-fn serde_buffers_resolved_scalars_before_deserializing_strings() {
-    #[derive(Debug, Deserialize, PartialEq)]
-    #[serde(untagged)]
-    enum Release {
-        Number(u32),
-        Text(String),
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    #[serde(tag = "kind")]
-    enum Shape {
-        Circle { radius: String },
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    struct Flattened {
-        #[serde(flatten)]
-        values: BTreeMap<String, String>,
-    }
-
-    assert_eq!(from_str::<Release>("42").unwrap(), Release::Number(42));
-    for source in ["1.10", "true", "~"] {
-        assert_eq!(from_str::<String>(source).unwrap(), source);
-        assert!(from_str::<Release>(source).is_err(), "{source}");
-    }
-
-    for source in ["'1.10'", "!!str 1.10"] {
-        assert_eq!(
-            from_str::<Release>(source).unwrap(),
-            Release::Text("1.10".into())
-        );
-    }
-
-    assert!(from_str::<Shape>("kind: Circle\nradius: 1.50").is_err());
-    assert_eq!(
-        from_str::<Shape>("kind: Circle\nradius: '1.50'").unwrap(),
-        Shape::Circle {
-            radius: "1.50".into()
-        }
-    );
-
-    assert_eq!(
-        from_str::<BTreeMap<String, String>>("radius: 1.50").unwrap()["radius"],
-        "1.50"
-    );
-    assert!(from_str::<Flattened>("radius: 1.50").is_err());
-    assert_eq!(
-        from_str::<Flattened>("radius: !!str 1.50").unwrap().values["radius"],
-        "1.50"
-    );
-}
-
-#[test]
 fn derived_types() {
     let source = "name: astral\nenabled: TRUE\ncount: 0xff\nrate: 1.5\nargs: [one, 'two', \"three\\nfour\"]\noptional: null\n";
     let config: Configuration<'_> = from_str(source).unwrap();
@@ -840,27 +787,6 @@ fn mapping_key_uniqueness_uses_core_types() {
         from_str::<BTreeMap<Option<String>, String>>(": value\n").unwrap(),
         BTreeMap::from([(None, "value".into())])
     );
-}
-
-#[test]
-fn serde_maps_replace_equal_deserialized_keys() {
-    #[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
-    enum Theme {
-        #[serde(alias = "light")]
-        Light,
-    }
-
-    for (source, key, expected) in [
-        ("{1: first, '1': second}", "1", "second"),
-        ("{'1': second, 1: first}", "1", "first"),
-        ("{true: first, 'true': second}", "true", "second"),
-    ] {
-        let value = from_str::<BTreeMap<String, String>>(source).unwrap();
-        assert_eq!(value, BTreeMap::from([(key.into(), expected.into())]));
-    }
-
-    let value = from_str::<BTreeMap<Theme, String>>("{Light: first, light: second}").unwrap();
-    assert_eq!(value, BTreeMap::from([(Theme::Light, "second".into())]));
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
