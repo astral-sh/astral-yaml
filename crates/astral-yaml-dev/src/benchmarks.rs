@@ -58,12 +58,16 @@ pub fn fixture(name: &str) -> &'static str {
 /// Typed output for the generated service configuration benchmark.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "compare", derive(deser::Deserialize))]
+#[cfg_attr(feature = "compare", deser(deny_unknown_fields))]
 pub struct ServiceConfig {
     services: Vec<Service>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "compare", derive(deser::Deserialize))]
+#[cfg_attr(feature = "compare", deser(deny_unknown_fields))]
 struct Service {
     name: String,
     image: String,
