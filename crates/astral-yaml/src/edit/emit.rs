@@ -1145,9 +1145,20 @@ pub(super) fn correspondence<'a, Location: 'a>(
             return None;
         }
         match (&left.kind, &right.kind) {
-            (NodeKind::Scalar { value: a, .. }, NodeKind::Scalar { value: b, .. }) => {
-                let kind = scalar_type(left);
-                if kind != scalar_type(right) || a != b {
+            (
+                NodeKind::Scalar {
+                    value: a,
+                    style: left_style,
+                },
+                NodeKind::Scalar {
+                    value: b,
+                    style: right_style,
+                },
+            ) => {
+                let kind = meaning(left, *left_style);
+                if kind != meaning(right, *right_style)
+                    || a != b
+                {
                     return None;
                 }
             }
@@ -1225,14 +1236,10 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
     first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
-fn scalar_type<Location>(node: &super::Node<Location>) -> crate::schema::ScalarType {
-    let NodeKind::Scalar { style, .. } = node.kind else {
-        unreachable!()
-    };
-    meaning(node, style)
-}
-
-pub(super) fn meaning<Location>(node: &super::Node<Location>, style: ScalarStyle) -> crate::schema::ScalarType {
+pub(super) fn meaning<Location>(
+    node: &super::Node<Location>,
+    style: ScalarStyle,
+) -> crate::schema::ScalarType {
     use crate::schema::{ScalarType, classify};
     match node.tag.as_deref() {
         Some("!" | "tag:yaml.org,2002:str") => return ScalarType::String,

@@ -2,6 +2,10 @@ use super::{Comment, EditableDocument, Node, NodeKind, emit};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{cell::Cell, collections::HashSet, sync::Arc};
 
+#[cfg(test)]
+#[path = "transaction_tests.rs"]
+mod tests;
+
 /// A node reference belonging to one edit transaction. Handles can be cloned,
 /// but cannot be used in another transaction or after their node is deleted.
 #[derive(Clone, Debug)]
@@ -322,16 +326,13 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(sequence)?;
-            let NodeKind::Sequence { items, .. } = &editor.candidate.nodes[id.0].kind else {
+            let child = editor.import(yaml, Some(id))?;
+            let NodeKind::Sequence { items, .. } = &mut editor.candidate.nodes[id.0].kind else {
                 return Err(editor.error("expected a sequence"));
             };
             if index > items.len() {
                 return Err(editor.error("item index out of bounds"));
             }
-            let child = editor.import(yaml, Some(id))?;
-            let NodeKind::Sequence { items, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                unreachable!()
-            };
             items.insert(index, child);
             editor.mark(id);
             Ok(())
@@ -371,17 +372,14 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(mapping)?;
-            let NodeKind::Mapping { entries, .. } = &editor.candidate.nodes[id.0].kind else {
+            let key = editor.import(key, Some(id))?;
+            let value = editor.import(value, Some(id))?;
+            let NodeKind::Mapping { entries, .. } = &mut editor.candidate.nodes[id.0].kind else {
                 return Err(editor.error("expected a mapping"));
             };
             if index > entries.len() {
                 return Err(editor.error("entry index out of bounds"));
             }
-            let key = editor.import(key, Some(id))?;
-            let value = editor.import(value, Some(id))?;
-            let NodeKind::Mapping { entries, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                unreachable!()
-            };
             entries.insert(index, (key, value));
             editor.mark(id);
             Ok(())

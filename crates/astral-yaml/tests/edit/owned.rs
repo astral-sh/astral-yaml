@@ -537,3 +537,112 @@ fn nested_replacements_and_small_resource_limits_are_rejected() {
         );
     }
 }
+
+#[test]
+fn poisoned_transactions_reject_subsequent_mutations() {
+    let mut document = EditableDocument::parse("[]").unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let root = e.root();
+                assert!(e.remove_item(&root, 0).is_err());
+                assert!(e.insert_item(&root, 0, "1").is_err());
+                Ok(())
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn fragment_comments_and_nested_comment_updates_are_retained() {
+    let mut document = EditableDocument::parse("a: 1 # old\nb: 2 # remove\n").unwrap();
+    document
+        .edit(|e| {
+            let entries = e.mapping_entries(&e.root())?;
+            e.replace_comment(&entries[0].1, 0, " new")?;
+            e.remove_comment(&entries[1].1, 0)?;
+            e.insert_entry(&e.root(), 2, "c", "3 # imported")
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.to_yaml(), @r"
+    a: 1 # new
+    b: 2
+    c: 3 # imported
+    ");
+    let mut document = EditableDocument::parse("--- # marker\na: 1\n").unwrap();
+    document
+        .edit(|e| {
+            e.replace_comment(&e.root(), 0, " updated")?;
+            let entries = e.mapping_entries(&e.root())?;
+            e.replace(&entries[0].1, "2")
+        })
+        .unwrap();
+    assert_eq!(document.source(), "--- # updated\na: 2\n");
+}
+
+#[test]
+fn changes_preserve_terminators_and_discard_removed_style_requests() {
+    use astral_yaml::{CollectionStyle, ScalarStyle};
+    let mut document = EditableDocument::parse("|\n  hello\n").unwrap();
+    document
+        .edit(|e| e.replace(&e.root(), "'updated'"))
+        .unwrap();
+    assert_eq!(document.source(), "'updated'\n");
+    let mut document = EditableDocument::parse("{a: text}").unwrap();
+    document
+        .edit(|e| {
+            let entries = e.mapping_entries(&e.root())?;
+            e.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)
+        })
+        .unwrap();
+    assert_eq!(document.source(), "{a: \"text\"}");
+    let mut document = EditableDocument::parse("[one]").unwrap();
+    document
+        .edit(|e| {
+            let root = e.root();
+            let item = e.sequence_items(&root)?.remove(0);
+            e.set_scalar_style(&item, ScalarStyle::SingleQuoted)?;
+            e.remove_item(&root, 0)
+        })
+        .unwrap();
+    let mut document = EditableDocument::parse("[{a: 1}]").unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let item = e.sequence_items(&e.root())?.remove(0);
+                e.set_collection_style(&item, CollectionStyle::Block)
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
+    let mut document = EditableDocument::parse("a: 1\nb: 2\n").unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let entries = e.mapping_entries(&e.root())?;
+                e.insert_comment(&entries[0].1, 0, " trailing", CommentPlacement::Trailing)
+            })
+            .is_err()
+    );
+    let source = "[0,0]";
+    let mut document = EditableDocument::parse_with_options(
+        source,
+        ParseOptions {
+            max_input_bytes: 5,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let items = e.sequence_items(&e.root())?;
+                e.replace(&items[1], "12345")
+            })
+            .is_err()
+    );
+    assert_eq!(document.source(), source);
+}
