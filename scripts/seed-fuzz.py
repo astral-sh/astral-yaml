@@ -114,7 +114,9 @@ def seed_editable(root: Path, inputs: list[Path]) -> None:
     sources.extend(example.encode("utf-8") for example in TYPED_EXAMPLES)
     for source in sources:
         for depth in (0, 64, 128, 192):
-            write_seed(corpus, bytes(depth + operation for operation in range(8)) + source)
+            write_seed(
+                corpus, bytes(depth + operation for operation in range(8)) + source
+            )
     print("Seeded bounded edit sequences")
 
 
