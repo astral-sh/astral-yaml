@@ -509,11 +509,11 @@ mod tests {
         let stream = astral_yaml::parse("---\n1 # first\n---\n2\n").unwrap();
         let budget = Cell::new(0);
         let cache = CommentCache::new(1);
-        assert!(
+        assert_eq!(
             cache
                 .get(&stream, stream.documents()[1].root, &budget)
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            []
         );
     }
 }

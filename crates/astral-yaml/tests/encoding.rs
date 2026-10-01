@@ -56,7 +56,7 @@ fn encodings_and_original_spans() {
                     .original_span(Span::new(inside, inside).unwrap())
                     .is_none()
             );
-            assert!(!format!("{:?}", source.clone()).is_empty());
+            assert_ne!(format!("{:?}", source.clone()), "");
         }
     }
 }

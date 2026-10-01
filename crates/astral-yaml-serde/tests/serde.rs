@@ -464,7 +464,7 @@ fn located_failures_and_document_count() {
     for source in ["", "---\n---\n", "[", "256"] {
         let error = from_str::<u8>(source).unwrap_err();
         assert!(error.span.is_some());
-        assert!(!error.to_string().is_empty());
+        assert_ne!(error.to_string(), "");
         assert_eq!(error.clone(), error);
     }
 
