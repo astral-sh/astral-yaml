@@ -668,3 +668,27 @@ fn repeated_navigation_is_bounded() {
             .is_err()
     );
 }
+
+#[test]
+fn replacing_implicit_nulls_adds_required_separation() {
+    for (source, expected) in [
+        ("---", "--- 42"),
+        ("a:", "a: 42"),
+        ("-", "- 42"),
+        ("{a:}", "{a: 42}"),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|e| {
+                let root = e.root();
+                let target = match e.node(&root)?.kind() {
+                    NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
+                    NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
+                    _ => root,
+                };
+                e.replace(&target, "42")
+            })
+            .unwrap();
+        assert_eq!(document.source(), expected);
+    }
+}
