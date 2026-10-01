@@ -1,3 +1,4 @@
+use astral_yaml_dev::edit_diff;
 use astral_yaml_serde::{Editable, Spanned, Tagged};
 use serde::Deserialize;
 
@@ -12,6 +13,7 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
         let source = String::from("timeout: 30 # seconds\nunknown : ['keep',  2]\n");
         Editable::<Config>::parse(&source).unwrap()
     };
+    let before = config.to_yaml();
     config
         .edit(|e| {
             let entries = e.mapping_entries(&e.root())?;
@@ -27,6 +29,14 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
         config.to_yaml(),
         "timeout: 100 # seconds\nunknown : ['keep',  2]\n"
     );
+    insta::assert_snapshot!(edit_diff(&before, config.syntax().source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -timeout: 30 # seconds
+    +timeout: 100 # seconds
+     unknown : ['keep',  2]
+    ");
     assert_eq!(config.into_inner().timeout.value, 100);
 }
 
@@ -58,9 +68,19 @@ fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
 fn tags_and_nulls_use_the_existing_deserialization_policy() {
     let mut value = Editable::<Tagged<Option<u8>>>::parse("!!null null").unwrap();
     assert_eq!(value.value().value, None);
+    let before = value.to_yaml();
     value.edit(|e| e.replace(&e.root(), "!!int 42")).unwrap();
     assert_eq!(value.value().value, Some(42));
     assert_eq!(value.value().tag, "tag:yaml.org,2002:int");
+    insta::assert_snapshot!(edit_diff(&before, value.syntax().source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!null null
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:int> 42
+    \ No newline at end of file
+    ");
     assert!(value.edit(|e| e.replace(&e.root(), "42")).is_err());
     assert_eq!(value.value().value, Some(42));
 }
