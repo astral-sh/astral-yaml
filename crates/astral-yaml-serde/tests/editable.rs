@@ -30,14 +30,12 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
         "timeout: 100 # seconds\nunknown : ['keep',  2]\n"
     );
     insta::assert_snapshot!(edit_diff(&before, config.syntax().source()), @"
-    +-------------------------+
-    | --- before.yaml |
-    | +++ after.yaml |
-    | @@ -1,2 +1,2 @@ |
-    | -timeout: 30 # seconds |
-    | +timeout: 100 # seconds |
-    |  unknown : ['keep',  2] |
-    +-------------------------+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -timeout: 30 # seconds
+    +timeout: 100 # seconds
+     unknown : ['keep',  2]
     ");
     assert_eq!(config.into_inner().timeout.value, 100);
 }
@@ -75,15 +73,13 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     assert_eq!(value.value().value, Some(42));
     assert_eq!(value.value().tag, "tag:yaml.org,2002:int");
     insta::assert_snapshot!(edit_diff(&before, value.syntax().source()), @r"
-    +------------------------------+
-    | --- before.yaml |
-    | +++ after.yaml |
-    | @@ -1 +1 @@ |
-    | -!!null null |
-    | \ No newline at end of file |
-    | +!<tag:yaml.org,2002:int> 42 |
-    | \ No newline at end of file |
-    +------------------------------+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!null null
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:int> 42
+    \ No newline at end of file
     ");
     assert!(value.edit(|e| e.replace(&e.root(), "42")).is_err());
     assert_eq!(value.value().value, Some(42));
