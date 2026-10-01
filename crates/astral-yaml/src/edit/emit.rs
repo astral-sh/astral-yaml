@@ -81,6 +81,14 @@ pub(super) fn render(
         skip_leading: false,
         skip_inline: false,
     };
+    if region.is_empty()
+        && matches!(
+            document.source.as_bytes()[..region.start()].last(),
+            Some(b':' | b'-' | b'?')
+        )
+    {
+        emitter.push(" ")?;
+    }
     emitter.node(id, indent, flow, "", 0)?;
     Ok(emitter.output)
 }
@@ -334,6 +342,17 @@ impl Emitter<'_> {
         flow: bool,
         indent: usize,
     ) -> Result<bool, Error> {
+        // A string tag can resolve an empty plain scalar. Keep its spelling
+        // empty rather than emitting the string "null".
+        if value.is_empty()
+            && style == ScalarStyle::Plain
+            && matches!(
+                self.document.nodes[id.0].tag.as_deref(),
+                Some("!" | "tag:yaml.org,2002:str")
+            )
+        {
+            return Ok(false);
+        }
         let text = scalar(value, style, flow, indent, self.newline);
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once(self.newline).expect("block scalar header");

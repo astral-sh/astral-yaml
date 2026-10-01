@@ -43,15 +43,27 @@ fn rendering_obeys_work_and_output_budgets() {
 #[test]
 fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
     let mut document = EditableDocument::parse("[&a 1, &a 2, *a]").unwrap();
-    let NodeKind::Sequence { items, .. } = document.nodes[document.root.0].kind.clone() else {
-        panic!("sequence")
-    };
-    let NodeKind::Alias { target, .. } = &mut document.nodes[items[2].0].kind else {
-        panic!("alias")
-    };
+    let first = crate::NodeId(
+        document
+            .nodes
+            .iter()
+            .position(|node| node.anchor.as_deref() == Some("a"))
+            .unwrap(),
+    );
+    let target = document
+        .nodes
+        .iter_mut()
+        .find_map(|node| {
+            if let NodeKind::Alias { target, .. } = &mut node.kind {
+                Some(target)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     // Model retaining the first definition while a later definition shadows it.
     // The renderer must fail rather than emit an alias with different meaning.
-    *target = items[0];
+    *target = first;
     assert_eq!(
         document.normalized_yaml().unwrap_err().message,
         "emission changed YAML content or alias identity"
