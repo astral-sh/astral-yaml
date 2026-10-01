@@ -2,7 +2,7 @@ use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
 fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
-    for source in ["---", "!!str", "!", "[!!str , ! ]", "a:", "-"] {
+    for source in ["---", "---\n", "!!str", "!", "[!!str , ! ]", "a:", "-"] {
         let document = EditableDocument::parse(source).unwrap();
         let output = document.normalized_yaml().unwrap();
         let reparsed = EditableDocument::parse(&output).unwrap();
