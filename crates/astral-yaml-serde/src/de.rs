@@ -1363,7 +1363,8 @@ mod tests {
                 .unwrap();
         }
 
-        context.budget.set(0);
+        // The wrapper consumes one visit before the payload is requested.
+        context.budget.set(1);
         assert!(
             de.deserialize_newtype_struct(crate::spanned::NAME, serde::de::IgnoredAny)
                 .is_err()
