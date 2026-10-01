@@ -2,6 +2,10 @@ use super::{Comment, EditableDocument, NodeKind};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::fmt::Write;
 
+#[cfg(test)]
+#[path = "emit_tests.rs"]
+mod tests;
+
 /// A rewritten region includes descendant comments, but leaves the root's outer
 /// comments in their original source positions unless explicitly requested.
 pub(super) fn region(document: &EditableDocument, id: NodeId, outer: bool) -> Span {
