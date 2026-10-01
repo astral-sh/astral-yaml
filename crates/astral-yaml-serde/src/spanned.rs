@@ -106,19 +106,10 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for SpannedVisitor<T> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let start = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-        let end = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-        let Some(span) = Span::new(start, end) else {
-            return Err(de::Error::custom("span starts after its end"));
-        };
-
-        let value = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+        let (start, end, value) =
+            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(&mut seq))?;
+        let span =
+            Span::new(start, end).ok_or_else(|| de::Error::custom("span starts after its end"))?;
         if seq.next_element::<de::IgnoredAny>()?.is_some() {
             return Err(de::Error::invalid_length(4, &self));
         }

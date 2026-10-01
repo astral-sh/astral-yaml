@@ -1109,7 +1109,8 @@ impl<'de> SeqAccess<'de> for &mut MetadataAccess<'_, 'de> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(if self.comments { 2 } else { 3 } - self.index)
+        let fields = if self.comments { 2 } else { 3 };
+        Some(fields - self.index)
     }
 }
 
