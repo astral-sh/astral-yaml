@@ -646,3 +646,25 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
     );
     assert_eq!(document.source(), source);
 }
+
+#[test]
+fn repeated_navigation_is_bounded() {
+    let mut document = EditableDocument::parse_with_options(
+        "42",
+        ParseOptions {
+            max_nodes: 1,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let root = e.root();
+                e.node(&root)?;
+                e.node(&root)?;
+                Ok(())
+            })
+            .is_err()
+    );
+}
