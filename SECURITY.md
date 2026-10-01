@@ -1,4 +1,17 @@
-# Resource limits
+# Security
+
+## Reporting a vulnerability
+
+Report vulnerabilities according to [Astral's security policy](https://github.com/astral-sh/.github/blob/main/SECURITY.md).
+
+## Processing untrusted input
+
+`astral-yaml` and `astral-yaml-serde` forbid unsafe Rust in their own code. The
+limits below constrain input size, nesting, and deserialization work; they do not
+bound work performed by custom Serde `Serialize` or `Deserialize` implementations.
+See [fuzzing](fuzz/README.md) for the parser and Serde fuzz targets.
+
+## Resource limits
 
 The parser defaults to:
 

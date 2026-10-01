@@ -4,7 +4,7 @@
 tags and aliases without constructing application values. `astral-yaml-serde`
 uses the core schema and rejects duplicate mapping keys. YAML 1.1 merge keys are
 not expanded; timestamps and spellings such as `yes` and `no` remain strings.
-See [limitations](limitations.md) and [resource limits](resource-limits.md).
+See [limitations](limitations.md) and [resource limits](../SECURITY.md#resource-limits).
 
 The serde adapter accepts the core tags `!!str`, `!!null`, `!!bool`, `!!int`,
 `!!float`, `!!seq`, and `!!map`, as well as the non-specific tag `!`. Core tags

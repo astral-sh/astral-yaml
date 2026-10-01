@@ -1,6 +1,6 @@
 # Limitations
 
-See [resource limits](resource-limits.md) for input and processing limits.
+See [resource limits](../SECURITY.md#resource-limits) for input and processing limits.
 
 ## Serde buffering
 
