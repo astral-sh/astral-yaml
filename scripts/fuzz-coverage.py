@@ -49,7 +49,7 @@ def main() -> None:
     sources += sorted((root / "crates/astral-yaml-serde/src").glob("*.rs"))
     reports: dict[str, JsonValue] = {}
 
-    for name in ("parse", "serde", "decode", "typed"):
+    for name in ("parse", "serde", "decode", "typed", "editable"):
         profile = root / "fuzz/coverage" / name / "coverage.profdata"
         binary = (
             root / "target" / host / "coverage" / host / "release" / (name + extension)

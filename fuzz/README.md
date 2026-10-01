@@ -6,10 +6,10 @@ With `uv` and `rustup` on `PATH`, run:
 cargo xtask fuzz
 ```
 
-The command seeds all four corpora, installs nightly if missing, and adds its
+The command seeds all five corpora, installs nightly if missing, and adds its
 `rust-src` and `llvm-tools-preview` components. It runs cargo-fuzz through
 `uv run --only-dev --locked`, using the project's pinned development tools.
-The `parse`, `serde`, `decode`, and `typed` targets run sequentially for 60 seconds
+The `parse`, `serde`, `decode`, `typed`, and `editable` targets run sequentially for 60 seconds
 each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
 Setup or fuzzing failures stop the command. Missing `uv` is an error.
 
@@ -33,6 +33,9 @@ Seeding preserves existing corpus discoveries and artifacts.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
+- `editable` checks bounded syntax edit sequences, typed-view consistency, and
+  complete rollback. Its first eight bytes select edits and navigation paths; the
+  rest is YAML.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.
@@ -51,7 +54,7 @@ them in `fixtures/regressions` with a regression assertion.
 Replay each corpus, then generate source reports:
 
 ```sh
-for target in parse serde decode typed; do
+for target in parse serde decode typed editable; do
   cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
 uv run --script scripts/fuzz-coverage.py

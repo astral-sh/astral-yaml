@@ -22,7 +22,7 @@ enum Command {
         html: bool,
     },
 
-    /// Run all four fuzz targets for 60 seconds each, or forward arguments to cargo-fuzz.
+    /// Run all five fuzz targets for 60 seconds each, or forward arguments to cargo-fuzz.
     Fuzz {
         #[arg(
             trailing_var_arg = true,

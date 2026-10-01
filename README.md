@@ -52,6 +52,11 @@ assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 `Spanned<T>` implements `DeserializeOwned` when `T` does. `Commented` borrows
 the input even for owned payloads. Both serialize only their value.
 
+For source-preserving changes, use `Editable<T>` to pair an owned typed view
+with editable syntax. Transactions update both together after parsing and type
+checking. See [editing YAML](docs/editing.md) for the API, preservation contract,
+and metadata-wrapper migration.
+
 Enums use variant names for unit variants and singleton mappings for variants
 with payloads. Serde's representation attributes, including `untagged`, still
 apply. Core tags such as `!!str` and `!!int` work by default. Application tags

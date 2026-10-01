@@ -96,3 +96,52 @@ mod astral {
         });
     }
 }
+
+mod editable {
+    use astral_yaml_dev::Value;
+    use astral_yaml_serde::Editable;
+    use divan::{Bencher, black_box};
+
+    const SOURCE: &str = "timeout: 30 # seconds\nservers: [primary, backup]\nextra: 'retained'\n";
+
+    #[divan::bench]
+    fn parse(bencher: Bencher) {
+        bencher.bench_local(|| {
+            black_box(Editable::<Value>::parse(black_box(SOURCE)).unwrap());
+        });
+    }
+
+    #[divan::bench]
+    fn unchanged_output(bencher: Bencher) {
+        let document = Editable::<Value>::parse(SOURCE).unwrap();
+        bencher.bench_local(|| {
+            black_box(document.to_yaml());
+        });
+    }
+
+    // Include construction: each transaction starts from the same source.
+    #[divan::bench]
+    fn replace_scalar(bencher: Bencher) {
+        bencher.bench_local(|| {
+            let mut document = Editable::<Value>::parse(SOURCE).unwrap();
+            document
+                .edit(|editor| {
+                    let entries = editor.mapping_entries(&editor.root())?;
+                    editor.replace(&entries[0].1, "60")
+                })
+                .unwrap();
+            black_box(document);
+        });
+    }
+
+    #[divan::bench]
+    fn insert_entry(bencher: Bencher) {
+        bencher.bench_local(|| {
+            let mut document = Editable::<Value>::parse(SOURCE).unwrap();
+            document
+                .edit(|editor| editor.insert_entry(&editor.root(), 3, "enabled", "true"))
+                .unwrap();
+            black_box(document);
+        });
+    }
+}

@@ -107,6 +107,17 @@ def seed_typed(root: Path, inputs: list[Path]) -> None:
     print("Seeded all 29 typed serde paths")
 
 
+def seed_editable(root: Path, inputs: list[Path]) -> None:
+    corpus = root / "fuzz/corpus/editable"
+    corpus.mkdir(parents=True, exist_ok=True)
+    sources = [path.read_bytes() for path in inputs]
+    sources.extend(example.encode("utf-8") for example in TYPED_EXAMPLES)
+    for source in sources:
+        for depth in (0, 64, 128, 192):
+            write_seed(corpus, bytes(depth + operation for operation in range(8)) + source)
+    print("Seeded bounded edit sequences")
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     inputs = list((root / "fixtures/yaml-test-suite").rglob("in.yaml"))
@@ -116,6 +127,7 @@ def main() -> None:
     seed_parsers(root, inputs)
     seed_encodings(root, inputs)
     seed_typed(root, inputs)
+    seed_editable(root, inputs)
 
 
 if __name__ == "__main__":

@@ -65,7 +65,7 @@ pub(crate) fn run(args: Vec<OsString>) -> io::Result<ExitCode> {
     }
 
     let runs = if args.is_empty() {
-        ["parse", "serde", "decode", "typed"]
+        ["parse", "serde", "decode", "typed", "editable"]
             .map(|target| {
                 [
                     "run",

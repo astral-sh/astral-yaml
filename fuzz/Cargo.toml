@@ -42,5 +42,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "editable"
+path = "fuzz_targets/editable.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
