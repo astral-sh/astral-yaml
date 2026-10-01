@@ -1362,6 +1362,12 @@ mod tests {
             de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
                 .unwrap();
         }
+
+        context.budget.set(0);
+        assert!(
+            de.deserialize_newtype_struct(crate::spanned::NAME, serde::de::IgnoredAny)
+                .is_err()
+        );
     }
 
     #[test]

@@ -426,6 +426,10 @@ mod protocol {
         use Wire::{Number as N, Sequence as S, Text};
         use astral_yaml_serde::Spanned;
 
+        let value = Spanned::<usize>::deserialize(S(vec![N(0), N(2), N(42)])).unwrap();
+        assert_eq!(value.value, 42);
+        assert_eq!(value.span, astral_yaml::Span::new(0, 2).unwrap());
+
         for (values, expected) in [
             (vec![Text("bad")], "invalid type"),
             (vec![N(0), Text("bad")], "invalid type"),
