@@ -4,12 +4,17 @@
 
 Report vulnerabilities according to [Astral's security policy](https://github.com/astral-sh/.github/blob/main/SECURITY.md).
 
+## Attacker model
+
+An attacker should not be able to induce arbitrary code execution or uncontrolled resource usage
+through astral-yaml. Being able to do either constitutes a potential security vulnerability.
+
 ## Processing untrusted input
 
-`astral-yaml` and `astral-yaml-serde` forbid unsafe Rust in their own code. The
-limits below constrain input size, nesting, and deserialization work; they do not
-bound work performed by custom Serde `Serialize` or `Deserialize` implementations.
-See [fuzzing](fuzz/README.md) for the parser and Serde fuzz targets.
+The astral-yaml crates forbid unsafe Rust in their own code. The
+limits below constrain input size, nesting, and deserialization work.
+
+The parser is also fuzzed. See [fuzzing](fuzz/README.md) for the parser and Serde fuzz targets.
 
 ## Resource limits
 
@@ -20,13 +25,6 @@ The parser defaults to:
 - 1,000,000 syntax elements: nodes, comments, directives, BOMs, and document end
   markers.
 
-`ParseOptions` controls these limits; nesting must be between 1 and 128.
-For encoded input, `Source::with_limit` bounds both the original and decoded byte
-lengths.
-
-Deserialization also limits nesting, node visits, and inspected scalar and tag bytes,
-including alias expansion and ignored values. Collecting comments counts toward
-the work limit, including repeated comments in parent and child wrappers. Cyclic
-aliases can be parsed, but expanding them during deserialization hits a resource
-limit. Serialization also limits nesting and checks non-string keys using the
-parser's default limits.
+Users may configure higher limits, subject to astral-yaml's upper limits.
+See the documentation for more information on those limits and how to
+configure them.
