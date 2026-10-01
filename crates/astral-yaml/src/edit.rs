@@ -1,7 +1,10 @@
 //! Owned YAML syntax for source-preserving editing.
 
 mod emit;
+mod transaction;
 mod view;
+
+pub use transaction::{Editor, Handle};
 
 use std::borrow::Cow;
 

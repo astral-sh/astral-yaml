@@ -1226,6 +1226,13 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
 }
 
 fn scalar_type<Location>(node: &super::Node<Location>) -> crate::schema::ScalarType {
+    let NodeKind::Scalar { style, .. } = node.kind else {
+        unreachable!()
+    };
+    meaning(node, style)
+}
+
+pub(super) fn meaning<Location>(node: &super::Node<Location>, style: ScalarStyle) -> crate::schema::ScalarType {
     use crate::schema::{ScalarType, classify};
     match node.tag.as_deref() {
         Some("!" | "tag:yaml.org,2002:str") => return ScalarType::String,
@@ -1236,10 +1243,7 @@ fn scalar_type<Location>(node: &super::Node<Location>) -> crate::schema::ScalarT
         _ => {}
     }
     match &node.kind {
-        NodeKind::Scalar {
-            value,
-            style: ScalarStyle::Plain,
-        } => classify(value),
+        NodeKind::Scalar { value, .. } if style == ScalarStyle::Plain => classify(value),
         _ => ScalarType::String,
     }
 }

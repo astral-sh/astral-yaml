@@ -174,3 +174,366 @@ fn normalization_keeps_limits_on_the_original_input_and_locates_errors_in_lf() {
         EditableDocument::parse("key: value\ninvalid: [\n").unwrap_err()
     );
 }
+
+#[test]
+fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
+    let source = "# config\r\ntimeout : 30   # seconds\r\nother:    'untouched'\r\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let entries = editor.mapping_entries(&editor.root())?;
+            editor.replace(&entries[0].1, "60")
+        })
+        .unwrap();
+    assert_eq!(document.to_yaml(), source.replace("30", "60"));
+    document
+        .edit(|editor| {
+            let entries = editor.mapping_entries(&editor.root())?;
+            editor.replace(&entries[0].1, "1000")?;
+            editor.replace(&entries[1].1, "'updated'")
+        })
+        .unwrap();
+    assert_eq!(
+        document.to_yaml(),
+        source
+            .replace("30", "1000")
+            .replace("'untouched'", "'updated'")
+    );
+}
+
+#[test]
+fn structural_edits_preserve_comments_and_accept_complex_keys() {
+    let mut document =
+        EditableDocument::parse("# config\na: 1 # remove\nb: [2, 3] # keep\n").unwrap();
+    document
+        .edit(|editor| {
+            let root = editor.root();
+            let entries = editor.mapping_entries(&root)?;
+            editor.remove_entry(&root, 0)?;
+            editor.remove_item(&entries[1].1, 0)?;
+            editor.insert_item(&entries[1].1, 1, "4")?;
+            editor.insert_entry(&root, 1, "[x, y]", "{enabled: true}")
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.to_yaml(), @r"
+    b: [3, 4] # keep
+    ? [x, y]
+    : {enabled: true}
+    ");
+}
+
+#[test]
+fn style_changes_preserve_meaning_and_reject_impossible_requests() {
+    use astral_yaml::{CollectionStyle, ScalarStyle};
+    let mut document = EditableDocument::parse("text: 'hello'\nitems: [1, 2]\n").unwrap();
+    document
+        .edit(|editor| {
+            let entries = editor.mapping_entries(&editor.root())?;
+            editor.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)?;
+            editor.set_collection_style(&entries[1].1, CollectionStyle::Block)
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.to_yaml(), @r#"
+    text: "hello"
+    items:
+      - 1
+      - 2
+    "#);
+    for (source, style) in [
+        ("42", ScalarStyle::SingleQuoted),
+        ("'null'", ScalarStyle::Plain),
+        ("'a: b'", ScalarStyle::Plain),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        assert!(
+            document
+                .edit(|e| e.set_scalar_style(&e.root(), style))
+                .is_err()
+        );
+        assert_eq!(document.source(), source);
+    }
+    let mut document = EditableDocument::parse("[one]").unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let item = e.sequence_items(&e.root())?.remove(0);
+                e.set_scalar_style(&item, ScalarStyle::Literal)
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn edits_are_atomic_and_handles_expire() {
+    let mut document = EditableDocument::parse("[1, 2]").unwrap();
+    let mut stale = None;
+    document
+        .edit(|editor| {
+            stale = Some(editor.root());
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        document
+            .edit(|editor| editor.insert_item(stale.as_ref().unwrap(), 0, "3"))
+            .is_err()
+    );
+    assert!(
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                let first = editor.sequence_items(&root)?.remove(0);
+                editor.remove_item(&root, 0)?;
+                editor.replace(&first, "3")
+            })
+            .is_err()
+    );
+    assert!(
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                editor.insert_item(&root, 0, "3")?;
+                assert!(editor.remove_item(&root, 20).is_err());
+                Ok(())
+            })
+            .is_err()
+    );
+    assert_eq!(document.source(), "[1, 2]");
+}
+
+#[test]
+fn aliases_cannot_be_dangled_or_silently_rebound() {
+    for (source, index) in [("[&a 1, *a]", 0), ("[&a 1, &a 2, *a]", 1)] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        assert!(document.edit(|e| e.remove_item(&e.root(), index)).is_err());
+        assert_eq!(document.source(), source);
+    }
+    let mut document = EditableDocument::parse("[&a 1, *a]").unwrap();
+    document
+        .edit(|e| {
+            let first = e.sequence_items(&e.root())?.remove(0);
+            e.replace(&first, "&a 2")
+        })
+        .unwrap();
+    assert_eq!(document.source(), "[&a 2, *a]");
+    document
+        .edit(|e| e.insert_item(&e.root(), 2, "&b [*b]"))
+        .unwrap();
+}
+
+#[test]
+fn comment_edits_keep_document_markers_and_source_outside_the_node() {
+    let mut document =
+        EditableDocument::parse("%YAML 1.2 # version\n--- # marker\n42 # number\n").unwrap();
+    document
+        .edit(|e| {
+            let root = e.root();
+            e.replace_comment(&root, 0, " updated")?;
+            e.remove_comment(&root, 1)
+        })
+        .unwrap();
+    assert_eq!(
+        document.source(),
+        "%YAML 1.2 # updated\n--- \n42 # number\n"
+    );
+    let mut document = EditableDocument::parse("a: 1\nb: 2\n").unwrap();
+    document
+        .edit(|e| {
+            let entries = e.mapping_entries(&e.root())?;
+            e.insert_comment(&entries[0].1, 0, " first", CommentPlacement::Leading)?;
+            e.insert_comment(&entries[1].1, 0, " second", CommentPlacement::Inline)
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.to_yaml(), @r"
+    # first
+    a: 1
+    b: 2 # second
+    ");
+}
+
+#[test]
+fn invalid_operations_roll_back() {
+    use astral_yaml::{CollectionStyle, ScalarStyle};
+    for (source, operation) in [
+        ("42", 0),
+        ("[]", 1),
+        ("[]", 2),
+        ("[]", 3),
+        ("42", 4),
+        ("[]", 5),
+        ("{}", 6),
+        ("{}", 7),
+        ("{}", 8),
+        ("42", 9),
+        ("{}", 10),
+        ("[]", 11),
+        ("42", 12),
+        ("42", 13),
+        ("42", 14),
+        ("42", 15),
+        ("42 # old", 16),
+        ("42", 17),
+        ("42", 18),
+        ("42", 19),
+        ("42", 20),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        let result = document.edit(|e| {
+            let root = e.root();
+            match operation {
+                0 => e.insert_item(&root, 0, "1"),
+                1 => e.insert_item(&root, 1, "1"),
+                2 => e.insert_item(&root, 0, "["),
+                3 | 4 => e.remove_item(&root, 0),
+                5 => e.insert_entry(&root, 0, "key", "value"),
+                6 => e.insert_entry(&root, 1, "key", "value"),
+                7 => e.insert_entry(&root, 0, "[", "value"),
+                8 => e.insert_entry(&root, 0, "key", "["),
+                9 | 10 => e.remove_entry(&root, 0),
+                11 => e.set_scalar_style(&root, ScalarStyle::Plain),
+                12 => e.set_collection_style(&root, CollectionStyle::Flow),
+                13 => e.insert_comment(&root, 1, " note", CommentPlacement::Inline),
+                14 => e.replace_comment(&root, 0, " note"),
+                15 => e.remove_comment(&root, 0),
+                16 => e.insert_comment(&root, 0, " note", CommentPlacement::Inline),
+                17 => e.insert_comment(&root, 0, "bad\ncomment", CommentPlacement::Leading),
+                18 => {
+                    e.replace(&root, "1")?;
+                    e.replace(&root, "2")
+                }
+                19 => {
+                    e.mapping_entries(&root)?;
+                    Ok(())
+                }
+                _ => {
+                    e.sequence_items(&root)?;
+                    Ok(())
+                }
+            }
+        });
+        assert!(result.is_err(), "{source:?} operation {operation}");
+        assert_eq!(document.source(), source);
+    }
+}
+
+#[test]
+fn local_collection_edits_leave_siblings_untouched() {
+    for source in [
+        "a:  'untouched'\nb: [1, 2]\nc : true\n",
+        "a:  'untouched'\nb:\n  - 1\n  - 2\nc : true\n",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|e| {
+                let entries = e.mapping_entries(&e.root())?;
+                e.insert_item(&entries[1].1, 2, "3")
+            })
+            .unwrap();
+        assert!(document.source().starts_with("a:  'untouched'\nb:"));
+        assert!(document.source().ends_with("c : true\n"));
+    }
+    let mut document = EditableDocument::parse("- a: 1\n  b: 2\n").unwrap();
+    document
+        .edit(|e| {
+            let item = e.sequence_items(&e.root())?.remove(0);
+            e.insert_entry(&item, 2, "c", "3")
+        })
+        .unwrap();
+}
+
+#[test]
+fn inserted_nodes_and_block_scalars_can_be_edited() {
+    use astral_yaml::{CollectionStyle, ScalarStyle};
+    let mut document = EditableDocument::parse("[]").unwrap();
+    document
+        .edit(|e| {
+            let root = e.root();
+            e.insert_item(&root, 0, "{a: 1}")?;
+            let item = e.sequence_items(&root)?.remove(0);
+            e.insert_entry(&item, 1, "b", "2")?;
+            let entries = e.mapping_entries(&item)?;
+            e.replace(&entries[0].1, "3")
+        })
+        .unwrap();
+    assert_eq!(document.source(), "[{a: 3, b: 2}]");
+    for style in [
+        ScalarStyle::Plain,
+        ScalarStyle::SingleQuoted,
+        ScalarStyle::DoubleQuoted,
+        ScalarStyle::Literal,
+        ScalarStyle::Folded,
+    ] {
+        let mut document = EditableDocument::parse("'hello'").unwrap();
+        document
+            .edit(|e| e.set_scalar_style(&e.root(), style))
+            .unwrap();
+    }
+    for source in ["[]", "{}"] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|e| e.set_collection_style(&e.root(), CollectionStyle::Block))
+            .unwrap();
+    }
+    let mut document =
+        EditableDocument::parse("value: | # header\n  hello\nother: true\n").unwrap();
+    document
+        .edit(|e| {
+            let entries = e.mapping_entries(&e.root())?;
+            e.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)
+        })
+        .unwrap();
+}
+
+#[test]
+fn nested_replacements_and_small_resource_limits_are_rejected() {
+    let mut document = EditableDocument::parse("[[1]]").unwrap();
+    assert!(
+        document
+            .edit(|e| {
+                let root = e.root();
+                let inner = e.sequence_items(&root)?.remove(0);
+                e.replace(&inner, "[2]")?;
+                e.replace(&root, "[]")
+            })
+            .is_err()
+    );
+    let mut document = EditableDocument::parse_with_options(
+        "[]",
+        ParseOptions {
+            max_nodes: 1,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(document.edit(|e| e.insert_item(&e.root(), 0, "1")).is_err());
+    let mut document = EditableDocument::parse_with_options(
+        "[]",
+        ParseOptions {
+            max_depth: 1,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(document.edit(|e| e.insert_item(&e.root(), 0, "1")).is_err());
+    for comment in [false, true] {
+        let mut document = EditableDocument::parse_with_options(
+            "[]",
+            ParseOptions {
+                max_input_bytes: 2,
+                ..ParseOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            document
+                .edit(|e| {
+                    if comment {
+                        e.insert_comment(&e.root(), 0, "long", CommentPlacement::Leading)
+                    } else {
+                        e.replace(&e.root(), "long")
+                    }
+                })
+                .is_err()
+        );
+    }
+}
