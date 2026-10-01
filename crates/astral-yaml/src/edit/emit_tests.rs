@@ -82,6 +82,7 @@ fn normalized_syntax_preserves_values_and_comments() {
         "true",
         "0xff",
         "'a''b'",
+        r#""a\"b\\c""#,
         "\"a\\nb\\r\\t\\0\\u0085\\u2028\\u2029\"",
         "{name: 'café', numbers: [1, 2]}",
         "[{}, [], null]",
