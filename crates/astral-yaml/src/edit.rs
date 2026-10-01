@@ -1,5 +1,7 @@
 //! Owned YAML syntax for source-preserving editing.
 
+mod emit;
+
 use std::borrow::Cow;
 
 use crate::{
@@ -132,6 +134,37 @@ impl EditableDocument {
             options,
             source: source.into_owned(),
         })
+    }
+
+    /// Returns the document's current source, preserving its formatting.
+    #[must_use]
+    pub fn to_yaml(&self) -> String {
+        self.source.clone()
+    }
+
+    /// Emits the document with normalized whitespace, preserving comments and
+    /// compatible presentation styles. Source outside the root region is retained.
+    ///
+    /// # Errors
+    /// Returns an error if emission exceeds the document's resource limits.
+    pub fn normalized_yaml(&self) -> Result<String, Error> {
+        let region = emit::region(self, self.root, false);
+        let indent = emit::indent(&self.source, region.start());
+        let body = emit::render(self, self.root, region, indent, false)?;
+        let mut output = self.source[..region.start()].to_owned();
+        output.push_str(&body);
+        if self.source[..region.end()].ends_with(['\n', '\r']) && !output.ends_with(['\n', '\r']) {
+            output.push_str(emit::newline(&self.source));
+        }
+        output.push_str(&self.source[region.end()..]);
+        let parsed = Self::parse_with_options(&output, self.options)?;
+        if !emit::equivalent(self, &parsed) {
+            return Err(Error {
+                span: region,
+                message: "emission changed YAML content or alias identity",
+            });
+        }
+        Ok(output)
     }
 
     /// The current committed UTF-8 source, with LF line endings.
