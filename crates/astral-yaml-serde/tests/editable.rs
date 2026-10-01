@@ -42,7 +42,7 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
 
 #[test]
 fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
-    for operation in 0..4 {
+    for operation in 0..6 {
         let source = "timeout: 30 # seconds\n";
         let mut config = Editable::<Config>::parse(source).unwrap();
         let result = config.edit(|e| {
@@ -52,7 +52,9 @@ fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
                 0 => e.replace(&entries[0].1, "256"),
                 1 => e.replace(&entries[0].1, "["),
                 2 => e.insert_entry(&root, 1, "timeout", "60"),
-                _ => e.remove_entry(&root, 0),
+                3 => e.remove_entry(&root, 0),
+                4 => e.replace(&entries[0].1, "[60]"),
+                _ => e.replace(&entries[0].1, "{value: 60}"),
             }
         });
         assert!(result.is_err());
