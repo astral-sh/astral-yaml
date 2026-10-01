@@ -112,6 +112,7 @@ dependencies = [
 name = "astral-yaml-dev"
 version = "0.1.0"
 dependencies = [
+ "annotate-snippets",
  "astral-yaml",
  "astral-yaml-serde",
  "codspeed-divan-compat",

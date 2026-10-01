@@ -1,6 +1,7 @@
 //! Comment syntax: <https://yaml.org/spec/1.2.2/#66-comments>.
 //! Ownership and aggregation are astral-yaml-serde API behavior.
 
+use astral_yaml_dev::span_snapshot;
 use astral_yaml_serde::{
     AttachedComment, CommentPlacement, Commented, from_document, from_str, to_string,
 };
@@ -24,29 +25,39 @@ fn comments<'a, T>(value: &Commented<'a, T>) -> Vec<(&'a str, CommentPlacement)>
 }
 
 fn comment_snapshot(source: &str, groups: &[(&str, &[AttachedComment<'_>])]) -> String {
-    let stream = astral_yaml::parse(source).unwrap();
-    let mut output = String::new();
-
+    let mut annotations = BTreeMap::new();
+    let mut empty = Vec::new();
     for (name, comments) in groups {
-        writeln!(output, "{name}:").unwrap();
-
         if comments.is_empty() {
-            writeln!(output, "  (none)").unwrap();
+            empty.push(*name);
         }
-
+        assert!(
+            comments
+                .windows(2)
+                .all(|pair| { pair[0].comment.span.end() <= pair[1].comment.span.start() })
+        );
         for attached in *comments {
             let comment = &attached.comment;
-            let (start_line, start_column) = stream.location(comment.span.start()).unwrap();
-            let (end_line, end_column) = stream.location(comment.span.end()).unwrap();
-            writeln!(
-                output,
-                "  {:?} @{start_line}:{start_column}..{end_line}:{end_column} {:?}",
-                attached.placement, comment.text,
-            )
-            .unwrap();
+            assert_eq!(
+                comment.span.slice(source).unwrap(),
+                format!("#{}", comment.text)
+            );
+            let (_, labels) = annotations
+                .entry((comment.span.start(), comment.span.end()))
+                .or_insert_with(|| (comment.span, Vec::new()));
+            labels.push(format!("{name}: {:?}", attached.placement));
         }
     }
 
+    let mut output = span_snapshot(
+        source,
+        annotations
+            .into_values()
+            .map(|(span, labels)| (labels.join(", "), span)),
+    );
+    for name in empty {
+        write!(output, "\n{name}: (none)").unwrap();
+    }
     output
 }
 
@@ -108,32 +119,33 @@ last: 3
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Leading @1:1..1:8 " first"
-      Inline @2:8..2:13 " one"
-      Detached @4:1..4:11 " detached"
-      Inline @6:9..6:17 " header"
-      Leading @7:3..7:10 " child"
-      Inline @8:10..8:15 " two"
-      Trailing @9:3..9:16 " nested tail"
-      Leading @10:1..10:7 " last"
-      Trailing @12:1..12:12 " root tail"
-      Detached @14:1..14:16 " detached tail"
-    one:
-      Leading @1:1..1:8 " first"
-      Inline @2:8..2:13 " one"
-    nested:
-      Inline @6:9..6:17 " header"
-      Leading @7:3..7:10 " child"
-      Inline @8:10..8:15 " two"
-      Trailing @9:3..9:16 " nested tail"
-    nested.two:
-      Leading @7:3..7:10 " child"
-      Inline @8:10..8:15 " two"
-    last:
-      Leading @10:1..10:7 " last"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+       |
+     1 | # first
+       | ^^^^^^^ root: Leading, one: Leading
+     2 | one: 1 # one
+       |        ^^^^^ root: Inline, one: Inline
+     3 |
+     4 | # detached
+       | ^^^^^^^^^^ root: Detached
+     5 |
+     6 | nested: # header
+       |         ^^^^^^^^ root: Inline, nested: Inline
+     7 |   # child
+       |   ^^^^^^^ root: Leading, nested: Leading, nested.two: Leading
+     8 |   two: 2 # two
+       |          ^^^^^ root: Inline, nested: Inline, nested.two: Inline
+     9 |   # nested tail
+       |   ^^^^^^^^^^^^^ root: Trailing, nested: Trailing
+    10 | # last
+       | ^^^^^^ root: Leading, last: Leading
+    11 | last: 3
+    12 | # root tail
+       | ^^^^^^^^^^^ root: Trailing
+    13 |
+    14 | # detached tail
+       | ^^^^^^^^^^^^^^^ root: Detached
+    ");
 
     assert_borrowed(&value, source);
 
@@ -164,21 +176,20 @@ fn sequence_headers_and_empty_items_own_their_comments() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Leading @1:1..1:8 " first"
-      Inline @2:5..2:13 " inline"
-      Inline @3:3..3:10 " empty"
-      Leading @4:1..4:8 " third"
-      Trailing @6:1..6:6 " end"
-    [0]:
-      Leading @1:1..1:8 " first"
-      Inline @2:5..2:13 " inline"
-    [1]:
-      Inline @3:3..3:10 " empty"
-    [2]:
-      Leading @4:1..4:8 " third"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | # first
+      | ^^^^^^^ root: Leading, [0]: Leading
+    2 | - 1 # inline
+      |     ^^^^^^^^ root: Inline, [0]: Inline
+    3 | - # empty
+      |   ^^^^^^^ root: Inline, [1]: Inline
+    4 | # third
+      | ^^^^^^^ root: Leading, [2]: Leading
+    5 | - 3
+    6 | # end
+      | ^^^^^ root: Trailing
+    ");
 
     assert_borrowed(&value, source);
 
@@ -197,15 +208,16 @@ fn sequence_headers_and_empty_items_own_their_comments() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    [0]:
-      Inline @1:3..1:16 " item header"
-      Inline @2:15..2:22 " field"
-    [0].name:
-      Inline @2:15..2:22 " field"
-    [1]:
-      (none)
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | - # item header
+      |   ^^^^^^^^^^^^^ [0]: Inline
+    2 |   name: first # field
+      |               ^^^^^^^ [0]: Inline, [0].name: Inline
+    3 | - name: second
+      |
+    [1]: (none)
+    ");
 }
 
 #[test]
@@ -229,20 +241,22 @@ fn flow_delimiters_and_empty_containers_own_their_comments() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Inline @1:3..1:12 " opening"
-      Leading @2:2..2:9 " first"
-      Inline @3:5..3:10 " one"
-      Leading @4:2..4:10 " second"
-      Trailing @6:2..6:8 " tail"
-      Inline @7:3..7:12 " closing"
-    [0]:
-      Leading @2:2..2:9 " first"
-      Inline @3:5..3:10 " one"
-    [1]:
-      Leading @4:2..4:10 " second"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | [ # opening
+      |   ^^^^^^^^^ root: Inline
+    2 |  # first
+      |  ^^^^^^^ root: Leading, [0]: Leading
+    3 |  1, # one
+      |     ^^^^^ root: Inline, [0]: Inline
+    4 |  # second
+      |  ^^^^^^^^ root: Leading, [1]: Leading
+    5 |  2,
+    6 |  # tail
+      |  ^^^^^^ root: Trailing
+    7 | ] # closing
+      |   ^^^^^^^^^ root: Inline
+    ");
 
     for source in ["[\n # empty\n]", "{\n # empty\n}"] {
         let value: Commented<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
@@ -277,21 +291,17 @@ fn explicit_complex_keys_keep_key_specific_comments() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Leading @1:1..1:8 " field"
-      Inline @2:7..2:14 " child"
-      Inline @3:7..3:12 " key"
-      Inline @4:5..4:12 " value"
-    key:
-      Inline @2:7..2:14 " child"
-      Inline @3:7..3:12 " key"
-    key[0]:
-      Inline @2:7..2:14 " child"
-    value:
-      Leading @1:1..1:8 " field"
-      Inline @4:5..4:12 " value"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | # field
+      | ^^^^^^^ root: Leading, value: Leading
+    2 | ? [a, # child
+      |       ^^^^^^^ root: Inline, key: Inline, key[0]: Inline
+    3 |    b] # key
+      |       ^^^^^ root: Inline, key: Inline
+    4 | : 1 # value
+      |     ^^^^^^^ root: Inline, value: Inline
+    ");
 }
 
 #[test]
@@ -313,19 +323,15 @@ alias: *items # use
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Inline @1:20..1:32 " definition"
-      Inline @2:7..2:14 " child"
-      Inline @3:15..3:20 " use"
-    definition:
-      Inline @1:20..1:32 " definition"
-      Inline @2:7..2:14 " child"
-    alias:
-      Inline @3:15..3:20 " use"
-    alias[0]:
-      Inline @2:7..2:14 " child"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | definition: &items # definition
+      |                    ^^^^^^^^^^^^ root: Inline, definition: Inline
+    2 |   - 1 # child
+      |       ^^^^^^^ root: Inline, definition: Inline, alias[0]: Inline
+    3 | alias: *items # use
+      |               ^^^^^ root: Inline, alias: Inline
+    ");
 
     assert_borrowed(&value, source);
 }
@@ -347,16 +353,17 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    root:
-      Inline @1:15..1:23 " anchor"
-      Inline @2:9..2:14 " tag"
-      Inline @3:6..3:14 " scalar"
-    value:
-      Inline @1:15..1:23 " anchor"
-      Inline @2:9..2:14 " tag"
-      Inline @3:6..3:14 " scalar"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | value: &value # anchor
+      |               ^^^^^^^^ root: Inline, value: Inline
+    2 |   !!str # tag
+      |         ^^^^^ root: Inline, value: Inline
+    3 |   |- # scalar
+      |      ^^^^^^^^ root: Inline, value: Inline
+    4 |     # scalar content
+      |
+    ");
 
     assert_eq!(value["value"].value, "# scalar content");
 
@@ -391,19 +398,28 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
         ],
     );
 
-    insta::assert_snapshot!(snapshot, @r#"
-    document 1:
-      Detached @1:1..1:11 " preamble"
-      Inline @3:11..3:22 " directive"
-      Inline @4:5..4:12 " start"
-      Inline @5:3..5:8 " one"
-      Inline @6:5..6:10 " end"
-      Trailing @7:1..7:6 " gap"
-    document 2:
-      Inline @8:5..8:13 " second"
-      Inline @9:3..9:8 " two"
-      Trailing @10:1..10:9 " suffix"
-    "#);
+    insta::assert_snapshot!(snapshot, @"
+       |
+     1 | # preamble
+       | ^^^^^^^^^^ document 1: Detached
+     2 |
+     3 | %YAML 1.2 # directive
+       |           ^^^^^^^^^^^ document 1: Inline
+     4 | --- # start
+       |     ^^^^^^^ document 1: Inline
+     5 | 1 # one
+       |   ^^^^^ document 1: Inline
+     6 | ... # end
+       |     ^^^^^ document 1: Inline
+     7 | # gap
+       | ^^^^^ document 1: Trailing
+     8 | --- # second
+       |     ^^^^^^^^ document 2: Inline
+     9 | 2 # two
+       |   ^^^^^ document 2: Inline
+    10 | # suffix
+       | ^^^^^^^^ document 2: Trailing
+    ");
 
     assert_borrowed(&first, source);
     assert_borrowed(&second, source);

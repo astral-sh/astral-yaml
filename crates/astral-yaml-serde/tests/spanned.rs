@@ -1,6 +1,7 @@
 mod support;
 
-use astral_yaml::{Source, Span};
+use astral_yaml::Source;
+use astral_yaml_dev::span_snapshot;
 use astral_yaml_serde::{Spanned, from_document, from_str, from_stream, to_string};
 use serde::{Deserialize, Serialize, de};
 use std::collections::{BTreeMap, HashMap};
@@ -8,9 +9,13 @@ use support::{YamlTag, from_tag};
 
 #[test]
 fn scalars_retain_their_lexical_spans() {
+    let mut snapshots = Vec::new();
     for (source, value, lexeme) in [
         ("  hello # comment\n", "hello", "hello"),
         ("'héllo'", "héllo", "'héllo'"),
+        ("'it''s'", "it's", "'it''s'"),
+        ("''", "", "''"),
+        ("''''", "'", "''''"),
         ("\"a\\nb\"", "a\nb", "\"a\\nb\""),
         ("!!str &name 42", "42", "!!str &name 42"),
         (
@@ -27,16 +32,99 @@ fn scalars_retain_their_lexical_spans() {
         let spanned: Spanned<String> = from_str(source).unwrap();
         assert_eq!(*spanned, value);
         assert_eq!(spanned.span.slice(source), Some(lexeme));
+        snapshots.push(span_snapshot(
+            source,
+            [(format!("value: {value:?}"), spanned.span)],
+        ));
     }
+    insta::assert_snapshot!(snapshots.join("\n\n"), @r#"
+      |
+    1 |   hello # comment
+      |   ^^^^^ value: "hello"
 
-    let number: Spanned<u16> = from_str("0xff").unwrap();
+      |
+    1 | 'héllo'
+      | ^^^^^^^ value: "héllo"
+
+      |
+    1 | 'it''s'
+      | ^^^^^^^ value: "it's"
+
+      |
+    1 | ''
+      | ^^ value: ""
+
+      |
+    1 | ''''
+      | ^^^^ value: "'"
+
+      |
+    1 | "a\nb"
+      | ^^^^^^ value: "a\nb"
+
+      |
+    1 | !!str &name 42
+      | ^^^^^^^^^^^^^^ value: "42"
+
+      |
+    1 | / |-
+    2 | |   hello
+    3 | |   world
+      | |________^ value: "hello\nworld"
+
+      |
+    1 | / >-
+    2 | |   hello
+    3 | |   world
+      | |________^ value: "hello world"
+    "#);
+}
+
+#[test]
+fn numeric_values_retain_their_lexical_spans() {
+    let source = "0xff";
+    let number: Spanned<u16> = from_str(source).unwrap();
     assert_eq!(*number, 255);
-    assert_eq!(number.span, Span::new(0, 4).unwrap());
+    insta::assert_snapshot!(span_snapshot(source, [("value: 255", number.span)]), @"
+      |
+    1 | 0xff
+      | ^^^^ value: 255
+    ");
+}
 
+#[test]
+fn mutating_the_value_retains_its_source_span() {
     let mut text: Spanned<String> = from_str("hello").unwrap();
+    let original_span = text.span;
     text.push_str(" world");
-    assert_eq!(text.span, Span::new(0, 5).unwrap());
+    assert_eq!(text.span, original_span);
     assert_eq!(text.into_inner(), "hello world");
+}
+
+#[test]
+fn decoded_strings_require_owned_storage_and_report_lexical_spans() {
+    let mut snapshots = Vec::new();
+    for source in ["'it''s'", "'hello\n  world'", "\"a\\nb\""] {
+        let error = from_str::<Spanned<&str>>(source).unwrap_err();
+        assert!(error.message.contains("borrowed string"));
+        let span = error.span.unwrap();
+        assert_eq!(span.slice(source), Some(source));
+        snapshots.push(span_snapshot(source, [(error.message, span)]));
+    }
+    insta::assert_snapshot!(snapshots.join("\n\n"), @r#"
+      |
+    1 | 'it''s'
+      | ^^^^^^^ invalid type: string "it's", expected a borrowed string
+
+      |
+    1 | / 'hello
+    2 | |   world'
+      | |________^ invalid type: string "hello world", expected a borrowed string
+
+      |
+    1 | "a\nb"
+      | ^^^^^^ invalid type: string "a\nb", expected a borrowed string
+    "#);
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -54,11 +142,8 @@ struct Config<'a> {
 fn wrappers_compose_with_structs_collections_and_borrowing() {
     let source = "{name: 'é🌍', counts: [1, 2], enabled: true}";
     let config: Spanned<Config<'_>> = from_str(source).unwrap();
-    assert_eq!(config.span.slice(source), Some(source));
     assert_eq!(*config.name, "é🌍");
-    assert_eq!(config.name.span.slice(source), Some("'é🌍'"));
     assert!(std::ptr::eq(config.name.as_ptr(), source[8..].as_ptr()));
-    assert_eq!(config.counts.span.slice(source), Some("[1, 2]"));
     assert_eq!(
         config
             .counts
@@ -67,25 +152,79 @@ fn wrappers_compose_with_structs_collections_and_borrowing() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    assert_eq!(config.counts[1].span.slice(source), Some("2"));
     assert!(config.enabled);
     assert!(config.optional.is_none());
+    let snapshots = [
+        span_snapshot(source, [("config", config.span)]),
+        span_snapshot(
+            source,
+            [("name", config.name.span), ("counts", config.counts.span)],
+        ),
+        span_snapshot(
+            source,
+            [
+                ("counts[0]", config.counts[0].span),
+                ("counts[1]", config.counts[1].span),
+            ],
+        ),
+    ];
+    insta::assert_snapshot!(snapshots.join("\n\n"), @"
+      |
+    1 | {name: 'é🌍', counts: [1, 2], enabled: true}
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ config
 
+      |
+    1 | {name: 'é🌍', counts: [1, 2], enabled: true}
+      |        ^^^^^ name     ^^^^^^ counts
+
+      |
+    1 | {name: 'é🌍', counts: [1, 2], enabled: true}
+      |                        ^  ^ counts[1]
+      |                        |
+      |                        counts[0]
+    ");
+}
+
+#[test]
+fn mapping_keys_and_sequence_elements_retain_their_spans() {
     let source = "{é: [3, 4]}";
     let mapping: HashMap<Spanned<String>, Spanned<Vec<Spanned<u8>>>> = from_str(source).unwrap();
     let (key, values) = mapping.iter().next().unwrap();
     assert_eq!(key.value, "é");
-    assert_eq!(key.span, Span::new(1, 3).unwrap());
-    assert_eq!(values.span.slice(source), Some("[3, 4]"));
-    assert_eq!(values[0].span.slice(source), Some("3"));
+    let snapshots = [
+        span_snapshot(source, [("key", key.span), ("values", values.span)]),
+        span_snapshot(
+            source,
+            [("values[0]", values[0].span), ("values[1]", values[1].span)],
+        ),
+    ];
+    insta::assert_snapshot!(snapshots.join("\n\n"), @"
+      |
+    1 | {é: [3, 4]}
+      |  ^  ^^^^^^ values
+      |  |
+      |  key
 
-    let bytes: Spanned<&[u8]> = from_str("'abc'").unwrap();
+      |
+    1 | {é: [3, 4]}
+      |      ^  ^ values[1]
+      |      |
+      |      values[0]
+    ");
+
+    let source = "'abc'";
+    let bytes: Spanned<&[u8]> = from_str(source).unwrap();
     assert_eq!(*bytes, b"abc");
-    assert_eq!(bytes.span, Span::new(0, 5).unwrap());
+    insta::assert_snapshot!(span_snapshot(source, [("bytes", bytes.span)]), @"
+      |
+    1 | 'abc'
+      | ^^^^^ bytes
+    ");
 }
 
 #[test]
 fn options_and_nested_wrappers_keep_the_same_node_span() {
+    let mut snapshots = Vec::new();
     for source in ["null", "~", "---\n"] {
         let value: Spanned<Option<u8>> = from_str(source).unwrap();
         assert!(value.is_none());
@@ -93,8 +232,25 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
             value.span.slice(source),
             Some(source.trim_start_matches("---\n"))
         );
+        if value.span.is_empty() {
+            assert_eq!(value.span.start(), source.len());
+        }
+        snapshots.push(span_snapshot(source, [("None", value.span)]));
         assert!(from_str::<Option<Spanned<u8>>>(source).unwrap().is_none());
     }
+    insta::assert_snapshot!(snapshots.join("\n\n"), @"
+      |
+    1 | null
+      | ^^^^ None
+
+      |
+    1 | ~
+      | ^ None
+
+      |
+    1 | ---
+      |    ^ None
+    ");
 
     let value: Option<Spanned<u8>> = from_str("42").unwrap();
     assert_eq!(value.unwrap().value, 42);
@@ -102,12 +258,21 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
     let value: Spanned<Spanned<Option<u8>>> = from_str("42").unwrap();
     assert_eq!(value.span, value.value.span);
     assert_eq!(**value, Some(42));
+    insta::assert_snapshot!(span_snapshot("42", [("nested wrappers: Some(42)", value.span)]), @"
+      |
+    1 | 42
+      | ^^ nested wrappers: Some(42)
+    ");
 
     let source = "{empty: }";
     let mapping: BTreeMap<String, Spanned<Option<u8>>> = from_str(source).unwrap();
     assert!(mapping["empty"].is_none());
     assert!(mapping["empty"].span.is_empty());
-    assert_eq!(mapping["empty"].span.slice(source), Some(""));
+    insta::assert_snapshot!(span_snapshot(source, [("empty: None", mapping["empty"].span)]), @"
+      |
+    1 | {empty: }
+      |         ^ empty: None
+    ");
 }
 
 #[test]
@@ -115,14 +280,46 @@ fn aliases_use_the_occurrence_span_and_children_use_definition_spans() {
     let source = "[&number 42, *number]";
     let values: Vec<Spanned<u8>> = from_str(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
-    assert_eq!(values[0].span.slice(source), Some("&number 42"));
-    assert_eq!(values[1].span.slice(source), Some("*number"));
+    insta::assert_snapshot!(span_snapshot(source, [
+        ("definition", values[0].span),
+        ("alias", values[1].span),
+    ]), @"
+      |
+    1 | [&number 42, *number]
+      |  ^^^^^^^^^^  ^^^^^^^ alias
+      |  |
+      |  definition
+    ");
 
     let source = "[&items [1, 2], *items]";
     let values: Vec<Spanned<Vec<Spanned<u8>>>> = from_str(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
-    assert_eq!(values[1].span.slice(source), Some("*items"));
-    assert_eq!(values[1][0].span.slice(source), Some("1"));
+    let snapshots = [
+        span_snapshot(
+            source,
+            [("definition", values[0].span), ("alias", values[1].span)],
+        ),
+        span_snapshot(
+            source,
+            [
+                ("alias[0]", values[1][0].span),
+                ("alias[1]", values[1][1].span),
+            ],
+        ),
+    ];
+    insta::assert_snapshot!(snapshots.join("\n\n"), @"
+      |
+    1 | [&items [1, 2], *items]
+      |  ^^^^^^^^^^^^^  ^^^^^^ alias
+      |  |
+      |  definition
+
+      |
+    1 | [&items [1, 2], *items]
+      |          ^  ^ alias[1]
+      |          |
+      |          alias[0]
+    ");
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -208,6 +405,15 @@ fn document_offsets_and_encoded_sources_use_the_core_span_convention() {
     assert_eq!(*value, "é🌍");
     assert_eq!(value.span.start(), source.find('\'').unwrap());
     assert_eq!(value.span.slice(source), Some("'é🌍'"));
+    insta::assert_snapshot!(span_snapshot(source, [("document 2", value.span)]), @"
+      |
+    1 | ---
+    2 | first
+    3 | ...
+    4 | ---
+    5 | 'é🌍'
+      | ^^^^^ document 2
+    ");
 
     let bytes: Vec<u8> = "\u{feff}name: 'é🌍'"
         .encode_utf16()
@@ -221,6 +427,11 @@ fn document_offsets_and_encoded_sources_use_the_core_span_convention() {
     let original = source.original_span(span).unwrap();
     let expected: Vec<u8> = "'é🌍'".encode_utf16().flat_map(u16::to_le_bytes).collect();
     assert_eq!(original.slice_bytes(&bytes), Some(expected.as_slice()));
+    insta::assert_snapshot!(span_snapshot(source.text(), [("name (decoded UTF-16)", span)]), @"
+      |
+    1 | ﻿name: 'é🌍'
+      |       ^^^^^ name (decoded UTF-16)
+    ");
 }
 
 #[test]
@@ -285,7 +496,11 @@ fn buffered_serde_values_require_wrapping_outside_the_buffer() {
 
     let value: Spanned<Untagged> = from_str("42").unwrap();
     assert_eq!(*value, Untagged::Number(42));
-    assert_eq!(value.span, Span::new(0, 2).unwrap());
+    insta::assert_snapshot!(span_snapshot("42", [("Untagged::Number(42)", value.span)]), @"
+      |
+    1 | 42
+      | ^^ Untagged::Number(42)
+    ");
 
     assert!(from_str::<Buffered>("42").is_err());
 
