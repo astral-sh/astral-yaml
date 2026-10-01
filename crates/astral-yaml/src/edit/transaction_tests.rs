@@ -33,7 +33,7 @@ fn empty_transactions_do_not_require_rewrite_work() {
     let document = EditableDocument::parse("one").unwrap();
     let editor = Editor::new(&document);
     editor.work.set(0);
-    assert!(editor.rewrite_regions().unwrap().is_empty());
+    assert_eq!(editor.rewrite_regions().unwrap(), []);
 }
 
 #[test]
