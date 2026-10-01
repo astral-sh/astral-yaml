@@ -13,7 +13,9 @@ Core parts:
 - `astral-yaml-serde`: serialization and deserialization.
 
 The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). See
-[conformance and limits](docs/conformance.md) for supported behavior.
+[conformance](docs/conformance.md) and [limitations](docs/limitations.md) for
+supported behavior, and [SECURITY.md](SECURITY.md) for resource limits and
+vulnerability reporting.
 
 ## Usage
 

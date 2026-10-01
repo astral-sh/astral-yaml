@@ -1,9 +1,10 @@
-# Conformance and limits
+# YAML 1.2 conformance
 
 `astral-yaml` targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/). The parser preserves
 tags and aliases without constructing application values. `astral-yaml-serde`
 uses the core schema and rejects duplicate mapping keys. YAML 1.1 merge keys are
 not expanded; timestamps and spellings such as `yes` and `no` remain strings.
+See [limitations](limitations.md) and [resource limits](../SECURITY.md#resource-limits).
 
 The serde adapter accepts the core tags `!!str`, `!!null`, `!!bool`, `!!int`,
 `!!float`, `!!seq`, and `!!map`, as well as the non-specific tag `!`. Core tags
@@ -22,13 +23,8 @@ and newtypes, but nested application tags require their own opt-in.
 `Tagged<T>` captures an explicit local, global, or core tag with its typed
 payload; untagged input is rejected. Tag handles are expanded, and tag URIs retain
 their percent-escape spelling. Core tags still validate the payload's type.
-Like `Spanned`, this wrapper requires direct access to the YAML deserializer;
-Serde's intermediate buffers cannot retain this metadata.
 
-Mapping-key comparison includes application tags. Application-tagged scalar keys
-are compared by their tag and scalar text; the adapter cannot infer a custom
-tag's canonical form. Applications that assign additional equivalences to these
-keys must check them when constructing their values.
+Serialization also rejects duplicate mapping keys and core-tag/content mismatches.
 
 `Source::from_bytes` accepts UTF-8, UTF-16, and UTF-32, with or without a BOM and in
 either byte order where applicable. Source spans use decoded UTF-8 byte offsets;
@@ -85,30 +81,3 @@ Comment text excludes `#` and preserves whitespace after it. Comment spans inclu
 Alias wrappers use the span and comments at the `*name` occurrence. Wrapped
 children of aliased collections use metadata from the anchor's definition.
 Comment collection does not follow alias targets, including cyclic references.
-
-## Resource limits
-
-The parser defaults to:
-
-- 64 MiB of UTF-8 input.
-- 64 levels of collection nesting.
-- 1,000,000 syntax elements: nodes, comments, directives, BOMs, and document end
-  markers.
-
-`ParseOptions` controls these limits; nesting must be between 1 and 128.
-For encoded input, `Source::with_limit` bounds both the original and decoded byte
-lengths.
-
-Deserialization also limits nesting, node visits, and inspected scalar and tag bytes,
-including alias expansion and ignored values. Collecting comments counts toward
-the work limit, including repeated comments in parent and child wrappers. Cyclic
-aliases can be parsed, but expanding them during deserialization hits a resource
-limit. Serialization also limits nesting.
-
-Numeric values must fit the requested Rust type. The parser can still recognize
-numeric syntax outside machine integer ranges.
-
-Mapping-key comparison uses 128-bit integer magnitudes and 64-bit floats,
-independently of the destination key type. Serialization also rejects duplicate
-keys and core-tag/content mismatches. Non-string keys are checked using the
-parser's default limits.

@@ -203,7 +203,7 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite() {
 #[test]
 fn prefix_boms_and_multiple_restricted_quoted_characters() {
     let stream = parse("# prefix\n\u{feff}").unwrap();
-    assert!(stream.documents().is_empty());
+    assert_eq!(stream.documents(), []);
     assert_eq!(stream.byte_order_marks().len(), 1);
 
     let stream = parse("[\"\u{7f}\", '\u{80}']").unwrap();
@@ -253,7 +253,7 @@ fn spans_comments_and_locations() {
     assert_eq!(stream.location(source.len() + 1), None);
 
     assert_eq!(stream.clone(), stream);
-    assert!(!format!("{stream:?}").is_empty());
+    assert_ne!(format!("{stream:?}"), "");
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn byte_order_marks_are_content_inside_quoted_continuations() {
 
             assert_eq!(scalar.value, format!("a{separator}\u{feff}b"));
             assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
-            assert!(stream.byte_order_marks().is_empty());
+            assert_eq!(stream.byte_order_marks(), []);
         }
     }
 }

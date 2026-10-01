@@ -361,7 +361,7 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
     let source = "&items # anchor\n- 1\n";
     let value: Spanned<'_, Vec<Spanned<'_, u8>>> = from_str(source).unwrap();
     assert_eq!(comments(&value), [(" anchor", Inline)]);
-    assert!(value[0].comments.is_empty());
+    assert_eq!(value[0].comments, []);
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
     let value: Spanned<'_, ()> = from_str("--- # empty\n").unwrap();
     assert_eq!(comments(&value), [(" empty", Inline)]);
     let stream = astral_yaml::parse("# only a comment\n").unwrap();
-    assert!(stream.documents().is_empty());
+    assert_eq!(stream.documents(), []);
     assert_eq!(stream.comments()[0].text, " only a comment");
 }
 
@@ -474,7 +474,7 @@ fn comments_at_scalar_boundaries_and_dedents_keep_their_scope() {
 second: next
 ";
     let value: Spanned<'_, Fields<'_>> = from_str(source).unwrap();
-    assert!(value["first"].comments.is_empty());
+    assert_eq!(value["first"].comments, []);
     assert_eq!(comments(&value["second"]), [(" second", Leading)]);
 
     let source = r"items:
@@ -482,7 +482,7 @@ second: next
 # root tail
 ";
     let value: Spanned<'_, BTreeMap<String, Spanned<'_, Vec<u8>>>> = from_str(source).unwrap();
-    assert!(value["items"].comments.is_empty());
+    assert_eq!(value["items"].comments, []);
     assert_eq!(comments(&value), [(" root tail", Trailing)]);
 
     let value: Spanned<'_, u8> = from_str("# before\n\n42\n\n# after").unwrap();

@@ -1,8 +1,8 @@
 # Validation record
 
-Recorded test, fuzz, and benchmark results. API behavior and limits are documented
-in [conformance and limits](docs/conformance.md); development commands are in the
-[contributing guide](CONTRIBUTING.md).
+Recorded test, fuzz, and benchmark results. See [conformance](docs/conformance.md),
+[limitations](docs/limitations.md), and [security](SECURITY.md) for API behavior
+and resource limits. Development commands are in the [contributing guide](CONTRIBUTING.md).
 
 ## Tests (2026-09-25)
 

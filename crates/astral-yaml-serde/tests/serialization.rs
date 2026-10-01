@@ -28,7 +28,7 @@ fn every_unicode_scalar_survives_serialization() {
         }
     }
 
-    assert!(chunk.is_empty());
+    assert_eq!(chunk, "");
 }
 
 // https://yaml.org/spec/1.2.2/#10214-floating-point
