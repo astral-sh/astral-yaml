@@ -50,7 +50,7 @@ cargo insta test -p astral-yaml --test real_world --review
 ```
 
 Parser tests also check LF/CRLF/CR equivalence. Serde tests roundtrip values and
-check that root `Spanned` values collect every comment in each constructible
+check that root `Commented` values collect every comment in each constructible
 single-document fixture. Other assertions check shell content, YAML styles, and
 comments. Benchmarks use the original three fixtures so results remain comparable.
 

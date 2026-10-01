@@ -37,7 +37,7 @@ Seeding preserves existing corpus discoveries and artifacts.
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.
 
-The typed target wraps each type in `Spanned<'a, T>` and checks its source range,
+The typed target wraps each type in `Spanned<Commented<'a, T>>` and checks its source range,
 descendant comments, comment order, and borrowed text. It also checks nested
 wrappers in collections, options, and enum payloads. One type skips value
 construction so comment indexing can be checked for arbitrary tags and cyclic

@@ -24,7 +24,7 @@ fn real_world_values_comments_and_serialization() {
         let values = values.unwrap_or_else(|error| panic!("{name}: {error}"));
 
         if stream.documents().len() == 1 {
-            let wrapped: astral_yaml_serde::Spanned<'_, Value> =
+            let wrapped: astral_yaml_serde::Commented<'_, Value> =
                 astral_yaml_serde::from_document(&stream, 0).unwrap();
             let comments: Vec<_> = wrapped
                 .comments

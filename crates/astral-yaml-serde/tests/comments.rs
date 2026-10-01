@@ -2,7 +2,7 @@
 //! Ownership and aggregation are astral-yaml-serde API behavior.
 
 use astral_yaml_serde::{
-    AttachedComment, CommentPlacement, Spanned, from_document, from_str, to_string,
+    AttachedComment, CommentPlacement, Commented, from_document, from_str, to_string,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{
@@ -12,10 +12,10 @@ use std::{
 
 use CommentPlacement::{Detached, Inline, Leading, Trailing};
 
-type Fields<'a> = BTreeMap<String, Spanned<'a, String>>;
-type ComplexKey<'a> = Spanned<'a, Vec<Spanned<'a, String>>>;
+type Fields<'a> = BTreeMap<String, Commented<'a, String>>;
+type ComplexKey<'a> = Commented<'a, Vec<Commented<'a, String>>>;
 
-fn comments<'a, T>(value: &Spanned<'a, T>) -> Vec<(&'a str, CommentPlacement)> {
+fn comments<'a, T>(value: &Commented<'a, T>) -> Vec<(&'a str, CommentPlacement)> {
     value
         .comments
         .iter()
@@ -50,7 +50,7 @@ fn comment_snapshot(source: &str, groups: &[(&str, &[AttachedComment<'_>])]) -> 
     output
 }
 
-fn assert_borrowed<T>(value: &Spanned<'_, T>, source: &str) {
+fn assert_borrowed<T>(value: &Commented<'_, T>, source: &str) {
     let mut end = 0;
 
     for attached in &value.comments {
@@ -71,11 +71,11 @@ fn assert_borrowed<T>(value: &Spanned<'_, T>, source: &str) {
 #[derive(Debug, Deserialize)]
 struct Config<'a> {
     #[serde(borrow)]
-    one: Spanned<'a, u8>,
+    one: Commented<'a, u8>,
     #[serde(borrow)]
-    nested: Spanned<'a, BTreeMap<String, Spanned<'a, u8>>>,
+    nested: Commented<'a, BTreeMap<String, Commented<'a, u8>>>,
     #[serde(borrow)]
-    last: Spanned<'a, u8>,
+    last: Commented<'a, u8>,
 }
 
 #[test]
@@ -95,7 +95,7 @@ last: 3
 
 # detached tail
 ";
-    let value: Spanned<'_, Config<'_>> = from_str(source).unwrap();
+    let value: Commented<'_, Config<'_>> = from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -137,9 +137,9 @@ last: 3
 
     assert_borrowed(&value, source);
 
-    let unwrapped_children: Spanned<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
+    let unwrapped_children: Commented<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
     assert_eq!(value.comments, unwrapped_children.comments);
-    let nested: Spanned<'_, Spanned<'_, Config<'_>>> = from_str(source).unwrap();
+    let nested: Commented<'_, Commented<'_, Config<'_>>> = from_str(source).unwrap();
     assert_eq!(nested.comments, nested.value.comments);
 }
 
@@ -152,7 +152,7 @@ fn sequence_headers_and_empty_items_own_their_comments() {
 - 3
 # end
 ";
-    let value: Spanned<'_, Vec<Spanned<'_, Option<u8>>>> = from_str(source).unwrap();
+    let value: Commented<'_, Vec<Commented<'_, Option<u8>>>> = from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -186,7 +186,7 @@ fn sequence_headers_and_empty_items_own_their_comments() {
   name: first # field
 - name: second
 ";
-    let value: Spanned<'_, Vec<Spanned<'_, Fields<'_>>>> = from_str(source).unwrap();
+    let value: Commented<'_, Vec<Commented<'_, Fields<'_>>>> = from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -218,7 +218,7 @@ fn flow_delimiters_and_empty_containers_own_their_comments() {
  # tail
 ] # closing
 ";
-    let value: Spanned<'_, Vec<Spanned<'_, u8>>> = from_str(source).unwrap();
+    let value: Commented<'_, Vec<Commented<'_, u8>>> = from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -245,12 +245,13 @@ fn flow_delimiters_and_empty_containers_own_their_comments() {
     "#);
 
     for source in ["[\n # empty\n]", "{\n # empty\n}"] {
-        let value: Spanned<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
+        let value: Commented<'_, serde::de::IgnoredAny> = from_str(source).unwrap();
         assert_eq!(comments(&value), [(" empty", Detached)]);
     }
 
     let source = "{empty: # null\n, next: 1 # number\n}";
-    let value: Spanned<'_, BTreeMap<String, Spanned<'_, Option<u8>>>> = from_str(source).unwrap();
+    let value: Commented<'_, BTreeMap<String, Commented<'_, Option<u8>>>> =
+        from_str(source).unwrap();
     assert_eq!(comments(&value["empty"]), [(" null", Inline)]);
     assert_eq!(comments(&value["next"]), [(" number", Inline)]);
 }
@@ -262,7 +263,8 @@ fn explicit_complex_keys_keep_key_specific_comments() {
    b] # key
 : 1 # value
 ";
-    let value: Spanned<'_, HashMap<ComplexKey<'_>, Spanned<'_, u8>>> = from_str(source).unwrap();
+    let value: Commented<'_, HashMap<ComplexKey<'_>, Commented<'_, u8>>> =
+        from_str(source).unwrap();
     let (key, number) = value.iter().next().unwrap();
 
     let snapshot = comment_snapshot(
@@ -298,7 +300,7 @@ fn aliases_collect_use_site_comments_without_importing_targets() {
   - 1 # child
 alias: *items # use
 ";
-    let value: Spanned<'_, BTreeMap<String, Spanned<'_, Vec<Spanned<'_, u8>>>>> =
+    let value: Commented<'_, BTreeMap<String, Commented<'_, Vec<Commented<'_, u8>>>>> =
         from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
@@ -335,7 +337,7 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
   |- # scalar
     # scalar content
 ";
-    let value: Spanned<'_, BTreeMap<String, Spanned<'_, String>>> = from_str(source).unwrap();
+    let value: Commented<'_, BTreeMap<String, Commented<'_, String>>> = from_str(source).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -359,7 +361,7 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
     assert_eq!(value["value"].value, "# scalar content");
 
     let source = "&items # anchor\n- 1\n";
-    let value: Spanned<'_, Vec<Spanned<'_, u8>>> = from_str(source).unwrap();
+    let value: Commented<'_, Vec<Commented<'_, u8>>> = from_str(source).unwrap();
     assert_eq!(comments(&value), [(" anchor", Inline)]);
     assert_eq!(value[0].comments, []);
 }
@@ -378,8 +380,8 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
 # suffix
 ";
     let stream = astral_yaml::parse(source).unwrap();
-    let first: Spanned<'_, u8> = from_document(&stream, 0).unwrap();
-    let second: Spanned<'_, u8> = from_document(&stream, 1).unwrap();
+    let first: Commented<'_, u8> = from_document(&stream, 0).unwrap();
+    let second: Commented<'_, u8> = from_document(&stream, 1).unwrap();
 
     let snapshot = comment_snapshot(
         source,
@@ -406,7 +408,7 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
     assert_borrowed(&first, source);
     assert_borrowed(&second, source);
 
-    let value: Spanned<'_, ()> = from_str("--- # empty\n").unwrap();
+    let value: Commented<'_, ()> = from_str("--- # empty\n").unwrap();
     assert_eq!(comments(&value), [(" empty", Inline)]);
     let stream = astral_yaml::parse("# only a comment\n").unwrap();
     assert_eq!(stream.documents(), []);
@@ -426,7 +428,7 @@ fn unicode_crlf_and_original_encoding_spans_are_preserved() {
         };
         let source = astral_yaml::Source::from_bytes(&bytes).unwrap();
         let stream = source.parse().unwrap();
-        let value: Spanned<'_, BTreeMap<String, String>> = from_document(&stream, 0).unwrap();
+        let value: Commented<'_, BTreeMap<String, String>> = from_document(&stream, 0).unwrap();
         assert_eq!(comments(&value), [(" 🌍  ", Inline), (" footer", Detached)]);
         assert_borrowed(&value, source.text());
 
@@ -455,7 +457,7 @@ fn owned_values_and_transparent_serialization_remain_supported() {
 
     let owned: BTreeMap<String, String> = parse_owned("name: example # comment".into());
     assert_eq!(owned["name"], "example");
-    let mut wrapped: Spanned<'_, String> = from_str("example # comment").unwrap();
+    let mut wrapped: Commented<'_, String> = from_str("example # comment").unwrap();
     let metadata = wrapped.comments.clone();
     wrapped.push('!');
     assert_eq!(wrapped.comments, metadata);
@@ -473,7 +475,7 @@ fn comments_at_scalar_boundaries_and_dedents_keep_their_scope() {
 # second
 second: next
 ";
-    let value: Spanned<'_, Fields<'_>> = from_str(source).unwrap();
+    let value: Commented<'_, Fields<'_>> = from_str(source).unwrap();
     assert_eq!(value["first"].comments, []);
     assert_eq!(comments(&value["second"]), [(" second", Leading)]);
 
@@ -481,21 +483,21 @@ second: next
   - 1
 # root tail
 ";
-    let value: Spanned<'_, BTreeMap<String, Spanned<'_, Vec<u8>>>> = from_str(source).unwrap();
+    let value: Commented<'_, BTreeMap<String, Commented<'_, Vec<u8>>>> = from_str(source).unwrap();
     assert_eq!(value["items"].comments, []);
     assert_eq!(comments(&value), [(" root tail", Trailing)]);
 
-    let value: Spanned<'_, u8> = from_str("# before\n\n42\n\n# after").unwrap();
+    let value: Commented<'_, u8> = from_str("# before\n\n42\n\n# after").unwrap();
     assert_eq!(
         comments(&value),
         [(" before", Detached), (" after", Detached)]
     );
 
-    let value: Spanned<'_, u8> = from_str("# before\n42 # after").unwrap();
+    let value: Commented<'_, u8> = from_str("# before\n42 # after").unwrap();
     assert_eq!(comments(&value), [(" before", Leading), (" after", Inline)]);
 
     let source = "\u{feff}# first\nfirst: text\n";
-    let value: Spanned<'_, Fields<'_>> = from_str(source).unwrap();
+    let value: Commented<'_, Fields<'_>> = from_str(source).unwrap();
     assert_eq!(comments(&value["first"]), [(" first", Leading)]);
 }
 
@@ -511,8 +513,65 @@ fn aggregation_does_not_expand_cyclic_aliases() {
     }
 
     let source = "&self [*self # cycle\n]";
-    let value: Spanned<'_, Opaque> = from_str(source).unwrap();
+    let value: Commented<'_, Opaque> = from_str(source).unwrap();
     assert_eq!(comments(&value), [(" cycle", Inline)]);
     assert_borrowed(&value, source);
-    assert!(from_str::<Spanned<'_, serde::de::IgnoredAny>>(source).is_err());
+    assert!(from_str::<Commented<'_, serde::de::IgnoredAny>>(source).is_err());
+}
+
+#[test]
+fn spans_and_comments_compose_in_either_order() {
+    use astral_yaml_serde::Spanned;
+
+    let source = "# before\n42 # after";
+    let first: Spanned<Commented<'_, u8>> = from_str(source).unwrap();
+    let second: Commented<'_, Spanned<u8>> = from_str(source).unwrap();
+    assert_eq!(first.span, second.span);
+    assert_eq!(first.comments, second.comments);
+    assert_eq!(first.value.value, second.value.value);
+
+    let owned: Spanned<String> = {
+        let source = String::from("text # gone");
+        from_str(&source).unwrap()
+    };
+    assert_eq!(owned.into_inner(), "text");
+}
+
+#[test]
+fn comments_require_the_yaml_deserializer() {
+    let error = Commented::<u8>::deserialize(serde::de::value::U8Deserializer::<
+        serde::de::value::Error,
+    >::new(42))
+    .unwrap_err();
+    assert!(error.to_string().contains("a commented value"));
+}
+
+#[test]
+fn comment_protocol_tracks_consumption() {
+    use serde::de::{self, SeqAccess, Visitor};
+    struct Protocol;
+    impl<'de> Deserialize<'de> for Protocol {
+        fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+            de.deserialize_newtype_struct("$astral_yaml::Commented", Self)
+        }
+    }
+    impl<'de> Visitor<'de> for Protocol {
+        type Value = Self;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("comment metadata")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self, A::Error> {
+            assert_eq!(seq.size_hint(), Some(2));
+            let value: u8 = seq.next_element()?.unwrap();
+            assert_eq!(seq.size_hint(), Some(1));
+            if value == 42 {
+                seq.next_element::<de::IgnoredAny>()?.unwrap();
+                assert_eq!(seq.size_hint(), Some(0));
+                assert!(seq.next_element::<de::IgnoredAny>()?.is_none());
+            }
+            Ok(self)
+        }
+    }
+    assert!(from_str::<Protocol>("42 # note").is_ok());
+    assert!(from_str::<Protocol>("1 # note").is_err());
 }

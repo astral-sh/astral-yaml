@@ -4,19 +4,19 @@ use astral_yaml_dev::{Value, benchmarks};
 use astral_yaml_serde::{Spanned, from_str, to_string};
 use benchmarks::{FIXTURES, documents};
 
-type Fields<'a> = Spanned<'a, BTreeMap<String, Spanned<'a, Value>>>;
+type Fields = Spanned<BTreeMap<String, Spanned<Value>>>;
 
 fn main() {
     for &(_, source) in FIXTURES {
         let values = benchmarks::astral(source);
-        let spanned = documents::<Spanned<'_, Value>>(source);
-        let fields = documents::<Fields<'_>>(source);
+        let spanned = documents::<Spanned<Value>>(source);
+        let fields = documents::<Fields>(source);
         assert_eq!(spanned.len(), values.len());
         assert_eq!(fields.len(), values.len());
 
         for ((value, spanned), fields) in values.iter().zip(&spanned).zip(&fields) {
             assert_eq!(value, &spanned.value);
-            assert_eq!(spanned.comments, fields.comments);
+            assert_eq!(spanned.span, fields.span);
             assert_eq!(
                 *value,
                 from_str::<Value>(&to_string(fields).unwrap()).unwrap()
@@ -72,7 +72,7 @@ mod astral {
         let source = fixture(name);
 
         bencher.bench_local(|| {
-            black_box(documents::<Spanned<'_, Value>>(black_box(source)));
+            black_box(documents::<Spanned<Value>>(black_box(source)));
         });
     }
 
@@ -81,7 +81,7 @@ mod astral {
         let source = fixture(name);
 
         bencher.bench_local(|| {
-            black_box(documents::<Fields<'_>>(black_box(source)));
+            black_box(documents::<Fields>(black_box(source)));
         });
     }
 

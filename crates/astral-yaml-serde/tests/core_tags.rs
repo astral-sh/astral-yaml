@@ -99,7 +99,7 @@ fn wrappers_and_aliases_preserve_tag_checks() {
             expected
         );
         assert_eq!(
-            from_str::<Spanned<'_, String>>(source).map(|v| v.value),
+            from_str::<Spanned<String>>(source).map(|v| v.value),
             expected
         );
         assert_eq!(from_str::<Newtype>(source).map(|v| v.0), expected);

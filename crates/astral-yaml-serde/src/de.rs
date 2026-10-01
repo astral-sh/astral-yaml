@@ -1,6 +1,6 @@
 use crate::{
-    AttachedComment, CommentPlacement, Error, comments::CommentCache, schema::YamlType, spanned,
-    tagged, with::yaml_tag,
+    AttachedComment, CommentPlacement, Error, commented, comments::CommentCache, schema::YamlType,
+    spanned, tagged, with::yaml_tag,
 };
 use astral_yaml::{
     Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
@@ -178,22 +178,23 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
     }
 
-    fn spanned<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+    fn metadata<V: Visitor<'de>>(self, visitor: V, comments: bool) -> Result<V::Value> {
         let span = self.raw_node()?.span;
-        let mut access = SpannedAccess {
+        let mut access = MetadataAccess {
             de: Self {
                 depth: self.depth + 1,
                 ..self
             },
             span,
+            comments,
             index: 0,
         };
 
         let value = visitor
             .visit_seq(&mut access)
             .map_err(|error| error.located(span))?;
-        if access.index != 4 {
-            return Err(Error::at("spanned value was not fully consumed", span));
+        if access.index != if comments { 2 } else { 3 } {
+            return Err(Error::at("metadata value was not fully consumed", span));
         }
 
         Ok(value)
@@ -983,7 +984,11 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         visitor: V,
     ) -> Result<V::Value> {
         if name == spanned::NAME {
-            return self.spanned(visitor);
+            return self.metadata(visitor, false);
+        }
+
+        if name == commented::NAME {
+            return self.metadata(visitor, true);
         }
 
         if name == tagged::NAME {
@@ -1080,21 +1085,22 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 }
 
-struct SpannedAccess<'s, 'de> {
+struct MetadataAccess<'s, 'de> {
     de: Deserializer<'s, 'de>,
     span: Span,
+    comments: bool,
     index: usize,
 }
 
-impl<'de> SeqAccess<'de> for &mut SpannedAccess<'_, 'de> {
+impl<'de> SeqAccess<'de> for &mut MetadataAccess<'_, 'de> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
-        let value = match self.index {
-            0 => seed.deserialize(self.span.start().into_deserializer()),
-            1 => seed.deserialize(self.span.end().into_deserializer()),
-            2 => seed.deserialize(self.de),
-            3 => self.de.comments(seed),
+        let value = match (self.comments, self.index) {
+            (false, 0) => seed.deserialize(self.span.start().into_deserializer()),
+            (false, 1) => seed.deserialize(self.span.end().into_deserializer()),
+            (false, 2) | (true, 0) => seed.deserialize(self.de),
+            (true, 1) => self.de.comments(seed),
             _ => return Ok(None),
         }?;
 
@@ -1103,7 +1109,7 @@ impl<'de> SeqAccess<'de> for &mut SpannedAccess<'_, 'de> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(4 - self.index)
+        Some(if self.comments { 2 } else { 3 } - self.index)
     }
 }
 
@@ -1346,10 +1352,12 @@ mod tests {
 
         for name in [
             crate::spanned::NAME,
+            crate::commented::NAME,
             crate::tagged::NAME,
             crate::with::yaml_tag::NAME,
             "Transparent",
         ] {
+            context.scalar_budget.set(100);
             de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
                 .unwrap();
         }
@@ -1400,6 +1408,25 @@ mod tests {
     }
 
     #[test]
+    fn spans_do_not_index_comments() {
+        let stream = astral_yaml::parse("# before\n42 # after").unwrap();
+        let context = Context {
+            stream: &stream,
+            budget: Cell::new(2),
+            scalar_budget: Cell::new(100),
+            comments: crate::comments::CommentCache::new(0),
+        };
+        let de = Deserializer {
+            context: &context,
+            id: stream.documents()[0].root,
+            depth: 0,
+            tag_state: TagState::Unconsumed,
+            yaml_tag: false,
+        };
+        assert_eq!(crate::Spanned::<u8>::deserialize(de).unwrap().value, 42);
+    }
+
+    #[test]
     fn nested_comment_lists_charge_each_emitted_record() {
         let stream = astral_yaml::parse("# leading\n42 # inline").unwrap();
 
@@ -1419,7 +1446,7 @@ mod tests {
                 yaml_tag: false,
             };
 
-            let result = crate::Spanned::<crate::Spanned<'_, u8>>::deserialize(de);
+            let result = crate::Commented::<crate::Commented<'_, u8>>::deserialize(de);
             if budget == 12 {
                 let value = result.unwrap();
                 assert_eq!(value.comments.len(), 2);
