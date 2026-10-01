@@ -29,11 +29,32 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
 }
 
 #[test]
-fn requested_style_comparison_rejects_a_different_node_kind() {
-    let scalar = EditableDocument::parse("one").unwrap();
-    let sequence = EditableDocument::parse("[one]").unwrap();
-    assert!(!same_style(
-        &scalar.nodes[scalar.root.0].kind,
-        &sequence.nodes[sequence.root.0].kind
-    ));
+fn empty_transactions_do_not_require_rewrite_work() {
+    let document = EditableDocument::parse("one").unwrap();
+    let editor = Editor::new(&document);
+    editor.work.set(0);
+    assert!(editor.rewrite_regions().unwrap().is_empty());
+}
+
+#[test]
+fn requested_style_comparison_checks_kind_and_collection_contents() {
+    for (left, right, expected) in [
+        ("one", "one", true),
+        ("one", "'one'", false),
+        ("one", "[one]", false),
+        ("[]", "[]", true),
+        ("[one]", "- one", false),
+        ("{}", "{}", true),
+        ("{one: two}", "one: two", false),
+    ] {
+        let left = EditableDocument::parse(left).unwrap();
+        let right = EditableDocument::parse(right).unwrap();
+        assert_eq!(
+            same_style(
+                &left.nodes[left.root.0].kind,
+                &right.nodes[right.root.0].kind
+            ),
+            expected
+        );
+    }
 }
