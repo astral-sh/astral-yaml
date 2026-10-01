@@ -2,6 +2,7 @@
 mod commented;
 mod comments;
 mod de;
+mod editable;
 mod error;
 mod schema;
 mod ser;
@@ -13,6 +14,7 @@ pub mod with;
 pub use commented::Commented;
 pub use comments::{AttachedComment, CommentPlacement};
 pub use de::{from_document, from_str, from_stream};
+pub use editable::Editable;
 pub use error::Error;
 pub use ser::to_string;
 pub use spanned::Spanned;
