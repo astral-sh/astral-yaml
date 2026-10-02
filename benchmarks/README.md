@@ -30,7 +30,7 @@ Each workload processes all documents in one of the three fixed
 | `astral::parse` | Parse the YAML stream. |
 | `astral::deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>`. |
 | `astral::deserialize_spanned` | Parse and deserialize, collecting each document root's span. |
-| `editable::{parse,unchanged_output,replace_scalar,insert_entry}` | Owned syntax construction, unchanged output, and typed edit transactions on a small configuration; edit cases include construction. |
+| `editable::{parse,unchanged_output,replace_scalar,insert_entry}` | Owned syntax construction, unchanged output, and value-based edit transactions on a small configuration; edit cases include construction. |
 | `astral::deserialize_spanned_fields` | Also wrap each top-level mapping value in `Spanned`. |
 | `astral::serialize` | Serialize previously deserialized values. |
 

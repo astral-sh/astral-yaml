@@ -33,9 +33,9 @@ Seeding preserves existing corpus discoveries and artifacts.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
-- `editable` checks bounded syntax edit sequences, typed-view consistency, and
-  complete rollback. Its first eight bytes select edits and navigation paths; the
-  rest is YAML.
+- `editable` checks bounded syntax and value-based edit sequences, typed-view
+  consistency, and complete rollback. Its first eight bytes select edits and
+  navigation paths; bit 5 selects the value-based API. The rest is YAML.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.

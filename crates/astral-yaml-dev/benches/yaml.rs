@@ -125,10 +125,7 @@ mod editable {
         bencher.bench_local(|| {
             let mut document = Editable::<Value>::parse(SOURCE).unwrap();
             document
-                .edit(|editor| {
-                    let entries = editor.mapping_entries(&editor.root())?;
-                    editor.replace(&entries[0].1, "60")
-                })
+                .edit(|editor| editor.root_mut().field("timeout")?.set(60))
                 .unwrap();
             black_box(document);
         });
@@ -139,7 +136,10 @@ mod editable {
         bencher.bench_local(|| {
             let mut document = Editable::<Value>::parse(SOURCE).unwrap();
             document
-                .edit(|editor| editor.insert_entry(&editor.root(), 3, "enabled", "true"))
+                .edit(|editor| {
+                    editor.root_mut().set_entry("enabled", true)?;
+                    Ok(())
+                })
                 .unwrap();
             black_box(document);
         });
