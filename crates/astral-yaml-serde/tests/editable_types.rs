@@ -66,7 +66,7 @@ fn root_kind_changes_refresh_the_untagged_variant_and_span() {
         let source = format!("{before}\n");
         let mut document = Editable::<Spanned<Shape>>::parse(&source).unwrap();
         document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
             .unwrap_or_else(|error| panic!("{name}: {error}"));
 
         assert_shape(
@@ -144,7 +144,7 @@ fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
         );
         let mut document = Editable::<ShapeConfig>::parse(&source).unwrap();
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let entries = editor.mapping_entries(&editor.root())?;
                 editor.replace(&entries[0].1, replacement)
             })
@@ -247,7 +247,7 @@ fn scalar_type_changes_refresh_the_typed_value() {
         let source = format!("{before} # value\n");
         let mut document = Editable::<Value>::parse(&source).unwrap();
         document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
             .unwrap();
 
         assert_eq!(document.value(), &expected);
@@ -298,7 +298,7 @@ fn null_and_empty_collections_can_replace_each_other() {
         let source = format!("{before} # nullable\n");
         let mut document = Editable::<Option<Shape>>::parse(&source).unwrap();
         document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
             .unwrap();
 
         assert_eq!(document.value(), &expected);
@@ -344,7 +344,7 @@ where
             .unwrap();
         assert!(
             document
-                .edit(|editor| editor.replace(&editor.root(), replacement))
+                .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
                 .is_err()
         );
         assert_eq!(document.syntax().source(), source);
@@ -374,7 +374,7 @@ fn kind_changes_that_move_outer_comments_roll_back() {
 
         // Collections would attach this comment to their first child.
         let error = document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
             .unwrap_err();
         assert_eq!(
             error.message,

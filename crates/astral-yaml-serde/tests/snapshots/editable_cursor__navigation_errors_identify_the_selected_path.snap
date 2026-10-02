@@ -1,0 +1,8 @@
+---
+source: crates/astral-yaml-serde/tests/editable_cursor.rs
+expression: "errors.join(\"\\n\")"
+---
+$["missing"]: missing mapping key
+$["items"][3]: item index out of bounds
+$["items"][0]: expected a mapping at bytes 0..10
+$: expected a sequence at bytes 0..10

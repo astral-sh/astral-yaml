@@ -1,0 +1,17 @@
+---
+source: crates/astral-yaml-serde/tests/editable_cursor.rs
+expression: "errors.join(\"\\n\")"
+---
+$: serialization failed
+$: expected a sequence
+$["items"]: item index out of bounds
+$["items"]: comment text contains a line break
+$["items"][0]: comment index out of bounds
+$: expected a sequence
+$: comment index out of bounds
+$: expected a scalar
+$["items"][0]: expected a collection
+$["items"]: serialization failed
+$: serialization failed
+$["items"]: expected a mapping
+$["items"][0]: expected a mapping

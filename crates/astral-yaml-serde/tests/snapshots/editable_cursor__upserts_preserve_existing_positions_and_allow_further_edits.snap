@@ -1,0 +1,12 @@
+---
+source: crates/astral-yaml-serde/tests/editable_cursor.rs
+expression: "edit_diff(source, document.source())"
+---
+--- before.yaml
++++ after.yaml
+@@ -1,2 +1,4 @@
+-first: 'old' # keep
++first: 'it''s new' # keep
+ last: true
++"added": ["one", "two" # added
++  ]

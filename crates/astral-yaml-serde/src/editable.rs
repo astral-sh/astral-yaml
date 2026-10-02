@@ -1,5 +1,5 @@
-use crate::{Error, from_str};
-use astral_yaml::edit::{EditableDocument, Editor};
+use crate::{Error, edit::Editor, from_str};
+use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
 use serde::de::DeserializeOwned;
 
 /// A read-only typed view paired with authoritative, editable YAML syntax.
@@ -21,10 +21,7 @@ use serde::de::DeserializeOwned;
 /// struct Config { timeout: u64 }
 ///
 /// let mut config = Editable::<Config>::parse("timeout: 30 # seconds\n")?;
-/// config.edit(|syntax| {
-///     let entries = syntax.mapping_entries(&syntax.root())?;
-///     syntax.replace(&entries[0].1, "60")
-/// })?;
+/// config.edit(|e| e.root_mut().field("timeout")?.set(60))?;
 /// assert_eq!(config.value().timeout, 60);
 /// assert_eq!(config.to_yaml(), "timeout: 60 # seconds\n");
 /// # Ok::<(), astral_yaml_serde::Error>(())
@@ -46,21 +43,40 @@ impl<T: DeserializeOwned> Editable<T> {
         Ok(Self { value, syntax })
     }
 
-    /// Applies syntax edits, committing only after deserializing a fresh `T`.
+    /// Edits Rust values and presentation, committing after deserializing a fresh `T`.
+    /// Returns the callback's result only after commit. Failed mutations poison
+    /// the transaction even when the callback catches their errors.
     ///
     /// # Errors
     /// Returns an edit, syntax, type, or resource-limit error. The original typed
     /// value and source remain unchanged, including on duplicate-key errors.
-    pub fn edit(
+    pub fn edit<R>(
         &mut self,
-        edit: impl FnOnce(&mut Editor<'_>) -> Result<(), astral_yaml::Error>,
-    ) -> Result<(), Error> {
+        edit: impl FnOnce(&mut Editor<'_, '_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
         let mut syntax = self.syntax.clone();
-        syntax.edit(edit)?;
+        let result = syntax.try_edit(|syntax| {
+            let mut editor = Editor::new(syntax);
+            let result = edit(&mut editor)?;
+            editor.finish()?;
+            Ok::<_, Error>(result)
+        })?;
         let value = from_str(syntax.source())?;
         self.syntax = syntax;
         self.value = value;
-        Ok(())
+        Ok(result)
+    }
+
+    /// Edits syntax handles and raw YAML fragments with the same typed commit
+    /// checks as [`Self::edit`]. Use this for arbitrary mapping keys and aliases.
+    ///
+    /// # Errors
+    /// Returns callback, syntax, or deserialization errors without committing.
+    pub fn edit_syntax<R>(
+        &mut self,
+        edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, astral_yaml::Error>,
+    ) -> Result<R, Error> {
+        self.edit(|editor| Ok(edit(editor.syntax_mut())?))
     }
 }
 
@@ -77,10 +93,22 @@ impl<T> Editable<T> {
         &self.syntax
     }
 
+    /// Borrows the current committed source without allocating.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        self.syntax.source()
+    }
+
     /// Emits the current committed source, retaining untouched formatting.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.syntax.to_yaml()
+    }
+
+    /// Consumes both views and returns the committed source without cloning it.
+    #[must_use]
+    pub fn into_yaml(self) -> String {
+        self.syntax.into_yaml()
     }
 
     /// Discards the syntax representation and returns the typed value.

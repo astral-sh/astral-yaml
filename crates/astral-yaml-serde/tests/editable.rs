@@ -15,7 +15,7 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     };
     let before = config.to_yaml();
     config
-        .edit(|e| {
+        .edit_syntax(|e| {
             let entries = e.mapping_entries(&e.root())?;
             e.replace(&entries[0].1, "100")
         })
@@ -45,7 +45,7 @@ fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
     for operation in 0..6 {
         let source = "timeout: 30 # seconds\n";
         let mut config = Editable::<Config>::parse(source).unwrap();
-        let result = config.edit(|e| {
+        let result = config.edit_syntax(|e| {
             let root = e.root();
             let entries = e.mapping_entries(&root)?;
             match operation {
@@ -71,7 +71,9 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     let mut value = Editable::<Tagged<Option<u8>>>::parse("!!null null").unwrap();
     assert_eq!(value.value().value, None);
     let before = value.to_yaml();
-    value.edit(|e| e.replace(&e.root(), "!!int 42")).unwrap();
+    value
+        .edit_syntax(|e| e.replace(&e.root(), "!!int 42"))
+        .unwrap();
     assert_eq!(value.value().value, Some(42));
     assert_eq!(value.value().tag, "tag:yaml.org,2002:int");
     insta::assert_snapshot!(edit_diff(&before, value.syntax().source()), @r"
@@ -83,6 +85,6 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     +!<tag:yaml.org,2002:int> 42
     \ No newline at end of file
     ");
-    assert!(value.edit(|e| e.replace(&e.root(), "42")).is_err());
+    assert!(value.edit_syntax(|e| e.replace(&e.root(), "42")).is_err());
     assert_eq!(value.value().value, Some(42));
 }

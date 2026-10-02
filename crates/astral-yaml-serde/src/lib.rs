@@ -9,6 +9,7 @@ mod ser;
 mod spanned;
 mod tagged;
 
+pub mod edit;
 pub mod with;
 
 pub use commented::Commented;

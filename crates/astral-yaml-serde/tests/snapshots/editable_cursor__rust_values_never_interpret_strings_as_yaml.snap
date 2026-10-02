@@ -1,0 +1,59 @@
+---
+source: crates/astral-yaml-serde/tests/editable_cursor.rs
+expression: "diffs.join(\"\\n\")"
+---
+string
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++"false"
+
+boolean
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++false
+
+sequence
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++["a", "b"]
+
+mapping
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++{"a": 1}
+
+null
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++null
+
+YAML-looking string
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++"[a, b] # still a string"
+
+empty string
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++""
+
+escaped string
+--- before.yaml
++++ after.yaml
+@@ -1 +1 @@
+-old
++"it's a\nnew line"
