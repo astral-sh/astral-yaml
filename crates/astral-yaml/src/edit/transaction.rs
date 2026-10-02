@@ -24,7 +24,6 @@ pub struct Editor<'a> {
     parents: Vec<Option<NodeId>>,
     alive: Vec<bool>,
     rewrites: HashSet<NodeId>,
-    replacements: Vec<NodeId>,
     requested_styles: HashSet<NodeId>,
     patches: Vec<(Span, String)>,
     work: Cell<usize>,
@@ -39,15 +38,27 @@ impl EditableDocument {
     /// # Errors
     /// Returns an error for invalid edits, invalid emitted syntax, altered alias
     /// identity, or exhausted resource limits. The document remains unchanged.
-    pub fn edit(
+    pub fn edit<R>(
         &mut self,
-        edit: impl FnOnce(&mut Editor<'_>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit(edit)
+    }
+
+    /// Applies a transaction whose callback uses an application-defined error.
+    /// The callback's result is returned only after a successful commit.
+    ///
+    /// # Errors
+    /// Returns callback or edit errors, leaving the document unchanged.
+    pub fn try_edit<R, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
+    ) -> Result<R, E> {
         let mut editor = Editor::new(self);
-        edit(&mut editor)?;
+        let result = edit(&mut editor)?;
         let candidate = editor.finish()?;
         *self = candidate;
-        Ok(())
+        Ok(result)
     }
 }
 
@@ -68,7 +79,6 @@ impl<'a> Editor<'a> {
             parents,
             alive: vec![true; original.nodes.len()],
             rewrites: HashSet::new(),
-            replacements: Vec::new(),
             requested_styles: HashSet::new(),
             patches: Vec::new(),
             work: Cell::new(original.options.max_nodes),
@@ -208,6 +218,8 @@ impl<'a> Editor<'a> {
         while let Some(id) = pending.pop() {
             self.charge(1)?;
             self.alive[id.0] = false;
+            self.rewrites.remove(&id);
+            self.requested_styles.remove(&id);
             emit::children(&self.candidate.nodes[id.0].kind, &mut pending);
         }
         Ok(())
@@ -262,22 +274,66 @@ impl<'a> Editor<'a> {
     }
 
     /// Replaces a node with a parsed single-node YAML fragment, retaining its
-    /// outer comment attachments. Overlapping replacements are rejected.
+    /// outer comment attachments. Its handle remains valid; handles to its old
+    /// descendants expire. Later operations see the replacement's content.
     ///
     /// # Errors
-    /// Rejects invalid fragments, handles, overlapping replacements, or limits.
+    /// Rejects invalid fragments, handles, or limits.
     pub fn replace(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
+        self.replace_impl(handle, yaml, false)
+    }
+
+    /// Replaces a node from a YAML fragment, retaining its anchor, outer comments,
+    /// and compatible scalar or collection style. The fragment supplies tags.
+    /// Unlike an explicit style request, the retained style may fall back when
+    /// the new content cannot use it.
+    ///
+    /// # Errors
+    /// Rejects invalid fragments, handles, or limits.
+    pub fn replace_preserving_style(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
+        self.replace_impl(handle, yaml, true)
+    }
+
+    fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            if editor
-                .replacements
-                .iter()
-                .any(|&other| editor.ancestor(id, other) || editor.ancestor(other, id))
-            {
-                return Err(editor.error("overlapping node replacements"));
-            }
             let offset = editor.candidate.nodes.len();
             let root = editor.import(yaml, editor.parents[id.0])?;
+            if preserve {
+                let old = &editor.candidate.nodes[id.0];
+                let mut replacement = editor.candidate.nodes[root.0].clone();
+                replacement.anchor.clone_from(&old.anchor);
+                match (&old.kind, &mut replacement.kind) {
+                    (
+                        NodeKind::Scalar {
+                            style: previous, ..
+                        },
+                        NodeKind::Scalar { style, .. },
+                    ) => {
+                        if emit::meaning(&editor.candidate.nodes[root.0], *previous)
+                            == emit::meaning(&editor.candidate.nodes[root.0], *style)
+                        {
+                            *style = *previous;
+                        }
+                    }
+                    (
+                        NodeKind::Sequence {
+                            style: previous, ..
+                        },
+                        NodeKind::Sequence { style, .. },
+                    )
+                    | (
+                        NodeKind::Mapping {
+                            style: previous, ..
+                        },
+                        NodeKind::Mapping { style, .. },
+                    ) => {
+                        *style = *previous;
+                    }
+                    _ => {}
+                }
+                editor.candidate.nodes[root.0] = replacement;
+            }
             let simple = inline_node(&editor.candidate.nodes[id.0])
                 && inline_node(&editor.candidate.nodes[root.0]);
             let comments = editor.candidate.nodes[id.0].comments.clone();
@@ -299,7 +355,6 @@ impl<'a> Editor<'a> {
             remap(&mut editor.candidate.nodes[id.0].kind, |target| {
                 if target == root { id } else { target }
             });
-            editor.replacements.push(id);
             if simple
                 && editor.candidate.nodes[id.0]
                     .comments
@@ -648,13 +703,13 @@ impl<'a> Editor<'a> {
         let correspondence = emit::correspondence(&self.candidate, &parsed)
             .ok_or_else(|| self.error("emission changed YAML content or alias identity"))?;
         for &id in &self.requested_styles {
-            if let Some(target) = correspondence[id.0] {
-                if !same_style(
-                    &self.candidate.nodes[id.0].kind,
-                    &parsed.nodes[target.0].kind,
-                ) {
-                    return Err(self.error("requested style is not representable in this context"));
-                }
+            // Removing a subtree also removes its style requests.
+            let target = correspondence[id.0].expect("styled node is retained");
+            if !same_style(
+                &self.candidate.nodes[id.0].kind,
+                &parsed.nodes[target.0].kind,
+            ) {
+                return Err(self.error("requested style is not representable in this context"));
             }
         }
         let mut expected_comments = Vec::new();

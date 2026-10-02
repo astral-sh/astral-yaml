@@ -223,6 +223,12 @@ impl EditableDocument {
         self.source.clone()
     }
 
+    /// Consumes the document and returns its committed source without cloning it.
+    #[must_use]
+    pub fn into_yaml(self) -> String {
+        self.source
+    }
+
     /// Emits the document with normalized whitespace, preserving comments and
     /// compatible presentation styles. Source outside the root region is retained.
     ///

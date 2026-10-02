@@ -1,0 +1,11 @@
+---
+source: crates/astral-yaml/tests/edit_sequential.rs
+expression: "edit_diff(source, document.source())"
+---
+--- before.yaml
++++ after.yaml
+@@ -1,2 +1,2 @@
+-value: 1 # keep
+-other : 'untouched'
++value: [6, 4] # keep
++other: 'untouched'

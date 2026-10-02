@@ -465,8 +465,10 @@ fn invalid_operations_roll_back() {
                 16 => e.insert_comment(&root, 0, " note", CommentPlacement::Inline),
                 17 => e.insert_comment(&root, 0, "bad\ncomment", CommentPlacement::Leading),
                 18 => {
-                    e.replace(&root, "1")?;
-                    e.replace(&root, "2")
+                    e.replace(&root, "[1]")?;
+                    let old = e.sequence_items(&root)?.remove(0);
+                    e.replace(&root, "[2]")?;
+                    e.replace(&old, "3")
                 }
                 19 => {
                     e.mapping_entries(&root)?;
@@ -662,18 +664,7 @@ fn scalar_style_changes_retain_header_comments() {
 }
 
 #[test]
-fn nested_replacements_and_small_resource_limits_are_rejected() {
-    let mut document = EditableDocument::parse("[[1]]").unwrap();
-    assert!(
-        document
-            .edit(|e| {
-                let root = e.root();
-                let inner = e.sequence_items(&root)?.remove(0);
-                e.replace(&inner, "[2]")?;
-                e.replace(&root, "[]")
-            })
-            .is_err()
-    );
+fn small_resource_limits_are_rejected() {
     let mut document = EditableDocument::parse_with_options(
         "[]",
         ParseOptions {
