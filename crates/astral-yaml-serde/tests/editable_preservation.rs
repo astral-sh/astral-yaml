@@ -129,7 +129,8 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
 
 #[test]
 fn typed_root_edits_preserve_document_framing_and_comment_order() {
-    let mut document = Editable::<Vec<String>>::parse("--- [old]\n...\n").unwrap();
+    let source = "--- [old]\n...\n";
+    let mut document = Editable::<Vec<String>>::parse(source).unwrap();
     document
         .edit(|editor| {
             let mut root = editor.root_mut();
@@ -137,17 +138,20 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
             root.set_collection_style(CollectionStyle::Block)
         })
         .unwrap();
-    insta::assert_debug_snapshot!((document.value(), document.source()), @r#"
-    (
-        [
-            "new",
-            "values",
-        ],
-        "--- \n- \"new\"\n- \"values\"\n...\n",
-    )
+    assert_eq!(document.value().as_slice(), ["new", "values"]);
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    ---- [old]
+    +--- ⏎
+    +- "new"
+    +- "values"
+     ...
     "#);
 
-    let mut document = Editable::<String>::parse("value\n\n# old\n").unwrap();
+    let source = "value\n\n# old\n";
+    let mut document = Editable::<String>::parse(source).unwrap();
     document
         .edit(|editor| {
             editor
@@ -158,24 +162,29 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
     document
         .edit(|editor| editor.root_mut().replace_comment(1, " changed"))
         .unwrap();
-    insta::assert_debug_snapshot!((document.value(), document.source()), @r#"
-    (
-        "value",
-        "value\n\n# old\n# changed\n",
-    )
-    "#);
+    assert_eq!(document.value(), "value");
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     value
+     ⏎
+     # old
+    +# changed
+    ");
 }
 
 #[test]
 fn value_setters_can_request_multiline_scalar_styles() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for (value, style) in [
         ("first\nsecond", ScalarStyle::Plain),
         ("first\nsecond", ScalarStyle::SingleQuoted),
         ("\n", ScalarStyle::Literal),
         ("\n", ScalarStyle::Folded),
     ] {
-        let mut document = Editable::<String>::parse("'old'\n\n").unwrap();
+        let source = "'old'\n\n";
+        let mut document = Editable::<String>::parse(source).unwrap();
         document
             .edit(|editor| {
                 let mut root = editor.root_mut();
@@ -183,26 +192,42 @@ fn value_setters_can_request_multiline_scalar_styles() {
                 root.set_scalar_style(style)
             })
             .unwrap();
-        outputs.push((document.value().clone(), document.into_yaml()));
+        assert_eq!(document.value(), value);
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        (
-            "first\nsecond",
-            "first\n\n  second\n\n",
-        ),
-        (
-            "first\nsecond",
-            "'first\n\n  second'\n\n",
-        ),
-        (
-            "\n",
-            "|2+\n  \n",
-        ),
-        (
-            "\n",
-            ">2+\n  \n",
-        ),
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -'old'
+    +first
+    +
+    +  second
+     ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -'old'
+    +'first
+    +
+    +  second'
+     ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -'old'
+    -
+    +|2+
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -'old'
+    -
+    +>2+
+    +  ⏎
+    ");
 }

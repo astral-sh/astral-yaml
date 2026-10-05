@@ -1,9 +1,10 @@
 use super::{Editor, Error};
 use astral_yaml::{ParseOptions, edit::EditableDocument};
+use astral_yaml_dev::edit_diff;
 
 #[test]
 fn string_key_updates_leave_application_tagged_entries_intact() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     // Exercise mixed key tags without imposing a Serde key type on the syntax.
     for source in [
         "!custom name: tagged\n",
@@ -17,7 +18,11 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
                 editor.finish()
             })
             .unwrap();
-        outputs.push(document.to_yaml());
+        diffs.push(format!(
+            "set_entry\n{}",
+            edit_diff(source, document.source())
+        ));
+        let before = document.to_yaml();
         document
             .try_edit(|syntax| {
                 let mut editor = Editor::new(syntax);
@@ -25,15 +30,42 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
                 editor.finish()
             })
             .unwrap();
-        outputs.push(document.to_yaml());
+        diffs.push(format!(
+            "remove_field\n{}",
+            edit_diff(&before, document.source())
+        ));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "!<!custom> name: tagged\n\"name\": \"new\"\n",
-        "!<!custom> name: tagged\n",
-        "!custom name: tagged\nname: new\n",
-        "!<!custom> name: tagged\n",
-    ]
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    set_entry
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -!custom name: tagged
+    +!<!custom> name: tagged
+    +"name": "new"
+
+    remove_field
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+     !<!custom> name: tagged
+    -"name": "new"
+
+    set_entry
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     !custom name: tagged
+    -name: old
+    +name: new
+
+    remove_field
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+    -!custom name: tagged
+    -name: new
+    +!<!custom> name: tagged
     "#);
 }
 
