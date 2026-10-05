@@ -1,6 +1,6 @@
 //! Value-based editing inside an [`Editable`](crate::Editable) transaction.
 
-use crate::{Error, schema::YamlType, to_string};
+use crate::{Error, to_string};
 use astral_yaml::{
     edit::{Editor as SyntaxEditor, Handle},
     schema::{ScalarType, classify},
@@ -126,6 +126,7 @@ impl<'doc> Cursor<'_, 'doc> {
     }
 
     /// Selects a decoded string key, returning `None` when it is absent.
+    /// Application-tagged keys do not match their scalar text.
     ///
     /// # Errors
     /// Rejects non-mappings, ambiguous keys, and exhausted work budgets.
@@ -317,15 +318,10 @@ fn string_key(node: &Node) -> Option<&str> {
         return None;
     };
     let kind = match node.tag() {
-        Some("!") => ScalarType::String,
-        Some(tag) if YamlType::from_tag(tag).is_some() => {
-            if YamlType::from_tag(tag) != Some(YamlType::Scalar(ScalarType::String)) {
-                return None;
-            }
-            ScalarType::String
-        }
-        _ if *style == ScalarStyle::Plain => classify(value),
-        _ => ScalarType::String,
+        Some("!" | "tag:yaml.org,2002:str") => ScalarType::String,
+        Some(_) => return None,
+        None if *style == ScalarStyle::Plain => classify(value),
+        None => ScalarType::String,
     };
     (kind == ScalarType::String).then_some(value)
 }

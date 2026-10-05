@@ -8,6 +8,32 @@ use astral_yaml_serde::{
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
 
+#[test]
+fn string_fields_do_not_match_application_tagged_keys() {
+    // Node equality includes tags: https://yaml.org/spec/1.2.2/#3213-node-comparison
+    for (source, name) in [
+        ("!custom name: old\n", "name"),
+        ("!custom 'name': old\n", "name"),
+        ("!custom true: old\n", "true"),
+        ("!custom 'true': old\n", "true"),
+        ("!<tag:example.org,2026:key> name: old\n", "name"),
+    ] {
+        let mut document = Editable::<
+            std::collections::BTreeMap<astral_yaml_serde::Tagged<String>, String>,
+        >::parse(source)
+        .unwrap();
+        document
+            .edit(|editor| {
+                assert!(editor.root_mut().get(name)?.is_none(), "{source:?}");
+                assert!(editor.root_mut().field(name).is_err());
+                assert!(!editor.root_mut().remove_field(name)?);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(document.source(), source);
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct Config {
     timeout: u8,

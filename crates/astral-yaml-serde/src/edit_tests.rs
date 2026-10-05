@@ -2,6 +2,42 @@ use super::{Editor, Error};
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
+fn string_key_updates_leave_application_tagged_entries_intact() {
+    let mut outputs = Vec::new();
+    // Exercise mixed key tags without imposing a Serde key type on the syntax.
+    for source in [
+        "!custom name: tagged\n",
+        "!custom name: tagged\nname: old\n",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .try_edit(|syntax| {
+                let mut editor = Editor::new(syntax);
+                editor.root_mut().set_entry("name", "new")?;
+                editor.finish()
+            })
+            .unwrap();
+        outputs.push(document.to_yaml());
+        document
+            .try_edit(|syntax| {
+                let mut editor = Editor::new(syntax);
+                assert!(editor.root_mut().remove_field("name")?);
+                editor.finish()
+            })
+            .unwrap();
+        outputs.push(document.to_yaml());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "!<!custom> name: tagged\n\"name\": \"new\"\n",
+        "!<!custom> name: tagged\n",
+        "!custom name: tagged\nname: new\n",
+        "!<!custom> name: tagged\n",
+    ]
+    "#);
+}
+
+#[test]
 fn exhausted_mutations_poison_subsequent_setters() {
     let mut document = EditableDocument::parse_with_options(
         "1",
