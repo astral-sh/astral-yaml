@@ -712,31 +712,7 @@ impl<'a> Editor<'a> {
                 return Err(self.error("requested style is not representable in this context"));
             }
         }
-        let mut expected_comments = Vec::new();
-        for (id, target) in correspondence.iter().enumerate() {
-            if let Some(target) = target {
-                for comment in &self.candidate.nodes[id].comments {
-                    expected_comments.push((
-                        target.0,
-                        comment.text.as_str(),
-                        comment.placement as u8,
-                    ));
-                }
-            }
-        }
-        let mut actual_comments: Vec<_> = parsed
-            .nodes
-            .iter()
-            .enumerate()
-            .flat_map(|(id, node)| {
-                node.comments
-                    .iter()
-                    .map(move |c| (id, c.text.as_str(), c.placement as u8))
-            })
-            .collect();
-        expected_comments.sort_unstable();
-        actual_comments.sort_unstable();
-        if expected_comments != actual_comments {
+        if !emit::comments_preserved(&self.candidate, &parsed, &correspondence) {
             return Err(self.error("emission changed comment ownership or placement"));
         }
         Ok(parsed)

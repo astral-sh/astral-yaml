@@ -1156,9 +1156,7 @@ pub(super) fn correspondence<'a, Location: 'a>(
                 },
             ) => {
                 let kind = meaning(left, *left_style);
-                if kind != meaning(right, *right_style)
-                    || a != b
-                {
+                if kind != meaning(right, *right_style) || a != b {
                     return None;
                 }
             }
