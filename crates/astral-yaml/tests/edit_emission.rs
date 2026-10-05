@@ -1,6 +1,33 @@
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
+fn normalization_preserves_leading_comments_in_flow_collections() {
+    // Comment separation: https://yaml.org/spec/1.2.2/#66-comments
+    let mut outputs = Vec::new();
+    for source in [
+        "[\n  # first\n  one, two]\n",
+        "[one,\n  # second\n  two]\n",
+        "{\n  # first\n  one: 1, two: 2}\n",
+        "{one: 1,\n  # second\n  two: 2}\n",
+        "outer: [{\n  # nested\n  one: 1}]\n",
+        "[one, # inline\n  # leading\n  two]\n",
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        outputs.push(document.normalized_yaml().unwrap());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "[\n  # first\n  one, two]\n",
+        "[one, \n  # second\n  two]\n",
+        "{\n  # first\n  one: 1, two: 2}\n",
+        "{one: 1, \n  # second\n  two: 2}\n",
+        "outer: [{\n    # nested\n    one: 1}]\n",
+        "[one, # inline\n  # leading\n  two]\n",
+    ]
+    "#);
+}
+
+#[test]
 fn normalization_preserves_empty_scalar_text() {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
     for source in [

@@ -201,6 +201,10 @@ impl Emitter<'_> {
             .into_iter()
             .map(|c| c.text.clone())
             .collect();
+        // Leading comments need their own line, including after flow delimiters.
+        if !comments.is_empty() && !self.output.is_empty() {
+            self.line(indent)?;
+        }
         for text in comments {
             self.push("#")?;
             self.push(&text)?;
@@ -331,7 +335,7 @@ impl Emitter<'_> {
                             self.line(indent)?;
                         }
                     }
-                    self.before(value, indent)?;
+                    self.before(value, if is_flow { indent + 2 } else { indent })?;
                     let simple = self.simple_key(key);
                     if !simple {
                         self.push("? ")?;
