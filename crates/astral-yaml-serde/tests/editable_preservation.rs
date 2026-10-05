@@ -38,7 +38,37 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
         assert_eq!(document.value().copy, "");
         diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_snapshot!(diffs.join("\n"));
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+    -plain: &empty
+    -tagged: !custom
+    +plain: &empty ⏎
+    +tagged: !<!custom> ⏎
+     copy: *empty
+     other: keep
+    +"enabled": true
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    -plain: &empty
+    -tagged: !custom
+    +plain: &empty ⏎
+    +tagged: !<!custom> ⏎
+     copy: *empty
+    -other: keep
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1 @@
+    -plain: &empty
+    -tagged: !custom
+    -copy: *empty
+    -other: keep
+    +{plain: &empty , tagged: !<!custom> , copy: *empty, other: keep}
+    "#);
 }
 
 #[test]
@@ -66,7 +96,17 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
             .collect::<Vec<_>>(),
         [" anchor", " header"]
     );
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     text: &text # anchor
+    -  | # header
+    -    content
+    +  |2 # header
+    +  content
+    +"enabled": true
+    "#);
 }
 
 #[test]

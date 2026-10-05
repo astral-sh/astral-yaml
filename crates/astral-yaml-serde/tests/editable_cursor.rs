@@ -61,7 +61,17 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     assert_eq!(result, "committed");
     assert_eq!(config.value().timeout, 60);
     assert_eq!(config.value().servers, ["primary", "backup", "tertiary"]);
-    insta::assert_snapshot!(edit_diff(source, config.source()));
+    insta::assert_snapshot!(edit_diff(source, config.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -timeout: 30 # seconds
+    -servers: [primary, retired]
+    +timeout: 60 # seconds
+    +servers: [primary, backup, "tertiary"]
+     extra: 'retained'
+    +"enabled": true
+    "#);
     let pointer = config.source().as_ptr();
     let yaml = config.into_yaml();
     assert_eq!(yaml.as_ptr(), pointer);
@@ -85,7 +95,63 @@ fn rust_values_never_interpret_strings_as_yaml() {
         assert_eq!(document.value(), &value);
         diffs.push(format!("{name}\n{}", edit_diff("old\n", document.source())));
     }
-    insta::assert_snapshot!(diffs.join("\n"));
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    string
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"false"
+
+    boolean
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +false
+
+    sequence
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +["a", "b"]
+
+    mapping
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +{"a": 1}
+
+    null
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +null
+
+    YAML-looking string
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"[a, b] # still a string"
+
+    empty string
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +""
+
+    escaped string
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"it's a\nnew line"
+    "#);
 }
 
 #[test]
@@ -128,7 +194,15 @@ fn optional_lookup_and_removal_distinguish_absence() {
             root.reborrow().get("second")?.unwrap().set(3)
         })
         .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -first: 1 # removed
+    -second: 2 # retained
+    +second: 3 # retained
+    +
+    ");
 }
 
 #[test]
@@ -155,7 +229,15 @@ fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
         document.value(),
         &json!({"items": ["first", {"value": "new"}]})
     );
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -items: [old]
+    +items:
+    +  - 'first'
+    +  - {"value": "new"}
+    "#);
 }
 
 #[test]
@@ -173,7 +255,16 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
             Ok(())
         })
         .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -first: 'old' # keep
+    +first: 'it''s new' # keep
+     last: true
+    +"added": ["one", "two" # added
+    +  ]
+    "#);
 }
 
 #[test]
@@ -190,7 +281,15 @@ fn styles_and_comments_can_be_changed_explicitly() {
             first.remove_comment(0)
         })
         .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -first: old # original
+    +# description
+    +first: 'new'
+     last: retained
+    ");
 }
 
 #[test]
@@ -231,7 +330,14 @@ fn aliases_are_not_followed_and_definitions_keep_their_anchor() {
         document.value(),
         &json!({"definition": "new", "copy": "new"})
     );
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -definition: &value 'old'
+    +definition: &value 'new'
+     copy: *value
+    ");
 }
 
 #[test]
@@ -261,7 +367,12 @@ fn navigation_errors_identify_the_selected_path() {
         errors.push(error.to_string());
         assert_eq!(document.source(), "items: [1]");
     }
-    insta::assert_snapshot!(errors.join("\n"));
+    insta::assert_snapshot!(errors.join("\n"), @r#"
+    $["missing"]: missing mapping key
+    $["items"][3]: item index out of bounds
+    $["items"][0]: expected a mapping at bytes 0..10
+    $: expected a sequence at bytes 0..10
+    "#);
 }
 
 #[test]
@@ -363,5 +474,19 @@ fn caught_mutation_errors_still_roll_back_the_transaction() {
         errors.push(error.message);
         assert_eq!(document.source(), source);
     }
-    insta::assert_snapshot!(errors.join("\n"));
+    insta::assert_snapshot!(errors.join("\n"), @r#"
+    $: serialization failed
+    $: expected a sequence
+    $["items"]: item index out of bounds
+    $["items"]: comment text contains a line break
+    $["items"][0]: comment index out of bounds
+    $: expected a sequence
+    $: comment index out of bounds
+    $: expected a scalar
+    $["items"][0]: expected a collection
+    $["items"]: serialization failed
+    $: serialization failed
+    $["items"]: expected a mapping
+    $["items"][0]: expected a mapping
+    "#);
 }
