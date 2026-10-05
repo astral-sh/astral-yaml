@@ -156,6 +156,7 @@ fn rust_values_never_interpret_strings_as_yaml() {
 
 #[test]
 fn fields_use_literal_decoded_string_keys() {
+    let mut diffs = Vec::new();
     for (source, name) in [
         ("'it''s': old", "it's"),
         ("'a.b/[0]': old", "a.b/[0]"),
@@ -177,8 +178,81 @@ fn fields_use_literal_decoded_string_keys() {
                 field.set("new")
             })
             .unwrap_or_else(|error| panic!("{source}: {error}"));
-        assert!(document.source().contains("new"));
+        diffs.push(edit_diff(source, document.source()));
     }
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -'it''s': old
+    \ No newline at end of file
+    +'it''s': new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -'a.b/[0]': old
+    \ No newline at end of file
+    +'a.b/[0]': new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -é: old
+    \ No newline at end of file
+    +é: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!str true: old
+    \ No newline at end of file
+    +!!str true: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -! true: old
+    \ No newline at end of file
+    +! true: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{true: ignored, 'true': old}
+    \ No newline at end of file
+    +{true: ignored, 'true': new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{1: ignored, '1': old}
+    \ No newline at end of file
+    +{1: ignored, '1': new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{!!int '1': ignored, '1': old}
+    \ No newline at end of file
+    +{!!int '1': ignored, '1': new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{[complex, key]: ignored, name: old}
+    \ No newline at end of file
+    +{[complex, key]: ignored, name: new}
+    \ No newline at end of file
+    ");
 }
 
 #[test]

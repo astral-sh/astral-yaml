@@ -25,10 +25,6 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
         config.value().timeout.span.slice(config.syntax().source()),
         Some("100")
     );
-    assert_eq!(
-        config.to_yaml(),
-        "timeout: 100 # seconds\nunknown : ['keep',  2]\n"
-    );
     insta::assert_snapshot!(edit_diff(&before, config.syntax().source()), @"
     --- before.yaml
     +++ after.yaml

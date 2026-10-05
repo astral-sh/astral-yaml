@@ -87,15 +87,6 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
         })
         .unwrap();
     assert_eq!(document.value().text, "content\n");
-    let stream = astral_yaml::parse(document.source()).unwrap();
-    assert_eq!(
-        stream
-            .comments()
-            .iter()
-            .map(|comment| comment.text)
-            .collect::<Vec<_>>(),
-        [" anchor", " header"]
-    );
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     --- before.yaml
     +++ after.yaml
@@ -112,7 +103,8 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
 #[test]
 fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let mut document = Editable::<serde_json::Value>::parse("existing: 1\n").unwrap();
+    let source = "existing: 1\n";
+    let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
     let key = "\u{1}".repeat(103);
     document
         .edit(|editor| {
@@ -122,5 +114,12 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
         .unwrap();
     assert_eq!(document.value()[&key], true);
     assert_eq!(document.value()["existing"], 1);
-    assert!(document.source().contains("\n? "));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+     existing: 1
+    +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
+    +: true
+    "#);
 }
