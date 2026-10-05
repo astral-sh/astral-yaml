@@ -164,6 +164,63 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
 }
 
 #[test]
+fn block_scalar_rewrites_own_their_trailing_line_breaks() {
+    let mut outputs = Vec::new();
+    for source in [
+        "'old'\n",
+        "'old'\n\n",
+        "'old'\n  \n  ",
+        "'old' # keep\n\n",
+        "'old'\n\n...\n",
+        "%YAML 1.2 # directive\n--- 'old' # inline\n... # end\n",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                editor.replace(&root, "\"\\n\"")?;
+                editor.set_scalar_style(&root, ScalarStyle::Literal)
+            })
+            .unwrap();
+        outputs.push(document.into_yaml());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "|2+\n  \n",
+        "|2+\n  \n",
+        "|2+\n  \n",
+        "|2+ # keep\n  \n",
+        "|2+\n  \n...\n",
+        "%YAML 1.2 # directive\n--- |2+ # inline\n  \n... # end\n",
+    ]
+    "#);
+}
+
+#[test]
+fn nested_block_scalar_boundaries_stop_before_following_syntax() {
+    let mut outputs = Vec::new();
+    for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
+        let mut document =
+            EditableDocument::parse("outer:\n  value: old # keep\n\nnext: retained\n").unwrap();
+        document
+            .edit(|editor| {
+                let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
+                let value = editor.mapping_entries(&outer)?.remove(0).1;
+                editor.replace(&value, "\"\\n\"")?;
+                editor.set_scalar_style(&value, style)
+            })
+            .unwrap();
+        outputs.push(document.into_yaml());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "outer:\n  value: |2+ # keep\n    \nnext: retained\n",
+        "outer:\n  value: >2+ # keep\n    \nnext: retained\n",
+    ]
+    "#);
+}
+
+#[test]
 fn comment_transactions_match_an_ordered_list_model() {
     let mut state = 0x93ca_ee76_1963_7651u64;
     for newline in ["\n", "\r\n", "\r"] {

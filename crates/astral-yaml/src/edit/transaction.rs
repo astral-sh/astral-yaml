@@ -749,7 +749,33 @@ impl<'a> Editor<'a> {
             }
             let mut regions: Vec<_> = ids
                 .iter()
-                .map(|&id| (id, emit::region(self.original, id, false)))
+                .map(|&id| {
+                    let mut region = emit::region(self.original, id, false);
+                    if id == self.candidate.root
+                        && matches!(
+                            self.candidate.nodes[id.0].kind,
+                            NodeKind::Scalar {
+                                style: ScalarStyle::Literal | ScalarStyle::Folded,
+                                ..
+                            }
+                        )
+                    {
+                        // A root's end-of-line comment moves onto a block
+                        // scalar's header. Marker/directive comments on other
+                        // lines remain outside the rewritten node.
+                        for comment in &self.original.nodes[id.0].comments {
+                            if comment.placement == CommentPlacement::Inline
+                                && comment.span.start() >= region.end()
+                                && self.original.source[region.end()..comment.span.start()]
+                                    .bytes()
+                                    .all(|byte| matches!(byte, b' ' | b'\t'))
+                            {
+                                region.end = comment.span.end();
+                            }
+                        }
+                    }
+                    (id, region)
+                })
                 .collect();
             regions.sort_by_key(|(_, span)| span.start());
             let Some(pair) = regions
@@ -836,7 +862,7 @@ impl<'a> Editor<'a> {
         for &(id, region) in &regions {
             let flow = self.flow_context(id);
             let indent = emit::indent(&self.original.source, region.start());
-            let mut body = if id == self.candidate.root {
+            let rendered = if id == self.candidate.root {
                 let comments = self.root_comments(region)?;
                 patches.extend(comments.insertions);
                 emit::render_with_comments(
@@ -848,8 +874,17 @@ impl<'a> Editor<'a> {
                     &comments.rendered,
                 )?
             } else {
-                emit::render(&self.candidate, id, region, indent, flow)?
+                emit::render_with_comments(
+                    &self.candidate,
+                    id,
+                    region,
+                    indent,
+                    flow,
+                    &self.candidate.nodes[id.0].comments,
+                )?
             };
+            let region = rendered.span;
+            let mut body = rendered.text;
             if !region.is_empty()
                 && self.original.source[..region.end()].ends_with(['\r', '\n'])
                 && !body.ends_with(['\r', '\n'])

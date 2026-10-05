@@ -94,7 +94,7 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
         .unwrap_or("");
     let own_line = id == document.root
         && (block_collection(&document.nodes[id.0].kind, flow)
-            || !emitter.comments(id, CommentPlacement::Leading).is_empty());
+            || emitter.visible_comments(id).any(|comment| comment.placement == CommentPlacement::Leading));
     if own_line && !prefix.bytes().all(|byte| byte == b' ') {
         // The unchanged prefix can end in a document marker. Block collections
         // and leading comments must start on their own line, unlike inline roots.
