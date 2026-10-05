@@ -113,7 +113,8 @@ collection when the surrounding syntax requires it. Outside those regions,
 original text is copied.
 
 Rewritten regions retain entry order, comments, tags, anchors, alias identity,
-and compatible styles. Whitespace and scalar spelling may normalize. Block
+and compatible styles. Whitespace and scalar spelling may normalize, but decoded
+scalar text is retained, including empty values read by Serde as strings. Block
 content uses two-space indentation and the document's first line-ending
 convention, defaulting to LF. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
@@ -144,7 +145,8 @@ work. This API favors validation and source preservation over incremental update
 performance.
 
 `EditableDocument::normalized_yaml()` is an explicit whole-root rendering
-operation. It returns normalized output without changing the document.
+operation. It returns normalized output without changing the document, or an
+error if the rendering would change content, aliases, or comment attachments.
 
 ## Migrating metadata wrappers
 
