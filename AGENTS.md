@@ -16,7 +16,8 @@
   Changes should preserve logical separations between functions and critical sections using whitespace.
 
 - Tests should use snapshots (via insta) where appropriate, instead of a bunch of
-  asserts for expected state/structure.
+  asserts for expected state/structure. Snapshots must be inline; do not use
+  sidecar `.snap` files.
 
 - Tests should be table-driven where appropriate, rather than defining several nearly-identical test functions.
 

@@ -200,5 +200,9 @@ fn real_world_normalization_preserves_comments_or_rejects_attachment_changes() {
     // These attachments previously moved silently during normalization.
     // Keep the unsupported set explicit so new failures remain visible.
     unsupported.sort();
-    insta::assert_debug_snapshot!(unsupported);
+    insta::assert_debug_snapshot!(unsupported, @r#"
+    [
+        "dagster-io-dagster-examples-docs-snippets-docs-snippets-integrations-airlift-v2-represent-airflow-dags-in-dagster-compo-0953944c.yaml",
+    ]
+    "#);
 }

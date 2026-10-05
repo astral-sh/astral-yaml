@@ -67,7 +67,16 @@ fn normalization_preserves_separate_header_comments() {
         );
         outputs.push(output);
     }
-    insta::assert_debug_snapshot!(outputs);
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "a: &a # anchor\n  |2 # header\n  text\n",
+        "a: !<tag:yaml.org,2002:str> # anchor\n  &a # tag\n  |2 # header\n  text\n",
+        "a: # field\n  !<tag:yaml.org,2002:seq> # anchor\n  &a # tag\n  - item\n",
+        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a # opening\n  [item] # closing\n\n",
+        "a: [ # opening\n  item] # closing\n\n",
+        "a: { # opening\n  key: value} # closing\n\n",
+    ]
+    "#);
 }
 
 #[test]
