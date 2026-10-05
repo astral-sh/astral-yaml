@@ -89,8 +89,33 @@ pub(super) fn render(
     {
         emitter.push(" ")?;
     }
-    emitter.node(id, indent, flow, "", 0)?;
+    let context = Context {
+        indent,
+        flow,
+        block_indent: if id == document.root { 0 } else { indent },
+    };
+    emitter.node(id, context, "", 0)?;
     Ok(emitter.output)
+}
+
+#[derive(Clone, Copy)]
+struct Context {
+    /// Indentation for this node's continuation lines and comments.
+    indent: usize,
+    flow: bool,
+    /// A block scalar's indentation indicator is relative to its parent, even
+    /// when comments or properties put its header on a more-indented line.
+    block_indent: usize,
+}
+
+impl Context {
+    fn flow(indent: usize) -> Self {
+        Self {
+            indent,
+            flow: true,
+            block_indent: indent,
+        }
+    }
 }
 
 struct Emitter<'a> {
@@ -180,24 +205,40 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn comments(&self, id: NodeId, placement: CommentPlacement) -> Vec<&Comment> {
+    fn visible_comments(&self, id: NodeId) -> impl Iterator<Item = &Comment> {
         self.document.nodes[id.0]
             .comments
             .iter()
+            .filter(move |comment| {
+                id != self.root
+                    || comment.span.is_empty()
+                    || (comment.span.start() >= self.region.start()
+                        && comment.span.end() <= self.region.end())
+            })
+    }
+
+    fn comments(&self, id: NodeId, placement: CommentPlacement) -> Vec<&Comment> {
+        self.visible_comments(id)
+            .filter(|comment| comment.placement == placement)
+            .collect()
+    }
+
+    fn leading_comments(&self, id: NodeId, inline_skip: usize) -> Vec<&Comment> {
+        let mut inlines = 0;
+        self.visible_comments(id)
             .filter(|comment| {
-                comment.placement == placement
-                    && (id != self.root
-                        || comment.span.is_empty()
-                        || (comment.span.start() >= self.region.start()
-                            && comment.span.end() <= self.region.end()))
+                if comment.placement == CommentPlacement::Inline {
+                    inlines += 1;
+                }
+                comment.placement == CommentPlacement::Leading && inlines == inline_skip
             })
             .collect()
     }
 
-    fn before(&mut self, id: NodeId, indent: usize) -> Result<(), Error> {
+    fn before(&mut self, id: NodeId, indent: usize, inline_skip: usize) -> Result<(), Error> {
         // Clone only comment text so writing can borrow the emitter mutably.
         let comments: Vec<_> = self
-            .comments(id, CommentPlacement::Leading)
+            .leading_comments(id, inline_skip)
             .into_iter()
             .map(|c| c.text.clone())
             .collect();
@@ -258,24 +299,24 @@ impl Emitter<'_> {
     fn node(
         &mut self,
         id: NodeId,
-        indent: usize,
-        flow: bool,
+        context: Context,
         suffix: &str,
         depth: usize,
     ) -> Result<(), Error> {
+        let Context { indent, flow, .. } = context;
         if depth >= self.document.options.max_depth || self.work == 0 {
             return Err(self.error("emission resource limit exceeded"));
         }
         self.work -= 1;
         let mut inline_skip = std::mem::take(&mut self.skip_inline);
         if !std::mem::take(&mut self.skip_leading) {
-            self.before(id, indent)?;
+            self.before(id, indent, inline_skip)?;
         }
         self.properties(id, indent, flow, &mut inline_skip)?;
         let node = &self.document.nodes[id.0];
         match &node.kind {
             NodeKind::Scalar { value, style } => {
-                inline_skip += self.scalar(id, value, *style, flow, indent, inline_skip)?;
+                inline_skip += self.scalar(id, value, *style, context, inline_skip)?;
             }
             NodeKind::Alias { name, .. } => {
                 self.push("*")?;
@@ -295,8 +336,7 @@ impl Emitter<'_> {
                         }
                         self.node(
                             item,
-                            indent + 2,
-                            true,
+                            Context::flow(indent + 2),
                             if index + 1 == items.len() { "" } else { "," },
                             depth + 1,
                         )?;
@@ -310,7 +350,7 @@ impl Emitter<'_> {
                         if index != 0 {
                             self.line(indent)?;
                         }
-                        self.before(item, indent)?;
+                        self.before(item, indent, 0)?;
                         self.push("-")?;
                         self.value(item, indent, false, "", depth + 1)?;
                     }
@@ -335,12 +375,12 @@ impl Emitter<'_> {
                             self.line(indent)?;
                         }
                     }
-                    self.before(value, if is_flow { indent + 2 } else { indent })?;
+                    self.before(value, if is_flow { indent + 2 } else { indent }, 0)?;
                     let simple = self.simple_key(key);
                     if !simple {
                         self.push("? ")?;
                     }
-                    self.node(key, indent + 2, true, "", depth + 1)?;
+                    self.node(key, Context::flow(indent + 2), "", depth + 1)?;
                     if !simple {
                         self.line(if is_flow { indent + 2 } else { indent })?;
                     }
@@ -398,20 +438,15 @@ impl Emitter<'_> {
         id: NodeId,
         value: &str,
         style: ScalarStyle,
-        flow: bool,
-        indent: usize,
+        context: Context,
         inline_skip: usize,
     ) -> Result<usize, Error> {
-        // Root block scalars measure an explicit indentation indicator from
-        // column zero, not from the column containing their header.
-        let indent = if id == self.document.root
-            && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
-        {
-            0
+        let indent = if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
+            context.block_indent
         } else {
-            indent
+            context.indent
         };
-        let text = scalar(value, style, flow, indent, self.newline);
+        let text = scalar(value, style, context.flow, indent, self.newline);
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once(self.newline).expect("block scalar header");
             self.push(header)?;
@@ -453,21 +488,28 @@ impl Emitter<'_> {
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
         let block = block_collection(&node.kind, flow);
-        if block {
+        // A field/item header can own an inline comment before the value's
+        // leading comments. Emit that ordered prefix here, then let the node
+        // emit the leading comments that follow it on the continuation line.
+        let leading_after_header = !self.leading_comments(id, 1).is_empty();
+        let value_indent = if block || flow || leading_after_header {
+            indent + 2
+        } else {
+            indent
+        };
+        if block || leading_after_header {
             self.skip_inline = self.inline(id, 0)?;
-            self.line(indent + 2)?;
+            self.line(value_indent)?;
         } else {
             self.push(" ")?;
         }
-        // Leading comments were emitted before the entry/item header.
-        self.skip_leading = true;
-        self.node(
-            id,
-            if block || flow { indent + 2 } else { indent },
+        self.skip_leading = !leading_after_header;
+        let context = Context {
+            indent: value_indent,
             flow,
-            suffix,
-            depth,
-        )
+            block_indent: indent,
+        };
+        self.node(id, context, suffix, depth)
     }
 }
 

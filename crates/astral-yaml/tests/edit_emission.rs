@@ -1,6 +1,37 @@
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
+fn normalization_preserves_header_comments_before_leading_comments() {
+    // Multiline comments: https://yaml.org/spec/1.2.2/#66-comments
+    let mut outputs = Vec::new();
+    for source in [
+        "key: # header\n  # leading\n  value\n",
+        "- # header\n  # leading\n  value\n",
+        "{key: # header\n  # leading\n  value}\n",
+        "# before\nkey: # header\n  # leading\n  value # inline\n",
+        "key: # header\n  # leading\n  | # scalar\n    text\n",
+        "key: # header\n  # leading\n  &a # anchor\n  value # inline\n",
+    ] {
+        outputs.push(
+            EditableDocument::parse(source)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+        );
+    }
+    insta::assert_debug_snapshot!(outputs, @r##"
+    [
+        "key: # header\n  # leading\n  value\n",
+        "- # header\n  # leading\n  value\n",
+        "{key: # header\n  # leading\n  value}\n",
+        "# before\nkey: # header\n  # leading\n  value # inline\n  \n",
+        "key: # header\n  # leading\n  |2 # scalar\n  text\n",
+        "key: # header\n  # leading\n  &a # anchor\n    value # inline\n  \n",
+    ]
+    "##);
+}
+
+#[test]
 fn normalization_retains_multiline_scalar_styles() {
     let outputs: Vec<_> = ["a\n\nb\n", "'a\n\nb'\n", "|+\n\n", ">+\n\n"]
         .into_iter()
