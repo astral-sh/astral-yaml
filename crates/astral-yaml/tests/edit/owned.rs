@@ -176,7 +176,8 @@ fn construction_rejects_invalid_documents_and_limits() {
 }
 
 #[test]
-fn real_world_documents_can_be_normalized() {
+fn real_world_normalization_preserves_comments_or_rejects_attachment_changes() {
+    let mut unsupported = Vec::new();
     for fixture in astral_yaml_dev::fixtures::manifest() {
         if !fixture.valid_syntax() {
             continue;
@@ -187,8 +188,17 @@ fn real_world_documents_can_be_normalized() {
             continue;
         }
         let document = EditableDocument::parse(&source).unwrap();
-        document
-            .normalized_yaml()
-            .unwrap_or_else(|error| panic!("{}: {error}", fixture.file));
+        if let Err(error) = document.normalized_yaml() {
+            assert_eq!(
+                error.message, "emission changed comment ownership or placement",
+                "{}: {error}",
+                fixture.file
+            );
+            unsupported.push(fixture.file);
+        }
     }
+    // These attachments previously moved silently during normalization.
+    // Keep the unsupported set explicit so new failures remain visible.
+    unsupported.sort();
+    insta::assert_debug_snapshot!(unsupported);
 }

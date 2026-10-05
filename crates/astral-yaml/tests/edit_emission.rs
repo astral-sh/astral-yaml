@@ -1,6 +1,101 @@
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
+fn normalization_preserves_empty_scalar_text() {
+    // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
+    for source in [
+        "name:\n",
+        "name: !custom\n",
+        "{name: , other: null}\n",
+        "-\n- !!str\n",
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let output = document.normalized_yaml().unwrap();
+        let scalars = |source: &str| {
+            astral_yaml::parse(source)
+                .unwrap()
+                .nodes()
+                .iter()
+                .filter_map(|node| match &node.kind {
+                    astral_yaml::NodeKind::Scalar(scalar) => Some(scalar.value.to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            scalars(&output),
+            scalars(source),
+            "{source:?} -> {output:?}"
+        );
+    }
+}
+
+#[test]
+fn normalization_preserves_separate_header_comments() {
+    // Node properties: https://yaml.org/spec/1.2.2/#69-node-properties
+    let mut outputs = Vec::new();
+    for source in [
+        "a: &a # anchor\n  | # header\n    text\n",
+        "a: &a # anchor\n  !!str # tag\n  | # header\n    text\n",
+        "a: # field\n  &a # anchor\n  !!seq # tag\n  - item\n",
+        "a: &a # anchor\n  !!seq [ # opening\n    item] # closing\n",
+        "a: [ # opening\n  item] # closing\n",
+        "a: { # opening\n  key: value} # closing\n",
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let output = document.normalized_yaml().unwrap();
+        let comments = |source: &str| {
+            let stream = astral_yaml::parse(source).unwrap();
+            let index = astral_yaml::comments::CommentIndex::new(&stream, 0).unwrap();
+            let mut comments = index
+                .direct()
+                .map(|(id, comment)| {
+                    (
+                        format!("{id:?}"),
+                        comment.placement as u8,
+                        comment.comment.text.to_owned(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            comments.sort();
+            comments
+        };
+        assert_eq!(
+            comments(&output),
+            comments(source),
+            "{source:?} -> {output:?}"
+        );
+        outputs.push(output);
+    }
+    insta::assert_debug_snapshot!(outputs);
+}
+
+#[test]
+fn normalization_uses_explicit_keys_when_escaped_syntax_is_long() {
+    // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
+    for key in [
+        format!("\"{}\"", "\\u0001".repeat(103)),
+        format!("&{} short", "a".repeat(1024)),
+        format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)),
+        format!("\"{}\"", "a".repeat(1023)),
+    ] {
+        let source = format!("? {key}\n: value\n");
+        let output = EditableDocument::parse(&source)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap();
+        assert!(output.starts_with("? "), "{output:?}");
+        assert_eq!(
+            EditableDocument::parse(&output)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+            output
+        );
+    }
+}
+
+#[test]
 fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
     for source in ["---", "---\n", "!!str", "!", "[!!str , ! ]", "a:", "-"] {
         let document = EditableDocument::parse(source).unwrap();
@@ -8,13 +103,16 @@ fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
         let reparsed = EditableDocument::parse(&output).unwrap();
         assert_eq!(reparsed.normalized_yaml().unwrap(), output);
     }
-    // Syntax inspection accepts an explicit tag with an invalid core payload.
-    // Normalization must still reject a change to that payload's contents.
+    // Syntax inspection accepts invalid core payloads. Normalization retains
+    // their text without interpreting or repairing it.
+    let output = EditableDocument::parse("!!bool")
+        .unwrap()
+        .normalized_yaml()
+        .unwrap();
+    let parsed = astral_yaml::parse(&output).unwrap();
     assert!(
-        EditableDocument::parse("!!bool")
-            .unwrap()
-            .normalized_yaml()
-            .is_err()
+        matches!(&parsed.node(parsed.documents()[0].root).unwrap().kind,
+        astral_yaml::NodeKind::Scalar(scalar) if scalar.value.is_empty())
     );
 }
 

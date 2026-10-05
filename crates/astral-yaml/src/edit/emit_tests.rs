@@ -1,10 +1,12 @@
-use super::{EditableDocument, NodeKind, equivalent, region, render};
+use super::{EditableDocument, NodeKind, correspondence, region, render};
 
 #[test]
 fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
     for (left, right, expected) in [
         ("text", "'text'", true),
-        ("null", "~", true),
+        ("null", "~", false),
+        ("a:", "a: null", false),
+        ("!custom", "!custom null", false),
         ("!!str 42", "!!int 42", false),
         ("1", "2", false),
         ("[1]", "[]", false),
@@ -15,7 +17,7 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
     ] {
         let left = EditableDocument::parse(left).unwrap();
         let right = EditableDocument::parse(right).unwrap();
-        assert_eq!(equivalent(&left, &right), expected);
+        assert_eq!(correspondence(&left, &right).is_some(), expected);
     }
 }
 
@@ -68,6 +70,26 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
     assert_eq!(
         document.normalized_yaml().unwrap_err().message,
         "emission changed YAML content or alias identity"
+    );
+}
+
+#[test]
+fn normalization_rejects_reassigned_comments() {
+    let mut document = EditableDocument::parse("a: one\nb: two\n").unwrap();
+    let value = document
+        .nodes
+        .iter_mut()
+        .find(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "one"))
+        .unwrap();
+    // This attachment would become a leading comment on the next field.
+    value.comments.push(crate::edit::Comment {
+        text: " trailing".to_owned(),
+        placement: crate::comments::CommentPlacement::Trailing,
+        span: crate::Span::new(0, 0).unwrap(),
+    });
+    assert_eq!(
+        document.normalized_yaml().unwrap_err().message,
+        "emission changed comment ownership or placement"
     );
 }
 

@@ -79,7 +79,7 @@ pub(super) fn render(
         output: String::new(),
         work: document.options.max_nodes,
         skip_leading: false,
-        skip_inline: false,
+        skip_inline: 0,
     };
     if region.is_empty()
         && matches!(
@@ -101,7 +101,7 @@ struct Emitter<'a> {
     output: String,
     work: usize,
     skip_leading: bool,
-    skip_inline: bool,
+    skip_inline: usize,
 }
 
 impl Emitter<'_> {
@@ -142,15 +142,40 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn inline(&mut self, id: NodeId) -> Result<(), Error> {
-        let comments: Vec<_> = self
+    fn inline(&mut self, id: NodeId, index: usize) -> Result<usize, Error> {
+        let text = self
             .comments(id, CommentPlacement::Inline)
             .into_iter()
-            .map(|c| c.text.clone())
-            .collect();
-        for text in comments {
-            self.push(" #")?;
+            .nth(index)
+            .map(|comment| comment.text.clone());
+        if let Some(text) = text {
+            self.push(if self.output.ends_with(' ') {
+                "#"
+            } else {
+                " #"
+            })?;
             self.push(&text)?;
+            Ok(1)
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn property_comment(
+        &mut self,
+        id: NodeId,
+        inline_skip: &mut usize,
+        indent: usize,
+        block_collection: bool,
+    ) -> Result<(), Error> {
+        // Keep one comment for the scalar or flow collection itself. Block
+        // collections must place their inline comments on the property lines.
+        if (block_collection
+            || self.comments(id, CommentPlacement::Inline).len() > *inline_skip + 1)
+            && self.inline(id, *inline_skip)? != 0
+        {
+            *inline_skip += 1;
+            self.line(indent)?;
         }
         Ok(())
     }
@@ -189,7 +214,7 @@ impl Emitter<'_> {
         id: NodeId,
         indent: usize,
         suffix: &str,
-        skip_inline: bool,
+        inline_skip: usize,
     ) -> Result<(), Error> {
         self.push(suffix)?;
         for placement in [
@@ -197,12 +222,14 @@ impl Emitter<'_> {
             CommentPlacement::Trailing,
             CommentPlacement::Detached,
         ] {
-            if skip_inline && placement == CommentPlacement::Inline {
-                continue;
-            }
             let comments: Vec<_> = self
                 .comments(id, placement)
                 .into_iter()
+                .skip(if placement == CommentPlacement::Inline {
+                    inline_skip
+                } else {
+                    0
+                })
                 .map(|c| c.text.clone())
                 .collect();
             for text in comments {
@@ -236,28 +263,15 @@ impl Emitter<'_> {
             return Err(self.error("emission resource limit exceeded"));
         }
         self.work -= 1;
-        let mut skip_inline = std::mem::take(&mut self.skip_inline);
+        let mut inline_skip = std::mem::take(&mut self.skip_inline);
         if !std::mem::take(&mut self.skip_leading) {
             self.before(id, indent)?;
         }
+        self.properties(id, indent, flow, &mut inline_skip)?;
         let node = &self.document.nodes[id.0];
-        if let Some(tag) = &node.tag {
-            if tag == "!" {
-                self.push("! ")?;
-            } else {
-                self.push("!<")?;
-                self.push(tag)?;
-                self.push("> ")?;
-            }
-        }
-        if let Some(anchor) = &node.anchor {
-            self.push("&")?;
-            self.push(anchor)?;
-            self.push(" ")?;
-        }
         match &node.kind {
             NodeKind::Scalar { value, style } => {
-                skip_inline |= self.scalar(id, value, *style, flow, indent)?;
+                inline_skip += self.scalar(id, value, *style, flow, indent, inline_skip)?;
             }
             NodeKind::Alias { name, .. } => {
                 self.push("*")?;
@@ -267,6 +281,10 @@ impl Emitter<'_> {
                 let is_flow = flow || *style == CollectionStyle::Flow || items.is_empty();
                 if is_flow {
                     self.push("[")?;
+                    if self.comments(id, CommentPlacement::Inline).len() > inline_skip + 1 {
+                        inline_skip += self.inline(id, inline_skip)?;
+                        self.line(indent + 2)?;
+                    }
                     for (index, &item) in items.iter().enumerate() {
                         if index != 0 {
                             self.push(" ")?;
@@ -298,6 +316,10 @@ impl Emitter<'_> {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
                 if is_flow {
                     self.push("{")?;
+                    if self.comments(id, CommentPlacement::Inline).len() > inline_skip + 1 {
+                        inline_skip += self.inline(id, inline_skip)?;
+                        self.line(indent + 2)?;
+                    }
                 } else if node.anchor.is_some() || node.tag.is_some() {
                     self.line(indent)?;
                 }
@@ -331,7 +353,40 @@ impl Emitter<'_> {
                 }
             }
         }
-        self.after(id, indent, suffix, skip_inline)
+        self.after(id, indent, suffix, inline_skip)
+    }
+
+    fn properties(
+        &mut self,
+        id: NodeId,
+        indent: usize,
+        flow: bool,
+        inline_skip: &mut usize,
+    ) -> Result<(), Error> {
+        let node = &self.document.nodes[id.0];
+        let block_collection = block_collection(&node.kind, flow);
+        let continuation_indent = if flow || block_collection {
+            indent
+        } else {
+            indent + 2
+        };
+        if let Some(tag) = &node.tag {
+            if tag == "!" {
+                self.push("! ")?;
+            } else {
+                self.push("!<")?;
+                self.push(tag)?;
+                self.push("> ")?;
+            }
+            self.property_comment(id, inline_skip, continuation_indent, block_collection)?;
+        }
+        if let Some(anchor) = &node.anchor {
+            self.push("&")?;
+            self.push(anchor)?;
+            self.push(" ")?;
+            self.property_comment(id, inline_skip, continuation_indent, block_collection)?;
+        }
+        Ok(())
     }
 
     fn scalar(
@@ -341,35 +396,38 @@ impl Emitter<'_> {
         style: ScalarStyle,
         flow: bool,
         indent: usize,
-    ) -> Result<bool, Error> {
-        // A string tag can resolve an empty plain scalar. Keep its spelling
-        // empty rather than emitting the string "null".
-        if value.is_empty()
-            && style == ScalarStyle::Plain
-            && matches!(
-                self.document.nodes[id.0].tag.as_deref(),
-                Some("!" | "tag:yaml.org,2002:str")
-            )
-        {
-            return Ok(false);
-        }
+        inline_skip: usize,
+    ) -> Result<usize, Error> {
         let text = scalar(value, style, flow, indent, self.newline);
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once(self.newline).expect("block scalar header");
             self.push(header)?;
-            self.inline(id)?;
+            let emitted = self.inline(id, inline_skip)?;
             self.push(self.newline)?;
             self.push(body)?;
-            return Ok(true);
+            return Ok(emitted);
         }
         self.push(&text)?;
-        Ok(false)
+        Ok(0)
     }
 
     fn simple_key(&self, id: NodeId) -> bool {
         let node = &self.document.nodes[id.0];
-        matches!(&node.kind, NodeKind::Scalar { value, .. } if !value.contains(['\r','\n']) && value.len() < 512)
-            && node.comments.is_empty()
+        let NodeKind::Scalar { value, style } = &node.kind else {
+            return false;
+        };
+        if !node.comments.is_empty() {
+            return false;
+        }
+        // YAML limits the entire implicit key, including escapes and properties,
+        // to 1024 source characters on one line.
+        let text = scalar(value, *style, true, 0, self.newline);
+        let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
+        let anchor = node
+            .anchor
+            .as_ref()
+            .map_or(0, |anchor| anchor.chars().count() + 2);
+        !text.contains(['\r', '\n']) && text.chars().count() + tag + anchor <= 1024
     }
 
     fn value(
@@ -381,14 +439,9 @@ impl Emitter<'_> {
         depth: usize,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
-        let block = !flow
-            && (matches!(&node.kind,
-            NodeKind::Sequence { items, style: CollectionStyle::Block } if !items.is_empty())
-                || matches!(&node.kind,
-            NodeKind::Mapping { entries, style: CollectionStyle::Block } if !entries.is_empty()));
+        let block = block_collection(&node.kind, flow);
         if block {
-            self.inline(id)?;
-            self.skip_inline = true;
+            self.skip_inline = self.inline(id, 0)?;
             self.line(indent + 2)?;
         } else {
             self.push(" ")?;
@@ -403,6 +456,14 @@ impl Emitter<'_> {
             depth,
         )
     }
+}
+
+fn block_collection(kind: &NodeKind, flow: bool) -> bool {
+    !flow
+        && (matches!(kind,
+        NodeKind::Sequence { items, style: CollectionStyle::Block } if !items.is_empty())
+            || matches!(kind,
+        NodeKind::Mapping { entries, style: CollectionStyle::Block } if !entries.is_empty()))
 }
 
 fn quoted(value: &str) -> String {
@@ -428,7 +489,9 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
     // Check the generated scalar in its actual flow/block context. This also
     // handles plain-scalar punctuation, folding, and explicit indentation.
     let candidate = match style {
-        ScalarStyle::Plain if value.is_empty() => String::from("null"),
+        // Empty scalar text is observable through Serde string visitors and
+        // application tags, even when the core schema resolves it as null.
+        ScalarStyle::Plain if value.is_empty() => return String::new(),
         ScalarStyle::Plain => value.to_owned(),
         ScalarStyle::SingleQuoted => format!("'{}'", value.replace('\'', "''")),
         ScalarStyle::Literal | ScalarStyle::Folded if !flow => {
@@ -480,23 +543,34 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
         format!("{}{candidate}", " ".repeat(indent))
     };
     let matches = crate::parse(&source).is_ok_and(|stream| {
-        let [document] = stream.documents() else { return false; };
+        let [document] = stream.documents() else {
+            return false;
+        };
         let mut node = stream.node(document.root).expect("parsed root");
         if flow {
-            let crate::NodeKind::Sequence { items, .. } = &node.kind else { return false; };
-            let [id] = items.as_slice() else { return false; };
+            let crate::NodeKind::Sequence { items, .. } = &node.kind else {
+                return false;
+            };
+            let [id] = items.as_slice() else {
+                return false;
+            };
             node = stream.node(*id).expect("parsed item");
         }
         matches!(&node.kind, crate::NodeKind::Scalar(scalar)
-            if scalar.value == value || value.is_empty() && style == ScalarStyle::Plain && scalar.value == "null")
-            && node.tag.is_none() && node.anchor.is_none() && stream.comments().is_empty()
+            if scalar.value == value)
+            && node.tag.is_none()
+            && node.anchor.is_none()
+            && stream.comments().is_empty()
     });
     if matches { candidate } else { quoted(value) }
 }
 
 /// Match syntax by traversal, not arena offsets, and verify alias identity after
 /// matching the definitions. Aliases are never expanded by this comparison.
-pub(super) fn equivalent(expected: &EditableDocument, actual: &EditableDocument) -> bool {
+pub(super) fn correspondence(
+    expected: &EditableDocument,
+    actual: &EditableDocument,
+) -> Option<Vec<Option<NodeId>>> {
     let mut pending = vec![(expected.root, actual.root)];
     let mut correspondence = vec![None; expected.nodes.len()];
     let mut aliases = Vec::new();
@@ -505,24 +579,24 @@ pub(super) fn equivalent(expected: &EditableDocument, actual: &EditableDocument)
         let left = &expected.nodes[left_id.0];
         let right = &actual.nodes[right_id.0];
         if left.anchor != right.anchor || left.tag != right.tag {
-            return false;
+            return None;
         }
         match (&left.kind, &right.kind) {
             (NodeKind::Scalar { value: a, .. }, NodeKind::Scalar { value: b, .. }) => {
                 let kind = scalar_type(left);
-                if kind != scalar_type(right) || a != b && kind != crate::schema::ScalarType::Null {
-                    return false;
+                if kind != scalar_type(right) || a != b {
+                    return None;
                 }
             }
             (NodeKind::Sequence { items: a, .. }, NodeKind::Sequence { items: b, .. }) => {
                 if a.len() != b.len() {
-                    return false;
+                    return None;
                 }
                 pending.extend(a.iter().copied().zip(b.iter().copied()));
             }
             (NodeKind::Mapping { entries: a, .. }, NodeKind::Mapping { entries: b, .. }) => {
                 if a.len() != b.len() {
-                    return false;
+                    return None;
                 }
                 for (&(ak, av), &(bk, bv)) in a.iter().zip(b) {
                     pending.extend([(ak, bk), (av, bv)]);
@@ -531,12 +605,41 @@ pub(super) fn equivalent(expected: &EditableDocument, actual: &EditableDocument)
             (NodeKind::Alias { target: a, .. }, NodeKind::Alias { target: b, .. }) => {
                 aliases.push((*a, *b));
             }
-            _ => return false,
+            _ => return None,
         }
     }
     aliases
         .into_iter()
         .all(|(a, b)| correspondence[a.0] == Some(b))
+        .then_some(correspondence)
+}
+
+pub(super) fn comments_preserved(
+    expected: &EditableDocument,
+    actual: &EditableDocument,
+    correspondence: &[Option<NodeId>],
+) -> bool {
+    let mut expected_comments = Vec::new();
+    for (id, target) in correspondence.iter().enumerate() {
+        if let Some(target) = target {
+            for comment in &expected.nodes[id].comments {
+                expected_comments.push((target.0, comment.text.as_str(), comment.placement as u8));
+            }
+        }
+    }
+    let mut actual_comments: Vec<_> = actual
+        .nodes
+        .iter()
+        .enumerate()
+        .flat_map(|(id, node)| {
+            node.comments
+                .iter()
+                .map(move |comment| (id, comment.text.as_str(), comment.placement as u8))
+        })
+        .collect();
+    expected_comments.sort_unstable();
+    actual_comments.sort_unstable();
+    expected_comments == actual_comments
 }
 
 fn scalar_type(node: &super::Node) -> crate::schema::ScalarType {

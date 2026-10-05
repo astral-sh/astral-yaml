@@ -146,7 +146,8 @@ impl EditableDocument {
     /// compatible presentation styles. Source outside the root region is retained.
     ///
     /// # Errors
-    /// Returns an error if emission exceeds the document's resource limits.
+    /// Returns an error if emission exceeds resource limits or cannot preserve
+    /// scalar text, alias identity, or comment ownership and placement.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = emit::region(self, self.root, false);
         let indent = emit::indent(&self.source, region.start());
@@ -158,10 +159,14 @@ impl EditableDocument {
         }
         output.push_str(&self.source[region.end()..]);
         let parsed = Self::parse_with_options(&output, self.options)?;
-        if !emit::equivalent(self, &parsed) {
+        let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
+            span: region,
+            message: "emission changed YAML content or alias identity",
+        })?;
+        if !emit::comments_preserved(self, &parsed, &correspondence) {
             return Err(Error {
                 span: region,
-                message: "emission changed YAML content or alias identity",
+                message: "emission changed comment ownership or placement",
             });
         }
         Ok(output)
