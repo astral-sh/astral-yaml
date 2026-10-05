@@ -1,5 +1,8 @@
 use astral_yaml_dev::edit_diff;
-use astral_yaml_serde::{Editable, Tagged, edit::CollectionStyle};
+use astral_yaml_serde::{
+    Editable, Tagged,
+    edit::{CollectionStyle, CommentPlacement, ScalarStyle},
+};
 use serde::Deserialize;
 
 #[test]
@@ -121,5 +124,85 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
      existing: 1
     +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
     +: true
+    "#);
+}
+
+#[test]
+fn typed_root_edits_preserve_document_framing_and_comment_order() {
+    let mut document = Editable::<Vec<String>>::parse("--- [old]\n...\n").unwrap();
+    document
+        .edit(|editor| {
+            let mut root = editor.root_mut();
+            root.set(["new", "values"])?;
+            root.set_collection_style(CollectionStyle::Block)
+        })
+        .unwrap();
+    insta::assert_debug_snapshot!((document.value(), document.source()), @r#"
+    (
+        [
+            "new",
+            "values",
+        ],
+        "--- \n- \"new\"\n- \"values\"\n...\n",
+    )
+    "#);
+
+    let mut document = Editable::<String>::parse("value\n\n# old\n").unwrap();
+    document
+        .edit(|editor| {
+            editor
+                .root_mut()
+                .append_comment(" new", CommentPlacement::Detached)
+        })
+        .unwrap();
+    document
+        .edit(|editor| editor.root_mut().replace_comment(1, " changed"))
+        .unwrap();
+    insta::assert_debug_snapshot!((document.value(), document.source()), @r#"
+    (
+        "value",
+        "value\n\n# old\n# changed\n",
+    )
+    "#);
+}
+
+#[test]
+fn value_setters_can_request_multiline_scalar_styles() {
+    let mut outputs = Vec::new();
+    for (value, style) in [
+        ("first\nsecond", ScalarStyle::Plain),
+        ("first\nsecond", ScalarStyle::SingleQuoted),
+        ("\n", ScalarStyle::Literal),
+        ("\n", ScalarStyle::Folded),
+    ] {
+        let mut document = Editable::<String>::parse("'old'\n\n").unwrap();
+        document
+            .edit(|editor| {
+                let mut root = editor.root_mut();
+                root.set(value)?;
+                root.set_scalar_style(style)
+            })
+            .unwrap();
+        outputs.push((document.value().clone(), document.into_yaml()));
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        (
+            "first\nsecond",
+            "first\n\n  second\n\n",
+        ),
+        (
+            "first\nsecond",
+            "'first\n\n  second'\n\n",
+        ),
+        (
+            "\n",
+            "|2+\n  \n",
+        ),
+        (
+            "\n",
+            ">2+\n  \n",
+        ),
+    ]
     "#);
 }
