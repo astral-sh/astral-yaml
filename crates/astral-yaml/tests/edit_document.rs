@@ -1,6 +1,40 @@
 use astral_yaml::{
-    CollectionStyle, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
+    CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
+
+#[test]
+fn emission_limits_roll_back_root_and_subtree_rewrites() {
+    let quoted = format!("\"{}\"", "\\x01".repeat(8));
+    for nested in [false, true] {
+        let source = if nested {
+            format!("key: {quoted}\n")
+        } else {
+            quoted.clone()
+        };
+        let mut document = EditableDocument::parse_with_options(
+            &source,
+            ParseOptions {
+                max_input_bytes: source.len(),
+                ..ParseOptions::default()
+            },
+        )
+        .unwrap();
+        // Emission canonicalizes the short escapes, exceeding the source limit
+        // inside the renderer, before a replacement patch can be constructed.
+        let error = document
+            .edit(|editor| {
+                let value = if nested {
+                    editor.mapping_entries(&editor.root())?.remove(0).1
+                } else {
+                    editor.root()
+                };
+                editor.set_scalar_style(&value, ScalarStyle::DoubleQuoted)
+            })
+            .unwrap_err();
+        assert_eq!(error.message, "emitted YAML exceeds input byte limit");
+        assert_eq!(document.source(), source);
+    }
+}
 
 #[test]
 fn root_comments_retain_the_requested_order() {
