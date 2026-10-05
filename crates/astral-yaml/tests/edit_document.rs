@@ -1,6 +1,7 @@
 use astral_yaml::{
     CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
+use astral_yaml_dev::edit_diff;
 
 #[test]
 fn emission_limits_roll_back_root_and_subtree_rewrites() {
@@ -38,7 +39,7 @@ fn emission_limits_roll_back_root_and_subtree_rewrites() {
 
 #[test]
 fn root_comments_retain_the_requested_order() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for (source, placement) in [
         ("# old\nvalue\n", CommentPlacement::Leading),
         ("value\n# old\n", CommentPlacement::Trailing),
@@ -54,23 +55,59 @@ fn root_comments_retain_the_requested_order() {
                 editor.insert_comment(&root, 2, " last", placement)
             })
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r##"
-    [
-        "# first\n# old\n# last\nvalue\n",
-        "value\n# first\n# old\n# last\n",
-        "value\n\n# first\n# old\n# last\n",
-        "# first\n# old\n# last\n--- value\n...\n",
-        "value\n...\n\n# first\n# old\n# last\n",
-    ]
-    "##);
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    +# first
+     # old
+    +# last
+     value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     value
+    +# first
+     # old
+    +# last
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     value
+     ⏎
+    +# first
+     # old
+    +# last
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    +# first
+     # old
+    +# last
+     --- value
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,6 @@
+     value
+     ...
+     ⏎
+    +# first
+     # old
+    +# last
+    ");
 }
 
 #[test]
 fn successive_root_comment_edits_keep_indices_and_attachments() {
-    let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
+    let mut diffs = Vec::new();
+    for (name, newline) in [("LF", "\n"), ("CRLF", "\r\n"), ("CR", "\r")] {
         let source = format!("  # old{newline}value{newline}");
         let mut document = EditableDocument::parse(&source).unwrap();
         document
@@ -84,31 +121,83 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
                 editor.replace(&root, "changed")
             })
             .unwrap();
-        outputs.push(document.to_yaml());
+        diffs.push(format!(
+            "{name}: initial edits\n{}",
+            edit_diff(&source, document.source())
+        ));
+        let before = document.to_yaml();
         document
             .edit(|editor| editor.remove_comment(&editor.root(), 2))
             .unwrap();
         document
             .edit(|editor| editor.replace_comment(&editor.root(), 1, " final"))
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(format!(
+            "{name}: subsequent edits\n{}",
+            edit_diff(&before, document.source())
+        ));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "  # first\n  # renamed\n  # last\nchanged\n",
-        "  # first\n  # final\nchanged\n",
-        "  # first\r\n  # renamed\r\n  # last\r\nchanged\r\n",
-        "  # first\r\n  # final\r\nchanged\r\n",
-        "  # first\r  # renamed\r  # last\rchanged\r",
-        "  # first\r  # final\rchanged\r",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    LF: initial edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -  # old
+    -value
+    +  # first
+    +  # renamed
+    +  # last
+    +changed
+
+    LF: subsequent edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+       # first
+    -  # renamed
+    -  # last
+    +  # final
+     changed
+
+    CRLF: initial edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -  # old␍
+    -value␍
+    +  # first␍
+    +  # renamed␍
+    +  # last␍
+    +changed␍
+
+    CRLF: subsequent edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+       # first␍
+    -  # renamed␍
+    -  # last␍
+    +  # final␍
+     changed␍
+
+    CR: initial edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -  # old␍-value␍+  # first␍+  # renamed␍+  # last␍+changed␍
+
+    CR: subsequent edits
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+       # first␍-  # renamed␍-  # last␍+  # final␍ changed␍
+    ");
 }
 
 #[test]
 fn block_roots_can_move_off_a_document_marker_line() {
     // Document prefixes and markers: https://yaml.org/spec/1.2.2/#92-documents
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for source in [
         "--- old\n",
         "--- [old]\n",
@@ -119,7 +208,7 @@ fn block_roots_can_move_off_a_document_marker_line() {
         document
             .edit(|editor| editor.replace(&editor.root(), "- new\n- values\n"))
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
     for source in [
         "--- [old]\n",
@@ -131,31 +220,97 @@ fn block_roots_can_move_off_a_document_marker_line() {
         document
             .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "--- \n- new\n- values\n",
-        "--- \n- new\n- values\n",
-        "---\n- new\n- values",
-        "%YAML 1.2\r\n--- \r\n- new\r\n- values\r\n...\r\n",
-        "--- \n- old\n",
-        "--- \nold: value\n",
-        "--- \n&anchor \n- old\n",
-        "--- \n!<tag:yaml.org,2002:map> \nold: value\n",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- old
+    +--- ⏎
+    +- new
+    +- values
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- [old]
+    +--- ⏎
+    +- new
+    +- values
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ----
+    \ No newline at end of file
+    +---
+    +- new
+    +- values
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     %YAML 1.2␍
+    ---- old␍
+    +--- ␍
+    +- new␍
+    +- values␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- [old]
+    +--- ⏎
+    +- old
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- {old: value}
+    +--- ⏎
+    +old: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- &anchor [old]
+    +--- ⏎
+    +&anchor ⏎
+    +- old
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- !!map {old: value}
+    +--- ⏎
+    +!<tag:yaml.org,2002:map> ⏎
+    +old: value
+    ");
 }
 
 #[test]
 fn root_comment_placement_respects_the_document_prefix() {
-    let mut document = EditableDocument::parse("%YAML 1.2\n--- value\n...\n").unwrap();
+    let source = "%YAML 1.2\n--- value\n...\n";
+    let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
             editor.insert_comment(&editor.root(), 0, " leading", CommentPlacement::Leading)
         })
         .unwrap();
-    insta::assert_debug_snapshot!(document.source(), @r#""%YAML 1.2\n--- \n# leading\nvalue\n...\n""#);
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     %YAML 1.2
+    ---- value
+    +--- ⏎
+    +# leading
+    +value
+     ...
+    ");
 
     let source = "value # inline\n";
     let mut document = EditableDocument::parse(source).unwrap();
@@ -174,7 +329,7 @@ fn root_comment_placement_respects_the_document_prefix() {
 
 #[test]
 fn exact_scalar_style_requests_preserve_multiline_values() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for (source, style) in [
         ("'a\n\nb'\n", ScalarStyle::SingleQuoted),
         ("a\n\nb\n", ScalarStyle::Plain),
@@ -185,21 +340,46 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
         document
             .edit(|editor| editor.set_scalar_style(&editor.root(), style))
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "'a\n\n  b'\n",
-        "a\n\n  b\n",
-        "|2+\n  \n",
-        ">2+\n  \n",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     'a
+     ⏎
+    -b'
+    +  b'
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     a
+     ⏎
+    -b
+    +  b
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -|+
+    -
+    +|2+
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    ->+
+    -
+    +>2+
+    +  ⏎
+    ");
 }
 
 #[test]
 fn block_scalar_rewrites_own_their_trailing_line_breaks() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for source in [
         "'old'\n",
         "'old'\n\n",
@@ -216,26 +396,67 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
                 editor.set_scalar_style(&root, ScalarStyle::Literal)
             })
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "|2+\n  \n",
-        "|2+\n  \n",
-        "|2+\n  \n",
-        "|2+ # keep\n  \n",
-        "|2+\n  \n...\n",
-        "%YAML 1.2 # directive\n--- |2+ # inline\n  \n... # end\n",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -'old'
+    +|2+
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -'old'
+    -
+    +|2+
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    -'old'
+    +|2+
+       ⏎
+    -  ⏎
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -'old' # keep
+    -
+    +|2+ # keep
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -'old'
+    -
+    +|2+
+    +  ⏎
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     %YAML 1.2 # directive
+    ---- 'old' # inline
+    +--- |2+ # inline
+    +  ⏎
+     ... # end
+    ");
 }
 
 #[test]
 fn nested_block_scalar_boundaries_stop_before_following_syntax() {
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
-        let mut document =
-            EditableDocument::parse("outer:\n  value: old # keep\n\nnext: retained\n").unwrap();
+        let source = "outer:\n  value: old # keep\n\nnext: retained\n";
+        let mut document = EditableDocument::parse(source).unwrap();
         document
             .edit(|editor| {
                 let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
@@ -244,14 +465,29 @@ fn nested_block_scalar_boundaries_stop_before_following_syntax() {
                 editor.set_scalar_style(&value, style)
             })
             .unwrap();
-        outputs.push(document.into_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "outer:\n  value: |2+ # keep\n    \nnext: retained\n",
-        "outer:\n  value: >2+ # keep\n    \nnext: retained\n",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     outer:
+    -  value: old # keep
+    -
+    +  value: |2+ # keep
+    +    ⏎
+     next: retained
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     outer:
+    -  value: old # keep
+    -
+    +  value: >2+ # keep
+    +    ⏎
+     next: retained
+    ");
 }
 
 #[test]
