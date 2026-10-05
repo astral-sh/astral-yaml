@@ -19,7 +19,15 @@ fn sequential_replacements_emit_the_final_candidate() {
         })
         .unwrap();
     assert_eq!(result, 42);
-    insta::assert_snapshot!(edit_diff(source, document.source()));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -value: 1 # keep
+    -other : 'untouched'
+    +value: [6, 4] # keep
+    +other: 'untouched'
+    ");
 }
 
 #[test]
@@ -44,7 +52,21 @@ fn removed_subtrees_discard_pending_rewrites_and_style_requests() {
             .unwrap();
         diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_snapshot!(diffs.join("\n"));
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -items: [old, keep]
+    +items: [replacement]
+     other: retained
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -items: [old, keep]
+    +items: [keep]
+     other: retained
+    ");
 }
 
 #[test]
@@ -93,7 +115,85 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
         })
         .unwrap();
     diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"));
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    \ No newline at end of file
+    +new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    \ No newline at end of file
+    +"false"
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -'old'
+    \ No newline at end of file
+    +'it''s new'
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -'old'
+    \ No newline at end of file
+    +"line\nbreak"
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -"old"
+    \ No newline at end of file
+    +60
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -|-
+    -  old
+    +|2-
+    +  new
+    +  text
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -- old
+    +- new
+    +- values
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old: 1
+    +new: 2
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -[]
+    \ No newline at end of file
+    +42
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -[&value 'old', *value]
+    \ No newline at end of file
+    +[&value 'new', *value]
+    \ No newline at end of file
+    "#);
 }
 
 #[test]
