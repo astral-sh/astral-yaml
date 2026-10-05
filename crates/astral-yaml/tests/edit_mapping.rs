@@ -1,5 +1,137 @@
-use astral_yaml::{ScalarStyle, edit::EditableDocument};
+use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::edit_diff;
+
+#[test]
+fn indentless_sequences_can_become_empty_or_flow_values() {
+    // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
+    let mut outputs = Vec::new();
+    for source in [
+        "items:\n- x\nother : kept\n",
+        "outer:\n  items:\n  - x\n  other : kept\noutside : untouched\n",
+        "- items:\n  - x\n  other : kept\n",
+        "&mapping\nitems:\n- x\nother : kept\n",
+        "items:\r\n- x\r\n",
+        "items:\n- x",
+    ] {
+        for remove in [true, false] {
+            let mut document = EditableDocument::parse(source).unwrap();
+            document
+                .edit(|editor| {
+                    let mut mapping = editor.root();
+                    if source.starts_with("outer:") {
+                        mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                    } else if source.starts_with('-') {
+                        mapping = editor.sequence_items(&mapping)?.remove(0);
+                    }
+                    let sequence = editor.mapping_entries(&mapping)?.remove(0).1;
+                    if remove {
+                        editor.remove_item(&sequence, 0)
+                    } else {
+                        editor.set_collection_style(&sequence, CollectionStyle::Flow)
+                    }
+                })
+                .unwrap();
+            outputs.push(document.to_yaml());
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "items: []\nother: kept\n",
+        "items: [x]\nother: kept\n",
+        "outer:\n  items: []\n  other: kept\noutside : untouched\n",
+        "outer:\n  items: [x]\n  other: kept\noutside : untouched\n",
+        "-\n  items: []\n  other: kept\n",
+        "-\n  items: [x]\n  other: kept\n",
+        "&mapping \nitems: []\nother: kept\n",
+        "&mapping \nitems: [x]\nother: kept\n",
+        "items: []\r\n",
+        "items: [x]\r\n",
+        "items: []",
+        "items: [x]",
+    ]
+    "#);
+}
+
+#[test]
+fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
+    // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
+    let mut outputs = Vec::new();
+    for source in ["a: b\n: c\n", "a: b\r\n: c\r\n", "a: b\r: c\r", "a: b\n: c"] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let key = editor.mapping_entries(&editor.root())?.remove(1).0;
+                editor.replace(&key, "next")
+            })
+            .unwrap();
+        outputs.push(document.to_yaml());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "a: b\nnext: c\n",
+        "a: b\r\nnext: c\r\n",
+        "a: b\rnext: c\r",
+        "a: b\nnext: c",
+    ]
+    "#);
+}
+
+#[test]
+fn nested_flow_pair_keys_expand_the_enclosing_rewrite() {
+    // Implicit flow pairs: https://yaml.org/spec/1.2.2/#741-flow-sequences
+    let mut diffs = Vec::new();
+    for source in [
+        "[[[a]: b]: c]\n",
+        "outer: [[[a]: b]: c]\noutside : untouched\n",
+        "[[[[a]: b]: c]: d]\n",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let mut sequence = editor.root();
+                if source.starts_with("outer:") {
+                    sequence = editor.mapping_entries(&sequence)?.remove(0).1;
+                }
+                while let Ok(items) = editor.sequence_items(&sequence) {
+                    let item = &items[0];
+                    let Ok(entries) = editor.mapping_entries(item) else {
+                        break;
+                    };
+                    sequence = entries[0].0.clone();
+                }
+                editor.insert_item(&sequence, 0, "new")
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -[[[a]: b]: c]
+    +[{? [{? [new, a]
+    +      : b}]
+    +  : c}]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -outer: [[[a]: b]: c]
+    +outer: [{? [{? [new, a]
+    +      : b}]
+    +  : c}]
+     outside : untouched
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -[[[[a]: b]: c]: d]
+    +[{? [{? [{? [new, a]
+    +          : b}]
+    +      : c}]
+    +  : d}]
+    ");
+}
 
 #[test]
 fn mapping_scalar_replacement_adds_omitted_value_indicators() {

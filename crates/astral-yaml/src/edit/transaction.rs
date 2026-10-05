@@ -189,6 +189,21 @@ impl<'a> Editor<'a> {
     }
 
     fn mark(&mut self, mut id: NodeId) {
+        // Changes below a key can make an enclosing implicit key multiline or
+        // too long. Include its mapping so emission can use explicit notation.
+        let edited = id;
+        let mut ancestor = id;
+        while let Some(parent) = self.parents[ancestor.0] {
+            if ancestor != edited
+                && matches!(&self.candidate.nodes[parent.0].kind,
+                    NodeKind::Mapping { entries, .. }
+                        if entries.iter().any(|&(key, _)| key == ancestor))
+            {
+                id = parent;
+            }
+            ancestor = parent;
+        }
+
         while let Some(parent) = self.parents[id.0] {
             if id.0 < self.original.nodes.len() {
                 let block = matches!(&self.candidate.nodes[id.0].kind,
@@ -238,7 +253,24 @@ impl<'a> Editor<'a> {
                             })
                         }));
             }
-            if value == id && span.is_empty() {
+            if value != id {
+                continue;
+            }
+            // A block sequence may be indentless. Render its mapping when it
+            // becomes flow syntax so the value can follow ':' on the same line.
+            if matches!(
+                self.original.nodes[id.0].kind,
+                NodeKind::Sequence {
+                    style: CollectionStyle::Block,
+                    ..
+                }
+            ) && matches!(&self.candidate.nodes[id.0].kind,
+                    NodeKind::Sequence { items, style }
+                        if items.is_empty() || *style == CollectionStyle::Flow)
+            {
+                return true;
+            }
+            if span.is_empty() {
                 // A value omitted without ':' has no source range in which
                 // a scalar replacement can supply its value indicator.
                 let separator =
@@ -710,7 +742,8 @@ impl<'a> Editor<'a> {
             let flow = self.flow_context(id);
             let indent = emit::indent(&self.original.source, region.start());
             let mut body = emit::render(&self.candidate, id, region, indent, flow)?;
-            if self.original.source[..region.end()].ends_with(['\r', '\n'])
+            if !region.is_empty()
+                && self.original.source[..region.end()].ends_with(['\r', '\n'])
                 && !body.ends_with(['\r', '\n'])
             {
                 body.push_str(emit::newline(&self.original.source));
