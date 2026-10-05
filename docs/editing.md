@@ -78,7 +78,8 @@ The callback can return a value, such as a count of removed entries. `edit()`
 returns that value only after the transaction commits.
 
 Before commit, the editor emits and reparses the candidate, checks content,
-alias identity, requested styles, and comment ownership, then deserializes `T`.
+alias identity, requested styles, and comment ownership, placement, and order,
+then deserializes `T`.
 Any error leaves the original source and typed value intact. This includes
 missing required fields, out-of-range values, and duplicate mapping keys.
 
@@ -112,6 +113,9 @@ replaced range. A structural edit may rewrite its collection, or an enclosing
 collection when the surrounding syntax requires it. Outside those regions,
 original text is copied.
 
+Rewrites include adjacent separators when YAML assigns them to the replacement,
+such as trailing blank lines that would become part of a block scalar's value.
+
 Rewritten regions retain entry order, comments, tags, anchors, alias identity,
 and compatible styles. Whitespace and scalar spelling may normalize, but decoded
 scalar text is retained, including empty values read by Serde as strings. Block
@@ -127,6 +131,7 @@ Comments owned by the enclosing collection remain. Comment editing uses text
 without `#` or a line break and placement relative to its direct owner. Include a
 leading space in the text for a comment beginning with `# `. A requested
 attachment that cannot survive emission is rejected rather than reassigned.
+Comments retain their order within each owner, including across transactions.
 
 Value setters retain the selected node's anchor and compatible style, with a
 fallback when that style cannot represent the replacement. Tags come from the
