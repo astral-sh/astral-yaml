@@ -597,32 +597,22 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
     let source = if flow {
         format!("[{candidate}]")
     } else {
-        // A mapping supplies the parent indentation used by block scalars.
+        // A sequence supplies the parent indentation used by block scalars.
         // Indenting a standalone scalar's header does not establish it.
-        format!("{}value: {candidate}", " ".repeat(indent))
+        format!("{}- {candidate}", " ".repeat(indent))
     };
     let matches = crate::parse(&source).is_ok_and(|stream| {
         let [document] = stream.documents() else {
             return false;
         };
-        let mut node = stream.node(document.root).expect("parsed root");
-        if flow {
-            let crate::NodeKind::Sequence { items, .. } = &node.kind else {
-                return false;
-            };
-            let [id] = items.as_slice() else {
-                return false;
-            };
-            node = stream.node(*id).expect("parsed item");
-        } else {
-            let crate::NodeKind::Mapping { entries, .. } = &node.kind else {
-                return false;
-            };
-            let [entry] = entries.as_slice() else {
-                return false;
-            };
-            node = stream.node(entry.value).expect("parsed value");
-        }
+        let root = stream.node(document.root).expect("parsed root");
+        let crate::NodeKind::Sequence { items, .. } = &root.kind else {
+            return false;
+        };
+        let [id] = items.as_slice() else {
+            return false;
+        };
+        let node = stream.node(*id).expect("parsed item");
         matches!(&node.kind, crate::NodeKind::Scalar(scalar)
             if scalar.value == value)
             && node.tag.is_none()

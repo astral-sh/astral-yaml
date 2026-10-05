@@ -171,6 +171,8 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
         ("]\n---\n[", true),
         ("key]: value #", true),
         ("first, second", true),
+        ("] # empty sequence", true),
+        ("first\r- second", false),
     ] {
         let output = super::scalar(value, crate::ScalarStyle::Plain, flow, 0, "\n");
         let parsed = crate::parse(&output).unwrap();
