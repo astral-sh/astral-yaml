@@ -121,15 +121,17 @@ fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
             let text = super::scalar(value, style, false, 2, "\n");
             let source = format!("  value: {text}");
             let parsed = crate::parse(&source).unwrap();
-            let crate::NodeKind::Mapping { entries, .. } =
-                &parsed.node(parsed.documents()[0].root).unwrap().kind
-            else {
-                unreachable!();
-            };
-            let node = parsed.node(entries[0].value).unwrap();
+            let node = parsed
+                .nodes()
+                .iter()
+                .find(|node| {
+                    matches!(&node.kind,
+                crate::NodeKind::Scalar(scalar) if scalar.value == value)
+                })
+                .unwrap();
             assert!(
                 matches!(&node.kind, crate::NodeKind::Scalar(scalar)
-                if scalar.value == value && scalar.style == style),
+                if scalar.style == style),
                 "{value:?} -> {text:?}"
             );
         }
@@ -173,6 +175,7 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
         ("first, second", true),
         ("] # empty sequence", true),
         ("first\r- second", false),
+        ("first\r---\rsecond", false),
     ] {
         let output = super::scalar(value, crate::ScalarStyle::Plain, flow, 0, "\n");
         let parsed = crate::parse(&output).unwrap();
@@ -271,6 +274,7 @@ fn normalized_syntax_preserves_values_and_comments() {
         "a: { # opening\n  key: value} # closing\n",
         "a: &a # anchor\n  | # header\n    text\n",
         "? [a, b]\n: value\n",
+        "? |\n  line\n",
         "[&a [1, 2], *a]",
         "text: |-\n  first\n  second\n",
         "text: >-\n  first\n\n  second\n",
