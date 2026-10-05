@@ -7,6 +7,9 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
         ("null", "~", false),
         ("a:", "a: null", false),
         ("!custom", "!custom null", false),
+        ("!!null null", "!!null null", true),
+        ("!!bool true", "!!bool true", true),
+        ("!!float 1.0", "!!float 1.0", true),
         ("!!str 42", "!!int 42", false),
         ("1", "2", false),
         ("[1]", "[]", false),
@@ -27,6 +30,12 @@ fn rendering_obeys_work_and_output_budgets() {
         ("42", 0, 100, "emission resource limit exceeded"),
         ("[42]", 1, 100, "emission resource limit exceeded"),
         ("42", 100, 1, "emitted YAML exceeds input byte limit"),
+        (
+            "a: # note\n  - value\n",
+            100,
+            3,
+            "emitted YAML exceeds input byte limit",
+        ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document.options.max_nodes = nodes;
@@ -40,6 +49,22 @@ fn rendering_obeys_work_and_output_budgets() {
         )
         .unwrap_err();
         assert_eq!(error.message, expected);
+    }
+}
+
+#[test]
+fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
+    for (value, flow) in [
+        ("first\n---\nsecond", false),
+        ("]\n---\n[", true),
+        ("key]: value #", true),
+        ("first, second", true),
+    ] {
+        let output = super::scalar(value, crate::ScalarStyle::Plain, flow, 0, "\n");
+        let parsed = crate::parse(&output).unwrap();
+        assert_eq!(parsed.documents().len(), 1, "{output:?}");
+        let root = parsed.node(parsed.documents()[0].root).unwrap();
+        assert!(matches!(&root.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value));
     }
 }
 
@@ -94,6 +119,20 @@ fn normalization_rejects_reassigned_comments() {
 }
 
 #[test]
+fn normalization_ignores_comments_on_unreachable_nodes() {
+    let mut document = EditableDocument::parse("value").unwrap();
+    let mut removed = document.nodes[document.root.0].clone();
+    removed.comments.push(crate::edit::Comment {
+        text: " removed".to_owned(),
+        placement: crate::comments::CommentPlacement::Inline,
+        span: crate::Span::new(0, 0).unwrap(),
+    });
+    // Replaced nodes may remain in the arena without belonging to the document.
+    document.nodes.push(removed);
+    assert_eq!(document.normalized_yaml().unwrap(), "value");
+}
+
+#[test]
 fn normalized_syntax_preserves_values_and_comments() {
     use astral_yaml_dev::Value;
     for source in [
@@ -107,10 +146,16 @@ fn normalized_syntax_preserves_values_and_comments() {
         r#""a\"b\\c""#,
         "\"a\\nb\\r\\t\\0\\u0085\\u2028\\u2029\"",
         "{name: 'café', numbers: [1, 2]}",
+        "{&key name: value}",
+        "{!!str name: value}",
+        "  name: value\n",
         "[{}, [], null]",
         "---\n# start\nfirst: one # inline\nsecond:\n  - two\n  - three\n# end\n...\n",
         "[1, # one\n 2]",
         "{a: 1, # one\n b: 2}",
+        "a: [ # opening\n  item] # closing\n",
+        "a: { # opening\n  key: value} # closing\n",
+        "a: &a # anchor\n  | # header\n    text\n",
         "? [a, b]\n: value\n",
         "[&a [1, 2], *a]",
         "text: |-\n  first\n  second\n",
