@@ -174,9 +174,11 @@ fn rust_values_never_interpret_strings_as_yaml() {
     escaped string
     --- before.yaml
     +++ after.yaml
-    @@ -1 +1 @@
+    @@ -1 +1,3 @@
     -old
-    +"it's a\nnew line"
+    +it's a
+    +
+    +  new line
     "#);
 }
 
