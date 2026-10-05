@@ -37,6 +37,34 @@ fn empty_transactions_do_not_require_rewrite_work() {
 }
 
 #[test]
+fn outer_comment_plans_obey_work_and_output_limits() {
+    let source = "        # old\nvalue\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    document.options.max_input_bytes = source.len();
+    let mut editor = Editor::new(&document);
+    for index in 0..3 {
+        editor
+            .insert_comment(
+                &editor.root(),
+                index,
+                " new",
+                crate::comments::CommentPlacement::Leading,
+            )
+            .unwrap();
+    }
+    let region = document.nodes[document.root.0].span;
+    assert_eq!(
+        editor.root_comments(region).unwrap_err().message,
+        "emitted YAML exceeds input byte limit"
+    );
+    editor.work.set(0);
+    assert_eq!(
+        editor.root_comments(region).unwrap_err().message,
+        "editing resource limit exceeded"
+    );
+}
+
+#[test]
 fn requested_style_comparison_checks_kind_and_collection_contents() {
     for (left, right, expected) in [
         ("one", "one", true),

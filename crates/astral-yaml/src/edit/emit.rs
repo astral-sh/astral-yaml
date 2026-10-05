@@ -58,16 +58,48 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     flow: bool,
 ) -> Result<Rendered, Error> {
     let document = document.into();
+    render_with_comments(
+        document,
+        id,
+        region,
+        indent,
+        flow,
+        &document.nodes[id.0].comments,
+    )
+}
+
+/// Renders a region after the transaction has planned any outer comment patches.
+pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>(
+    document: impl Into<Emission<'a, Location>>,
+    id: NodeId,
+    region: Span,
+    indent: usize,
+    flow: bool,
+    root_comments: &'a [Comment<Location>],
+) -> Result<Rendered, Error> {
+    let document = document.into();
     let mut emitter = Emitter {
         document,
         root: id,
+        root_comments,
         region,
         output: String::new(),
         work: document.options.max_nodes,
         pending_indent: None,
         trailing_block_scalar: false,
     };
-    if region.is_empty()
+    let prefix = document.source[..region.start()]
+        .rsplit(['\r', '\n'])
+        .next()
+        .unwrap_or("");
+    let own_line = id == document.root
+        && (block_collection(&document.nodes[id.0].kind, flow)
+            || !emitter.comments(id, CommentPlacement::Leading).is_empty());
+    if own_line && !prefix.bytes().all(|byte| byte == b' ') {
+        // The unchanged prefix can end in a document marker. Block collections
+        // and leading comments must start on their own line, unlike inline roots.
+        emitter.line(indent)?;
+    } else if region.is_empty()
         && matches!(
             document.source.as_bytes()[..region.start()].last(),
             Some(b':' | b'-' | b'?')
@@ -248,6 +280,7 @@ enum ErasedRootLine {
 struct Emitter<'a, Location> {
     document: Emission<'a, Location>,
     root: NodeId,
+    root_comments: &'a [Comment<Location>],
     region: Span,
     output: String,
     work: usize,
@@ -445,8 +478,12 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
     }
 
     fn visible_comments(&self, id: NodeId) -> impl Iterator<Item = &Comment<Location>> {
-        self.document.nodes[id.0]
-            .comments
+        let comments = if id == self.root {
+            self.root_comments
+        } else {
+            &self.document.nodes[id.0].comments
+        };
+        comments
             .iter()
             .filter(move |comment| {
                 id != self.root

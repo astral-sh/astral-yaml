@@ -31,6 +31,15 @@ pub struct Editor<'a> {
     failure: Option<Error>,
 }
 
+/// The document's outer comments share their source with directives and markers.
+/// Keep those source positions as anchors instead of pulling them into the node
+/// region, which would erase framing syntax when that region is rendered.
+#[derive(Debug)]
+struct RootComments {
+    rendered: Vec<Comment>,
+    insertions: Vec<(Span, String)>,
+}
+
 impl EditableDocument {
     /// Applies syntax edits atomically. Failed mutation operations poison the transaction,
     /// even if the callback catches their errors.
@@ -685,6 +694,33 @@ impl<'a> Editor<'a> {
             && (span.start() < root_span.start() || span.end() > root_span.end())
         {
             self.patches.retain(|(previous, _)| *previous != span);
+            let span = if replacement.is_empty() {
+                // A removed standalone comment must not leave an empty line:
+                // that would detach the remaining leading/trailing comments.
+                let source = &self.original.source;
+                let start = source[..span.start()]
+                    .rfind(['\r', '\n'])
+                    .map_or(0, |index| index + 1);
+                if source[start..span.start()]
+                    .bytes()
+                    .all(|byte| matches!(byte, b' ' | b'\t'))
+                {
+                    let suffix = &source[span.end()..];
+                    let terminator = if suffix.starts_with("\r\n") {
+                        2
+                    } else {
+                        usize::from(suffix.starts_with(['\r', '\n']))
+                    };
+                    Span {
+                        start,
+                        end: span.end() + terminator,
+                    }
+                } else {
+                    span
+                }
+            } else {
+                span
+            };
             self.patches.push((span, replacement));
         } else {
             self.mark_parent(id);
@@ -732,6 +768,65 @@ impl<'a> Editor<'a> {
         }
     }
 
+    fn root_comments(&self, region: Span) -> Result<RootComments, Error> {
+        let comments = &self.candidate.nodes[self.candidate.root.0].comments;
+        self.charge(comments.len())?;
+        let mut following = vec![None; comments.len()];
+        let mut next = None;
+        for (index, comment) in comments.iter().enumerate().rev() {
+            following[index] = next;
+            if !comment.span.is_empty() {
+                next = Some(index);
+            }
+        }
+
+        let mut plan = RootComments {
+            rendered: Vec::new(),
+            insertions: Vec::new(),
+        };
+        let newline = emit::newline(&self.original.source);
+        let mut previous = None;
+        let mut bytes = 0usize;
+        for (index, comment) in comments.iter().enumerate() {
+            if !comment.span.is_empty() {
+                previous = Some(index);
+                plan.rendered.push(comment.clone());
+                continue;
+            }
+            // Consecutive insertions use the nearest retained comments as
+            // anchors. Planning from the final list preserves order even when
+            // several operations insert at the same index in one transaction.
+            let outer = |&index: &usize| {
+                let anchor = &comments[index];
+                anchor.placement == comment.placement
+                    && comment.placement != CommentPlacement::Inline
+                    && (anchor.span.end() <= region.start() || anchor.span.start() >= region.end())
+            };
+            let anchor = following[index]
+                .filter(outer)
+                .map(|index| (index, true))
+                .or_else(|| previous.filter(outer).map(|index| (index, false)));
+            let Some((anchor, before)) = anchor else {
+                plan.rendered.push(comment.clone());
+                continue;
+            };
+            let anchor = &comments[anchor];
+            let indentation = emit::indent(&self.original.source, anchor.span.start());
+            bytes = bytes
+                .checked_add(comment.text.len() + 1 + newline.len() + indentation)
+                .filter(|&size| size <= self.original.options.max_input_bytes)
+                .ok_or_else(|| self.error("emitted YAML exceeds input byte limit"))?;
+            let separator = format!("{newline}{}", " ".repeat(indentation));
+            let (at, text) = if before {
+                (anchor.span.start(), format!("#{}{separator}", comment.text))
+            } else {
+                (anchor.span.end(), format!("{separator}#{}", comment.text))
+            };
+            plan.insertions.push((Span { start: at, end: at }, text));
+        }
+        Ok(plan)
+    }
+
     fn finish(self) -> Result<EditableDocument, Error> {
         if let Some(error) = self.failure {
             return Err(error);
@@ -741,7 +836,20 @@ impl<'a> Editor<'a> {
         for &(id, region) in &regions {
             let flow = self.flow_context(id);
             let indent = emit::indent(&self.original.source, region.start());
-            let mut body = emit::render(&self.candidate, id, region, indent, flow)?;
+            let mut body = if id == self.candidate.root {
+                let comments = self.root_comments(region)?;
+                patches.extend(comments.insertions);
+                emit::render_with_comments(
+                    &self.candidate,
+                    id,
+                    region,
+                    indent,
+                    flow,
+                    &comments.rendered,
+                )?
+            } else {
+                emit::render(&self.candidate, id, region, indent, flow)?
+            };
             if !region.is_empty()
                 && self.original.source[..region.end()].ends_with(['\r', '\n'])
                 && !body.ends_with(['\r', '\n'])
@@ -760,7 +868,9 @@ impl<'a> Editor<'a> {
                 })
                 .cloned(),
         );
-        patches.sort_by_key(|(span, _)| span.start());
+        // Insertions at a replacement's start must precede that replacement.
+        // Stable sorting retains candidate order for insertions at the same point.
+        patches.sort_by_key(|(span, _)| (span.start(), span.end()));
         let mut source = String::new();
         let mut position = 0;
         for (span, replacement) in patches {

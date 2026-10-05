@@ -142,10 +142,12 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1 +1 @@
+    @@ -1 +1,3 @@
     -'old'
     \ No newline at end of file
-    +"line\nbreak"
+    +'line
+    +
+    +  break'
     \ No newline at end of file
 
     --- before.yaml
