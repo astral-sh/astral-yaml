@@ -4,7 +4,7 @@ use astral_yaml_dev::edit_diff;
 #[test]
 fn indentless_sequences_can_become_empty_or_flow_values() {
     // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for source in [
         "items:\n- x\nother : kept\n",
         "outer:\n  items:\n  - x\n  other : kept\noutside : untouched\n",
@@ -31,31 +31,130 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
                     }
                 })
                 .unwrap();
-            outputs.push(document.to_yaml());
+            diffs.push(edit_diff(source, document.source()));
         }
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "items: []\nother: kept\n",
-        "items: [x]\nother: kept\n",
-        "outer:\n  items: []\n  other: kept\noutside : untouched\n",
-        "outer:\n  items: [x]\n  other: kept\noutside : untouched\n",
-        "-\n  items: []\n  other: kept\n",
-        "-\n  items: [x]\n  other: kept\n",
-        "&mapping \nitems: []\nother: kept\n",
-        "&mapping \nitems: [x]\nother: kept\n",
-        "items: []\r\n",
-        "items: [x]\r\n",
-        "items: []",
-        "items: [x]",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    -items:
+    -- x
+    -other : kept
+    +items: []
+    +other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    -items:
+    -- x
+    -other : kept
+    +items: [x]
+    +other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     outer:
+    -  items:
+    -  - x
+    -  other : kept
+    +  items: []
+    +  other: kept
+     outside : untouched
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     outer:
+    -  items:
+    -  - x
+    -  other : kept
+    +  items: [x]
+    +  other: kept
+     outside : untouched
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -- items:
+    -  - x
+    -  other : kept
+    +-
+    +  items: []
+    +  other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -- items:
+    -  - x
+    -  other : kept
+    +-
+    +  items: [x]
+    +  other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    -&mapping
+    -items:
+    -- x
+    -other : kept
+    +&mapping ⏎
+    +items: []
+    +other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    -&mapping
+    -items:
+    -- x
+    -other : kept
+    +&mapping ⏎
+    +items: [x]
+    +other: kept
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+    -items:␍
+    -- x␍
+    +items: []␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+    -items:␍
+    -- x␍
+    +items: [x]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+    -items:
+    -- x
+    \ No newline at end of file
+    +items: []
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1 @@
+    -items:
+    -- x
+    \ No newline at end of file
+    +items: [x]
+    \ No newline at end of file
+    ");
 }
 
 #[test]
 fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
-    let mut outputs = Vec::new();
+    let mut diffs = Vec::new();
     for source in ["a: b\n: c\n", "a: b\r\n: c\r\n", "a: b\r: c\r", "a: b\n: c"] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -64,16 +163,37 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
                 editor.replace(&key, "next")
             })
             .unwrap();
-        outputs.push(document.to_yaml());
+        diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "a: b\nnext: c\n",
-        "a: b\r\nnext: c\r\n",
-        "a: b\rnext: c\r",
-        "a: b\nnext: c",
-    ]
-    "#);
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     a: b
+    -: c
+    +next: c
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     a: b␍
+    -: c␍
+    +next: c␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     a: b␍-: c␍+next: c␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     a: b
+    -: c
+    \ No newline at end of file
+    +next: c
+    \ No newline at end of file
+    ");
 }
 
 #[test]
