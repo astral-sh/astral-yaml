@@ -182,17 +182,23 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
     document
         .edit(|editor| {
             let entries = editor.mapping_entries(&editor.root())?;
-            editor.replace(&entries[0].1, "60")
+            editor.replace(&entries[0].1, "600")
         })
         .unwrap();
-    assert_eq!(document.to_yaml(), source.replace("30", "60"));
+    // Diff snapshots normalize line endings, so check CRLF preservation directly.
+    assert!(
+        document
+            .source()
+            .split_inclusive('\n')
+            .all(|line| line.ends_with("\r\n"))
+    );
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
      # config
     -timeout : 30   # seconds
-    +timeout : 60   # seconds
+    +timeout : 600   # seconds
      other:    'untouched'
     ");
     let before = document.to_yaml();
@@ -203,18 +209,18 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
             editor.replace(&entries[1].1, "'updated'")
         })
         .unwrap();
-    assert_eq!(
-        document.to_yaml(),
-        source
-            .replace("30", "1000")
-            .replace("'untouched'", "'updated'")
+    assert!(
+        document
+            .source()
+            .split_inclusive('\n')
+            .all(|line| line.ends_with("\r\n"))
     );
     insta::assert_snapshot!(edit_diff(&before, document.source()), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
      # config
-    -timeout : 60   # seconds
+    -timeout : 600   # seconds
     -other:    'untouched'
     +timeout : 1000   # seconds
     +other:    'updated'
