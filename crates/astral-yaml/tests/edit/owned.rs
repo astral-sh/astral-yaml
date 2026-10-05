@@ -185,21 +185,14 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
             editor.replace(&entries[0].1, "600")
         })
         .unwrap();
-    // Diff snapshots normalize line endings, so check CRLF preservation directly.
-    assert!(
-        document
-            .source()
-            .split_inclusive('\n')
-            .all(|line| line.ends_with("\r\n"))
-    );
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
-     # config
-    -timeout : 30   # seconds
-    +timeout : 600   # seconds
-     other:    'untouched'
+     # config␍
+    -timeout : 30   # seconds␍
+    +timeout : 600   # seconds␍
+     other:    'untouched'␍
     ");
     let before = document.to_yaml();
     document
@@ -209,21 +202,15 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
             editor.replace(&entries[1].1, "'updated'")
         })
         .unwrap();
-    assert!(
-        document
-            .source()
-            .split_inclusive('\n')
-            .all(|line| line.ends_with("\r\n"))
-    );
     insta::assert_snapshot!(edit_diff(&before, document.source()), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
-     # config
-    -timeout : 600   # seconds
-    -other:    'untouched'
-    +timeout : 1000   # seconds
-    +other:    'updated'
+     # config␍
+    -timeout : 600   # seconds␍
+    -other:    'untouched'␍
+    +timeout : 1000   # seconds␍
+    +other:    'updated'␍
     ");
 }
 
@@ -389,10 +376,6 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
             e.remove_comment(&root, 1)
         })
         .unwrap();
-    assert_eq!(
-        document.source(),
-        "%YAML 1.2 # updated\n--- \n42 # number\n"
-    );
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -505,8 +488,6 @@ fn local_collection_edits_leave_siblings_untouched() {
                 e.insert_item(&entries[1].1, 2, "3")
             })
             .unwrap();
-        assert!(document.source().starts_with("a:  'untouched'\nb:"));
-        assert!(document.source().ends_with("c : true\n"));
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -777,7 +758,6 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     document
         .edit(|e| e.replace(&e.root(), "'updated'"))
         .unwrap();
-    assert_eq!(document.source(), "'updated'\n");
     insta::assert_snapshot!(edit_diff("|\n  hello\n", document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -888,12 +868,7 @@ fn repeated_navigation_is_bounded() {
 #[test]
 fn replacing_implicit_nulls_adds_required_separation() {
     let mut diffs = Vec::new();
-    for (source, expected) in [
-        ("---", "--- 42"),
-        ("a:", "a: 42"),
-        ("-", "- 42"),
-        ("{a:}", "{a: 42}"),
-    ] {
+    for source in ["---", "a:", "-", "{a:}"] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
             .edit(|e| {
@@ -906,7 +881,6 @@ fn replacing_implicit_nulls_adds_required_separation() {
                 e.replace(&target, "42")
             })
             .unwrap();
-        assert_eq!(document.source(), expected);
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
