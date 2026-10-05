@@ -1,0 +1,33 @@
+---
+source: crates/astral-yaml-serde/tests/editable_preservation.rs
+expression: "diffs.join(\"\\n\")"
+---
+--- before.yaml
++++ after.yaml
+@@ -1,4 +1,5 @@
+-plain: &empty
+-tagged: !custom
++plain: &empty ⏎
++tagged: !<!custom> ⏎
+ copy: *empty
+ other: keep
++"enabled": true
+
+--- before.yaml
++++ after.yaml
+@@ -1,4 +1,3 @@
+-plain: &empty
+-tagged: !custom
++plain: &empty ⏎
++tagged: !<!custom> ⏎
+ copy: *empty
+-other: keep
+
+--- before.yaml
++++ after.yaml
+@@ -1,4 +1 @@
+-plain: &empty
+-tagged: !custom
+-copy: *empty
+-other: keep
++{plain: &empty , tagged: !<!custom> , copy: *empty, other: keep}
