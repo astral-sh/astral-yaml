@@ -25,6 +25,118 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
 }
 
 #[test]
+fn comment_comparison_preserves_each_owners_order() {
+    for (before, after, expected) in [
+        (
+            "# first\n# second\nvalue\n",
+            "# first\n# second\nvalue\n",
+            true,
+        ),
+        (
+            "# first\n# second\nvalue\n",
+            "# second\n# first\nvalue\n",
+            false,
+        ),
+        (
+            "value\n\n# first\n\n# second\n",
+            "value\n\n# second\n\n# first\n",
+            false,
+        ),
+        ("# first\nvalue\n", "value # first\n", false),
+        ("# first\nvalue\n", "value\n", false),
+        ("value\n", "# first\nvalue\n", false),
+    ] {
+        let before = EditableDocument::parse(before).unwrap();
+        let after = EditableDocument::parse(after).unwrap();
+        let correspondence = correspondence(&before, &after).unwrap();
+        assert_eq!(
+            super::comments_preserved(&before, &after, &correspondence),
+            expected
+        );
+    }
+}
+
+#[test]
+fn scalar_emission_preserves_representable_line_breaks() {
+    // Flow folding and block chomping:
+    // https://yaml.org/spec/1.2.2/#65-line-folding
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+    use crate::ScalarStyle;
+    for style in [
+        ScalarStyle::Plain,
+        ScalarStyle::SingleQuoted,
+        ScalarStyle::Literal,
+        ScalarStyle::Folded,
+    ] {
+        for value in [
+            "a\nb", "a\n\nb", "\nb", "\n\nb", "b\n", "b\n\n", "\n", "\n\n",
+        ] {
+            if style == ScalarStyle::Plain && (value.starts_with('\n') || value.ends_with('\n')) {
+                continue;
+            }
+            for indent in [0, 2, 4] {
+                for newline in ["\n", "\r\n", "\r"] {
+                    for flow in [false, true] {
+                        if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
+                            continue;
+                        }
+                        let text = super::scalar(value, style, flow, indent, newline);
+                        let source = if flow {
+                            format!("[{text}]")
+                        } else {
+                            format!("{}value: {text}", " ".repeat(indent))
+                        };
+                        let stream = crate::parse(&source).unwrap();
+                        let mut node = stream.node(stream.documents()[0].root).unwrap();
+                        if let crate::NodeKind::Sequence { items, .. } = &node.kind {
+                            node = stream.node(items[0]).unwrap();
+                        } else if let crate::NodeKind::Mapping { entries, .. } = &node.kind {
+                            node = stream.node(entries[0].value).unwrap();
+                        }
+                        assert!(
+                            matches!(&node.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
+                            "{style:?}, {flow}, {indent}, {newline:?}, {value:?} -> {text:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
+    use crate::ScalarStyle;
+    for style in [ScalarStyle::Plain, ScalarStyle::SingleQuoted] {
+        for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
+            let text = super::scalar(value, style, false, 2, "\n");
+            let parsed = crate::parse(&text).unwrap();
+            let node = parsed.node(parsed.documents()[0].root).unwrap();
+            assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
+                if scalar.value == value && scalar.style == ScalarStyle::DoubleQuoted));
+        }
+    }
+    for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
+        for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
+            let text = super::scalar(value, style, false, 2, "\n");
+            let source = format!("  value: {text}");
+            let parsed = crate::parse(&source).unwrap();
+            let crate::NodeKind::Mapping { entries, .. } =
+                &parsed.node(parsed.documents()[0].root).unwrap().kind
+            else {
+                unreachable!();
+            };
+            let node = parsed.node(entries[0].value).unwrap();
+            assert!(
+                matches!(&node.kind, crate::NodeKind::Scalar(scalar)
+                if scalar.value == value && scalar.style == style),
+                "{value:?} -> {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rendering_obeys_work_and_output_budgets() {
     for (source, nodes, bytes, expected) in [
         ("42", 0, 100, "emission resource limit exceeded"),

@@ -402,6 +402,15 @@ impl Emitter<'_> {
         indent: usize,
         inline_skip: usize,
     ) -> Result<usize, Error> {
+        // Root block scalars measure an explicit indentation indicator from
+        // column zero, not from the column containing their header.
+        let indent = if id == self.document.root
+            && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
+        {
+            0
+        } else {
+            indent
+        };
         let text = scalar(value, style, flow, indent, self.newline);
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once(self.newline).expect("block scalar header");
@@ -489,6 +498,81 @@ fn quoted(value: &str) -> String {
     result
 }
 
+fn flow_scalar(value: &str, indent: usize, newline: &str) -> String {
+    let continuation = " ".repeat(indent + 2);
+    let mut result = String::new();
+    let mut after_break = false;
+    for character in value.chars() {
+        if character == '\n' {
+            // Flow folding consumes one physical break in each run. An extra
+            // empty line retains every decoded break, including at the edges
+            // of a single-quoted scalar.
+            if !after_break {
+                result.push_str(newline);
+            }
+            result.push_str(newline);
+            after_break = true;
+        } else {
+            if after_break {
+                result.push_str(&continuation);
+            }
+            result.push(character);
+            after_break = false;
+        }
+    }
+    if after_break {
+        result.push_str(&continuation);
+    }
+    result
+}
+
+fn block_scalar(value: &str, style: ScalarStyle, indent: usize, newline: &str) -> String {
+    let indicator = if style == ScalarStyle::Literal {
+        '|'
+    } else {
+        '>'
+    };
+    let trailing = value
+        .bytes()
+        .rev()
+        .take_while(|&byte| byte == b'\n')
+        .count();
+    let chomp = match trailing {
+        0 => "-",
+        // Clip retains the final break of a nonempty content line. A scalar
+        // consisting only of empty lines needs keep even for a single break.
+        1 if value.len() > trailing => "",
+        _ => "+",
+    };
+    let mut body = value.to_owned();
+    if style == ScalarStyle::Folded {
+        // Only breaks between ordinary text lines fold in block scalars.
+        // Leading, trailing, and more-indented lines already retain breaks.
+        body.clear();
+        let mut previous_text = false;
+        for (index, line) in value.split('\n').enumerate() {
+            if index != 0 {
+                body.push('\n');
+            }
+            if !line.is_empty() {
+                if previous_text && !line.starts_with([' ', '\t']) {
+                    body.push('\n');
+                }
+                previous_text = !line.starts_with([' ', '\t']);
+            }
+            body.push_str(line);
+        }
+    }
+    let mut result = format!("{indicator}2{chomp}{newline}");
+    let indentation = " ".repeat(indent + 2);
+    for line in body.split_terminator('\n') {
+        result.push_str(&indentation);
+        result.push_str(line);
+        result.push_str(newline);
+    }
+    result
+}
+
 fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &str) -> String {
     // Check the generated scalar in its actual flow/block context. This also
     // handles plain-scalar punctuation, folding, and explicit indentation.
@@ -496,46 +580,15 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
         // Empty scalar text is observable through Serde string visitors and
         // application tags, even when the core schema resolves it as null.
         ScalarStyle::Plain if value.is_empty() => return String::new(),
-        ScalarStyle::Plain => value.to_owned(),
-        ScalarStyle::SingleQuoted => format!("'{}'", value.replace('\'', "''")),
+        ScalarStyle::Plain => flow_scalar(value, indent, newline),
+        ScalarStyle::SingleQuoted => {
+            format!(
+                "'{}'",
+                flow_scalar(value, indent, newline).replace('\'', "''")
+            )
+        }
         ScalarStyle::Literal | ScalarStyle::Folded if !flow => {
-            let indicator = if style == ScalarStyle::Literal {
-                '|'
-            } else {
-                '>'
-            };
-            let trailing = value.bytes().rev().take_while(|&b| b == b'\n').count();
-            let chomp = match trailing {
-                0 => "-",
-                1 => "",
-                _ => "+",
-            };
-            let mut body = value.to_owned();
-            if style == ScalarStyle::Folded {
-                // A blank line prevents folding between ordinary text lines.
-                let lines: Vec<_> = value.split('\n').collect();
-                body.clear();
-                let mut previous_text = false;
-                for (index, line) in lines.iter().enumerate() {
-                    if index != 0 {
-                        body.push('\n');
-                    }
-                    if !line.is_empty() {
-                        if previous_text && !line.starts_with([' ', '\t']) {
-                            body.push('\n');
-                        }
-                        previous_text = !line.starts_with([' ', '\t']);
-                    }
-                    body.push_str(line);
-                }
-            }
-            let mut result = format!("{indicator}2{chomp}{newline}");
-            for line in body.split_terminator('\n') {
-                result.push_str(&" ".repeat(indent + 2));
-                result.push_str(line);
-                result.push_str(newline);
-            }
-            result
+            block_scalar(value, style, indent, newline)
         }
         ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
             return quoted(value);
@@ -544,7 +597,9 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
     let source = if flow {
         format!("[{candidate}]")
     } else {
-        format!("{}{candidate}", " ".repeat(indent))
+        // A mapping supplies the parent indentation used by block scalars.
+        // Indenting a standalone scalar's header does not establish it.
+        format!("{}value: {candidate}", " ".repeat(indent))
     };
     let matches = crate::parse(&source).is_ok_and(|stream| {
         let [document] = stream.documents() else {
@@ -559,6 +614,14 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
                 return false;
             };
             node = stream.node(*id).expect("parsed item");
+        } else {
+            let crate::NodeKind::Mapping { entries, .. } = &node.kind else {
+                return false;
+            };
+            let [entry] = entries.as_slice() else {
+                return false;
+            };
+            node = stream.node(entry.value).expect("parsed value");
         }
         matches!(&node.kind, crate::NodeKind::Scalar(scalar)
             if scalar.value == value)
@@ -623,27 +686,18 @@ pub(super) fn comments_preserved(
     actual: &EditableDocument,
     correspondence: &[Option<NodeId>],
 ) -> bool {
-    let mut expected_comments = Vec::new();
-    for (id, target) in correspondence.iter().enumerate() {
-        if let Some(target) = target {
-            for comment in &expected.nodes[id].comments {
-                expected_comments.push((target.0, comment.text.as_str(), comment.placement as u8));
-            }
-        }
-    }
-    let mut actual_comments: Vec<_> = actual
-        .nodes
-        .iter()
-        .enumerate()
-        .flat_map(|(id, node)| {
-            node.comments
+    correspondence.iter().enumerate().all(|(id, target)| {
+        let Some(target) = target else {
+            return true;
+        };
+        let left = &expected.nodes[id].comments;
+        let right = &actual.nodes[target.0].comments;
+        left.len() == right.len()
+            && left
                 .iter()
-                .map(move |comment| (id, comment.text.as_str(), comment.placement as u8))
-        })
-        .collect();
-    expected_comments.sort_unstable();
-    actual_comments.sort_unstable();
-    expected_comments == actual_comments
+                .zip(right)
+                .all(|(left, right)| left.text == right.text && left.placement == right.placement)
+    })
 }
 
 fn scalar_type(node: &super::Node) -> crate::schema::ScalarType {

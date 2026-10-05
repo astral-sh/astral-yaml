@@ -1,6 +1,53 @@
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 
 #[test]
+fn normalization_retains_multiline_scalar_styles() {
+    let outputs: Vec<_> = ["a\n\nb\n", "'a\n\nb'\n", "|+\n\n", ">+\n\n"]
+        .into_iter()
+        .map(|source| {
+            EditableDocument::parse(source)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap()
+        })
+        .collect();
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "a\n\n  b\n",
+        "'a\n\n  b'\n",
+        "|2+\n  \n",
+        ">2+\n  \n",
+    ]
+    "#);
+}
+
+#[test]
+fn normalized_block_scalars_use_their_parent_indentation() {
+    let outputs: Vec<_> = [
+        "  |2-\n  first\n  second\n",
+        "  &anchor |2-\n  first\n  second\n",
+        "outer:\n  inner: |-\n    first\n    second\n",
+        "outer:\n  - |+\n    \n",
+    ]
+    .into_iter()
+    .map(|source| {
+        EditableDocument::parse(source)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap()
+    })
+    .collect();
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "  |2-\n  first\n  second\n",
+        "  &anchor |2-\n  first\n  second\n",
+        "outer:\n  inner: |2-\n    first\n    second\n",
+        "outer:\n  - |2+\n    \n",
+    ]
+    "#);
+}
+
+#[test]
 fn normalization_preserves_leading_comments_in_flow_collections() {
     // Comment separation: https://yaml.org/spec/1.2.2/#66-comments
     let mut outputs = Vec::new();
