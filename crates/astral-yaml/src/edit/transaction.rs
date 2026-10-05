@@ -200,13 +200,53 @@ impl<'a> Editor<'a> {
                     .rsplit(['\n', '\r'])
                     .next()
                     .unwrap_or("");
-                if !block || prefix.bytes().all(|byte| byte == b' ') {
+                if (!block || prefix.bytes().all(|byte| byte == b' '))
+                    && !self.needs_mapping_rewrite(id, parent)
+                {
                     break;
                 }
             }
             id = parent;
         }
         self.rewrites.insert(id);
+    }
+
+    fn needs_mapping_rewrite(&self, id: NodeId, parent: NodeId) -> bool {
+        let NodeKind::Mapping { entries, style } = &self.original.nodes[parent.0].kind else {
+            return false;
+        };
+        let source = &self.original.source;
+        let span = self.original.nodes[id.0].span;
+        for &(key, value) in entries {
+            if key == id {
+                // Key notation and separation belong to the mapping, outside
+                // the key's span. Reuse the emitter's implicit-key check.
+                let node = &self.candidate.nodes[id.0];
+                let separator = crate::comments::skip_trivia(source, span.end());
+                let plain = matches!(
+                    node.kind,
+                    NodeKind::Scalar {
+                        style: ScalarStyle::Plain,
+                        ..
+                    }
+                );
+                return !emit::simple_key(node, emit::newline(source), *style == CollectionStyle::Flow)
+                    || (plain
+                        && source[separator..].strip_prefix(':').is_some_and(|suffix| {
+                            suffix.starts_with(|c: char| {
+                                !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
+                            })
+                        }));
+            }
+            if value == id && span.is_empty() {
+                // A value omitted without ':' has no source range in which
+                // a scalar replacement can supply its value indicator.
+                let separator =
+                    crate::comments::skip_trivia(source, self.original.nodes[key.0].span.end());
+                return source.as_bytes().get(separator) != Some(&b':');
+            }
+        }
+        false
     }
 
     fn mark_parent(&mut self, id: NodeId) {

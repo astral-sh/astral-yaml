@@ -77,6 +77,9 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     }
     let context = Context::value(indent, flow, if id == document.root { 0 } else { indent });
     emitter.node(id, context, "", 0)?;
+    if region.is_empty() && document.source.as_bytes().get(region.end()) == Some(&b'#') {
+        emitter.push(" ")?;
+    }
     emitter.finish()
 }
 
@@ -772,7 +775,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
     fn key(&mut self, key: NodeId, context: Context, depth: usize) -> Result<(), Error> {
         let indent = context.indent;
         let is_flow = context.in_flow();
-        let simple = self.simple_key(key, is_flow);
+        let simple = simple_key(&self.document.nodes[key.0], is_flow);
         if !simple && !is_flow {
             self.push("?")?;
             let key_comments = self.node_comments(key);
@@ -872,31 +875,6 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
         prefix.trim_start_matches('\u{feff}').is_empty() && self.output.is_empty()
     }
 
-    fn simple_key(&self, id: NodeId, flow: bool) -> bool {
-        let node = &self.document.nodes[id.0];
-        let NodeKind::Scalar { value, style } = &node.kind else {
-            return false;
-        };
-        if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
-        {
-            return false;
-        }
-        // YAML limits the entire implicit key, including escapes and properties,
-        // to 1024 source characters on one line.
-        let position = if flow {
-            ScalarPosition::Flow
-        } else {
-            ScalarPosition::Block
-        };
-        let text = scalar(value, *style, position, 0);
-        let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
-        let anchor = node
-            .anchor
-            .as_ref()
-            .map_or(0, |anchor| anchor.chars().count() + 2);
-        !text.contains('\n') && text.chars().count() + tag + anchor <= 1024
-    }
-
     fn value(
         &mut self,
         id: NodeId,
@@ -951,6 +929,30 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
             .map_or(start, |offset| start + offset + 1),
         None => source.len(),
     }
+}
+
+pub(super) fn simple_key(node: &super::Node, flow: bool) -> bool {
+    let NodeKind::Scalar { value, style } = &node.kind else {
+        return false;
+    };
+    if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
+    {
+        return false;
+    }
+    // YAML limits the entire implicit key, including escapes and properties,
+    // to 1024 source characters on one line.
+    let position = if flow {
+        ScalarPosition::Flow
+    } else {
+        ScalarPosition::Block
+    };
+    let text = scalar(value, *style, position, 0);
+    let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
+    let anchor = node
+        .anchor
+        .as_ref()
+        .map_or(0, |anchor| anchor.chars().count() + 2);
+    !text.contains(['\r', '\n']) && text.chars().count() + tag + anchor <= 1024
 }
 
 fn block_collection(kind: &NodeKind, flow: bool) -> bool {
