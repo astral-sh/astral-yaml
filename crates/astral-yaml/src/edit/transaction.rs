@@ -424,7 +424,7 @@ impl<'a> Editor<'a> {
             }
             let simple = inline_node(&editor.candidate.nodes[id.0])
                 && inline_node(&editor.candidate.nodes[root.0]);
-            let comments = retained_comments(
+            let comments = merged_comments(
                 &editor.candidate.nodes[id.0],
                 &editor.candidate.nodes[root.0],
             );
@@ -433,7 +433,7 @@ impl<'a> Editor<'a> {
             editor.alive[id.0] = true;
             editor.alive[root.0] = false;
             editor.candidate.nodes[id.0] = editor.candidate.nodes[root.0].clone();
-            editor.candidate.nodes[id.0].comments.splice(0..0, comments);
+            editor.candidate.nodes[id.0].comments = comments;
             editor.candidate.nodes[id.0].span = span;
             for index in offset..editor.candidate.nodes.len() {
                 remap(&mut editor.candidate.nodes[index], |target| {
@@ -779,17 +779,11 @@ impl<'a> Editor<'a> {
                 .map(|&id| {
                     let mut region = emit::region(self.original, id, false);
                     if id == self.candidate.root
-                        && matches!(
-                            self.candidate.nodes[id.0].kind,
-                            NodeKind::Scalar {
-                                style: ScalarStyle::Literal | ScalarStyle::Folded,
-                                ..
-                            }
-                        )
+                        && emit::has_inline_header(&self.candidate.nodes[id.0], false)
                     {
-                        // A root's end-of-line comment moves onto a block
-                        // scalar's header. Marker/directive comments on other
-                        // lines remain outside the rewritten node.
+                        // A root's inline comment must move with its content
+                        // when the emitted layout puts it on a header. Framing
+                        // comments on other lines remain outside the rewrite.
                         for comment in &self.original.nodes[id.0].comments {
                             if comment.placement == CommentPlacement::Inline
                                 && comment.span.start() >= region.end()
@@ -851,7 +845,11 @@ impl<'a> Editor<'a> {
             // several operations insert at the same index in one transaction.
             let outer = |&index: &usize| {
                 let anchor = &comments[index];
-                anchor.placement == comment.placement
+                matches!(
+                    comment.position,
+                    CommentPosition::Before | CommentPosition::After
+                ) && anchor.position == comment.position
+                    && anchor.placement == comment.placement
                     && comment.placement != CommentPlacement::Inline
                     && (anchor.span.end() <= region.start() || anchor.span.start() >= region.end())
             };
@@ -1019,9 +1017,18 @@ fn retarget_comments(node: &mut Node, removed: NodeId, following: Option<NodeId>
     }
 }
 
-/// Whole-node replacements retain gaps by ordinal position, without retaining
-/// references to descendants that are about to expire.
-fn retained_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
+/// Merge the retained and imported comments at their structural positions.
+/// Each list keeps its own order; retained comments precede imports at a shared
+/// boundary. Collection gaps retain their ordinal position in the replacement.
+fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    enum Boundary {
+        Before,
+        Header,
+        BeforeChild(usize),
+        InlineAfter,
+        After,
+    }
     fn boundaries(kind: &NodeKind) -> Vec<NodeId> {
         match kind {
             NodeKind::Sequence { items, .. } => items.clone(),
@@ -1043,7 +1050,34 @@ fn retained_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
                 following[&child].map_or(CommentPosition::After, CommentPosition::BeforeChild);
         }
     }
-    comments
+    let positions: HashMap<_, _> = new_children
+        .into_iter()
+        .enumerate()
+        .map(|(index, child)| (child, index))
+        .collect();
+    let boundary = |comment: &Comment| match comment.position {
+        CommentPosition::Before => Boundary::Before,
+        CommentPosition::Header => Boundary::Header,
+        CommentPosition::BeforeChild(child) => Boundary::BeforeChild(positions[&child]),
+        CommentPosition::After if comment.placement == CommentPlacement::Inline => {
+            Boundary::InlineAfter
+        }
+        CommentPosition::After => Boundary::After,
+    };
+    let mut retained = comments.into_iter().peekable();
+    let mut imported = replacement.comments.iter().cloned().peekable();
+    let mut merged = Vec::with_capacity(retained.len() + imported.len());
+    while let (Some(left), Some(right)) = (retained.peek(), imported.peek()) {
+        let next = if boundary(left) <= boundary(right) {
+            retained.next()
+        } else {
+            imported.next()
+        };
+        merged.push(next.expect("remaining comment"));
+    }
+    merged.extend(retained);
+    merged.extend(imported);
+    merged
 }
 
 fn inline_node(node: &Node) -> bool {

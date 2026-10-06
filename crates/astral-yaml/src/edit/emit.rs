@@ -1004,6 +1004,20 @@ pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> 
     !text.contains(['\r', '\n']) && text.chars().count() + tag + anchor <= 1024
 }
 
+/// Whether block presentation provides a header for an inline content comment.
+/// Collection headers need a tag or anchor; block scalars have their indicator.
+pub(super) fn has_inline_header(node: &super::Node, flow: bool) -> bool {
+    !flow
+        && (matches!(
+            node.kind,
+            NodeKind::Scalar {
+                style: ScalarStyle::Literal | ScalarStyle::Folded,
+                ..
+            }
+        ) || (block_collection(&node.kind, flow)
+            && (node.tag.is_some() || node.anchor.is_some())))
+}
+
 fn block_collection(kind: &NodeKind, flow: bool) -> bool {
     collection_style(kind, flow) == Some(CollectionStyle::Block)
 }
