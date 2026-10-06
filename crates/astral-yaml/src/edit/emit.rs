@@ -70,7 +70,7 @@ pub(super) fn render(
     region: Span,
     indent: usize,
     flow: bool,
-) -> Result<String, Error> {
+) -> Result<Rendered, Error> {
     let mut emitter = Emitter {
         document,
         root: id,
@@ -78,6 +78,8 @@ pub(super) fn render(
         newline: newline(&document.source),
         output: String::new(),
         work: document.options.max_nodes,
+        pending_indent: None,
+        trailing_block_scalar: false,
     };
     if region.is_empty()
         && matches!(
@@ -89,7 +91,14 @@ pub(super) fn render(
     }
     let context = Context::value(indent, flow, if id == document.root { 0 } else { indent });
     emitter.node(id, context, "", 0)?;
-    Ok(emitter.output)
+    emitter.finish()
+}
+
+/// Complete replacement text and the source separators it owns.
+#[derive(Debug)]
+pub(super) struct Rendered {
+    pub(super) text: String,
+    pub(super) span: Span,
 }
 
 #[derive(Clone, Copy)]
@@ -157,8 +166,10 @@ impl Comments {
 
     fn has_prefix(&self) -> bool {
         self.remaining.as_slice().iter().any(|comment| {
-            comment.position != CommentPosition::After
-                || comment.placement == CommentPlacement::Leading
+            matches!(
+                comment.position,
+                CommentPosition::Before | CommentPosition::Header
+            ) || comment.placement == CommentPlacement::Leading
         })
     }
 
@@ -189,7 +200,10 @@ impl Comments {
                 .iter()
                 .filter(|comment| {
                     comment.placement == CommentPlacement::Inline
-                        && comment.position != CommentPosition::After
+                        && matches!(
+                            comment.position,
+                            CommentPosition::Before | CommentPosition::Header
+                        )
                 })
                 .count()
                 > properties
@@ -223,6 +237,9 @@ struct Emitter<'a> {
     newline: &'static str,
     output: String,
     work: usize,
+    // A comment terminator is materialized only when following syntax needs it.
+    pending_indent: Option<usize>,
+    trailing_block_scalar: bool,
 }
 
 impl Emitter<'_> {
@@ -233,7 +250,49 @@ impl Emitter<'_> {
         }
     }
 
+    fn finish(mut self) -> Result<Rendered, Error> {
+        let source = &self.document.source;
+        let mut span = self.region;
+        if self.trailing_block_scalar {
+            // Blank lines immediately following a block scalar belong to its
+            // content. The emitted value supplies all of them itself.
+            let suffix = &source[span.end()..];
+            span.end = match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
+                Some(index) => suffix[..index]
+                    .rfind(['\r', '\n'])
+                    .map_or(span.end(), |offset| span.end() + offset + 1),
+                None => source.len(),
+            };
+        }
+        let suffix = &source[span.end()..];
+        let suffix_has_break = suffix
+            .trim_start_matches([' ', '\t'])
+            .starts_with(['\r', '\n']);
+        let needs_break = self.pending_indent.take().is_some()
+            || self
+                .document
+                .end_marker
+                .is_some_and(|marker| marker.start() == span.end())
+            || (!span.is_empty() && source[..span.end()].ends_with(['\r', '\n']));
+        if needs_break
+            && !self.output.is_empty()
+            && !self.output.ends_with(['\r', '\n'])
+            && !suffix_has_break
+        {
+            self.push(self.newline)?;
+        }
+        Ok(Rendered {
+            text: self.output,
+            span,
+        })
+    }
+
     fn push(&mut self, text: &str) -> Result<(), Error> {
+        if !text.is_empty() {
+            if let Some(indent) = self.pending_indent.take() {
+                self.line(indent)?;
+            }
+        }
         if text.len()
             > self
                 .document
@@ -243,11 +302,15 @@ impl Emitter<'_> {
         {
             return Err(self.error("emitted YAML exceeds input byte limit"));
         }
+        if text.bytes().any(|byte| !byte.is_ascii_whitespace()) {
+            self.trailing_block_scalar = false;
+        }
         self.output.push_str(text);
         Ok(())
     }
 
     fn line(&mut self, indent: usize) -> Result<(), Error> {
+        self.pending_indent = None;
         if let Some(index) = self
             .output
             .rfind(['\r', '\n'])
@@ -332,10 +395,41 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    fn between(
+        &mut self,
+        comments: &mut Comments,
+        child: NodeId,
+        indent: usize,
+    ) -> Result<(), Error> {
+        while comments
+            .remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| comment.position == CommentPosition::BeforeChild(child))
+        {
+            let comment = comments.remaining.next().expect("comment before child");
+            self.line(indent)?;
+            if !self.trailing_block_scalar {
+                self.push(self.newline)?;
+            }
+            self.line(indent)?;
+            self.push("#")?;
+            self.push(&comment.text)?;
+            // Blank separation on both sides keeps a container comment from
+            // becoming a leading comment on the following child.
+            self.push(self.newline)?;
+            self.push(self.newline)?;
+            self.line(indent)?;
+        }
+        Ok(())
+    }
+
     fn after(&mut self, comments: Comments, indent: usize, suffix: &str) -> Result<(), Error> {
         self.push(suffix)?;
         for comment in comments.remaining {
-            if comment.placement == CommentPlacement::Inline && !self.output.ends_with(['\n', '\r'])
+            if comment.placement == CommentPlacement::Inline
+                && self.pending_indent.is_none()
+                && !self.output.ends_with(['\n', '\r'])
             {
                 self.push(" ")?;
             } else {
@@ -347,8 +441,7 @@ impl Emitter<'_> {
             }
             self.push("#")?;
             self.push(&comment.text)?;
-            // A comment must never swallow a following delimiter or property.
-            self.line(indent)?;
+            self.pending_indent = Some(indent);
         }
         Ok(())
     }
@@ -390,39 +483,14 @@ impl Emitter<'_> {
                 self.push(name)?;
             }
             NodeKind::Sequence { items, style } => {
-                let is_flow = flow || *style == CollectionStyle::Flow || items.is_empty();
-                if is_flow {
-                    self.push("[")?;
-                    if comments.needs_header() && self.inline(&mut comments)? {
-                        self.line(indent + 2)?;
-                        self.before(&mut comments, indent + 2)?;
-                    }
-                    for (index, &item) in items.iter().enumerate() {
-                        if index != 0 {
-                            self.push(" ")?;
-                        }
-                        self.node(
-                            item,
-                            Context::flow(indent + 2),
-                            if index + 1 == items.len() { "" } else { "," },
-                            depth + 1,
-                        )?;
-                    }
-                    self.push("]")?;
-                } else {
-                    if node.anchor.is_some() || node.tag.is_some() {
-                        self.line(indent)?;
-                    }
-                    for (index, &item) in items.iter().enumerate() {
-                        if index != 0 {
-                            self.line(indent)?;
-                        }
-                        let mut comments = self.node_comments(item);
-                        self.before(&mut comments, indent)?;
-                        self.push("-")?;
-                        self.value(item, context, "", depth + 1, comments)?;
-                    }
-                }
+                self.sequence(
+                    items,
+                    *style,
+                    node.anchor.is_some() || node.tag.is_some(),
+                    context,
+                    depth,
+                    &mut comments,
+                )?;
             }
             NodeKind::Mapping { entries, style } => {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
@@ -443,6 +511,11 @@ impl Emitter<'_> {
                             self.line(indent)?;
                         }
                     }
+                    self.between(
+                        &mut comments,
+                        key,
+                        if is_flow { indent + 2 } else { indent },
+                    )?;
                     let mut value_comments = self.node_comments(value);
                     self.before(
                         &mut value_comments,
@@ -469,6 +542,54 @@ impl Emitter<'_> {
             }
         }
         self.after(comments, indent, suffix)
+    }
+
+    fn sequence(
+        &mut self,
+        items: &[NodeId],
+        style: CollectionStyle,
+        has_properties: bool,
+        context: Context,
+        depth: usize,
+        comments: &mut Comments,
+    ) -> Result<(), Error> {
+        let indent = context.indent;
+        let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
+        if is_flow {
+            self.push("[")?;
+            if comments.needs_header() && self.inline(comments)? {
+                self.line(indent + 2)?;
+                self.before(comments, indent + 2)?;
+            }
+            for (index, &item) in items.iter().enumerate() {
+                if index != 0 {
+                    self.push(" ")?;
+                }
+                self.between(comments, item, indent + 2)?;
+                self.node(
+                    item,
+                    Context::flow(indent + 2),
+                    if index + 1 == items.len() { "" } else { "," },
+                    depth + 1,
+                )?;
+            }
+            self.push("]")?;
+        } else {
+            if has_properties {
+                self.line(indent)?;
+            }
+            for (index, &item) in items.iter().enumerate() {
+                if index != 0 {
+                    self.line(indent)?;
+                }
+                self.between(comments, item, indent)?;
+                let mut comments = self.node_comments(item);
+                self.before(&mut comments, indent)?;
+                self.push("-")?;
+                self.value(item, context, "", depth + 1, comments)?;
+            }
+        }
+        Ok(())
     }
 
     fn key(&mut self, key: NodeId, context: Context, depth: usize) -> Result<(), Error> {
@@ -562,6 +683,7 @@ impl Emitter<'_> {
             self.inline(comments)?;
             self.push(self.newline)?;
             self.push(body)?;
+            self.trailing_block_scalar = true;
             return Ok(());
         }
         self.push(&text)

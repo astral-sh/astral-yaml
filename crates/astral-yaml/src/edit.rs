@@ -18,6 +18,7 @@ pub struct EditableDocument {
     pub(crate) nodes: Vec<Node>,
     pub(crate) root: NodeId,
     pub(crate) options: ParseOptions,
+    pub(crate) end_marker: Option<Span>,
 }
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
@@ -71,6 +72,8 @@ pub struct Comment<Location = Span> {
 pub(crate) enum CommentPosition {
     Before,
     Header,
+    /// A collection-owned comment before an item or mapping key.
+    BeforeChild(NodeId),
     After,
 }
 
@@ -148,6 +151,23 @@ impl EditableDocument {
                 CommentPosition::Before
             } else if attached.comment.span.start() < content_start {
                 CommentPosition::Header
+            } else if attached.placement == crate::comments::CommentPlacement::Detached {
+                let at = attached.comment.span.start();
+                let following = match &node.kind {
+                    crate::NodeKind::Sequence { items, .. } => {
+                        let index =
+                            items.partition_point(|id| stream.nodes()[id.0].span.start() <= at);
+                        items.get(index).copied()
+                    }
+                    crate::NodeKind::Mapping { entries, .. } => {
+                        let index = entries.partition_point(|entry| {
+                            stream.nodes()[entry.key.0].span.start() <= at
+                        });
+                        entries.get(index).map(|entry| entry.key)
+                    }
+                    _ => None,
+                };
+                following.map_or(CommentPosition::After, CommentPosition::BeforeChild)
             } else {
                 CommentPosition::After
             };
@@ -162,6 +182,7 @@ impl EditableDocument {
             nodes,
             root: document.root,
             options,
+            end_marker: document.end_marker,
             source: source.into_owned(),
         })
     }
@@ -181,13 +202,10 @@ impl EditableDocument {
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = emit::region(self, self.root, false);
         let indent = emit::indent(&self.source, region.start());
-        let body = emit::render(self, self.root, region, indent, false)?;
-        let mut output = self.source[..region.start()].to_owned();
-        output.push_str(&body);
-        if self.source[..region.end()].ends_with(['\n', '\r']) && !output.ends_with(['\n', '\r']) {
-            output.push_str(emit::newline(&self.source));
-        }
-        output.push_str(&self.source[region.end()..]);
+        let rendered = emit::render(self, self.root, region, indent, false)?;
+        let mut output = self.source[..rendered.span.start()].to_owned();
+        output.push_str(&rendered.text);
+        output.push_str(&self.source[rendered.span.end()..]);
         let parsed = Self::parse_with_options(&output, self.options)?;
         let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
             span: region,

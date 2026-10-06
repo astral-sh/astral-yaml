@@ -24,9 +24,9 @@ fn normalization_preserves_header_comments_before_leading_comments() {
         "key: # header\n  # leading\n  value\n",
         "- # header\n  # leading\n  value\n",
         "{key: # header\n  # leading\n  value}\n",
-        "# before\nkey: # header\n  # leading\n  value # inline\n  \n",
+        "# before\nkey: # header\n  # leading\n  value # inline\n",
         "key: # header\n  # leading\n  |2 # scalar\n  text\n",
-        "key: # header\n  # leading\n  &a # anchor\n    value # inline\n  \n",
+        "key: # header\n  # leading\n  &a # anchor\n    value # inline\n",
     ]
     "##);
 }
@@ -177,9 +177,9 @@ fn normalization_preserves_separate_header_comments() {
         "a: &a # anchor\n  |2 # header\n  text\n",
         "a: !<tag:yaml.org,2002:str> # anchor\n  &a # tag\n  |2 # header\n  text\n",
         "a: # field\n  !<tag:yaml.org,2002:seq> # anchor\n  &a # tag\n  - item\n",
-        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a # opening\n  [item] # closing\n\n",
-        "a: [ # opening\n  item] # closing\n\n",
-        "a: { # opening\n  key: value} # closing\n\n",
+        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a # opening\n  [item] # closing\n",
+        "a: [ # opening\n  item] # closing\n",
+        "a: { # opening\n  key: value} # closing\n",
     ]
     "#);
 }
@@ -315,4 +315,54 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
         "? # header\n  # leading\n  |2-\n  key\n: value\n",
     ]
     "#);
+}
+
+#[test]
+fn normalization_preserves_framing_and_collection_comment_positions() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# config\n%YAML 1.2\n---\nkey: old\n...\n  # after\n",
+            "# config\n--- &root\n- old\n...\n",
+            "key: old # inline\n# tail\n",
+            "a: old\n\n# detached\n\nb: |+\n  text\n\n",
+            "a: |+\n  text\n\n# detached\n\nb: old\n",
+            "- old\n\n# detached\n\n- |+\n  text\n\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let document = EditableDocument::parse(&source).unwrap();
+            let output = document.normalized_yaml().unwrap();
+            // Normalization reaches a fixed point, including source separators.
+            assert_eq!(
+                EditableDocument::parse(&output)
+                    .unwrap()
+                    .normalized_yaml()
+                    .unwrap(),
+                output
+            );
+            outputs.push(output);
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r##"
+    [
+        "# config\n%YAML 1.2\n---\nkey: old\n...\n  # after\n",
+        "# config\n--- &root \n- old\n...\n",
+        "key: old # inline\n# tail\n",
+        "a: old\n\n# detached\n\nb: |2+\n  text\n  \n",
+        "a: |2+\n  text\n  \n# detached\n\nb: old\n",
+        "- old\n\n# detached\n\n- |2+\n  text\n  \n",
+        "# config\r\n%YAML 1.2\r\n---\r\nkey: old\r\n...\r\n  # after\r\n",
+        "# config\r\n--- &root \r\n- old\r\n...\r\n",
+        "key: old # inline\r\n# tail\r\n",
+        "a: old\r\n\r\n# detached\r\n\r\nb: |2+\r\n  text\r\n  \r\n",
+        "a: |2+\r\n  text\r\n  \r\n# detached\r\n\r\nb: old\r\n",
+        "- old\r\n\r\n# detached\r\n\r\n- |2+\r\n  text\r\n  \r\n",
+        "# config\r%YAML 1.2\r---\rkey: old\r...\r  # after\r",
+        "# config\r--- &root \r- old\r...\r",
+        "key: old # inline\r# tail\r",
+        "a: old\r\r# detached\r\rb: |2+\r  text\r  \r",
+        "a: |2+\r  text\r  \r# detached\r\rb: old\r",
+        "- old\r\r# detached\r\r- |2+\r  text\r  \r",
+    ]
+    "##);
 }
