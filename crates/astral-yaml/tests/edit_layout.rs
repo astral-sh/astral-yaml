@@ -921,3 +921,191 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
     -[{key: old}]␍+-␍+  key: old␍ ␍-   # root␍+# root␍
     ");
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn retained_end_markers_bound_removed_suffix_comments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "---\n{outer: {key: old}} # inline\n...\n\n# detached\n",
+            "{outer: {key: old}} # inline\n# trailing\n\n",
+            "{outer: {key: old}} # inline\n# trailing\n...\n",
+            "{outer: {key: old}}\n... # inline\n# trailing\n",
+            "{outer: {key: old}}\n...\n\n# detached\n...\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    let inner = editor.mapping_entries(&root)?[0].1.clone();
+                    let leaf = editor.mapping_entries(&inner)?[0].1.clone();
+                    editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
+                    editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
+                    editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
+                    editor.replace(&leaf, "|+\n  new\n\n")
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    ----
+    -{outer: {key: old}} # inline
+    +--- # inline
+    +outer:
+    +  key: |2+
+    +    new
+    +    ⏎
+     ...
+     ⏎
+    -# detached
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline
+    -# trailing
+    +--- # inline
+    +outer:
+    +  key: |2+
+    +    new
+    +    ⏎
+    +...
+    +
+     ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline
+    -# trailing
+    +--- # inline
+    +outer:
+    +  key: |2+
+    +    new
+    +    ⏎
+    +...
+    +
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}}
+    +outer:
+    +  key: |2+
+    +    new
+    +    ⏎
+     ... # inline
+    -# trailing
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    -{outer: {key: old}}
+    +outer:
+    +  key: |2+
+    +    new
+    +    ⏎
+     ...
+     ⏎
+    -# detached
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    ----␍
+    -{outer: {key: old}} # inline␍
+    +--- # inline␍
+    +outer:␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+     ...␍
+     ␍
+    -# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline␍
+    -# trailing␍
+    +--- # inline␍
+    +outer:␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+    +...␍
+    +␍
+     ␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline␍
+    -# trailing␍
+    +--- # inline␍
+    +outer:␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+    +...␍
+    +␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}}␍
+    +outer:␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+     ... # inline␍
+    -# trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    -{outer: {key: old}}␍
+    +outer:␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+     ...␍
+     ␍
+    -# detached␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    ----␍-{outer: {key: old}} # inline␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍ ...␍ ␍-# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline␍-# trailing␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -{outer: {key: old}} # inline␍-# trailing␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}}␍+outer:␍+  key: |2+␍+    new␍+    ␍ ... # inline␍-# trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+    -{outer: {key: old}}␍+outer:␍+  key: |2+␍+    new␍+    ␍ ...␍ ␍-# detached␍ ...␍
+    ");
+}

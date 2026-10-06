@@ -769,6 +769,7 @@ impl RootLayout {
     /// A removed suffix comment can expose retained whitespace to the final
     /// scalar, even when the same transaction introduces that scalar. Preserve
     /// the boundary using the candidate's layout, not the original scalar style.
+    /// Comments past an existing end marker cannot expose scalar content.
     fn removed_scalar_boundary(
         &self,
         original: &EditableDocument,
@@ -778,12 +779,9 @@ impl RootLayout {
             return None;
         }
         let end = original.nodes[original.root.0].span.end();
-        if original
+        let boundary = original
             .end_marker
-            .is_some_and(|marker| marker.start() <= end)
-        {
-            return None;
-        }
+            .map_or(original.source.len(), Span::start);
         let retained: HashSet<_> = root
             .comments
             .iter()
@@ -793,8 +791,20 @@ impl RootLayout {
         original.nodes[original.root.0]
             .comments
             .iter()
-            .any(|comment| comment.span.start() >= end && !retained.contains(&comment.span.start()))
-            .then_some(end)
+            .any(|comment| {
+                (end..boundary).contains(&comment.span.start())
+                    && !retained.contains(&comment.span.start())
+            })
+            // Keep any closing inline header on the body side of the marker.
+            // A block scalar's span can already end at the following line's
+            // start; that line belongs to the suffix and must stay outside.
+            .then(|| {
+                if original.source[..end].ends_with(['\r', '\n']) {
+                    end
+                } else {
+                    line_end(&original.source, end)
+                }
+            })
     }
 
     /// Comments already in the framing retain their source anchors. Comments
