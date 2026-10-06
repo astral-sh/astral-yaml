@@ -116,6 +116,9 @@ text is copied.
 
 Rewrites include adjacent separators when YAML assigns them to the replacement,
 such as trailing blank lines that would become part of a block scalar's value.
+Comment terminators share retained line breaks, so repeated rewrites do not add
+blank lines. Directives and document markers are retained; comments outside the
+start and end markers belong to the document root.
 
 Rewritten regions retain entry order, comments, tags, anchors, alias identity,
 and compatible styles. Whitespace and scalar spelling may normalize, but decoded
@@ -129,7 +132,11 @@ retain block scalar or collection styles.
 
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
-Comments owned by the enclosing collection remain. Comment editing uses text
+Comments owned by the enclosing collection remain. Detached comments between
+children stay before the same following child. Removing that child moves the
+comments before the next child, or after the collection when none remains.
+Replacing a whole collection retains these positions by entry or item index.
+Comment editing uses text
 without `#` or a line break and placement relative to its direct owner. Include a
 leading space in the text for a comment beginning with `# `. A requested
 attachment that cannot survive emission is rejected rather than reassigned.
