@@ -168,6 +168,13 @@ changes comment attachment. If the value shared a line with `---`, the marker
 retains its line terminator. Comments after block scalars are emitted outside the
 scalar's content indentation.
 
+A block collection can end in a block scalar, so its suffix has the same
+boundary requirements as the scalar itself. When a removed comment was the
+boundary that stopped scalar content, the editor supplies a document end marker
+at that position. Detached suffix comments also use an end marker to keep their
+blank separation outside scalar content. Unused blank lines between suffix
+markers can be removed when necessary to preserve a trailing attachment.
+
 Value setters retain the selected node's anchor and compatible style, with a
 fallback when that style cannot represent the replacement. Tags come from the
 new value. Lower-level `replace()` takes the fragment's style, tags, and anchor;
@@ -183,6 +190,11 @@ clone the syntax, render changed regions, reparse the result, and deserialize th
 entire typed view. Parser, traversal, insertion, and output limits bound their
 work. This API favors validation and source preservation over incremental update
 performance.
+
+The `editable-model` fuzz target generates valid edit sequences and requires
+every transaction to succeed. It compares committed values and root comments
+with independent Rust models and checks alias target identity. It runs alongside
+the `editable` target, which exercises arbitrary input documents and rollback.
 
 `EditableDocument::normalized_yaml()` is an explicit whole-root rendering
 operation. It returns normalized output without changing the document, or an

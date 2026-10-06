@@ -127,6 +127,24 @@ def seed_editable(root: Path, inputs: list[Path]) -> None:
     print("Seeded bounded syntax and value-based edit sequences")
 
 
+def seed_editable_model(root: Path) -> None:
+    corpus = root / "fuzz/corpus/editable-model"
+    corpus.mkdir(parents=True, exist_ok=True)
+    sequences = [
+        bytes(value for selector in range(32) for value in (operation, selector))
+        for operation in range(14)
+    ]
+    sequences.append(
+        bytes(value for index in range(64) for value in (index % 14, index))
+    )
+    for controls in range(80):
+        for sequence in sequences:
+            for text in ("", "false\n\n", "\ufeff\x00é\r\n"):
+                header = bytes([controls, len(sequence) // 2 - 1])
+                write_seed(corpus, header + sequence + text.encode("utf-8"))
+    print("Seeded valid edit sequences with independent value and comment models")
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     inputs = list((root / "fixtures/yaml-test-suite").rglob("in.yaml"))
@@ -137,6 +155,7 @@ def main() -> None:
     seed_encodings(root, inputs)
     seed_typed(root, inputs)
     seed_editable(root, inputs)
+    seed_editable_model(root)
 
 
 if __name__ == "__main__":

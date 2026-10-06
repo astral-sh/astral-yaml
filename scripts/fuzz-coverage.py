@@ -45,11 +45,11 @@ def main() -> None:
     llvm = Path(rustc("--print", "sysroot")) / "lib/rustlib" / host / "bin"
     extension = ".exe" if os.name == "nt" else ""
     llvm_cov = llvm / ("llvm-cov" + extension)
-    sources = sorted((root / "crates/astral-yaml/src").glob("*.rs"))
-    sources += sorted((root / "crates/astral-yaml-serde/src").glob("*.rs"))
+    sources = sorted((root / "crates/astral-yaml/src").rglob("*.rs"))
+    sources += sorted((root / "crates/astral-yaml-serde/src").rglob("*.rs"))
     reports: dict[str, JsonValue] = {}
 
-    for name in ("parse", "serde", "decode", "typed", "editable"):
+    for name in ("parse", "serde", "decode", "typed", "editable", "editable-model"):
         profile = root / "fuzz/coverage" / name / "coverage.profdata"
         binary = (
             root / "target" / host / "coverage" / host / "release" / (name + extension)
@@ -57,7 +57,7 @@ def main() -> None:
         for path in (profile, binary):
             if not path.is_file():
                 raise SystemExit(
-                    f"Missing {path}; run cargo xtask fuzz coverage for all four targets first"
+                    f"Missing {path}; run cargo xtask fuzz coverage for all targets first"
                 )
 
         arguments = [str(binary), f"-instr-profile={profile}", *map(str, sources)]
