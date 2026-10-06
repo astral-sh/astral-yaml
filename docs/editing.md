@@ -82,6 +82,8 @@ alias identity, requested styles, and comment ownership, placement, and order,
 then deserializes `T`.
 Rewrite regions are selected from the final candidate, so intermediate style
 changes do not force a larger rewrite when the final syntax fits in place.
+Root comment changes are also planned from the final candidate. Changing only
+a framing comment's text retains the existing body layout.
 Any error leaves the original source and typed value intact. This includes
 missing required fields, out-of-range values, and duplicate mapping keys.
 
@@ -130,9 +132,10 @@ scalar text is retained, including empty values read by Serde as strings. Block
 content uses two-space indentation and the document's first line-ending
 convention, defaulting to LF. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
-represented in its surrounding context. Root inline comments move onto an
-existing tag or anchor header when a collection changes to block style. Existing
-block content placed in a flow context is emitted in a compatible style.
+represented in its surrounding context. Root inline comments can use an existing
+tag, anchor, or document marker as a header when a collection changes to block
+style. Existing block content placed in a flow context is emitted in a compatible
+style.
 Explicit keys in block mappings can retain block scalar or collection styles.
 Comments at flow-opening delimiters stay there while the collection retains flow
 presentation, including when closing comments remain outside the rewritten region.
@@ -151,6 +154,17 @@ its direct owner. Include a leading space in the text for a comment beginning
 with `# `. A requested
 attachment that cannot survive emission is rejected rather than reassigned.
 Comments retain their order within each owner, including across transactions.
+
+When document markers are present, changing the root's layout can move its
+comments to those boundaries. Leading comments can move before `---`, inline
+comments onto a marker, and trailing or detached comments after `...`. These moves
+retain the comments' root ownership and order. Rewrites also manage the separation
+before `...`, keeping trailing comments adjacent and preserving blank separation
+for detached comments after the marker. Replacing the root with an omitted
+value removes its former standalone line so it does not leave a blank line that
+changes comment attachment. If the value shared a line with `---`, the marker
+retains its line terminator. Comments after block scalars are emitted outside the
+scalar's content indentation.
 
 Value setters retain the selected node's anchor and compatible style, with a
 fallback when that style cannot represent the replacement. Tags come from the
