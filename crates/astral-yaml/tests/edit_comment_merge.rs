@@ -309,3 +309,324 @@ fn root_collection_headers_retain_inline_comments() {
      # leading␍ %YAML 1.2 # directive␍---- &root [old] # inline␍+--- ␍+&root # inline␍+- old␍ ... # end␍ # trailing␍
     ");
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for (source, replacement) in [
+            ("old\n", "# detached\n\nnew\n"),
+            ("# retained\nold\n", "# detached\n\nnew\n"),
+            ("# retained\n\nold\n", "# leading\nnew\n"),
+            ("--- # marker\n# retained\nold\n", "# detached\n\nnew\n"),
+            ("old # inline\n", "new\n# trailing\n"),
+            ("old # inline\n", "new\n\n# detached\n"),
+            ("old\n# trailing\n", "new\n\n# detached\n"),
+            ("old\n\n# detached\n", "new\n# trailing\n"),
+            (
+                "&root # retained\nold\n",
+                "# leading\n&next # imported\nnew\n",
+            ),
+        ] {
+            let source = source.replace('\n', newline);
+            let replacement = replacement.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| editor.replace(&editor.root(), &replacement))
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old
+    +# detached
+    +
+    +new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    +# detached
+    +
+     # retained
+    -old
+    +new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     # retained
+     ⏎
+    -old
+    +# leading
+    +new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     --- # marker
+    +# detached
+    +
+     # retained
+    -old
+    +new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -old # inline
+    +new # inline
+    +# trailing
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old # inline
+    +new # inline
+    +
+    +# detached
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -old
+    +new
+     # trailing
+    +
+    +# detached
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -old
+    +new
+    +# trailing
+     ⏎
+     # detached
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -&root # retained
+    -old
+    +# leading
+    +&next # retained
+    +  new # imported
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old␍
+    +# detached␍
+    +␍
+    +new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    +# detached␍
+    +␍
+     # retained␍
+    -old␍
+    +new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     # retained␍
+     ␍
+    -old␍
+    +# leading␍
+    +new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     --- # marker␍
+    +# detached␍
+    +␍
+     # retained␍
+    -old␍
+    +new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -old # inline␍
+    +new # inline␍
+    +# trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old # inline␍
+    +new # inline␍
+    +␍
+    +# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -old␍
+    +new␍
+     # trailing␍
+    +␍
+    +# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -old␍
+    +new␍
+    +# trailing␍
+     ␍
+     # detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -&root # retained␍
+    -old␍
+    +# leading␍
+    +&next # retained␍
+    +  new # imported␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old␍+# detached␍+␍+new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    +# detached␍+␍ # retained␍-old␍+new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     # retained␍ ␍-old␍+# leading␍+new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     --- # marker␍+# detached␍+␍ # retained␍-old␍+new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -old # inline␍+new # inline␍+# trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -old # inline␍+new # inline␍+␍+# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -old␍+new␍ # trailing␍+␍+# detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -old␍+new␍+# trailing␍ ␍ # detached␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -&root # retained␍-old␍+# leading␍+&next # retained␍+  new # imported␍
+    ");
+}
+
+#[test]
+fn nested_fragment_prefixes_belong_to_the_selected_value() {
+    let mut diffs = Vec::new();
+    for source in ["outer: old\nother: keep\n", "- old\n- keep\n"] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                let value = if source.starts_with("outer") {
+                    editor.mapping_entries(&root)?.remove(0).1
+                } else {
+                    editor.sequence_items(&root)?.remove(0)
+                };
+                editor.replace(&value, "# detached\n\n# leading\nnew\n")
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,6 @@
+    -outer: old
+    +outer:
+    +  # detached
+    +
+    +  # leading
+    +  new
+     other: keep
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,6 @@
+    -- old
+    +-
+    +  # detached
+    +
+    +  # leading
+    +  new
+     - keep
+    ");
+}
+
+#[test]
+fn replacement_does_not_reorder_an_explicitly_edited_comment_list() {
+    use astral_yaml::comments::CommentPlacement;
+    let source = "old # inline\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    let result = document.edit(|editor| {
+        let root = editor.root();
+        // This explicit order cannot keep the new comment leading. Replacement
+        // must preserve that request and reject it, rather than sort it away.
+        editor.insert_comment(&root, 1, " leading", CommentPlacement::Leading)?;
+        editor.replace(&root, "# imported\nnew\n")
+    });
+    assert!(result.is_err());
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn merged_comment_gaps_survive_further_replacement_and_removal() {
+    let source = "a: old\n\n# tail\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let root = editor.root();
+            editor.replace(&root, "a: one\n\n# first\n\nb: two\n")?;
+            editor.replace(&root, "a: first\n\n# second\n\nb: middle\nc: last\n")?;
+            editor.remove_entry(&root, 1)
+        })
+        .unwrap();
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,10 @@
+    -a: old
+    +a: first
+    +
+    +# first
+    +
+    +
+    +# second
+    +
+    +c: last
+     ⏎
+     # tail
+    ");
+}

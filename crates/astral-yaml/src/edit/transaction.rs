@@ -843,31 +843,27 @@ impl<'a> Editor<'a> {
             // Consecutive insertions use the nearest retained comments as
             // anchors. Planning from the final list preserves order even when
             // several operations insert at the same index in one transaction.
-            let outer = |&index: &usize| {
+            let outer = |index: usize, before: bool| {
                 let anchor = &comments[index];
-                matches!(
-                    comment.position,
-                    CommentPosition::Before | CommentPosition::After
-                ) && anchor.position == comment.position
-                    && anchor.placement == comment.placement
-                    && comment.placement != CommentPlacement::Inline
-                    && (anchor.span.end() <= region.start() || anchor.span.start() >= region.end())
+                (anchor.span.end() <= region.start() || anchor.span.start() >= region.end())
+                    .then(|| outer_comment_breaks(comment, anchor, before))
+                    .flatten()
+                    .map(|breaks| (index, before, breaks))
             };
             let anchor = following[index]
-                .filter(outer)
-                .map(|index| (index, true))
-                .or_else(|| previous.filter(outer).map(|index| (index, false)));
-            let Some((anchor, before)) = anchor else {
+                .and_then(|index| outer(index, true))
+                .or_else(|| previous.and_then(|index| outer(index, false)));
+            let Some((anchor, before, breaks)) = anchor else {
                 plan.rendered.push(comment.clone());
                 continue;
             };
             let anchor = &comments[anchor];
             let indentation = emit::indent(&self.original.source, anchor.span.start());
             bytes = bytes
-                .checked_add(comment.text.len() + 1 + newline.len() + indentation)
+                .checked_add(comment.text.len() + 1 + newline.len() * breaks + indentation)
                 .filter(|&size| size <= self.original.options.max_input_bytes)
                 .ok_or_else(|| self.error("emitted YAML exceeds input byte limit"))?;
-            let separator = format!("{newline}{}", " ".repeat(indentation));
+            let separator = format!("{}{}", newline.repeat(breaks), " ".repeat(indentation));
             let (at, text) = if before {
                 (anchor.span.start(), format!("#{}{separator}", comment.text))
             } else {
@@ -984,6 +980,42 @@ impl<'a> Editor<'a> {
     }
 }
 
+/// Choose separation only when inserting beside a retained outer comment
+/// preserves both attachments. Otherwise emission places the new comment next
+/// to the rewritten content. Inline and leading/trailing comments must remain
+/// adjacent to their syntax; detached comments require blank separation.
+fn outer_comment_breaks(comment: &Comment, anchor: &Comment, before: bool) -> Option<usize> {
+    if !matches!(
+        comment.position,
+        CommentPosition::Before | CommentPosition::After
+    ) || anchor.position != comment.position
+        || comment.placement == CommentPlacement::Inline
+    {
+        return None;
+    }
+    if anchor.placement == comment.placement {
+        return Some(1);
+    }
+    match (
+        comment.position,
+        before,
+        comment.placement,
+        anchor.placement,
+    ) {
+        (CommentPosition::Before, true, CommentPlacement::Detached, CommentPlacement::Leading)
+        | (
+            CommentPosition::After,
+            false,
+            CommentPlacement::Detached,
+            CommentPlacement::Inline | CommentPlacement::Trailing,
+        ) => Some(2),
+        (CommentPosition::After, false, CommentPlacement::Trailing, CommentPlacement::Inline) => {
+            Some(1)
+        }
+        _ => None,
+    }
+}
+
 fn remap(node: &mut Node, map: impl Fn(NodeId) -> NodeId) {
     for comment in &mut node.comments {
         if let CommentPosition::BeforeChild(child) = &mut comment.position {
@@ -1023,11 +1055,14 @@ fn retarget_comments(node: &mut Node, removed: NodeId, following: Option<NodeId>
 fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
     #[derive(PartialEq, Eq, PartialOrd, Ord)]
     enum Boundary {
-        Before,
+        InlineBefore,
+        DetachedBefore,
+        LeadingBefore,
         Header,
         BeforeChild(usize),
         InlineAfter,
-        After,
+        TrailingAfter,
+        DetachedAfter,
     }
     fn boundaries(kind: &NodeKind) -> Vec<NodeId> {
         match kind {
@@ -1056,13 +1091,20 @@ fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
         .map(|(index, child)| (child, index))
         .collect();
     let boundary = |comment: &Comment| match comment.position {
-        CommentPosition::Before => Boundary::Before,
+        CommentPosition::Before => match comment.placement {
+            CommentPlacement::Inline => Boundary::InlineBefore,
+            CommentPlacement::Detached => Boundary::DetachedBefore,
+            _ => Boundary::LeadingBefore,
+        },
         CommentPosition::Header => Boundary::Header,
         CommentPosition::BeforeChild(child) => Boundary::BeforeChild(positions[&child]),
         CommentPosition::After if comment.placement == CommentPlacement::Inline => {
             Boundary::InlineAfter
         }
-        CommentPosition::After => Boundary::After,
+        CommentPosition::After if comment.placement == CommentPlacement::Detached => {
+            Boundary::DetachedAfter
+        }
+        CommentPosition::After => Boundary::TrailingAfter,
     };
     let mut retained = comments.into_iter().peekable();
     let mut imported = replacement.comments.iter().cloned().peekable();
