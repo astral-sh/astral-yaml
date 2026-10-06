@@ -173,7 +173,7 @@ impl Comments {
             .then(|| self.remaining.next().expect("header comment"))
     }
 
-    fn needs_value_line(&self) -> bool {
+    fn needs_value_line(&self, properties: usize) -> bool {
         self.remaining
             .as_slice()
             .first()
@@ -183,6 +183,16 @@ impl Comments {
                 .as_slice()
                 .iter()
                 .any(|comment| comment.placement == CommentPlacement::Leading)
+            || self
+                .remaining
+                .as_slice()
+                .iter()
+                .filter(|comment| {
+                    comment.placement == CommentPlacement::Inline
+                        && comment.position != CommentPosition::After
+                })
+                .count()
+                > properties
     }
 
     fn needs_header(&self) -> bool {
@@ -605,8 +615,10 @@ impl Emitter<'_> {
     ) -> Result<(), Error> {
         let indent = context.indent;
         let flow = context.in_flow();
-        let block = block_collection(&self.document.nodes[id.0].kind, flow);
-        let leading = comments.needs_value_line();
+        let node = &self.document.nodes[id.0];
+        let block = block_collection(&node.kind, flow);
+        let properties = usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
+        let leading = comments.needs_value_line(properties);
         let value_indent = if block || flow || leading {
             indent + 2
         } else {

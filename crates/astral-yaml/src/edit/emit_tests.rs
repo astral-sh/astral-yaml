@@ -427,3 +427,20 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
     ]
     "#);
 }
+
+#[test]
+fn removed_properties_leave_room_for_retained_header_comments() {
+    let source = "key: !!str # tag\n  &a # anchor\n  # before value\n  old\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    let NodeKind::Mapping { entries, .. } = &document.nodes[document.root.0].kind else {
+        panic!("mapping");
+    };
+    let value = entries[0].1;
+    document.nodes[value.0].tag = None;
+    insta::assert_snapshot!(document.normalized_yaml().unwrap(), @"
+    key: # tag
+      &a # anchor
+        # before value
+        old
+    ");
+}
