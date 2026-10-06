@@ -14,6 +14,7 @@ enum Operation {
     RemoveLast,
     PrependLeading,
     AppendTrailing,
+    AppendInline,
     SetSequence,
     SetScalar,
     SetMapping,
@@ -48,6 +49,9 @@ impl Operation {
             }
             Self::AppendTrailing => {
                 editor.insert_comment(&root, count, " trailing", CommentPlacement::Trailing)
+            }
+            Self::AppendInline => {
+                editor.insert_comment(&root, count, " inline", CommentPlacement::Inline)
             }
             Self::SetSequence => editor.replace(&root, "- new\n"),
             Self::SetScalar => editor.replace(&root, "value"),
@@ -92,6 +96,7 @@ impl Operation {
             Self::PrependLeading => {
                 comments.insert(0, (" leading".to_owned(), CommentPlacement::Leading));
             }
+            Self::AppendInline => comments.push((" inline".to_owned(), CommentPlacement::Inline)),
             Self::AppendTrailing => {
                 comments.push((" trailing".to_owned(), CommentPlacement::Trailing));
             }
@@ -117,10 +122,11 @@ fn framing_comment_edits_compose_with_content_edits() {
     // Every case must succeed. Rejections are failures, not discarded samples.
     use CommentPlacement::{Inline, Leading, Trailing};
     use Operation::{
-        AppendTrailing, PrependLeading, RemoveFirst, RemoveLast, ReplaceFirst, ReplaceLast,
-        SetEmpty, SetFlowSequence, SetLiteral, SetMapping, SetScalar, SetSequence,
+        AppendInline, AppendTrailing, PrependLeading, RemoveFirst, RemoveLast, ReplaceFirst,
+        ReplaceLast, SetEmpty, SetFlowSequence, SetLiteral, SetMapping, SetScalar, SetSequence,
     };
     let operations = [
+        AppendInline,
         ReplaceFirst,
         ReplaceLast,
         RemoveFirst,
@@ -136,6 +142,7 @@ fn framing_comment_edits_compose_with_content_edits() {
     ];
     let cases: &[(&str, &[(&str, CommentPlacement)])] = &[
         ("old", &[]),
+        ("---", &[]),
         (
             "# prefix\nold\n# tail\n",
             &[(" prefix", Leading), (" tail", Trailing)],

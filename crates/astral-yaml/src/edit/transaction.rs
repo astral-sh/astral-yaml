@@ -610,11 +610,11 @@ impl<'a> Editor<'a> {
     }
 
     /// Inserts comment text (without `#` or a line break) at an owner-local index.
-    /// Only one inline comment may be added to a node.
+    /// Inline comments require distinct syntax headers in the emitted layout.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, multiline text, conflicting inline
-    /// comments, or resource limits.
+    /// Rejects invalid handles, indices, multiline text, or resource limits.
+    /// Commit rejects placements that cannot preserve the node's attachments.
     pub fn insert_comment(
         &mut self,
         handle: &Handle,
@@ -628,11 +628,6 @@ impl<'a> Editor<'a> {
             let comments = &mut editor.candidate.nodes[id.0].comments;
             if index > comments.len() {
                 return Err(editor.error("comment index out of bounds"));
-            }
-            if placement == CommentPlacement::Inline
-                && comments.iter().any(|c| c.placement == placement)
-            {
-                return Err(editor.error("node already has an inline comment"));
             }
             comments.insert(
                 index,
@@ -891,7 +886,11 @@ impl<'a> Editor<'a> {
             };
             patches.push((rendered.span, rendered.text));
         }
-        // Insertions at a replacement's start must precede that replacement.
+        if let Some(comments) = root_comments.as_mut() {
+            patches.append(&mut comments.after_body);
+        }
+        // Prefix insertions at a replacement's start precede that replacement.
+        // Suffix insertions at an empty root's position follow its syntax.
         // Stable sorting retains candidate order for insertions at the same point.
         patches.sort_by_key(|(span, _)| (span.start(), span.end()));
         let mut source = String::new();

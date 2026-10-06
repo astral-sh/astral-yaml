@@ -426,7 +426,7 @@ fn invalid_operations_roll_back() {
         ("42", 13),
         ("42", 14),
         ("42", 15),
-        ("42 # old", 16),
+        ("value: 42 # old", 16),
         ("42", 17),
         ("42", 18),
         ("42", 19),
@@ -450,7 +450,10 @@ fn invalid_operations_roll_back() {
                 13 => e.insert_comment(&root, 1, " note", CommentPlacement::Inline),
                 14 => e.replace_comment(&root, 0, " note"),
                 15 => e.remove_comment(&root, 0),
-                16 => e.insert_comment(&root, 0, " note", CommentPlacement::Inline),
+                16 => {
+                    let value = e.mapping_entries(&root)?.remove(0).1;
+                    e.insert_comment(&value, 0, " note", CommentPlacement::Inline)
+                }
                 17 => e.insert_comment(&root, 0, "bad\ncomment", CommentPlacement::Leading),
                 18 => {
                     e.replace(&root, "[1]")?;
