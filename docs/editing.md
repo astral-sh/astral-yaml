@@ -126,9 +126,10 @@ scalar text is retained, including empty values read by Serde as strings. Block
 content uses two-space indentation and the document's first line-ending
 convention, defaulting to LF. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
-represented in its surrounding context. Existing block content placed in a flow
-context is emitted in a compatible style. Explicit keys in block mappings can
-retain block scalar or collection styles.
+represented in its surrounding context. Root inline comments move onto an
+existing tag or anchor header when a collection changes to block style. Existing
+block content placed in a flow context is emitted in a compatible style.
+Explicit keys in block mappings can retain block scalar or collection styles.
 
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
@@ -136,9 +137,12 @@ Comments owned by the enclosing collection remain. Detached comments between
 children stay before the same following child. Removing that child moves the
 comments before the next child, or after the collection when none remains.
 Replacing a whole collection retains these positions by entry or item index.
-Comment editing uses text
-without `#` or a line break and placement relative to its direct owner. Include a
-leading space in the text for a comment beginning with `# `. A requested
+Replacement fragments merge their comments with retained comments by structural
+position, preserving the order within each list. Detached prefixes remain before
+their value, and leading and trailing comments stay adjacent to their syntax.
+Comment editing uses text without `#` or a line break and placement relative to
+its direct owner. Include a leading space in the text for a comment beginning
+with `# `. A requested
 attachment that cannot survive emission is rejected rather than reassigned.
 Comments retain their order within each owner, including across transactions.
 
