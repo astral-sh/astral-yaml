@@ -152,6 +152,13 @@ struct Comments {
 }
 
 impl Comments {
+    fn at_opening(&self) -> bool {
+        self.remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| comment.position == CommentPosition::Opening)
+    }
+
     fn next_is(&self, placement: CommentPlacement) -> bool {
         self.remaining
             .as_slice()
@@ -343,11 +350,17 @@ impl Emitter<'_> {
         &mut self,
         comments: &mut Comments,
         indent: usize,
-        block_collection: bool,
+        collection: Option<CollectionStyle>,
     ) -> Result<(), Error> {
         // Reserve the last inline comment for the content, unless a leading
         // comment still needs a boundary before that content begins.
-        if (block_collection || comments.needs_header()) && self.inline(comments)? {
+        // Flow-opening comments belong after the delimiter even when a tag or
+        // anchor precedes it. Block presentation can use a property header.
+        let opening = collection == Some(CollectionStyle::Flow) && comments.at_opening();
+        if !opening
+            && (collection == Some(CollectionStyle::Block) || comments.needs_header())
+            && self.inline(comments)?
+        {
             self.line(indent)?;
             self.before(comments, indent)?;
         }
@@ -356,6 +369,22 @@ impl Emitter<'_> {
             self.push("#")?;
             self.push(&comment.text)?;
             self.line(indent)?;
+        }
+        Ok(())
+    }
+
+    fn flow_start(
+        &mut self,
+        delimiter: &str,
+        comments: &mut Comments,
+        indent: usize,
+    ) -> Result<(), Error> {
+        self.push(delimiter)?;
+        // A closing comment may remain outside the rendered region. Its
+        // visibility must not determine where the opening comment is emitted.
+        if (comments.at_opening() || comments.needs_header()) && self.inline(comments)? {
+            self.line(indent)?;
+            self.before(comments, indent)?;
         }
         Ok(())
     }
@@ -520,11 +549,7 @@ impl Emitter<'_> {
             NodeKind::Mapping { entries, style } => {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
                 if is_flow {
-                    self.push("{")?;
-                    if comments.needs_header() && self.inline(&mut comments)? {
-                        self.line(indent + 2)?;
-                        self.before(&mut comments, indent + 2)?;
-                    }
+                    self.flow_start("{", &mut comments, indent + 2)?;
                 } else if node.anchor.is_some() || node.tag.is_some() {
                     self.line(indent)?;
                 }
@@ -581,11 +606,7 @@ impl Emitter<'_> {
         let indent = context.indent;
         let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
         if is_flow {
-            self.push("[")?;
-            if comments.needs_header() && self.inline(comments)? {
-                self.line(indent + 2)?;
-                self.before(comments, indent + 2)?;
-            }
+            self.flow_start("[", comments, indent + 2)?;
             for (index, &item) in items.iter().enumerate() {
                 if index != 0 {
                     self.push(" ")?;
@@ -654,8 +675,8 @@ impl Emitter<'_> {
         comments: &mut Comments,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
-        let block_collection = block_collection(&node.kind, flow);
-        let continuation_indent = if flow || block_collection {
+        let collection = collection_style(&node.kind, flow);
+        let continuation_indent = if flow || collection == Some(CollectionStyle::Block) {
             indent
         } else {
             indent + 2
@@ -668,13 +689,13 @@ impl Emitter<'_> {
                 self.push(tag)?;
                 self.push("> ")?;
             }
-            self.property_comment(comments, continuation_indent, block_collection)?;
+            self.property_comment(comments, continuation_indent, collection)?;
         }
         if let Some(anchor) = &node.anchor {
             self.push("&")?;
             self.push(anchor)?;
             self.push(" ")?;
-            self.property_comment(comments, continuation_indent, block_collection)?;
+            self.property_comment(comments, continuation_indent, collection)?;
         }
         Ok(())
     }
@@ -783,11 +804,20 @@ impl Emitter<'_> {
 }
 
 fn block_collection(kind: &NodeKind, flow: bool) -> bool {
-    !flow
-        && (matches!(kind,
-        NodeKind::Sequence { items, style: CollectionStyle::Block } if !items.is_empty())
-            || matches!(kind,
-        NodeKind::Mapping { entries, style: CollectionStyle::Block } if !entries.is_empty()))
+    collection_style(kind, flow) == Some(CollectionStyle::Block)
+}
+
+fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
+    let (empty, style) = match kind {
+        NodeKind::Sequence { items, style } => (items.is_empty(), *style),
+        NodeKind::Mapping { entries, style } => (entries.is_empty(), *style),
+        _ => return None,
+    };
+    Some(if flow || empty {
+        CollectionStyle::Flow
+    } else {
+        style
+    })
 }
 
 fn quoted(value: &str) -> String {

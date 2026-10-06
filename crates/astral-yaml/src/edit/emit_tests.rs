@@ -536,3 +536,52 @@ fn detached_prefixes_are_emitted_before_content() {
     ]
     "##);
 }
+
+#[test]
+fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "[ # open\n  old\n] # close\n",
+            "{ # open\n  key: old\n} # close\n",
+            "&a [ # open\n  old\n] # close\n",
+            "!!seq # tag\n&a [ # open\n  old\n] # close\n",
+            "[ # open\n]\n",
+            "key: [ # open\n  old\n  ]\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let document = EditableDocument::parse(&source).unwrap();
+            let output = document.normalized_yaml().unwrap();
+            assert_eq!(
+                EditableDocument::parse(&output)
+                    .unwrap()
+                    .normalized_yaml()
+                    .unwrap(),
+                output
+            );
+            outputs.push(output);
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "[ # open\n  old] # close\n",
+        "{ # open\n  key: old} # close\n",
+        "&a [ # open\n  old] # close\n",
+        "!<tag:yaml.org,2002:seq> # tag\n  &a [ # open\n  old] # close\n",
+        "[ # open\n  ]\n",
+        "key: [ # open\n  old]\n",
+        "[ # open\r\n  old] # close\r\n",
+        "{ # open\r\n  key: old} # close\r\n",
+        "&a [ # open\r\n  old] # close\r\n",
+        "!<tag:yaml.org,2002:seq> # tag\r\n  &a [ # open\r\n  old] # close\r\n",
+        "[ # open\r\n  ]\r\n",
+        "key: [ # open\r\n  old]\r\n",
+        "[ # open\r  old] # close\r",
+        "{ # open\r  key: old} # close\r",
+        "&a [ # open\r  old] # close\r",
+        "!<tag:yaml.org,2002:seq> # tag\r  &a [ # open\r  old] # close\r",
+        "[ # open\r  ]\r",
+        "key: [ # open\r  old]\r",
+    ]
+    "#);
+}

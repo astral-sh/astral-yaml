@@ -72,6 +72,8 @@ pub struct Comment<Location = Span> {
 pub(crate) enum CommentPosition {
     Before,
     Header,
+    /// An inline comment after a flow collection's opening delimiter.
+    Opening,
     /// A collection-owned comment before an item or mapping key.
     BeforeChild(NodeId),
     After,
@@ -151,6 +153,20 @@ impl EditableDocument {
                 CommentPosition::Before
             } else if attached.comment.span.start() < content_start {
                 CommentPosition::Header
+            } else if attached.placement == CommentPlacement::Inline
+                && attached.comment.span.start() < node.span.end()
+                && matches!(
+                    node.kind,
+                    crate::NodeKind::Sequence {
+                        style: CollectionStyle::Flow,
+                        ..
+                    } | crate::NodeKind::Mapping {
+                        style: CollectionStyle::Flow,
+                        ..
+                    }
+                )
+            {
+                CommentPosition::Opening
             } else if attached.placement == crate::comments::CommentPlacement::Detached {
                 let at = attached.comment.span.start();
                 let following = match &node.kind {
