@@ -18,18 +18,30 @@ struct Config {
     copy: String,
     items: Vec<String>,
     map: BTreeMap<String, String>,
+    nested: Nested,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+struct Nested {
+    value: String,
+}
+
+#[derive(Default)]
+struct Comments {
+    root: Vec<(String, CommentPlacement)>,
+    nested: Vec<(String, CommentPlacement)>,
 }
 
 fn apply(
     editor: &mut Editor<'_, '_>,
     expected: &mut Config,
-    comments: &mut Vec<(String, CommentPlacement)>,
+    comments: &mut Comments,
     operation: &[u8; 2],
     text: &str,
 ) -> Result<(), Error> {
     let selector = usize::from(operation[1]);
     let key = ["null", "true", "01", "with: space", "two\nlines"][selector % 5];
-    match operation[0] % 14 {
+    match operation[0] % 19 {
         0 => {
             editor.root_mut().field("value")?.set(text)?;
             text.clone_into(&mut expected.value);
@@ -57,13 +69,21 @@ fn apply(
             editor.root_mut().field("map")?.remove_field(key)?;
             expected.map.remove(key);
         }
-        6 => editor
-            .root_mut()
-            .set_collection_style(if selector % 2 == 0 {
+        6 => {
+            let style = if selector % 2 == 0 {
                 CollectionStyle::Block
             } else {
                 CollectionStyle::Flow
-            })?,
+            };
+            // A flow parent cannot honor an earlier nested block-style request.
+            if style == CollectionStyle::Flow {
+                editor
+                    .root_mut()
+                    .field("nested")?
+                    .set_collection_style(style)?;
+            }
+            editor.root_mut().set_collection_style(style)?;
+        }
         7 => editor
             .root_mut()
             .field("value")?
@@ -75,6 +95,7 @@ fn apply(
                 0 => CommentPlacement::Leading,
                 1 => CommentPlacement::Inline,
                 2 if !comments
+                    .root
                     .iter()
                     .any(|(_, placement)| *placement == CommentPlacement::Detached) =>
                 {
@@ -82,14 +103,22 @@ fn apply(
                 }
                 _ => CommentPlacement::Detached,
             };
+            if placement == CommentPlacement::Trailing && !comments.nested.is_empty() {
+                editor
+                    .root_mut()
+                    .field("nested")?
+                    .set_collection_style(CollectionStyle::Flow)?;
+            }
             let index = if placement == CommentPlacement::Leading {
                 0
             } else {
-                comments.len()
+                comments.root.len()
             };
             let syntax = editor.syntax_mut();
             syntax.insert_comment(&syntax.root(), index, " model", placement)?;
-            comments.insert(index, (" model".to_owned(), placement));
+            comments
+                .root
+                .insert(index, (" model".to_owned(), placement));
         }
         9 => {
             editor.root_mut().field("items")?.set([text])?;
@@ -110,22 +139,94 @@ fn apply(
                 .set(text)?;
             expected.map.insert(key.to_owned(), text.to_owned());
         }
-        12 if !comments.is_empty() => {
-            let index = selector % comments.len();
+        12 if !comments.root.is_empty() => {
+            let index = selector % comments.root.len();
             editor.root_mut().remove_comment(index)?;
-            comments.remove(index);
+            comments.root.remove(index);
         }
-        13 if !comments.is_empty() => {
-            let index = selector % comments.len();
+        13 if !comments.root.is_empty() => {
+            let index = selector % comments.root.len();
             editor.root_mut().replace_comment(index, " changed")?;
-            " changed".clone_into(&mut comments[index].0);
+            " changed".clone_into(&mut comments.root[index].0);
+        }
+        14 => {
+            let syntax = editor.syntax_mut();
+            let nested = syntax
+                .mapping_entries(&syntax.root())?
+                .last()
+                .unwrap()
+                .1
+                .clone();
+            let value = syntax.mapping_entries(&nested)?[0].1.clone();
+            syntax.replace(
+                &value,
+                if selector % 2 == 0 {
+                    "|+\n  new\n\n"
+                } else {
+                    ">+\n  new\n\n"
+                },
+            )?;
+            "new\n\n".clone_into(&mut expected.nested.value);
+        }
+        15 => {
+            // Keep prior exact style requests compatible with this boundary.
+            if comments
+                .root
+                .iter()
+                .any(|(_, placement)| *placement == CommentPlacement::Trailing)
+            {
+                editor
+                    .root_mut()
+                    .field("nested")?
+                    .set_collection_style(CollectionStyle::Flow)?;
+            }
+            editor
+                .root_mut()
+                .field("nested")?
+                .append_comment(" nested", CommentPlacement::Detached)?;
+            comments
+                .nested
+                .push((" nested".to_owned(), CommentPlacement::Detached));
+        }
+        16 if !comments.nested.is_empty() => {
+            let index = selector % comments.nested.len();
+            editor.root_mut().field("nested")?.remove_comment(index)?;
+            comments.nested.remove(index);
+        }
+        17 => {
+            let style = if selector % 2 == 0
+                && (comments.nested.is_empty()
+                    || !comments
+                        .root
+                        .iter()
+                        .any(|(_, placement)| *placement == CommentPlacement::Trailing))
+            {
+                CollectionStyle::Block
+            } else {
+                CollectionStyle::Flow
+            };
+            if style == CollectionStyle::Block {
+                editor.root_mut().set_collection_style(style)?;
+            }
+            editor
+                .root_mut()
+                .field("nested")?
+                .set_collection_style(style)?;
+        }
+        18 => {
+            editor
+                .root_mut()
+                .field("nested")?
+                .field("value")?
+                .set(text)?;
+            text.clone_into(&mut expected.nested.value);
         }
         _ => {}
     }
     Ok(())
 }
 
-fn check(document: &Editable<Config>, expected: &Config, comments: &[(String, CommentPlacement)]) {
+fn check(document: &Editable<Config>, expected: &Config, comments: &Comments) {
     assert_eq!(document.value(), expected);
     let syntax = document.syntax();
     let root = syntax.node(syntax.root()).unwrap();
@@ -134,7 +235,7 @@ fn check(document: &Editable<Config>, expected: &Config, comments: &[(String, Co
         .iter()
         .map(|comment| (comment.text().to_owned(), comment.placement()))
         .collect();
-    assert_eq!(actual, comments);
+    assert_eq!(actual, comments.root);
     let NodeKind::Mapping { entries, .. } = root.kind() else {
         unreachable!()
     };
@@ -149,6 +250,14 @@ fn check(document: &Editable<Config>, expected: &Config, comments: &[(String, Co
             })
             .unwrap()
     };
+    let actual: Vec<_> = syntax
+        .node(field("nested"))
+        .unwrap()
+        .comments()
+        .iter()
+        .map(|comment| (comment.text().to_owned(), comment.placement()))
+        .collect();
+    assert_eq!(actual, comments.nested);
     let value = field("value");
     assert_eq!(syntax.node(value).unwrap().anchor(), Some("a"));
     assert!(
@@ -169,9 +278,9 @@ fuzz_target!(|data: &[u8]| {
     let text =
         ["null", "first\n\nlast\n\n", "\r\n", "\u{feff}", &payload][usize::from(controls >> 4) % 5];
     let source = if controls & 1 == 0 {
-        "value: &a old # stable\ncopy: *a\nitems: [x]\nmap: {key: value}\n"
+        "value: &a old # stable\ncopy: *a\nitems: [x]\nmap: {key: value}\nnested:\n  value: old\n"
     } else {
-        "---\nvalue: &a |-\n  old\ncopy: *a\nitems: [x]\nmap: {key: value}\n...\n"
+        "---\nvalue: &a |-\n  old\ncopy: *a\nitems: [x]\nmap: {key: value}\nnested:\n  value: old\n...\n"
     };
     let newline = ["\n", "\r\n", "\r"][usize::from(controls >> 1) % 3];
     let source = source.replace('\n', newline);
@@ -181,8 +290,11 @@ fuzz_target!(|data: &[u8]| {
         copy: "old".to_owned(),
         items: vec!["x".to_owned()],
         map: BTreeMap::from([("key".to_owned(), "value".to_owned())]),
+        nested: Nested {
+            value: "old".to_owned(),
+        },
     };
-    let mut comments = Vec::new();
+    let mut comments = Comments::default();
     let batch = [1, 4, 16][usize::from(controls >> 3) % 3];
     for operations in operations.chunks(batch * 2) {
         document

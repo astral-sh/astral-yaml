@@ -132,11 +132,21 @@ def seed_editable_model(root: Path) -> None:
     corpus.mkdir(parents=True, exist_ok=True)
     sequences = [
         bytes(value for selector in range(32) for value in (operation, selector))
-        for operation in range(14)
+        for operation in range(19)
     ]
     sequences.append(
-        bytes(value for index in range(64) for value in (index % 14, index))
+        bytes(value for index in range(64) for value in (index % 19, index))
     )
+    # Exercise scalar termination on both sides of a flow-style change.
+    for operations in ((14, 15, 17), (15, 17, 14), (8, 14, 15), (15, 16, 14)):
+        for selector in range(4):
+            sequences.append(
+                bytes(
+                    value for operation in operations for value in (operation, selector)
+                )
+            )
+    # Reopen nested block syntax after adding an inline and detached root suffix.
+    sequences.append(bytes([6, 1, 8, 1, 8, 3, 17, 0]))
     for controls in range(80):
         for sequence in sequences:
             for text in ("", "false\n\n", "\ufeff\x00é\r\n"):

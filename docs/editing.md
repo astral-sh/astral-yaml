@@ -169,11 +169,25 @@ retains its line terminator. Comments after block scalars are emitted outside th
 scalar's content indentation.
 
 A block collection can end in a block scalar, so its suffix has the same
-boundary requirements as the scalar itself. When a removed comment was the
-boundary that stopped scalar content, the editor supplies a document end marker
-at that position. Detached suffix comments also use an end marker to keep their
-blank separation outside scalar content. Unused blank lines between suffix
+boundary requirements as the scalar itself. When removing a comment would let
+the final scalar consume retained suffix whitespace, the editor supplies a
+document end marker at that position. This also applies when the transaction
+introduces the block scalar. Detached suffix comments use an end marker to keep
+their blank separation outside scalar content. Unused blank lines between suffix
 markers can be removed when necessary to preserve a trailing attachment.
+
+Scalar termination is planned across nested collections before selecting rewrite
+regions. A descendant edit can require a root rewrite to preserve a detached
+root comment's boundary. Inside a collection, where document markers cannot
+provide that boundary, the emitter quotes the final scalar when necessary to
+keep blank separation outside its content. Explicit style requests still have
+to be representable. Nested flow collection suffix comments remain inside their
+closing delimiter so they keep their owner. An inline closing comment can move
+to the opening delimiter when later suffix comments need that enclosure. The
+planner can also add flow delimiters to a nested collection when its detached
+suffix would otherwise break an enclosing trailing comment's attachment.
+Indented root suffixes share the root's rewrite context when block descendants
+could claim their attachment. They are emitted at the root's indentation.
 
 Value setters retain the selected node's anchor and compatible style, with a
 fallback when that style cannot represent the replacement. Tags come from the
@@ -192,9 +206,10 @@ work. This API favors validation and source preservation over incremental update
 performance.
 
 The `editable-model` fuzz target generates valid edit sequences and requires
-every transaction to succeed. It compares committed values and root comments
-with independent Rust models and checks alias target identity. It runs alongside
-the `editable` target, which exercises arbitrary input documents and rollback.
+every transaction to succeed. It compares committed values and both root and
+nested comments with independent Rust models and checks alias target identity.
+It runs alongside the `editable` target, which exercises arbitrary input
+documents and rollback.
 
 `EditableDocument::normalized_yaml()` is an explicit whole-root rendering
 operation. It returns normalized output without changing the document, or an
