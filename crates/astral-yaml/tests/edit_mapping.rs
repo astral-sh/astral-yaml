@@ -2,6 +2,7 @@ use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::edit_diff;
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn indentless_sequences_can_become_empty_or_flow_values() {
     // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
     let mut diffs = Vec::new();
@@ -459,7 +460,7 @@ fn explicit_keys_accept_block_style_requests() {
                 let (key, value) = editor.mapping_entries(&mapping)?.remove(0);
                 match editor.node(&key)?.kind() {
                     astral_yaml::edit::NodeKind::Scalar { style, .. } => {
-                        editor.set_scalar_style(&key, *style)?
+                        editor.set_scalar_style(&key, *style)?;
                     }
                     _ => editor.set_collection_style(&key, CollectionStyle::Block)?,
                 }

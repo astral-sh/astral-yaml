@@ -556,6 +556,7 @@ fn comment_transactions_match_an_ordered_list_model() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn empty_roots_end_retained_header_comments_before_inserting_content() {
     let mut diffs = Vec::new();
     for source in [
