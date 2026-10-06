@@ -826,10 +826,23 @@ impl<'a> Editor<'a> {
         RootComments::plan(self.original, &self.candidate, region)
     }
 
-    fn finish(self) -> Result<EditableDocument, Error> {
-        if let Some(error) = self.failure {
+    fn finish(mut self) -> Result<EditableDocument, Error> {
+        if let Some(error) = self.failure.take() {
             return Err(error);
         }
+        let framed = if self.rewrites.is_empty() {
+            None
+        } else {
+            super::framing::prepare(self.original, &mut self.candidate)
+        };
+        let editor = Editor {
+            original: framed.as_ref().unwrap_or(self.original),
+            ..self
+        };
+        editor.render()
+    }
+
+    fn render(self) -> Result<EditableDocument, Error> {
         let regions = self.rewrite_regions()?;
         let root_region = regions.iter().find(|&&(id, _)| id == self.candidate.root);
         let mut root_comments = if root_region.is_some() || self.root_comments_changed {

@@ -25,6 +25,7 @@ pub struct EditableDocument {
     pub(crate) options: ParseOptions,
     pub(crate) start_marker: Option<Span>,
     pub(crate) end_marker: Option<Span>,
+    pub(crate) extra_end_markers: Vec<Span>,
 }
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
@@ -216,6 +217,16 @@ impl EditableDocument {
             options,
             start_marker: document.start_marker,
             end_marker: document.end_marker,
+            extra_end_markers: stream
+                .document_end_markers()
+                .iter()
+                .copied()
+                .filter(|marker| {
+                    document
+                        .end_marker
+                        .is_some_and(|first| marker.start() > first.start())
+                })
+                .collect(),
             source: source.into_owned(),
         })
     }

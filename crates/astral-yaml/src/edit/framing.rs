@@ -4,7 +4,7 @@
 
 use super::{Comment, CommentPosition, EditableDocument, emit};
 use crate::{Error, Span, comments::CommentPlacement};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
 pub(super) struct RootComments {
@@ -17,6 +17,128 @@ struct Anchor {
     at: usize,
     before: String,
     after: String,
+}
+
+/// Supply document boundaries required by the final root layout. The original
+/// and candidate keep the same node identities; only source coordinates move.
+/// Planning against this framed source lets retained and generated markers use
+/// the same comment-placement rules.
+pub(super) fn prepare(
+    original: &EditableDocument,
+    candidate: &mut EditableDocument,
+) -> Option<EditableDocument> {
+    let layout = RootLayout::new(original, candidate);
+    let root = &candidate.nodes[candidate.root.0];
+    let collection = matches!(
+        layout.kind,
+        RootKind::FlowCollection | RootKind::BlockCollection { .. }
+    );
+    let start = original.start_marker.is_none()
+        && (matches!(layout.kind, RootKind::Omitted)
+            || (collection
+                && root
+                    .comments
+                    .iter()
+                    .any(|comment| comment.placement == CommentPlacement::Leading))
+            || layout.inline.start.is_some());
+    let suffix = usize::from(
+        original.end_marker.is_none()
+            && matches!(layout.kind, RootKind::Omitted)
+            && root.comments.iter().any(|comment| {
+                comment.placement == CommentPlacement::Trailing
+                    || (comment.placement == CommentPlacement::Detached
+                        && comment.position == CommentPosition::After)
+            }),
+    );
+    let ends = layout
+        .inline
+        .end
+        .len()
+        .saturating_sub(layout.inline.slots.len())
+        .max(suffix);
+    if !start && ends == 0 {
+        return None;
+    }
+
+    let mut framed = original.clone();
+    let newline = emit::newline(&original.source);
+    if start {
+        // Place the boundary immediately before the root's syntax line. Any
+        // prefix comments and blank lines then keep their original relation to
+        // that boundary, including a BOM at the beginning of the stream.
+        let root_start = original.nodes[original.root.0].span.start();
+        let at = original.source[..root_start]
+            .rfind(['\r', '\n'])
+            .map_or_else(
+                || usize::from(original.source.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
+                |index| index + 1,
+            );
+        let marker = format!("---{newline}");
+        framed.source.insert_str(at, &marker);
+        shift_spans(&mut framed, at, marker.len());
+        shift_spans(candidate, at, marker.len());
+        framed.start_marker = Some(Span {
+            start: at,
+            end: at + 3,
+        });
+    }
+    if ends > 0 {
+        if framed.end_marker.is_none() && !framed.source.ends_with(['\r', '\n']) {
+            framed.source.push_str(newline);
+        }
+        let at = framed.end_marker.map_or(framed.source.len(), Span::start);
+        let text = format!("...{newline}").repeat(ends);
+        framed.source.insert_str(at, &text);
+        shift_spans(&mut framed, at, text.len());
+        shift_spans(candidate, at, text.len());
+        let mut markers: Vec<_> = (0..ends)
+            .map(|index| {
+                let start = at + index * (3 + newline.len());
+                Span {
+                    start,
+                    end: start + 3,
+                }
+            })
+            .collect();
+        markers.extend(framed.end_marker);
+        markers.append(&mut framed.extra_end_markers);
+        framed.end_marker = Some(markers.remove(0));
+        framed.extra_end_markers = markers;
+    }
+    candidate.source.clone_from(&framed.source);
+    candidate.start_marker = framed.start_marker;
+    candidate.end_marker = framed.end_marker;
+    candidate
+        .extra_end_markers
+        .clone_from(&framed.extra_end_markers);
+    Some(framed)
+}
+
+fn shift_spans(document: &mut EditableDocument, at: usize, offset: usize) {
+    let shift = |span: &mut Span| {
+        if span.end() > at {
+            if span.start() >= at {
+                span.start += offset;
+            }
+            span.end += offset;
+        }
+    };
+    for node in &mut document.nodes {
+        shift(&mut node.span);
+        for comment in &mut node.comments {
+            if !comment.span.is_empty() {
+                shift(&mut comment.span);
+            }
+        }
+    }
+    for marker in document
+        .start_marker
+        .iter_mut()
+        .chain(document.end_marker.iter_mut())
+        .chain(document.extra_end_markers.iter_mut())
+    {
+        shift(marker);
+    }
 }
 
 impl RootComments {
@@ -153,13 +275,117 @@ enum RootKind {
     BlockCollection { header: bool },
 }
 
+/// Inline comments need syntax on their line. Reserve the root's own headers
+/// first, then assign overflow to document markers in owner-local order.
+struct InlineLayout {
+    start: Option<usize>,
+    end: Vec<usize>,
+    slots: Vec<Span>,
+    moved: HashSet<usize>,
+}
+
+impl InlineLayout {
+    fn new(
+        original: &EditableDocument,
+        root: &super::Node,
+        body: Span,
+        kind: RootKind,
+        leading: usize,
+    ) -> Self {
+        let headers = usize::from(root.anchor.is_some())
+            + usize::from(root.tag.is_some())
+            + match kind {
+                RootKind::Token | RootKind::BlockScalar => 1,
+                RootKind::FlowCollection => 2,
+                RootKind::Omitted | RootKind::BlockCollection { .. } => 0,
+            };
+        let mut body_comments = root
+            .comments
+            .iter()
+            .enumerate()
+            .filter_map(|(index, comment)| {
+                (comment.placement == CommentPlacement::Inline
+                    && (comment.span.is_empty() || contains(body, comment.span)))
+                .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let occupied = occupied_markers(original, root, body);
+        let start = if body_comments.len() > headers
+            && body_comments.first() == Some(&leading)
+            && original
+                .start_marker
+                .is_none_or(|marker| !occupied.contains(&marker.start()))
+        {
+            Some(body_comments.remove(0))
+        } else {
+            None
+        };
+        let end = body_comments.into_iter().skip(headers).collect::<Vec<_>>();
+        let mut moved: HashSet<_> = start
+            .iter()
+            .chain(&end)
+            .filter_map(|&index| {
+                let span = root.comments[index].span;
+                (!span.is_empty()).then_some(span.start())
+            })
+            .collect();
+        if let Some(&first) = end.first() {
+            // Comments following a relocated suffix header must follow it to
+            // the same boundary, rather than remain earlier in the old body.
+            moved.extend(root.comments[first..].iter().filter_map(|comment| {
+                (!comment.span.is_empty() && contains(body, comment.span))
+                    .then_some(comment.span.start())
+            }));
+        }
+        let slots = original
+            .end_marker
+            .iter()
+            .chain(&original.extra_end_markers)
+            .copied()
+            .filter(|&marker| !occupied.contains(&marker.start()))
+            .collect();
+        Self {
+            start,
+            end,
+            slots,
+            moved,
+        }
+    }
+}
+
+/// Match fixed inline comments to their preceding marker once. Searching the
+/// ordered marker list avoids scanning every comment for every document suffix.
+fn occupied_markers(original: &EditableDocument, root: &super::Node, body: Span) -> HashSet<usize> {
+    let markers: Vec<_> = original
+        .start_marker
+        .iter()
+        .chain(original.end_marker.iter())
+        .chain(&original.extra_end_markers)
+        .copied()
+        .collect();
+    root.comments
+        .iter()
+        .filter_map(|comment| {
+            if comment.placement != CommentPlacement::Inline
+                || comment.span.is_empty()
+                || contains(body, comment.span)
+            {
+                return None;
+            }
+            let index = markers.partition_point(|marker| marker.end() <= comment.span.start());
+            let marker = markers.get(index.checked_sub(1)?)?;
+            (!original.source[marker.end()..comment.span.start()].contains(['\r', '\n']))
+                .then_some(marker.start())
+        })
+        .collect()
+}
+
 struct RootLayout {
     kind: RootKind,
     body: Span,
     root_start: usize,
-    leading_count: usize,
-    marker_header: Option<usize>,
     suffix_boundary: Option<Span>,
+    inline: InlineLayout,
 }
 
 impl RootLayout {
@@ -194,19 +420,16 @@ impl RootLayout {
                 _ => RootKind::Token,
             }
         };
+        let leading_count = root
+            .comments
+            .iter()
+            .take_while(|comment| comment.placement == CommentPlacement::Leading)
+            .count();
+        let inline = InlineLayout::new(original, root, body, kind, leading_count);
         Self {
             kind,
             body,
             root_start,
-            leading_count: root
-                .comments
-                .iter()
-                .take_while(|comment| comment.placement == CommentPlacement::Leading)
-                .count(),
-            marker_header: root.comments.iter().rposition(|comment| {
-                comment.placement == CommentPlacement::Inline
-                    && (comment.span.is_empty() || contains(body, comment.span))
-            }),
             suffix_boundary: original.end_marker.filter(|_| {
                 matches!(kind, RootKind::Omitted | RootKind::BlockScalar)
                     || root
@@ -214,24 +437,28 @@ impl RootLayout {
                         .iter()
                         .any(|comment| comment.placement == CommentPlacement::Trailing)
             }),
+            inline,
         }
     }
 
     /// Comments already in the framing retain their source anchors. Comments
     /// within the body may depend on syntax removed by the final candidate.
     fn fixed(&self, comment: &Comment) -> bool {
-        if comment.span.is_empty() {
+        if comment.span.is_empty() || self.inline.moved.contains(&comment.span.start()) {
             return false;
         }
         if !contains(self.body, comment.span) {
             return true;
         }
+        if comment.placement == CommentPlacement::Leading && self.inline.start.is_some() {
+            return false;
+        }
         match self.kind {
             RootKind::Token => true,
             RootKind::Omitted => {
                 comment.span.start() < self.root_start
-                    && !(comment.placement == CommentPlacement::Leading
-                        && self.marker_header.is_some())
+                    && (comment.placement != CommentPlacement::Leading
+                        || self.inline.end.is_empty())
             }
             // Indented comments can become block-scalar text; rendering them
             // together supplies the indentation boundary after the scalar.
@@ -319,8 +546,7 @@ fn marker_anchor(
                 RootKind::FlowCollection | RootKind::BlockCollection { .. }
             );
             let precedes_header = next.is_some_and(|next| next.span.end() <= region.start())
-                || (matches!(layout.kind, RootKind::Omitted)
-                    && layout.marker_header.is_some_and(|header| index < header));
+                || layout.inline.start.is_some_and(|header| index < header);
             if !collection
                 && !precedes_header
                 && line_end(&original.source, marker.end()) < region.start()
@@ -337,7 +563,11 @@ fn marker_anchor(
             if comment.placement == CommentPlacement::Trailing
                 || comment.position == CommentPosition::After =>
         {
-            let marker = original.end_marker?;
+            let marker = original
+                .extra_end_markers
+                .last()
+                .copied()
+                .or(original.end_marker)?;
             let at = line_end(&original.source, marker.end());
             Some(Anchor {
                 at,
@@ -349,19 +579,22 @@ fn marker_anchor(
                 after: String::new(),
             })
         }
-        CommentPlacement::Inline
-            if matches!(
-                layout.kind,
-                RootKind::Omitted | RootKind::BlockCollection { header: false }
-            ) =>
-        {
-            if index != layout.leading_count {
-                let marker = original.end_marker?;
+        CommentPlacement::Inline => {
+            if let Some(slot) = layout
+                .inline
+                .end
+                .iter()
+                .position(|&comment| comment == index)
+            {
+                let marker = *layout.inline.slots.get(slot)?;
                 return Some(Anchor {
                     at: line_end(&original.source, marker.end()),
                     before: " ".to_owned(),
                     after: String::new(),
                 });
+            }
+            if layout.inline.start != Some(index) {
+                return None;
             }
             let marker = original.start_marker?;
             let end = line_end(&original.source, marker.end());
