@@ -534,6 +534,11 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
         for (source, root, inner) in [
             ("outer:\n  key: old\n", None, None),
             (
+                "outer: {key: old} # inline\n",
+                None,
+                Some((" inline", CommentPlacement::Inline)),
+            ),
+            (
                 "outer:\n  key: old\n# trailing\n",
                 Some((" trailing", CommentPlacement::Trailing)),
                 None,
