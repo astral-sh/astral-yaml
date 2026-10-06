@@ -12,7 +12,7 @@ fn suffix_boundaries_preserve_detached_comments() {
     for newline in ["\n", "\r\n", "\r"] {
         for source in [
             "# prefix\n--- old\n\n...\n# gap\n",
-            "# prefix\n--- old\n\n...\n\n  # gap\n",
+            "# prefix\n--- old\n\n...\n \t \n  # gap\n",
             "# prefix\n--- old\n\n... # end\n# gap\n",
         ] {
             let source = source.replace('\n', newline);
@@ -69,7 +69,7 @@ fn suffix_boundaries_preserve_detached_comments() {
     -
      ...
     +# added
-     ⏎
+      \t ⏎
        # gap
 
     --- before.yaml
@@ -80,7 +80,7 @@ fn suffix_boundaries_preserve_detached_comments() {
     -
     +--- ⏎
      ...
-     ⏎
+      \t ⏎
        # gap
 
     --- before.yaml
@@ -135,7 +135,7 @@ fn suffix_boundaries_preserve_detached_comments() {
     -␍
      ...␍
     +# added␍
-     ␍
+      \t ␍
        # gap␍
 
     --- before.yaml
@@ -146,7 +146,7 @@ fn suffix_boundaries_preserve_detached_comments() {
     -␍
     +--- ␍
      ...␍
-     ␍
+      \t ␍
        # gap␍
 
     --- before.yaml
@@ -184,12 +184,12 @@ fn suffix_boundaries_preserve_detached_comments() {
     --- before.yaml
     +++ after.yaml
     @@ -1,6 +1,6 @@
-     # prefix␍ --- old␍-␍ ...␍+# added␍ ␍   # gap␍
+     # prefix␍ --- old␍-␍ ...␍+# added␍  \t ␍   # gap␍
 
     --- before.yaml
     +++ after.yaml
     @@ -1,6 +1,5 @@
-     # prefix␍---- old␍-␍+--- ␍ ...␍ ␍   # gap␍
+     # prefix␍---- old␍-␍+--- ␍ ...␍  \t ␍   # gap␍
 
     --- before.yaml
     +++ after.yaml
