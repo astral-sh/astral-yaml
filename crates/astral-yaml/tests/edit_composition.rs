@@ -128,6 +128,8 @@ fn framing_comment_edits_compose_with_content_edits() {
             &[(" prefix", Leading), (" end", Inline), (" tail", Trailing)],
         ),
         ("---\n...\n", &[]),
+        ("# prefix\n--- old\n\n...\n", &[(" prefix", Leading)]),
+        ("# prefix\n--- |-\n  old\n\n...\n", &[(" prefix", Leading)]),
         (
             "---\n# prefix\nold\n...\n# tail\n",
             &[(" prefix", Leading), (" tail", Trailing)],

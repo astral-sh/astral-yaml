@@ -4,6 +4,206 @@ use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::edit_diff;
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn suffix_boundaries_preserve_detached_comments() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# prefix\n--- old\n\n...\n# gap\n",
+            "# prefix\n--- old\n\n...\n\n  # gap\n",
+            "# prefix\n--- old\n\n... # end\n# gap\n",
+        ] {
+            let source = source.replace('\n', newline);
+            for omit in [false, true] {
+                let mut document = EditableDocument::parse(&source).unwrap();
+                document
+                    .edit(|editor| {
+                        let root = editor.root();
+                        if omit {
+                            editor.replace(&root, "---\n")
+                        } else {
+                            let index = editor.node(&root)?.comments().len() - 1;
+                            editor.insert_comment(
+                                &root,
+                                index,
+                                " added",
+                                CommentPlacement::Trailing,
+                            )
+                        }
+                    })
+                    .unwrap();
+                diffs.push(edit_diff(&source, document.source()));
+            }
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix
+     --- old
+    -
+     ...
+    +# added
+    +
+     # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix
+    ---- old
+    +--- ⏎
+    +...
+     ⏎
+    -...
+     # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+     # prefix
+     --- old
+    -
+     ...
+    +# added
+     ⏎
+       # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,5 @@
+     # prefix
+    ---- old
+    -
+    +--- ⏎
+     ...
+     ⏎
+       # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix
+     --- old
+    -
+     ... # end
+    +# added
+    +
+     # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix
+    ---- old
+    +--- ⏎
+    +... # end
+     ⏎
+    -... # end
+     # gap
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix␍
+     --- old␍
+    -␍
+     ...␍
+    +# added␍
+    +␍
+     # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix␍
+    ---- old␍
+    +--- ␍
+    +...␍
+     ␍
+    -...␍
+     # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+     # prefix␍
+     --- old␍
+    -␍
+     ...␍
+    +# added␍
+     ␍
+       # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,5 @@
+     # prefix␍
+    ---- old␍
+    -␍
+    +--- ␍
+     ...␍
+     ␍
+       # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix␍
+     --- old␍
+    -␍
+     ... # end␍
+    +# added␍
+    +␍
+     # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix␍
+    ---- old␍
+    +--- ␍
+    +... # end␍
+     ␍
+    -... # end␍
+     # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix␍ --- old␍-␍ ...␍+# added␍+␍ # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix␍---- old␍+--- ␍+...␍ ␍-...␍ # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+     # prefix␍ --- old␍-␍ ...␍+# added␍ ␍   # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,5 @@
+     # prefix␍---- old␍-␍+--- ␍ ...␍ ␍   # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+     # prefix␍ --- old␍-␍ ... # end␍+# added␍+␍ # gap␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     # prefix␍---- old␍+--- ␍+... # end␍ ␍-... # end␍ # gap␍
+    ");
+}
+
+#[test]
 fn structural_edits_preserve_framing_and_outer_comments() {
     // Document markers: https://yaml.org/spec/1.2.2/#922-document-markers
     let mut diffs = Vec::new();
@@ -969,6 +1169,8 @@ fn root_omission_retains_comments_at_document_boundaries() {
     for newline in ["\n", "\r\n", "\r"] {
         for source in [
             "# prefix\n---\nold\n...\n",
+            "# prefix\n--- old\n\n...\n",
+            "# prefix\n--- |-\n  old\n\n...\n",
             "---\nold # inline\n...\n",
             "---\nold\n# tail\n...\n",
             "---\nold\n\n# gap\n...\n",
@@ -989,6 +1191,25 @@ fn root_omission_retains_comments_at_document_boundaries() {
      # prefix
      ---
     -old
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix
+    ---- old
+    -
+    +--- ⏎
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+     # prefix
+    ---- |-
+    -  old
+    -
+    +--- ⏎
      ...
 
     --- before.yaml
@@ -1037,6 +1258,25 @@ fn root_omission_retains_comments_at_document_boundaries() {
 
     --- before.yaml
     +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix␍
+    ---- old␍
+    -␍
+    +--- ␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+     # prefix␍
+    ---- |-␍
+    -  old␍
+    -␍
+    +--- ␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
     @@ -1,3 +1,2 @@
     ----␍
     -old # inline␍
@@ -1075,6 +1315,16 @@ fn root_omission_retains_comments_at_document_boundaries() {
     +++ after.yaml
     @@ -1,4 +1,3 @@
      # prefix␍ ---␍-old␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix␍---- old␍-␍+--- ␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+     # prefix␍---- |-␍-  old␍-␍+--- ␍ ...␍
 
     --- before.yaml
     +++ after.yaml

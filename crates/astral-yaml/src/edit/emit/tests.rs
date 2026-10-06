@@ -1093,27 +1093,25 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
 #[test]
 fn omitted_roots_own_their_line_when_comments_are_emitted() {
     let mut outputs = Vec::new();
-    let source = indoc! {r"
-        ---
-        old
-        ...
-    "};
-    let mut candidate = EditableDocument::parse(source).unwrap();
-    let root = &mut candidate.nodes[candidate.root.0];
-    root.kind = NodeKind::Scalar {
-        value: String::new(),
-        style: crate::ScalarStyle::Plain,
-    };
-    root.comments.push(super::Comment {
-        text: " added".to_owned(),
-        placement: crate::comments::CommentPlacement::Leading,
-        position: super::CommentPosition::Before,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
-    outputs.push(candidate.normalized_yaml().unwrap());
+    for source in ["---\nold\n...\n", "--- old\n...\n"] {
+        let mut candidate = EditableDocument::parse(source).unwrap();
+        let root = &mut candidate.nodes[candidate.root.0];
+        root.kind = NodeKind::Scalar {
+            value: String::new(),
+            style: crate::ScalarStyle::Plain,
+        };
+        root.comments.push(super::Comment {
+            text: " added".to_owned(),
+            placement: crate::comments::CommentPlacement::Leading,
+            position: super::CommentPosition::Before,
+            span: crate::Span::new(0, 0).unwrap(),
+        });
+        outputs.push(candidate.normalized_yaml().unwrap());
+    }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
         "---\n# added\n...\n",
+        "--- \n# added\n...\n",
     ]
     "#);
 }

@@ -90,7 +90,30 @@ impl RootComments {
             ));
         }
         plan.changed_comments(original, Some(region));
+        if let Some(marker) = layout.suffix_boundary {
+            plan.retain_suffix_separation(original, marker);
+        }
         Ok(plan)
+    }
+
+    /// A rewritten body owns its separation from the end marker. If an outer
+    /// detached comment relied on that separation, give it a blank line on the
+    /// retained side of the marker instead.
+    fn retain_suffix_separation(&mut self, original: &EditableDocument, marker: Span) {
+        let Some(comment) = self.rendered.iter().find(|comment| {
+            comment.placement == CommentPlacement::Detached && comment.span.start() >= marker.end()
+        }) else {
+            return;
+        };
+        if !blank_between(&original.source, marker.end(), comment.span.start()) {
+            let start = original.source[..comment.span.start()]
+                .rfind(['\r', '\n'])
+                .map_or(0, |index| index + 1);
+            self.patches.push((
+                Span { start, end: start },
+                emit::newline(&original.source).to_owned(),
+            ));
+        }
     }
 
     /// Compare final comment identities with the original source. Intermediate
@@ -136,6 +159,7 @@ struct RootLayout {
     root_start: usize,
     leading_count: usize,
     marker_header: Option<usize>,
+    suffix_boundary: Option<Span>,
 }
 
 impl RootLayout {
@@ -183,6 +207,13 @@ impl RootLayout {
                 comment.placement == CommentPlacement::Inline
                     && (comment.span.is_empty() || contains(body, comment.span))
             }),
+            suffix_boundary: original.end_marker.filter(|_| {
+                matches!(kind, RootKind::Omitted | RootKind::BlockScalar)
+                    || root
+                        .comments
+                        .iter()
+                        .any(|comment| comment.placement == CommentPlacement::Trailing)
+            }),
         }
     }
 
@@ -226,6 +257,12 @@ pub(super) fn root_region(
             region.start = region.start().min(comment.span.start());
             region.end = region.end().max(comment.span.end());
         }
+    }
+    if let Some(marker) = layout.suffix_boundary {
+        // Trailing comments require adjacency to the root even when the end
+        // marker hosts them. Omitted roots and block scalars also own these
+        // separators. Render the complete body to establish that boundary.
+        region.end = region.end().max(marker.start());
     }
     region
 }
@@ -349,6 +386,27 @@ fn line_end(source: &str, start: usize) -> usize {
     source[start..]
         .find(['\r', '\n'])
         .map_or(source.len(), |offset| start + offset)
+}
+
+fn blank_between(source: &str, before: usize, after: usize) -> bool {
+    let mut end = line_end(source, before);
+    while end < after {
+        let start = end
+            + if source[end..].starts_with("\r\n") {
+                2
+            } else {
+                1
+            };
+        end = line_end(source, start);
+        if end < after
+            && source[start..end]
+                .bytes()
+                .all(|byte| matches!(byte, b' ' | b'\t'))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn removal_span(source: &str, span: Span) -> Span {
