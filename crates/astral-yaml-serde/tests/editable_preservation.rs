@@ -697,3 +697,132 @@ fn commented_fragments_refresh_the_typed_view() {
      # tail
     ");
 }
+
+#[test]
+fn typed_insertions_keep_flow_delimiter_comments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "[ # open\n  old\n] # close\n".replace('\n', newline);
+        let mut document = Editable::<Vec<String>>::parse(&source).unwrap();
+        document
+            .edit(|editor| {
+                editor.root_mut().push("new")?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(document.value(), &["old", "new"]);
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+     [ # open
+    -  old
+    -] # close
+    +  old, "new"] # close
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+     [ # open␍
+    -  old␍
+    -] # close␍
+    +  old, "new"] # close␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+     [ # open␍-  old␍-] # close␍+  old, "new"] # close␍
+    "#);
+}
+
+#[test]
+fn typed_collection_edits_retain_outside_comments() {
+    #[derive(Deserialize)]
+    struct Config {
+        outer: std::collections::BTreeMap<String, String>,
+    }
+
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "outer:\n# detached\n  key: old\nunknown: keep\n",
+            "outer:\n# leading\n  {key: old}\nunknown: keep\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = Editable::<Config>::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let mut outer = editor.root_mut().field("outer")?;
+                    outer.set_collection_style(CollectionStyle::Flow)?;
+                    outer.reborrow().set_entry("added", "new")?;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(
+                document.value().outer,
+                std::collections::BTreeMap::from([
+                    ("key".to_owned(), "old".to_owned()),
+                    ("added".to_owned(), "new".to_owned()),
+                ])
+            );
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     outer:
+    -# detached
+    -  key: old
+    +  # detached
+    +
+    +  {key: old, "added": "new"}
+     unknown: keep
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -outer:
+    -# leading
+    -  {key: old}
+    +outer: {
+    +  # leading
+    +  key: old, "added": "new"}
+     unknown: keep
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     outer:␍
+    -# detached␍
+    -  key: old␍
+    +  # detached␍
+    +␍
+    +  {key: old, "added": "new"}␍
+     unknown: keep␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -outer:␍
+    -# leading␍
+    -  {key: old}␍
+    +outer: {␍
+    +  # leading␍
+    +  key: old, "added": "new"}␍
+     unknown: keep␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     outer:␍-# detached␍-  key: old␍+  # detached␍+␍+  {key: old, "added": "new"}␍ unknown: keep␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -outer:␍-# leading␍-  {key: old}␍+outer: {␍+  # leading␍+  key: old, "added": "new"}␍ unknown: keep␍
+    "#);
+}
