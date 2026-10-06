@@ -120,9 +120,11 @@ dependencies = [
  "deser-value",
  "deser-yaml",
  "indoc",
+ "insta",
  "serde",
  "serde-saphyr",
  "serde_json",
+ "similar",
  "yaml_serde",
 ]
 

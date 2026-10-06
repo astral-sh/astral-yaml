@@ -535,23 +535,58 @@ impl Emitter<'_> {
     fn after(&mut self, comments: Comments, indent: usize, suffix: &str) -> Result<(), Error> {
         self.push(suffix)?;
         for comment in comments.remaining {
-            if comment.placement == CommentPlacement::Inline
-                && self.pending_indent.is_none()
-                && !self.output.ends_with(['\n', '\r'])
-            {
-                self.push(" ")?;
-            } else {
-                self.line(indent)?;
-            }
-            if comment.placement == CommentPlacement::Detached {
-                self.push(self.newline)?;
-                self.line(indent)?;
-            }
-            self.push("#")?;
-            self.push(&comment.text)?;
-            self.pending_indent = Some(indent);
+            self.comment(&comment, indent)?;
         }
         Ok(())
+    }
+
+    fn comment(&mut self, comment: &Comment, indent: usize) -> Result<(), Error> {
+        if comment.placement == CommentPlacement::Inline
+            && self.pending_indent.is_none()
+            && !self.output.ends_with(['\n', '\r'])
+        {
+            self.push(" ")?;
+        } else {
+            self.line(indent)?;
+        }
+        if comment.placement == CommentPlacement::Detached {
+            self.push(self.newline)?;
+            self.line(indent)?;
+        }
+        self.push("#")?;
+        self.push(&comment.text)?;
+        self.pending_indent = Some(indent);
+        Ok(())
+    }
+
+    /// Full-line suffixes need the collection's enclosing delimiters to retain
+    /// their owner. An inline closing comment still follows the delimiter.
+    fn flow_end(
+        &mut self,
+        delimiter: &str,
+        id: NodeId,
+        comments: &mut Comments,
+        indent: usize,
+    ) -> Result<(), Error> {
+        while comments
+            .remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| {
+                id != self.document.root
+                    || (!comment.span.is_empty()
+                        && comment.span.end() <= self.document.nodes[id.0].span.end())
+            })
+        {
+            let Some(comment) = comments
+                .take(CommentPlacement::Trailing)
+                .or_else(|| comments.take(CommentPlacement::Detached))
+            else {
+                break;
+            };
+            self.comment(&comment, indent)?;
+        }
+        self.push(delimiter)
     }
 
     fn node(
@@ -591,14 +626,7 @@ impl Emitter<'_> {
                 self.push(name)?;
             }
             NodeKind::Sequence { items, style } => {
-                self.sequence(
-                    items,
-                    *style,
-                    node.anchor.is_some() || node.tag.is_some(),
-                    context,
-                    depth,
-                    &mut comments,
-                )?;
+                self.sequence(items, *style, id, context, depth, &mut comments)?;
             }
             NodeKind::Mapping { entries, style } => {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
@@ -641,7 +669,7 @@ impl Emitter<'_> {
                     )?;
                 }
                 if is_flow {
-                    self.push("}")?;
+                    self.flow_end("}", id, &mut comments, indent + 2)?;
                 }
             }
         }
@@ -656,7 +684,7 @@ impl Emitter<'_> {
         &mut self,
         items: &[NodeId],
         style: CollectionStyle,
-        has_properties: bool,
+        id: NodeId,
         context: Context,
         depth: usize,
         comments: &mut Comments,
@@ -677,9 +705,10 @@ impl Emitter<'_> {
                     depth + 1,
                 )?;
             }
-            self.push("]")?;
+            self.flow_end("]", id, comments, indent + 2)?;
         } else {
-            if has_properties {
+            let node = &self.document.nodes[id.0];
+            if node.anchor.is_some() || node.tag.is_some() {
                 self.line(indent)?;
             }
             for (index, &item) in items.iter().enumerate() {
