@@ -303,12 +303,10 @@ fn root_comment_placement_respects_the_document_prefix() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,5 @@
+    @@ -1,3 +1,4 @@
      %YAML 1.2
-    ---- value
-    +--- ⏎
     +# leading
-    +value
+     --- value
      ...
     ");
 

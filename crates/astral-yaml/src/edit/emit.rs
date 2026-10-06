@@ -1018,7 +1018,7 @@ pub(super) fn has_inline_header(node: &super::Node, flow: bool) -> bool {
             && (node.tag.is_some() || node.anchor.is_some())))
 }
 
-fn block_collection(kind: &NodeKind, flow: bool) -> bool {
+pub(super) fn block_collection(kind: &NodeKind, flow: bool) -> bool {
     collection_style(kind, flow) == Some(CollectionStyle::Block)
 }
 

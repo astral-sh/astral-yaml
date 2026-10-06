@@ -688,3 +688,632 @@ fn removing_the_last_gap_cannot_change_block_scalar_content() {
         assert_eq!(document.source(), source);
     }
 }
+
+#[test]
+fn root_comments_can_use_framing_without_retained_comment_anchors() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "---\n...\n",
+            "--- # header\n... # end\n",
+            "---\n\n...\n# tail\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    let count = editor.node(&root)?.comments().len();
+                    editor.insert_comment(&root, count, " added", CommentPlacement::Trailing)?;
+                    for _ in 0..count {
+                        editor.remove_comment(&root, 0)?;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     ---
+     ...
+    +# added
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    ---- # header
+    -... # end
+    +--- ⏎
+    +... ⏎
+    +# added
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     ---
+     ⏎
+     ...
+    -# tail
+    +# added
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     ---␍
+     ...␍
+    +# added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    ---- # header␍
+    -... # end␍
+    +--- ␍
+    +... ␍
+    +# added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     ---␍
+     ␍
+     ...␍
+    -# tail␍
+    +# added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     ---␍ ...␍+# added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    ---- # header␍-... # end␍+--- ␍+... ␍+# added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     ---␍ ␍ ...␍-# tail␍+# added␍
+    ");
+}
+
+#[test]
+fn block_roots_can_use_the_document_marker_for_inline_comments() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in ["--- # header", "---\n", "--- old\n"] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    while !editor.node(&root)?.comments().is_empty() {
+                        editor.remove_comment(&root, 0)?;
+                    }
+                    editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
+                    editor.replace(&root, "a: new\n")
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # header
+    \ No newline at end of file
+    +---  # added
+    +a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ----
+    +--- # added
+    +a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- old
+    +---  # added
+    +a: new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # header
+    \ No newline at end of file
+    +---  # added
+    +a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ----␍
+    +--- # added␍
+    +a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- old␍
+    +---  # added␍
+    +a: new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # header
+    \ No newline at end of file
+    +---  # added
+    +a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ----␍+--- # added␍+a: new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- old␍+---  # added␍+a: new␍
+    ");
+}
+
+#[test]
+fn root_leading_comments_use_the_start_marker_boundary() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "---\n- old\n...\n",
+            "--- # header\nkey: old\n",
+            "---\n\n... # end\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    +# added
+     ---
+     - old
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +# added
+     --- # header
+     key: old
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     ---
+     ⏎
+    +# added
+     ... # end
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    +# added␍
+     ---␍
+     - old␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +# added␍
+     --- # header␍
+     key: old␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     ---␍
+     ␍
+    +# added␍
+     ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    +# added␍ ---␍ - old␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +# added␍ --- # header␍ key: old␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+     ---␍ ␍+# added␍ ... # end␍
+    ");
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn root_omission_retains_comments_at_document_boundaries() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# prefix\n---\nold\n...\n",
+            "---\nold # inline\n...\n",
+            "---\nold\n# tail\n...\n",
+            "---\nold\n\n# gap\n...\n",
+            "---\n# leading\nold # inline\n...\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| editor.replace(&editor.root(), "---\n"))
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix
+     ---
+    -old
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    ----
+    -old # inline
+    +--- # inline
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     ---
+    -old
+    -# tail
+     ...
+    +# tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     ---
+    -old
+    +...
+     ⏎
+     # gap
+    -...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----
+     # leading
+    -old # inline
+    +--- # inline
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix␍
+     ---␍
+    -old␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    ----␍
+    -old # inline␍
+    +--- # inline␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     ---␍
+    -old␍
+    -# tail␍
+     ...␍
+    +# tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     ---␍
+    -old␍
+    +...␍
+     ␍
+     # gap␍
+    -...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----␍
+     # leading␍
+    -old # inline␍
+    +--- # inline␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # prefix␍ ---␍-old␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,2 @@
+    ----␍-old # inline␍+--- # inline␍ ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     ---␍-old␍-# tail␍ ...␍+# tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     ---␍-old␍+...␍ ␍ # gap␍-...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----␍ # leading␍-old # inline␍+--- # inline␍ ...␍
+    ");
+}
+
+#[test]
+fn collection_comments_can_use_both_document_marker_headers() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "---\n[ # open\n  old\n] # close\n...\n",
+            "---\n{ # open\n  key: old\n} # close\n...\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----
+    -[ # open
+    -  old
+    -] # close
+    -...
+    +--- # open
+    +- old
+    +... # close
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----
+    -{ # open
+    -  key: old
+    -} # close
+    -...
+    +--- # open
+    +key: old
+    +... # close
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----␍
+    -[ # open␍
+    -  old␍
+    -] # close␍
+    -...␍
+    +--- # open␍
+    +- old␍
+    +... # close␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----␍
+    -{ # open␍
+    -  key: old␍
+    -} # close␍
+    -...␍
+    +--- # open␍
+    +key: old␍
+    +... # close␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----␍-[ # open␍-  old␍-] # close␍-...␍+--- # open␍+- old␍+... # close␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,3 @@
+    ----␍-{ # open␍-  key: old␍-} # close␍-...␍+--- # open␍+key: old␍+... # close␍
+    ");
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn scalar_style_edits_keep_comments_outside_the_content() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in ["  old\n# tail\n", "old\n  # tail\n"] {
+            for style in [
+                astral_yaml::ScalarStyle::Literal,
+                astral_yaml::ScalarStyle::Folded,
+            ] {
+                let source = source.replace('\n', newline);
+                let mut document = EditableDocument::parse(&source).unwrap();
+                document
+                    .edit(|editor| editor.set_scalar_style(&editor.root(), style))
+                    .unwrap();
+                diffs.push(edit_diff(&source, document.source()));
+            }
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-
+       old
+     # tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  >2-
+       old
+     # tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old
+    -  # tail
+    +|2-
+    +  old
+    +# tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old
+    -  # tail
+    +>2-
+    +  old
+    +# tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-␍
+       old␍
+     # tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  >2-␍
+       old␍
+     # tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old␍
+    -  # tail␍
+    +|2-␍
+    +  old␍
+    +# tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old␍
+    -  # tail␍
+    +>2-␍
+    +  old␍
+    +# tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-␍   old␍ # tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  >2-␍   old␍ # tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old␍-  # tail␍+|2-␍+  old␍+# tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -old␍-  # tail␍+>2-␍+  old␍+# tail␍
+    ");
+}
+
+#[test]
+fn framing_text_edits_retain_the_unchanged_body_layout() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "---\n&root\n# header\n|\n  old\n...\n# tail\n".replace('\n', newline);
+        let mut document = EditableDocument::parse(&source).unwrap();
+        document
+            .edit(|editor| editor.replace_comment(&editor.root(), 1, " changed"))
+            .unwrap();
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -4,4 +4,4 @@
+     |
+       old
+     ...
+    -# tail
+    +# changed
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -4,4 +4,4 @@
+     |␍
+       old␍
+     ...␍
+    -# tail␍
+    +# changed␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -4,4 +4,4 @@
+     |␍   old␍ ...␍-# tail␍+# changed␍
+    ");
+}

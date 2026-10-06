@@ -1,6 +1,7 @@
 //! Owned YAML syntax for source-preserving editing.
 
 mod emit;
+mod framing;
 mod transaction;
 mod view;
 
@@ -22,6 +23,7 @@ pub struct EditableDocument {
     pub(crate) nodes: Vec<Node>,
     pub(crate) root: NodeId,
     pub(crate) options: ParseOptions,
+    pub(crate) start_marker: Option<Span>,
     pub(crate) end_marker: Option<Span>,
 }
 
@@ -212,6 +214,7 @@ impl EditableDocument {
             nodes,
             root: document.root,
             options,
+            start_marker: document.start_marker,
             end_marker: document.end_marker,
             source: source.into_owned(),
         })

@@ -1,4 +1,6 @@
-use super::{Comment, CommentPosition, EditableDocument, Node, NodeKind, emit};
+use super::{
+    Comment, CommentPosition, EditableDocument, Node, NodeKind, emit, framing::RootComments,
+};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{
     cell::Cell,
@@ -29,19 +31,10 @@ pub struct Editor<'a> {
     alive: Vec<bool>,
     rewrites: HashSet<NodeId>,
     requested_styles: HashSet<NodeId>,
-    patches: Vec<(Span, String)>,
+    root_comments_changed: bool,
     work: Cell<usize>,
     introduced_bytes: usize,
     failure: Option<Error>,
-}
-
-/// The document's outer comments share their source with directives and markers.
-/// Keep those source positions as anchors instead of pulling them into the node
-/// region, which would erase framing syntax when that region is rendered.
-#[derive(Debug)]
-struct RootComments {
-    rendered: Vec<Comment>,
-    insertions: Vec<(Span, String)>,
 }
 
 impl EditableDocument {
@@ -93,7 +86,7 @@ impl<'a> Editor<'a> {
             alive: vec![true; original.nodes.len()],
             rewrites: HashSet::new(),
             requested_styles: HashSet::new(),
-            patches: Vec::new(),
+            root_comments_changed: false,
             work: Cell::new(original.options.max_nodes),
             introduced_bytes: 0,
             failure: None,
@@ -685,7 +678,7 @@ impl<'a> Editor<'a> {
             };
             text.clone_into(&mut comment.text);
             let span = comment.span;
-            editor.comment_change(id, span, format!("#{text}"));
+            editor.comment_change(id, span);
             Ok(())
         })
     }
@@ -702,7 +695,7 @@ impl<'a> Editor<'a> {
                 return Err(editor.error("comment index out of bounds"));
             }
             let comment = comments.remove(index);
-            editor.comment_change(id, comment.span, String::new());
+            editor.comment_change(id, comment.span);
             Ok(())
         })
     }
@@ -719,41 +712,13 @@ impl<'a> Editor<'a> {
         self.charge(1)
     }
 
-    fn comment_change(&mut self, id: NodeId, span: Span, replacement: String) {
+    fn comment_change(&mut self, id: NodeId, span: Span) {
         let root_span = self.original.nodes[self.original.root.0].span;
         if id == self.original.root
             && !span.is_empty()
             && (span.start() < root_span.start() || span.end() > root_span.end())
         {
-            self.patches.retain(|(previous, _)| *previous != span);
-            let span = if replacement.is_empty() {
-                // A removed standalone comment must not leave an empty line:
-                // that would detach the remaining leading/trailing comments.
-                let source = &self.original.source;
-                let start = source[..span.start()]
-                    .rfind(['\r', '\n'])
-                    .map_or(0, |index| index + 1);
-                if source[start..span.start()]
-                    .bytes()
-                    .all(|byte| matches!(byte, b' ' | b'\t'))
-                {
-                    let suffix = &source[span.end()..];
-                    let terminator = if suffix.starts_with("\r\n") {
-                        2
-                    } else {
-                        usize::from(suffix.starts_with(['\r', '\n']))
-                    };
-                    Span {
-                        start,
-                        end: span.end() + terminator,
-                    }
-                } else {
-                    span
-                }
-            } else {
-                span
-            };
-            self.patches.push((span, replacement));
+            self.root_comments_changed = true;
         } else {
             self.mark_parent(id);
         }
@@ -800,6 +765,10 @@ impl<'a> Editor<'a> {
                                 region.end = comment.span.end();
                             }
                         }
+                    }
+                    if id == self.candidate.root {
+                        region =
+                            super::framing::root_region(self.original, &self.candidate, region);
                     }
                     (id, region)
                 })
@@ -849,63 +818,12 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn root_comments(&self, region: Span) -> Result<RootComments, Error> {
-        let comments = &self.candidate.nodes[self.candidate.root.0].comments;
-        self.charge(comments.len())?;
-        let mut following = vec![None; comments.len()];
-        let mut next = None;
-        for (index, comment) in comments.iter().enumerate().rev() {
-            following[index] = next;
-            if !comment.span.is_empty() {
-                next = Some(index);
-            }
-        }
-
-        let mut plan = RootComments {
-            rendered: Vec::new(),
-            insertions: Vec::new(),
-        };
-        let newline = emit::newline(&self.original.source);
-        let mut previous = None;
-        let mut bytes = 0usize;
-        for (index, comment) in comments.iter().enumerate() {
-            if !comment.span.is_empty() {
-                previous = Some(index);
-                plan.rendered.push(comment.clone());
-                continue;
-            }
-            // Consecutive insertions use the nearest retained comments as
-            // anchors. Planning from the final list preserves order even when
-            // several operations insert at the same index in one transaction.
-            let outer = |index: usize, before: bool| {
-                let anchor = &comments[index];
-                (anchor.span.end() <= region.start() || anchor.span.start() >= region.end())
-                    .then(|| outer_comment_breaks(comment, anchor, before))
-                    .flatten()
-                    .map(|breaks| (index, before, breaks))
-            };
-            let anchor = following[index]
-                .and_then(|index| outer(index, true))
-                .or_else(|| previous.and_then(|index| outer(index, false)));
-            let Some((anchor, before, breaks)) = anchor else {
-                plan.rendered.push(comment.clone());
-                continue;
-            };
-            let anchor = &comments[anchor];
-            let indentation = emit::indent(&self.original.source, anchor.span.start());
-            bytes = bytes
-                .checked_add(comment.text.len() + 1 + newline.len() * breaks + indentation)
-                .filter(|&size| size <= self.original.options.max_input_bytes)
-                .ok_or_else(|| self.error("emitted YAML exceeds input byte limit"))?;
-            let separator = format!("{}{}", newline.repeat(breaks), " ".repeat(indentation));
-            let (at, text) = if before {
-                (anchor.span.start(), format!("#{}{separator}", comment.text))
-            } else {
-                (anchor.span.end(), format!("{separator}#{}", comment.text))
-            };
-            plan.insertions.push((Span { start: at, end: at }, text));
-        }
-        Ok(plan)
+    fn root_comments(&self, region: Option<Span>) -> Result<RootComments, Error> {
+        self.charge(
+            self.original.nodes[self.original.root.0].comments.len()
+                + self.candidate.nodes[self.candidate.root.0].comments.len(),
+        )?;
+        RootComments::plan(self.original, &self.candidate, region)
     }
 
     fn finish(self) -> Result<EditableDocument, Error> {
@@ -913,7 +831,16 @@ impl<'a> Editor<'a> {
             return Err(error);
         }
         let regions = self.rewrite_regions()?;
-        let mut patches = Vec::new();
+        let root_region = regions.iter().find(|&&(id, _)| id == self.candidate.root);
+        let mut root_comments = if root_region.is_some() || self.root_comments_changed {
+            let region = root_region.map(|&(_, region)| region);
+            Some(self.root_comments(region)?)
+        } else {
+            None
+        };
+        let mut patches = root_comments
+            .as_mut()
+            .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
         for &(id, region) in &regions {
             let flow = self.flow_context(id);
             let indent = emit::indent(&self.original.source, region.start());
@@ -932,8 +859,7 @@ impl<'a> Editor<'a> {
                 )
             };
             let rendered = if id == self.candidate.root {
-                let comments = self.root_comments(region)?;
-                patches.extend(comments.insertions);
+                let comments = root_comments.as_ref().expect("root comment plan");
                 emit::render_with_comments(
                     &self.candidate,
                     id,
@@ -952,16 +878,6 @@ impl<'a> Editor<'a> {
             };
             patches.push((rendered.span, rendered.text));
         }
-        patches.extend(
-            self.patches
-                .iter()
-                .filter(|(span, _)| {
-                    !regions.iter().any(|(_, region)| {
-                        span.start() >= region.start() && span.end() <= region.end()
-                    })
-                })
-                .cloned(),
-        );
         // Insertions at a replacement's start must precede that replacement.
         // Stable sorting retains candidate order for insertions at the same point.
         patches.sort_by_key(|(span, _)| (span.start(), span.end()));
@@ -1011,42 +927,6 @@ impl<'a> Editor<'a> {
             id = parent;
         }
         false
-    }
-}
-
-/// Choose separation only when inserting beside a retained outer comment
-/// preserves both attachments. Otherwise emission places the new comment next
-/// to the rewritten content. Inline and leading/trailing comments must remain
-/// adjacent to their syntax; detached comments require blank separation.
-fn outer_comment_breaks(comment: &Comment, anchor: &Comment, before: bool) -> Option<usize> {
-    if !matches!(
-        comment.position,
-        CommentPosition::Before | CommentPosition::After
-    ) || anchor.position != comment.position
-        || comment.placement == CommentPlacement::Inline
-    {
-        return None;
-    }
-    if anchor.placement == comment.placement {
-        return Some(1);
-    }
-    match (
-        comment.position,
-        before,
-        comment.placement,
-        anchor.placement,
-    ) {
-        (CommentPosition::Before, true, CommentPlacement::Detached, CommentPlacement::Leading)
-        | (
-            CommentPosition::After,
-            false,
-            CommentPlacement::Detached,
-            CommentPlacement::Inline | CommentPlacement::Trailing,
-        ) => Some(2),
-        (CommentPosition::After, false, CommentPlacement::Trailing, CommentPlacement::Inline) => {
-            Some(1)
-        }
-        _ => None,
     }
 }
 

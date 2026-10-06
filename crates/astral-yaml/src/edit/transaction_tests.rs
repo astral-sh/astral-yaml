@@ -57,12 +57,12 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     }
     let region = document.nodes[document.root.0].span;
     assert_eq!(
-        editor.root_comments(region).unwrap_err().message,
+        editor.root_comments(Some(region)).unwrap_err().message,
         "emitted YAML exceeds input byte limit"
     );
     editor.work.set(0);
     assert_eq!(
-        editor.root_comments(region).unwrap_err().message,
+        editor.root_comments(Some(region)).unwrap_err().message,
         "editing resource limit exceeded"
     );
 }
