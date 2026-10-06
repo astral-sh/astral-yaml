@@ -155,6 +155,18 @@ fn rendering_obeys_work_and_output_budgets() {
         ("[42]", 1, 100, "emission resource limit exceeded"),
         ("42", 100, 1, "emitted YAML exceeds input byte limit"),
         (
+            "a: old\n\n# detached\n\nb: new\n",
+            100,
+            10,
+            "emitted YAML exceeds input byte limit",
+        ),
+        (
+            "- old\n\n# detached\n\n- new\n",
+            100,
+            10,
+            "emitted YAML exceeds input byte limit",
+        ),
+        (
             "# leading\na: value\n",
             100,
             3,
