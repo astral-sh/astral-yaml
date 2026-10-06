@@ -689,10 +689,11 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,4 +1,4 @@
+    @@ -1,4 +1,5 @@
      # config
     ---- &root
-    +--- &root ⏎
+    +--- ⏎
+    +&root ⏎
      - old
      ...
 

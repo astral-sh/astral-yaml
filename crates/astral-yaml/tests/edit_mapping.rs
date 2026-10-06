@@ -304,10 +304,9 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1 +1,2 @@
+    @@ -1 +1 @@
     -? key # note
     +key: 42 # note
-    +
 
     --- before.yaml
     +++ after.yaml

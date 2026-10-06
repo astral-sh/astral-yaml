@@ -398,12 +398,11 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,4 @@
+    @@ -1,2 +1,3 @@
     +# first
      a: 1
     -b: 2
     +b: 2 # second
-    +
     ");
 }
 
@@ -723,13 +722,12 @@ fn fragment_comments_and_nested_comment_updates_are_retained() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,4 @@
+    @@ -1,2 +1,3 @@
     -a: 1 # old
     -b: 2 # remove
     +a: 1 # new
     +b: 2
     +c: 3 # imported
-    +
     ");
     let source = "--- # marker\na: 1\n";
     let mut document = EditableDocument::parse(source).unwrap();

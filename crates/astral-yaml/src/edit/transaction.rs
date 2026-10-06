@@ -1,6 +1,10 @@
 use super::{Comment, CommentPosition, EditableDocument, Node, NodeKind, emit};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
-use std::{cell::Cell, collections::HashSet, sync::Arc};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[cfg(test)]
 #[path = "transaction_tests.rs"]
@@ -337,7 +341,7 @@ impl<'a> Editor<'a> {
         let offset = self.candidate.nodes.len();
         let root = NodeId(document.root.0 + offset);
         for mut node in document.nodes {
-            remap(&mut node.kind, |id| NodeId(id.0 + offset));
+            remap(&mut node, |id| NodeId(id.0 + offset));
             node.span = Span { start: 0, end: 0 };
             for comment in &mut node.comments {
                 comment.span = node.span;
@@ -420,7 +424,10 @@ impl<'a> Editor<'a> {
             }
             let simple = inline_node(&editor.candidate.nodes[id.0])
                 && inline_node(&editor.candidate.nodes[root.0]);
-            let comments = editor.candidate.nodes[id.0].comments.clone();
+            let comments = retained_comments(
+                &editor.candidate.nodes[id.0],
+                &editor.candidate.nodes[root.0],
+            );
             let span = editor.candidate.nodes[id.0].span;
             editor.remove_tree(id)?;
             editor.alive[id.0] = true;
@@ -429,14 +436,14 @@ impl<'a> Editor<'a> {
             editor.candidate.nodes[id.0].comments.splice(0..0, comments);
             editor.candidate.nodes[id.0].span = span;
             for index in offset..editor.candidate.nodes.len() {
-                remap(&mut editor.candidate.nodes[index].kind, |target| {
+                remap(&mut editor.candidate.nodes[index], |target| {
                     if target == root { id } else { target }
                 });
                 if editor.parents[index] == Some(root) {
                     editor.parents[index] = Some(id);
                 }
             }
-            remap(&mut editor.candidate.nodes[id.0].kind, |target| {
+            remap(&mut editor.candidate.nodes[id.0], |target| {
                 if target == root { id } else { target }
             });
             if simple
@@ -492,6 +499,8 @@ impl<'a> Editor<'a> {
                 return Err(editor.error("item index out of bounds"));
             }
             let child = items.remove(index);
+            let following = items.get(index).copied();
+            retarget_comments(&mut editor.candidate.nodes[id.0], child, following);
             editor.remove_tree(child)?;
             editor.mark(id);
             Ok(())
@@ -539,6 +548,8 @@ impl<'a> Editor<'a> {
                 return Err(editor.error("entry index out of bounds"));
             }
             let (key, value) = entries.remove(index);
+            let following = entries.get(index).map(|&(key, _)| key);
+            retarget_comments(&mut editor.candidate.nodes[id.0], key, following);
             editor.remove_tree(key)?;
             editor.remove_tree(value)?;
             editor.mark(id);
@@ -632,6 +643,14 @@ impl<'a> Editor<'a> {
                     placement,
                     position: if placement == CommentPlacement::Leading {
                         CommentPosition::Before
+                    } else if placement == CommentPlacement::Detached {
+                        comments[index..]
+                            .iter()
+                            .find_map(|comment| match comment.position {
+                                CommentPosition::BeforeChild(_) => Some(comment.position),
+                                _ => None,
+                            })
+                            .unwrap_or(CommentPosition::After)
                     } else {
                         CommentPosition::After
                     },
@@ -903,15 +922,7 @@ impl<'a> Editor<'a> {
                     &self.candidate.nodes[id.0].comments,
                 )?
             };
-            let region = rendered.span;
-            let mut body = rendered.text;
-            if !region.is_empty()
-                && self.original.source[..region.end()].ends_with(['\r', '\n'])
-                && !body.ends_with(['\r', '\n'])
-            {
-                body.push_str(emit::newline(&self.original.source));
-            }
-            patches.push((region, body));
+            patches.push((rendered.span, rendered.text));
         }
         patches.extend(
             self.patches
@@ -975,8 +986,13 @@ impl<'a> Editor<'a> {
     }
 }
 
-fn remap(kind: &mut NodeKind, map: impl Fn(NodeId) -> NodeId) {
-    match kind {
+fn remap(node: &mut Node, map: impl Fn(NodeId) -> NodeId) {
+    for comment in &mut node.comments {
+        if let CommentPosition::BeforeChild(child) = &mut comment.position {
+            *child = map(*child);
+        }
+    }
+    match &mut node.kind {
         NodeKind::Sequence { items, .. } => {
             for item in items {
                 *item = map(*item);
@@ -991,6 +1007,43 @@ fn remap(kind: &mut NodeKind, map: impl Fn(NodeId) -> NodeId) {
         NodeKind::Alias { target, .. } => *target = map(*target),
         NodeKind::Scalar { .. } => {}
     }
+}
+
+/// A removed child leaves its preceding gap before the next surviving child.
+fn retarget_comments(node: &mut Node, removed: NodeId, following: Option<NodeId>) {
+    for comment in &mut node.comments {
+        if comment.position == CommentPosition::BeforeChild(removed) {
+            comment.position =
+                following.map_or(CommentPosition::After, CommentPosition::BeforeChild);
+        }
+    }
+}
+
+/// Whole-node replacements retain gaps by ordinal position, without retaining
+/// references to descendants that are about to expire.
+fn retained_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
+    fn boundaries(kind: &NodeKind) -> Vec<NodeId> {
+        match kind {
+            NodeKind::Sequence { items, .. } => items.clone(),
+            NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
+            _ => Vec::new(),
+        }
+    }
+    let old_children = boundaries(&old.kind);
+    let new_children = boundaries(&replacement.kind);
+    let following: HashMap<_, _> = old_children
+        .into_iter()
+        .enumerate()
+        .map(|(index, child)| (child, new_children.get(index).copied()))
+        .collect();
+    let mut comments = old.comments.clone();
+    for comment in &mut comments {
+        if let CommentPosition::BeforeChild(child) = comment.position {
+            comment.position =
+                following[&child].map_or(CommentPosition::After, CommentPosition::BeforeChild);
+        }
+    }
+    comments
 }
 
 fn inline_node(node: &Node) -> bool {
