@@ -397,7 +397,7 @@ impl Tree<'_, '_> {
     }
 }
 
-fn skip_trivia(source: &str, mut at: usize) -> usize {
+pub(crate) fn skip_trivia(source: &str, mut at: usize) -> usize {
     let bytes = source.as_bytes();
 
     while let Some(&byte) = bytes.get(at) {

@@ -61,7 +61,17 @@ pub enum NodeKind {
 pub struct Comment<Location = Span> {
     pub(crate) text: String,
     pub(crate) placement: CommentPlacement,
+    pub(crate) position: CommentPosition,
     pub(crate) span: Location,
+}
+
+/// Source position and attachment are distinct: comments between a node's
+/// properties and content can be attached as trailing comments to that node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CommentPosition {
+    Before,
+    Header,
+    After,
 }
 
 impl EditableDocument {
@@ -121,10 +131,30 @@ impl EditableDocument {
                 }
             })
             .collect();
+        let mut content_starts = vec![None; nodes.len()];
         for (owner, attached) in CommentIndex::new(&stream, 0)?.direct() {
+            let node = &stream.nodes()[owner.0];
+            let content_start = *content_starts[owner.0].get_or_insert_with(|| {
+                let properties_end = node
+                    .anchor
+                    .iter()
+                    .chain(node.tag.iter())
+                    .map(|property| property.span.end())
+                    .max()
+                    .unwrap_or(node.span.start());
+                crate::comments::skip_trivia(source, properties_end).min(node.span.end())
+            });
+            let position = if attached.comment.span.start() < node.span.start() {
+                CommentPosition::Before
+            } else if attached.comment.span.start() < content_start {
+                CommentPosition::Header
+            } else {
+                CommentPosition::After
+            };
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
+                position,
                 span: attached.comment.span,
             });
         }

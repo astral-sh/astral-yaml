@@ -246,3 +246,73 @@ fn normalization_respects_limits_on_output_expansion() {
         "emitted YAML exceeds input byte limit"
     );
 }
+
+#[test]
+fn normalization_consumes_interleaved_property_comments_in_order() {
+    // Node properties and comments: https://yaml.org/spec/1.2.2/#69-node-properties
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "key: # header\n  &a # anchor\n  # leading\n  value\n",
+            "- # header\n  &a # anchor\n  # leading\n  value\n",
+            "key: # header\n  !!str # tag\n  &a # anchor\n  # leading\n  value\n",
+            "key: # header\n  # before anchor\n  &a # anchor\n  # before value\n  value\n",
+            "key: # header\n  &a # anchor\n  # leading\n  |\n    value\n",
+            "{key: # header\n  &a # anchor\n  # leading\n  [value]}\n",
+        ] {
+            let document = EditableDocument::parse(&source.replace('\n', newline)).unwrap();
+            outputs.push(document.normalized_yaml().unwrap());
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "key: # header\n  &a # anchor\n    # leading\n    value\n",
+        "- # header\n  &a # anchor\n    # leading\n    value\n",
+        "key: # header\n  !<tag:yaml.org,2002:str> # tag\n    &a # anchor\n    # leading\n    value\n",
+        "key: # header\n  # before anchor\n  &a # anchor\n    # before value\n    value\n",
+        "key: # header\n  &a # anchor\n    # leading\n    |2\n  value\n",
+        "{key: # header\n  &a # anchor\n  # leading\n  [value]}\n",
+        "key: # header\r\n  &a # anchor\r\n    # leading\r\n    value\r\n",
+        "- # header\r\n  &a # anchor\r\n    # leading\r\n    value\r\n",
+        "key: # header\r\n  !<tag:yaml.org,2002:str> # tag\r\n    &a # anchor\r\n    # leading\r\n    value\r\n",
+        "key: # header\r\n  # before anchor\r\n  &a # anchor\r\n    # before value\r\n    value\r\n",
+        "key: # header\r\n  &a # anchor\r\n    # leading\r\n    |2\r\n  value\r\n",
+        "{key: # header\r\n  &a # anchor\r\n  # leading\r\n  [value]}\r\n",
+        "key: # header\r  &a # anchor\r    # leading\r    value\r",
+        "- # header\r  &a # anchor\r    # leading\r    value\r",
+        "key: # header\r  !<tag:yaml.org,2002:str> # tag\r    &a # anchor\r    # leading\r    value\r",
+        "key: # header\r  # before anchor\r  &a # anchor\r    # before value\r    value\r",
+        "key: # header\r  &a # anchor\r    # leading\r    |2\r  value\r",
+        "{key: # header\r  &a # anchor\r  # leading\r  [value]}\r",
+    ]
+    "#);
+}
+
+#[test]
+fn normalization_preserves_block_styles_in_explicit_keys() {
+    // Explicit entries: https://yaml.org/spec/1.2.2/#822-block-mappings
+    let mut outputs = Vec::new();
+    for source in [
+        "? |2-\n  key\n: value\n",
+        "? >2-\n  key\n: value\n",
+        "? - a\n  - b\n: value\n",
+        "? k: v\n: value\n",
+        "outer:\n  ? |2-\n    key\n  : value\n",
+        "? &key\n  - a\n: value\n",
+        "? # header\n  # leading\n  |2-\n  key\n: value\n",
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        outputs.push(document.normalized_yaml().unwrap());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "? |2-\n  key\n: value\n",
+        "? >2-\n  key\n: value\n",
+        "?\n  - a\n  - b\n: value\n",
+        "?\n  k: v\n: value\n",
+        "outer:\n  ? |2-\n    key\n  : value\n",
+        "?\n  &key \n  - a\n: value\n",
+        "? # header\n  # leading\n  |2-\n  key\n: value\n",
+    ]
+    "#);
+}

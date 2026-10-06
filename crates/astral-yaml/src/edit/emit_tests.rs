@@ -80,7 +80,17 @@ fn scalar_emission_preserves_representable_line_breaks() {
                         if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
                             continue;
                         }
-                        let text = super::scalar(value, style, flow, indent, newline);
+                        let text = super::scalar(
+                            value,
+                            style,
+                            if flow {
+                                super::ScalarPosition::Flow
+                            } else {
+                                super::ScalarPosition::Block
+                            },
+                            indent,
+                            newline,
+                        );
                         let source = if flow {
                             format!("[{text}]")
                         } else {
@@ -109,7 +119,7 @@ fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
     use crate::ScalarStyle;
     for style in [ScalarStyle::Plain, ScalarStyle::SingleQuoted] {
         for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
-            let text = super::scalar(value, style, false, 2, "\n");
+            let text = super::scalar(value, style, super::ScalarPosition::Block, 2, "\n");
             let parsed = crate::parse(&text).unwrap();
             let node = parsed.node(parsed.documents()[0].root).unwrap();
             assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
@@ -118,7 +128,7 @@ fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
     }
     for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
         for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
-            let text = super::scalar(value, style, false, 2, "\n");
+            let text = super::scalar(value, style, super::ScalarPosition::Block, 2, "\n");
             let source = format!("  value: {text}");
             let parsed = crate::parse(&source).unwrap();
             let node = parsed
@@ -177,7 +187,17 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
         ("first\r- second", false),
         ("first\r---\rsecond", false),
     ] {
-        let output = super::scalar(value, crate::ScalarStyle::Plain, flow, 0, "\n");
+        let output = super::scalar(
+            value,
+            crate::ScalarStyle::Plain,
+            if flow {
+                super::ScalarPosition::Flow
+            } else {
+                super::ScalarPosition::Block
+            },
+            0,
+            "\n",
+        );
         let parsed = crate::parse(&output).unwrap();
         assert_eq!(parsed.documents().len(), 1, "{output:?}");
         let root = parsed.node(parsed.documents()[0].root).unwrap();
@@ -227,6 +247,7 @@ fn normalization_rejects_reassigned_comments() {
     value.comments.push(crate::edit::Comment {
         text: " trailing".to_owned(),
         placement: crate::comments::CommentPlacement::Trailing,
+        position: super::CommentPosition::After,
         span: crate::Span::new(0, 0).unwrap(),
     });
     assert_eq!(
@@ -242,6 +263,7 @@ fn normalization_ignores_comments_on_unreachable_nodes() {
     removed.comments.push(crate::edit::Comment {
         text: " removed".to_owned(),
         placement: crate::comments::CommentPlacement::Inline,
+        position: super::CommentPosition::After,
         span: crate::Span::new(0, 0).unwrap(),
     });
     // Replaced nodes may remain in the arena without belonging to the document.
@@ -307,4 +329,101 @@ fn normalized_syntax_preserves_values_and_comments() {
         after.sort_unstable();
         assert_eq!(before, after, "{source:?} -> {output:?}");
     }
+}
+
+#[test]
+fn root_scalar_candidates_respect_document_position() {
+    let mut outputs = Vec::new();
+    for source in [
+        "old\n",
+        "--- old\n",
+        "  old\n",
+        "\u{feff}old\n",
+        "&root old\n",
+        "! old\n",
+        "# before\nold\n",
+    ] {
+        for replacement in ["---", "... text"] {
+            let mut document = EditableDocument::parse(source).unwrap();
+            let NodeKind::Scalar { value, .. } = &mut document.nodes[document.root.0].kind else {
+                panic!("scalar root");
+            };
+            replacement.clone_into(value);
+            outputs.push(document.normalized_yaml().unwrap());
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r##"
+    [
+        "\"---\"\n",
+        "\"... text\"\n",
+        "--- ---\n",
+        "--- ... text\n",
+        "  ---\n",
+        "  ... text\n",
+        "\u{feff}\"---\"\n",
+        "\u{feff}\"... text\"\n",
+        "&root ---\n",
+        "&root ... text\n",
+        "! ---\n",
+        "! ... text\n",
+        "# before\n\"---\"\n",
+        "# before\n\"... text\"\n",
+    ]
+    "##);
+}
+
+#[test]
+fn scalar_validation_distinguishes_implicit_keys_from_values() {
+    use super::ScalarPosition;
+    let mut outputs = Vec::new();
+    for position in [ScalarPosition::BlockKey, ScalarPosition::FlowKey] {
+        for value in [
+            "---",
+            "...",
+            "a,b",
+            "a[b]",
+            "x: value",
+            "first\rsecond",
+            "a\n- b",
+            "x: one, y",
+        ] {
+            let text = super::scalar(value, crate::ScalarStyle::Plain, position, 0, "\n");
+            let source = if position == ScalarPosition::BlockKey {
+                format!("{text}: value")
+            } else {
+                format!("{{{text}: value}}")
+            };
+            let parsed = crate::parse(&source).unwrap();
+            let crate::NodeKind::Mapping { entries, .. } =
+                &parsed.node(parsed.documents()[0].root).unwrap().kind
+            else {
+                panic!("mapping");
+            };
+            let crate::NodeKind::Scalar(key) = &parsed.node(entries[0].key).unwrap().kind else {
+                panic!("scalar key");
+            };
+            assert_eq!(key.value, value);
+            outputs.push(source);
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "---: value",
+        "...: value",
+        "a,b: value",
+        "a[b]: value",
+        "\"x: value\": value",
+        "\"first\\rsecond\": value",
+        "\"a\\n- b\": value",
+        "\"x: one, y\": value",
+        "{---: value}",
+        "{...: value}",
+        "{\"a,b\": value}",
+        "{\"a[b]\": value}",
+        "{\"x: value\": value}",
+        "{\"first\\rsecond\": value}",
+        "{a\n\n  - b: value}",
+        "{\"x: one, y\": value}",
+    ]
+    "#);
 }

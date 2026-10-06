@@ -1,4 +1,4 @@
-use super::{Comment, EditableDocument, NodeKind};
+use super::{Comment, CommentPosition, EditableDocument, NodeKind};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::fmt::Write;
 
@@ -78,8 +78,6 @@ pub(super) fn render(
         newline: newline(&document.source),
         output: String::new(),
         work: document.options.max_nodes,
-        skip_leading: false,
-        skip_inline: 0,
     };
     if region.is_empty()
         && matches!(
@@ -89,33 +87,123 @@ pub(super) fn render(
     {
         emitter.push(" ")?;
     }
-    let context = Context {
-        indent,
-        flow,
-        block_indent: if id == document.root { 0 } else { indent },
-    };
+    let context = Context::value(indent, flow, if id == document.root { 0 } else { indent });
     emitter.node(id, context, "", 0)?;
     Ok(emitter.output)
 }
 
 #[derive(Clone, Copy)]
 struct Context {
-    /// Indentation for this node's continuation lines and comments.
+    /// Indentation for continuation lines and comments.
     indent: usize,
-    flow: bool,
-    /// A block scalar's indentation indicator is relative to its parent, even
-    /// when comments or properties put its header on a more-indented line.
-    block_indent: usize,
+    position: Position,
+}
+
+#[derive(Clone, Copy)]
+enum Position {
+    // A block scalar's indentation is relative to its parent, even when its
+    // header is moved onto a continuation line by properties or comments.
+    Block { parent_indent: usize },
+    Flow,
+    ImplicitKey { flow: bool },
 }
 
 impl Context {
+    fn value(indent: usize, flow: bool, parent_indent: usize) -> Self {
+        Self {
+            indent,
+            position: if flow {
+                Position::Flow
+            } else {
+                Position::Block { parent_indent }
+            },
+        }
+    }
+
     fn flow(indent: usize) -> Self {
         Self {
             indent,
-            flow: true,
-            block_indent: indent,
+            position: Position::Flow,
         }
     }
+
+    fn in_flow(self) -> bool {
+        matches!(
+            self.position,
+            Position::Flow | Position::ImplicitKey { flow: true }
+        )
+    }
+}
+
+/// Comments are consumed in source order as the node's syntax is emitted.
+/// Passing the cursor through field headers, properties, and content makes
+/// interleaved inline/leading comments independent of the number of properties.
+struct Comments {
+    remaining: std::vec::IntoIter<Comment>,
+}
+
+impl Comments {
+    fn next_is(&self, placement: CommentPlacement) -> bool {
+        self.remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| comment.placement == placement)
+    }
+
+    fn take(&mut self, placement: CommentPlacement) -> Option<Comment> {
+        self.next_is(placement)
+            .then(|| self.remaining.next().expect("next comment"))
+    }
+
+    fn has_prefix(&self) -> bool {
+        self.remaining.as_slice().iter().any(|comment| {
+            comment.position != CommentPosition::After
+                || comment.placement == CommentPlacement::Leading
+        })
+    }
+
+    fn take_header(&mut self) -> Option<Comment> {
+        self.remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| {
+                comment.position == CommentPosition::Header
+                    && comment.placement != CommentPlacement::Inline
+            })
+            .then(|| self.remaining.next().expect("header comment"))
+    }
+
+    fn needs_value_line(&self) -> bool {
+        self.remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| comment.position == CommentPosition::Before)
+            || self
+                .remaining
+                .as_slice()
+                .iter()
+                .any(|comment| comment.placement == CommentPlacement::Leading)
+    }
+
+    fn needs_header(&self) -> bool {
+        self.has_prefix()
+            || self
+                .remaining
+                .as_slice()
+                .iter()
+                .filter(|comment| comment.placement == CommentPlacement::Inline)
+                .count()
+                > 1
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScalarPosition {
+    Document,
+    Block,
+    Flow,
+    BlockKey,
+    FlowKey,
 }
 
 struct Emitter<'a> {
@@ -125,8 +213,6 @@ struct Emitter<'a> {
     newline: &'static str,
     output: String,
     work: usize,
-    skip_leading: bool,
-    skip_inline: usize,
 }
 
 impl Emitter<'_> {
@@ -167,39 +253,35 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn inline(&mut self, id: NodeId, index: usize) -> Result<usize, Error> {
-        let text = self
-            .comments(id, CommentPlacement::Inline)
-            .into_iter()
-            .nth(index)
-            .map(|comment| comment.text.clone());
-        if let Some(text) = text {
-            self.push(if self.output.ends_with(' ') {
-                "#"
-            } else {
-                " #"
-            })?;
-            self.push(&text)?;
-            Ok(1)
+    fn inline(&mut self, comments: &mut Comments) -> Result<bool, Error> {
+        let Some(comment) = comments.take(CommentPlacement::Inline) else {
+            return Ok(false);
+        };
+        self.push(if self.output.ends_with(' ') {
+            "#"
         } else {
-            Ok(0)
-        }
+            " #"
+        })?;
+        self.push(&comment.text)?;
+        Ok(true)
     }
 
     fn property_comment(
         &mut self,
-        id: NodeId,
-        inline_skip: &mut usize,
+        comments: &mut Comments,
         indent: usize,
         block_collection: bool,
     ) -> Result<(), Error> {
-        // Keep one comment for the scalar or flow collection itself. Block
-        // collections must place their inline comments on the property lines.
-        if (block_collection
-            || self.comments(id, CommentPlacement::Inline).len() > *inline_skip + 1)
-            && self.inline(id, *inline_skip)? != 0
-        {
-            *inline_skip += 1;
+        // Reserve the last inline comment for the content, unless a leading
+        // comment still needs a boundary before that content begins.
+        if (block_collection || comments.needs_header()) && self.inline(comments)? {
+            self.line(indent)?;
+            self.before(comments, indent)?;
+        }
+        while let Some(comment) = comments.take_header() {
+            self.line(indent)?;
+            self.push("#")?;
+            self.push(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
@@ -217,81 +299,46 @@ impl Emitter<'_> {
             })
     }
 
-    fn comments(&self, id: NodeId, placement: CommentPlacement) -> Vec<&Comment> {
-        self.visible_comments(id)
-            .filter(|comment| comment.placement == placement)
-            .collect()
+    fn node_comments(&self, id: NodeId) -> Comments {
+        Comments {
+            remaining: self
+                .visible_comments(id)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter(),
+        }
     }
 
-    fn leading_comments(&self, id: NodeId, inline_skip: usize) -> Vec<&Comment> {
-        let mut inlines = 0;
-        self.visible_comments(id)
-            .filter(|comment| {
-                if comment.placement == CommentPlacement::Inline {
-                    inlines += 1;
-                }
-                comment.placement == CommentPlacement::Leading && inlines == inline_skip
-            })
-            .collect()
-    }
-
-    fn before(&mut self, id: NodeId, indent: usize, inline_skip: usize) -> Result<(), Error> {
-        // Clone only comment text so writing can borrow the emitter mutably.
-        let comments: Vec<_> = self
-            .leading_comments(id, inline_skip)
-            .into_iter()
-            .map(|c| c.text.clone())
-            .collect();
+    fn before(&mut self, comments: &mut Comments, indent: usize) -> Result<(), Error> {
         // Leading comments need their own line, including after flow delimiters.
-        if !comments.is_empty() && !self.output.is_empty() {
+        if comments.next_is(CommentPlacement::Leading) && !self.output.is_empty() {
             self.line(indent)?;
         }
-        for text in comments {
+        while let Some(comment) = comments.take(CommentPlacement::Leading) {
             self.push("#")?;
-            self.push(&text)?;
+            self.push(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
     }
 
-    fn after(
-        &mut self,
-        id: NodeId,
-        indent: usize,
-        suffix: &str,
-        inline_skip: usize,
-    ) -> Result<(), Error> {
+    fn after(&mut self, comments: Comments, indent: usize, suffix: &str) -> Result<(), Error> {
         self.push(suffix)?;
-        for placement in [
-            CommentPlacement::Inline,
-            CommentPlacement::Trailing,
-            CommentPlacement::Detached,
-        ] {
-            let comments: Vec<_> = self
-                .comments(id, placement)
-                .into_iter()
-                .skip(if placement == CommentPlacement::Inline {
-                    inline_skip
-                } else {
-                    0
-                })
-                .map(|c| c.text.clone())
-                .collect();
-            for text in comments {
-                if placement == CommentPlacement::Inline && !self.output.ends_with(['\n', '\r']) {
-                    self.push(" ")?;
-                } else {
-                    self.line(indent)?;
-                }
-                if placement == CommentPlacement::Detached {
-                    self.push(self.newline)?;
-                    self.line(indent)?;
-                }
-                self.push("#")?;
-                self.push(&text)?;
-                // A comment must never swallow a following delimiter or property.
+        for comment in comments.remaining {
+            if comment.placement == CommentPlacement::Inline && !self.output.ends_with(['\n', '\r'])
+            {
+                self.push(" ")?;
+            } else {
                 self.line(indent)?;
             }
+            if comment.placement == CommentPlacement::Detached {
+                self.push(self.newline)?;
+                self.line(indent)?;
+            }
+            self.push("#")?;
+            self.push(&comment.text)?;
+            // A comment must never swallow a following delimiter or property.
+            self.line(indent)?;
         }
         Ok(())
     }
@@ -303,20 +350,30 @@ impl Emitter<'_> {
         suffix: &str,
         depth: usize,
     ) -> Result<(), Error> {
-        let Context { indent, flow, .. } = context;
+        let comments = self.node_comments(id);
+        self.node_with_comments(id, context, suffix, depth, comments)
+    }
+
+    fn node_with_comments(
+        &mut self,
+        id: NodeId,
+        context: Context,
+        suffix: &str,
+        depth: usize,
+        mut comments: Comments,
+    ) -> Result<(), Error> {
+        let indent = context.indent;
+        let flow = context.in_flow();
         if depth >= self.document.options.max_depth || self.work == 0 {
             return Err(self.error("emission resource limit exceeded"));
         }
         self.work -= 1;
-        let mut inline_skip = std::mem::take(&mut self.skip_inline);
-        if !std::mem::take(&mut self.skip_leading) {
-            self.before(id, indent, inline_skip)?;
-        }
-        self.properties(id, indent, flow, &mut inline_skip)?;
+        self.before(&mut comments, indent)?;
+        self.properties(id, indent, flow, &mut comments)?;
         let node = &self.document.nodes[id.0];
         match &node.kind {
             NodeKind::Scalar { value, style } => {
-                inline_skip += self.scalar(id, value, *style, context, inline_skip)?;
+                self.scalar(value, *style, context, &mut comments)?;
             }
             NodeKind::Alias { name, .. } => {
                 self.push("*")?;
@@ -326,9 +383,9 @@ impl Emitter<'_> {
                 let is_flow = flow || *style == CollectionStyle::Flow || items.is_empty();
                 if is_flow {
                     self.push("[")?;
-                    if self.comments(id, CommentPlacement::Inline).len() > inline_skip + 1 {
-                        inline_skip += self.inline(id, inline_skip)?;
+                    if comments.needs_header() && self.inline(&mut comments)? {
                         self.line(indent + 2)?;
+                        self.before(&mut comments, indent + 2)?;
                     }
                     for (index, &item) in items.iter().enumerate() {
                         if index != 0 {
@@ -350,9 +407,10 @@ impl Emitter<'_> {
                         if index != 0 {
                             self.line(indent)?;
                         }
-                        self.before(item, indent, 0)?;
+                        let mut comments = self.node_comments(item);
+                        self.before(&mut comments, indent)?;
                         self.push("-")?;
-                        self.value(item, indent, false, "", depth + 1)?;
+                        self.value(item, context, "", depth + 1, comments)?;
                     }
                 }
             }
@@ -360,9 +418,9 @@ impl Emitter<'_> {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
                 if is_flow {
                     self.push("{")?;
-                    if self.comments(id, CommentPlacement::Inline).len() > inline_skip + 1 {
-                        inline_skip += self.inline(id, inline_skip)?;
+                    if comments.needs_header() && self.inline(&mut comments)? {
                         self.line(indent + 2)?;
+                        self.before(&mut comments, indent + 2)?;
                     }
                 } else if node.anchor.is_some() || node.tag.is_some() {
                     self.line(indent)?;
@@ -375,29 +433,61 @@ impl Emitter<'_> {
                             self.line(indent)?;
                         }
                     }
-                    self.before(value, if is_flow { indent + 2 } else { indent }, 0)?;
-                    let simple = self.simple_key(key);
-                    if !simple {
-                        self.push("? ")?;
-                    }
-                    self.node(key, Context::flow(indent + 2), "", depth + 1)?;
-                    if !simple {
-                        self.line(if is_flow { indent + 2 } else { indent })?;
-                    }
+                    let mut value_comments = self.node_comments(value);
+                    self.before(
+                        &mut value_comments,
+                        if is_flow { indent + 2 } else { indent },
+                    )?;
+                    self.key(key, Context::value(indent, is_flow, indent), depth + 1)?;
                     self.push(":")?;
                     let suffix = if is_flow && index + 1 != entries.len() {
                         ","
                     } else {
                         ""
                     };
-                    self.value(value, indent, is_flow, suffix, depth + 1)?;
+                    self.value(
+                        value,
+                        Context::value(indent, is_flow, indent),
+                        suffix,
+                        depth + 1,
+                        value_comments,
+                    )?;
                 }
                 if is_flow {
                     self.push("}")?;
                 }
             }
         }
-        self.after(id, indent, suffix, inline_skip)
+        self.after(comments, indent, suffix)
+    }
+
+    fn key(&mut self, key: NodeId, context: Context, depth: usize) -> Result<(), Error> {
+        let indent = context.indent;
+        let is_flow = context.in_flow();
+        let simple = self.simple_key(key, is_flow);
+        if !simple && !is_flow {
+            self.push("?")?;
+            let key_comments = self.node_comments(key);
+            self.value(key, context, "", depth, key_comments)?;
+            self.line(indent)?;
+        } else {
+            if !simple {
+                self.push("? ")?;
+            }
+            let key_context = if simple {
+                Context {
+                    indent: indent + 2,
+                    position: Position::ImplicitKey { flow: is_flow },
+                }
+            } else {
+                Context::flow(indent + 2)
+            };
+            self.node(key, key_context, "", depth)?;
+            if !simple {
+                self.line(indent + 2)?;
+            }
+        }
+        Ok(())
     }
 
     fn properties(
@@ -405,7 +495,7 @@ impl Emitter<'_> {
         id: NodeId,
         indent: usize,
         flow: bool,
-        inline_skip: &mut usize,
+        comments: &mut Comments,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
         let block_collection = block_collection(&node.kind, flow);
@@ -422,54 +512,81 @@ impl Emitter<'_> {
                 self.push(tag)?;
                 self.push("> ")?;
             }
-            self.property_comment(id, inline_skip, continuation_indent, block_collection)?;
+            self.property_comment(comments, continuation_indent, block_collection)?;
         }
         if let Some(anchor) = &node.anchor {
             self.push("&")?;
             self.push(anchor)?;
             self.push(" ")?;
-            self.property_comment(id, inline_skip, continuation_indent, block_collection)?;
+            self.property_comment(comments, continuation_indent, block_collection)?;
         }
         Ok(())
     }
 
     fn scalar(
         &mut self,
-        id: NodeId,
         value: &str,
         style: ScalarStyle,
         context: Context,
-        inline_skip: usize,
-    ) -> Result<usize, Error> {
-        let indent = if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
-            context.block_indent
-        } else {
-            context.indent
+        comments: &mut Comments,
+    ) -> Result<(), Error> {
+        let indent = match context.position {
+            Position::Block { parent_indent }
+                if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) =>
+            {
+                parent_indent
+            }
+            _ => context.indent,
         };
-        let text = scalar(value, style, context.flow, indent, self.newline);
+        let position = match context.position {
+            Position::Flow => ScalarPosition::Flow,
+            Position::ImplicitKey { flow: true } => ScalarPosition::FlowKey,
+            Position::ImplicitKey { flow: false } => ScalarPosition::BlockKey,
+            Position::Block { .. } if self.at_document_boundary() => ScalarPosition::Document,
+            Position::Block { .. } => ScalarPosition::Block,
+        };
+        let text = scalar(value, style, position, indent, self.newline);
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once(self.newline).expect("block scalar header");
             self.push(header)?;
-            let emitted = self.inline(id, inline_skip)?;
+            self.inline(comments)?;
             self.push(self.newline)?;
             self.push(body)?;
-            return Ok(emitted);
+            return Ok(());
         }
-        self.push(&text)?;
-        Ok(0)
+        self.push(&text)
     }
 
-    fn simple_key(&self, id: NodeId) -> bool {
+    fn at_document_boundary(&self) -> bool {
+        // Document markers are recognized only at column zero. Include the
+        // retained source prefix when emission has not started a new line.
+        if let Some(index) = self.output.rfind(['\r', '\n']) {
+            return self.output[index + 1..].is_empty();
+        }
+        let prefix = self.document.source[..self.region.start()]
+            .rsplit(['\r', '\n'])
+            .next()
+            .unwrap_or("");
+        prefix.trim_start_matches('\u{feff}').is_empty() && self.output.is_empty()
+    }
+
+    fn simple_key(&self, id: NodeId, flow: bool) -> bool {
         let node = &self.document.nodes[id.0];
         let NodeKind::Scalar { value, style } = &node.kind else {
             return false;
         };
-        if !node.comments.is_empty() {
+        if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
+        {
             return false;
         }
         // YAML limits the entire implicit key, including escapes and properties,
         // to 1024 source characters on one line.
-        let text = scalar(value, *style, true, 0, self.newline);
+        let position = if flow {
+            ScalarPosition::Flow
+        } else {
+            ScalarPosition::Block
+        };
+        let text = scalar(value, *style, position, 0, self.newline);
         let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
         let anchor = node
             .anchor
@@ -481,35 +598,28 @@ impl Emitter<'_> {
     fn value(
         &mut self,
         id: NodeId,
-        indent: usize,
-        flow: bool,
+        context: Context,
         suffix: &str,
         depth: usize,
+        mut comments: Comments,
     ) -> Result<(), Error> {
-        let node = &self.document.nodes[id.0];
-        let block = block_collection(&node.kind, flow);
-        // A field/item header can own an inline comment before the value's
-        // leading comments. Emit that ordered prefix here, then let the node
-        // emit the leading comments that follow it on the continuation line.
-        let leading_after_header = !self.leading_comments(id, 1).is_empty();
-        let value_indent = if block || flow || leading_after_header {
+        let indent = context.indent;
+        let flow = context.in_flow();
+        let block = block_collection(&self.document.nodes[id.0].kind, flow);
+        let leading = comments.needs_value_line();
+        let value_indent = if block || flow || leading {
             indent + 2
         } else {
             indent
         };
-        if block || leading_after_header {
-            self.skip_inline = self.inline(id, 0)?;
+        if block || leading {
+            self.inline(&mut comments)?;
             self.line(value_indent)?;
         } else {
             self.push(" ")?;
         }
-        self.skip_leading = !leading_after_header;
-        let context = Context {
-            indent: value_indent,
-            flow,
-            block_indent: indent,
-        };
-        self.node(id, context, suffix, depth)
+        let context = Context::value(value_indent, flow, indent);
+        self.node_with_comments(id, context, suffix, depth, comments)
     }
 }
 
@@ -615,7 +725,13 @@ fn block_scalar(value: &str, style: ScalarStyle, indent: usize, newline: &str) -
     result
 }
 
-fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &str) -> String {
+fn scalar(
+    value: &str,
+    style: ScalarStyle,
+    position: ScalarPosition,
+    indent: usize,
+    newline: &str,
+) -> String {
     // Check the generated scalar in its actual flow/block context. This also
     // handles plain-scalar punctuation, folding, and explicit indentation.
     let candidate = match style {
@@ -629,32 +745,49 @@ fn scalar(value: &str, style: ScalarStyle, flow: bool, indent: usize, newline: &
                 flow_scalar(value, indent, newline).replace('\'', "''")
             )
         }
-        ScalarStyle::Literal | ScalarStyle::Folded if !flow => {
+        ScalarStyle::Literal | ScalarStyle::Folded
+            if matches!(position, ScalarPosition::Block | ScalarPosition::Document) =>
+        {
             block_scalar(value, style, indent, newline)
         }
         ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
             return quoted(value);
         }
     };
-    let source = if flow {
-        format!("[{candidate}]")
-    } else {
-        // A sequence supplies the parent indentation used by block scalars.
-        // Indenting a standalone scalar's header does not establish it.
-        format!("{}- {candidate}", " ".repeat(indent))
+    let source = match position {
+        ScalarPosition::Document => candidate.clone(),
+        ScalarPosition::Flow => format!("[{candidate}]"),
+        ScalarPosition::BlockKey => format!("{candidate}: value"),
+        ScalarPosition::FlowKey => format!("{{{candidate}: value}}"),
+        // The sequence supplies the parent indentation used by block scalars.
+        ScalarPosition::Block => format!("{}- {candidate}", " ".repeat(indent)),
     };
     let matches = crate::parse(&source).is_ok_and(|stream| {
         let [document] = stream.documents() else {
             return false;
         };
-        let root = stream.node(document.root).expect("parsed root");
-        let crate::NodeKind::Sequence { items, .. } = &root.kind else {
-            return false;
-        };
-        let [id] = items.as_slice() else {
-            return false;
-        };
-        let node = stream.node(*id).expect("parsed item");
+        let mut node = stream.node(document.root).expect("parsed root");
+        match position {
+            ScalarPosition::Document => {}
+            ScalarPosition::Flow | ScalarPosition::Block => {
+                let crate::NodeKind::Sequence { items, .. } = &node.kind else {
+                    return false;
+                };
+                let [id] = items.as_slice() else {
+                    return false;
+                };
+                node = stream.node(*id).expect("parsed item");
+            }
+            ScalarPosition::BlockKey | ScalarPosition::FlowKey => {
+                let crate::NodeKind::Mapping { entries, .. } = &node.kind else {
+                    return false;
+                };
+                let [entry] = entries.as_slice() else {
+                    return false;
+                };
+                node = stream.node(entry.key).expect("parsed key");
+            }
+        }
         matches!(&node.kind, crate::NodeKind::Scalar(scalar)
             if scalar.value == value)
             && node.tag.is_none()
