@@ -20,11 +20,24 @@ enum Operation {
     RemoveEntry,
     EditSelectedEntry,
     Flow,
+    Block,
+    Multiline,
+    Mapping,
+    Sequence,
 }
 
 impl Operation {
     fn apply(self, editor: &mut Editor<'_, '_>) -> Result<(), Error> {
         match self {
+            Self::Multiline => editor.root_mut().field("value")?.set("first\n\nlast\n\n")?,
+            Self::Mapping => editor
+                .root_mut()
+                .field("value")?
+                .set(json!({"nested": ["false", null]}))?,
+            Self::Sequence => editor.root_mut().field("value")?.set([true, false])?,
+            Self::Block => editor
+                .root_mut()
+                .set_collection_style(CollectionStyle::Block)?,
             Self::String => editor.root_mut().field("value")?.set("null")?,
             Self::Boolean => editor.root_mut().field("value")?.set(false)?,
             Self::Integer => editor.root_mut().field("value")?.set(i64::MIN)?,
@@ -68,6 +81,9 @@ impl Operation {
 
     fn model(self, value: &mut Value) {
         match self {
+            Self::Multiline => value["value"] = json!("first\n\nlast\n\n"),
+            Self::Mapping => value["value"] = json!({"nested": ["false", null]}),
+            Self::Sequence => value["value"] = json!([true, false]),
             Self::String => value["value"] = json!("null"),
             Self::Boolean => value["value"] = json!(false),
             Self::Integer => value["value"] = json!(i64::MIN),
@@ -92,7 +108,7 @@ impl Operation {
                 value["map"].as_object_mut().unwrap().remove("true");
             }
             Self::EditSelectedEntry => value["map"]["true"] = json!(42),
-            Self::Flow => {}
+            Self::Flow | Self::Block => {}
         }
         // The alias continues to reference this occurrence as its value changes.
         value["copy"] = value["value"].clone();
@@ -119,47 +135,95 @@ fn typed_edits_match_an_independent_value_model() {
         EditSelectedEntry,
         Flow,
     ];
-    let sources = [
-        "value: &a old # value\ncopy: *a\nitems: [x]\nmap: {key: value}\n",
-        "{value: &a 'old', copy: *a, items: [x], map: {key: value}} # root\n",
-        "--- # start\nvalue: &a |-\n  old\ncopy: *a\nitems:\n- x\nmap:\n  key: value\n... # end\n",
-        "? value\n: &a old\n? copy\n: *a\n? items\n: [x]\n? map\n: {key: value}\n",
-    ];
     for newline in ["\n", "\r\n", "\r"] {
-        for source in sources {
+        for &source in SOURCES {
             let source = source.replace('\n', newline);
             for first in operations {
                 for second in operations {
                     for third in operations {
                         let sequence = [first, second, third];
-                        let mut expected = json!({"value": "old", "copy": "old", "items": ["x"], "map": {"key": "value"}});
-                        for operation in sequence {
-                            operation.model(&mut expected);
-                        }
-                        for combined in [false, true] {
-                            let mut document = Editable::<Value>::parse(&source).unwrap();
-                            let result = if combined {
-                                document.edit(|editor| {
-                                    for operation in sequence {
-                                        operation.apply(editor)?;
-                                    }
-                                    Ok(())
-                                })
-                            } else {
-                                sequence.into_iter().try_for_each(|operation| {
-                                    document.edit(|editor| operation.apply(editor))
-                                })
-                            };
-                            result.unwrap_or_else(|error| {
-                                panic!("{source:?}, {sequence:?}, combined={combined}: {error}")
-                            });
-                            assert_eq!(document.value(), &expected, "{source:?}, {sequence:?}");
-                            check_alias(&document);
-                        }
+                        check_sequence(&source, sequence);
                     }
                 }
             }
         }
+    }
+}
+
+const SOURCES: &[&str] = &[
+    "value: &a old # value\ncopy: *a\nitems: [x]\nmap: {key: value}\n",
+    "{value: &a 'old', copy: *a, items: [x], map: {key: value}} # root\n",
+    "--- # start\nvalue: &a |-\n  old\ncopy: *a\nitems:\n- x\nmap:\n  key: value\n... # end\n",
+    "? value\n: &a old\n? copy\n: *a\n? items\n: [x]\n? map\n: {key: value}\n",
+];
+
+#[test]
+fn longer_typed_edits_match_the_independent_model() {
+    use Operation::*;
+    let operations = [
+        String,
+        Boolean,
+        Integer,
+        Null,
+        PushString,
+        PushObject,
+        InsertFirst,
+        RemoveFirst,
+        SetEntry,
+        RemoveEntry,
+        EditSelectedEntry,
+        Flow,
+        Block,
+        Multiline,
+        Mapping,
+        Sequence,
+    ];
+    for newline in ["\n", "\r\n", "\r"] {
+        for &source in SOURCES {
+            let source = source.replace('\n', newline);
+            for seed in 1..=128u64 {
+                let mut state = seed;
+                let mut sequence = [String; 64];
+                for operation in &mut sequence {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    let index = state % u64::try_from(operations.len()).unwrap();
+                    *operation = operations[usize::try_from(index).unwrap()];
+                }
+                check_sequence(&source, sequence);
+            }
+        }
+    }
+}
+
+fn check_sequence<const N: usize>(source: &str, sequence: [Operation; N]) {
+    let initial = json!({"value": "old", "copy": "old", "items": ["x"], "map": {"key": "value"}});
+    let mut expected = initial.clone();
+    for operation in sequence {
+        operation.model(&mut expected);
+    }
+    let mut combined = Editable::<Value>::parse(source).unwrap();
+    combined
+        .edit(|editor| {
+            for operation in sequence {
+                operation.apply(editor)?;
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}, combined: {error}"));
+    assert_eq!(combined.value(), &expected, "{source:?}, {sequence:?}");
+    check_alias(&combined);
+
+    let mut separate = Editable::<Value>::parse(source).unwrap();
+    let mut step = initial;
+    for operation in sequence {
+        operation.model(&mut step);
+        separate
+            .edit(|editor| operation.apply(editor))
+            .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}, separate: {error}"));
+        assert_eq!(separate.value(), &step, "{source:?}, {sequence:?}");
+        check_alias(&separate);
     }
 }
 
