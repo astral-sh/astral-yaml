@@ -1,4 +1,4 @@
-use super::{Comment, EditableDocument, Node, NodeKind, emit};
+use super::{Comment, CommentPosition, EditableDocument, Node, NodeKind, emit};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{cell::Cell, collections::HashSet, sync::Arc};
 
@@ -254,13 +254,16 @@ impl<'a> Editor<'a> {
                         ..
                     }
                 );
-                return !emit::simple_key(node, emit::newline(source), *style == CollectionStyle::Flow)
-                    || (plain
-                        && source[separator..].strip_prefix(':').is_some_and(|suffix| {
-                            suffix.starts_with(|c: char| {
-                                !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
-                            })
-                        }));
+                return !emit::simple_key(
+                    node,
+                    emit::newline(source),
+                    *style == CollectionStyle::Flow,
+                ) || (plain
+                    && source[separator..].strip_prefix(':').is_some_and(|suffix| {
+                        suffix.starts_with(|c: char| {
+                            !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
+                        })
+                    }));
             }
             if value != id {
                 continue;
@@ -627,6 +630,11 @@ impl<'a> Editor<'a> {
                 Comment {
                     text: text.to_owned(),
                     placement,
+                    position: if placement == CommentPlacement::Leading {
+                        CommentPosition::Before
+                    } else {
+                        CommentPosition::After
+                    },
                     span: Span { start: 0, end: 0 },
                 },
             );
@@ -862,6 +870,20 @@ impl<'a> Editor<'a> {
         for &(id, region) in &regions {
             let flow = self.flow_context(id);
             let indent = emit::indent(&self.original.source, region.start());
+            let context = if self.parents[id.0].is_some_and(|parent| {
+                matches!(
+                    &self.candidate.nodes[parent.0].kind,
+                    NodeKind::Mapping { entries, .. } if entries.iter().any(|&(key, _)| key == id)
+                )
+            }) {
+                emit::Context::key(indent, flow)
+            } else {
+                emit::Context::value(
+                    indent,
+                    flow,
+                    if id == self.candidate.root { 0 } else { indent },
+                )
+            };
             let rendered = if id == self.candidate.root {
                 let comments = self.root_comments(region)?;
                 patches.extend(comments.insertions);
@@ -869,8 +891,7 @@ impl<'a> Editor<'a> {
                     &self.candidate,
                     id,
                     region,
-                    indent,
-                    flow,
+                    context,
                     &comments.rendered,
                 )?
             } else {
@@ -878,8 +899,7 @@ impl<'a> Editor<'a> {
                     &self.candidate,
                     id,
                     region,
-                    indent,
-                    flow,
+                    context,
                     &self.candidate.nodes[id.0].comments,
                 )?
             };
@@ -942,13 +962,11 @@ impl<'a> Editor<'a> {
                 NodeKind::Sequence {
                     style: CollectionStyle::Flow,
                     ..
-                } => return true,
-                NodeKind::Mapping { entries, style }
-                    if *style == CollectionStyle::Flow
-                        || entries.iter().any(|&(key, _)| key == id) =>
-                {
-                    return true;
                 }
+                | NodeKind::Mapping {
+                    style: CollectionStyle::Flow,
+                    ..
+                } => return true,
                 _ => {}
             }
             id = parent;
@@ -976,13 +994,18 @@ fn remap(kind: &mut NodeKind, map: impl Fn(NodeId) -> NodeId) {
 }
 
 fn inline_node(node: &Node) -> bool {
-    matches!(
-        node.kind,
-        NodeKind::Scalar {
-            style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
-            ..
-        } | NodeKind::Alias { .. }
-    )
+    // Comments between properties and content need the parent's header and
+    // continuation indentation, even when the content itself fits on one line.
+    node.comments
+        .iter()
+        .all(|comment| comment.position != CommentPosition::Header)
+        && matches!(
+            node.kind,
+            NodeKind::Scalar {
+                style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+                ..
+            } | NodeKind::Alias { .. }
+        )
 }
 
 fn same_style(left: &NodeKind, right: &NodeKind) -> bool {

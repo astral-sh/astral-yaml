@@ -554,3 +554,198 @@ fn comment_transactions_match_an_ordered_list_model() {
         }
     }
 }
+
+#[test]
+fn empty_roots_end_retained_header_comments_before_inserting_content() {
+    let mut diffs = Vec::new();
+    for source in [
+        "--- # marker",
+        "%YAML 1.2\r\n--- # marker",
+        "%YAML 1.2\r--- # marker",
+    ] {
+        for fragment in ["new", "[new]", "{key: new}", "|2-\n  new\n"] {
+            let mut document = EditableDocument::parse(source).unwrap();
+            document
+                .edit(|editor| editor.replace(&editor.root(), fragment))
+                .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
+            diffs.push(edit_diff(source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker
+    +new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker
+    +[new]
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker
+    +{key: new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker
+    +|2-
+    +  new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker␍
+    +new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker␍
+    +[new]
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker␍
+    +{key: new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     %YAML 1.2␍
+    ---- # marker
+    \ No newline at end of file
+    +--- # marker␍
+    +|2-␍
+    +  new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍---- # marker
+    \ No newline at end of file
+    +--- # marker␍+new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍---- # marker
+    \ No newline at end of file
+    +--- # marker␍+[new]
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     %YAML 1.2␍---- # marker
+    \ No newline at end of file
+    +--- # marker␍+{key: new}
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     %YAML 1.2␍---- # marker
+    \ No newline at end of file
+    +--- # marker␍+|2-␍+  new␍
+    ");
+}
+
+#[test]
+fn edits_preserve_comments_between_headers_properties_and_content() {
+    let mut diffs = Vec::new();
+    for source in [
+        "key: # header\n  &a # anchor\n  # before value\n  old\n",
+        "key: !!str # tag\n  &a # anchor\n  # before value\n  old\n",
+        "key: # header\n  # before anchor\n  &a # anchor\n  # before value\n  old\n",
+        "key: # header\r\n  &a # anchor\r\n  # before value\r\n  old\r\n",
+        "key: # header\r  &a # anchor\r  # before value\r  old\r",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+                editor.replace_preserving_style(&value, "new")
+            })
+            .unwrap_or_else(|error| panic!("{source:?}: {error}"));
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header
+       &a # anchor
+    -  # before value
+    -  old
+    +    # before value
+    +    new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -key: !!str # tag
+    +key: # tag
+       &a # anchor
+    -  # before value
+    -  old
+    +    # before value
+    +    new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     key: # header
+       # before anchor
+       &a # anchor
+    -  # before value
+    -  old
+    +    # before value
+    +    new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header␍
+       &a # anchor␍
+    -  # before value␍
+    -  old␍
+    +    # before value␍
+    +    new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header␍   &a # anchor␍-  # before value␍-  old␍+    # before value␍+    new␍
+    ");
+}

@@ -62,8 +62,7 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
         document,
         id,
         region,
-        indent,
-        flow,
+        Context::value(indent, flow, if id == document.root { 0 } else { indent }),
         &document.nodes[id.0].comments,
     )
 }
@@ -73,11 +72,12 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     document: impl Into<Emission<'a, Location>>,
     id: NodeId,
     region: Span,
-    indent: usize,
-    flow: bool,
+    context: Context,
     root_comments: &'a [Comment<Location>],
 ) -> Result<Rendered, Error> {
     let document = document.into();
+    let indent = context.indent;
+    let flow = context.in_flow();
     let mut emitter = Emitter {
         document,
         root: id,
@@ -94,10 +94,20 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
         .unwrap_or("");
     let own_line = id == document.root
         && (block_collection(&document.nodes[id.0].kind, flow)
-            || emitter.visible_comments(id).any(|comment| comment.placement == CommentPlacement::Leading));
-    if own_line && !prefix.bytes().all(|byte| byte == b' ') {
-        // The unchanged prefix can end in a document marker. Block collections
-        // and leading comments must start on their own line, unlike inline roots.
+            || emitter
+                .visible_comments(id)
+                .any(|comment| comment.placement == CommentPlacement::Leading));
+    let line_start = region.start() - prefix.len();
+    let comment_ended_prefix = region.is_empty()
+        && root_comments.iter().any(|comment| {
+            !comment.span.is_empty()
+                && comment.span.start() >= line_start
+                && comment.span.end() <= region.start()
+        });
+    if comment_ended_prefix || (own_line && !prefix.bytes().all(|byte| byte == b' ')) {
+        // A retained comment needs a terminating break before any inserted
+        // syntax. Block collections and leading comments also need their own
+        // line after a document marker.
         emitter.line(indent)?;
     } else if region.is_empty()
         && matches!(
@@ -107,7 +117,6 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     {
         emitter.push(" ")?;
     }
-    let context = Context::value(indent, flow, if id == document.root { 0 } else { indent });
     emitter.node(id, context, "", 0)?;
     if region.is_empty() && document.source.as_bytes().get(region.end()) == Some(&b'#') {
         emitter.push(" ")?;
@@ -123,7 +132,7 @@ pub(super) struct Rendered {
 }
 
 #[derive(Clone, Copy)]
-struct Context {
+pub(super) struct Context {
     /// Indentation for continuation lines and comments.
     indent: usize,
     position: Position,
@@ -139,7 +148,7 @@ enum Position {
 }
 
 impl Context {
-    fn value(indent: usize, flow: bool, parent_indent: usize) -> Self {
+    pub(super) fn value(indent: usize, flow: bool, parent_indent: usize) -> Self {
         Self {
             indent,
             position: if flow {
@@ -147,6 +156,13 @@ impl Context {
             } else {
                 Position::Block { parent_indent }
             },
+        }
+    }
+
+    pub(super) fn key(indent: usize, flow: bool) -> Self {
+        Self {
+            indent,
+            position: Position::ImplicitKey { flow },
         }
     }
 
@@ -823,10 +839,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
                 self.push("? ")?;
             }
             let key_context = if simple {
-                Context {
-                    indent: indent + 2,
-                    position: Position::ImplicitKey { flow: is_flow },
-                }
+                Context::key(indent + 2, is_flow)
             } else {
                 Context::flow(indent + 2)
             };
@@ -968,12 +981,11 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
     }
 }
 
-pub(super) fn simple_key(node: &super::Node, flow: bool) -> bool {
+pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> bool {
     let NodeKind::Scalar { value, style } = &node.kind else {
         return false;
     };
-    if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
-    {
+    if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
         return false;
     }
     // YAML limits the entire implicit key, including escapes and properties,

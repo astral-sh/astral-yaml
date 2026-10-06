@@ -313,8 +313,8 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     @@ -1,2 +1,2 @@
     -{key # a colon in a comment: ⏎
     -}
-    +{key: 42 # a colon in a comment: ⏎
-    +  }
+    +{key: # a colon in a comment: ⏎
+    +  42}
 
     --- before.yaml
     +++ after.yaml
@@ -433,5 +433,212 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
     -outer: {"key":"value"}
     +outer: {key: "value"}
      other : 'untouched'
+    "#);
+}
+
+#[test]
+fn explicit_keys_accept_block_style_requests() {
+    let mut diffs = Vec::new();
+    for source in [
+        "? |2-\n  key\n: value\n",
+        "? >2-\n  key\n: value\n",
+        "? - a\n  - b\n: value\n",
+        "? k: v\n: value\n",
+        "? [a, b]\n: value\n",
+        "? {k: v}\n: value\n",
+        "outer:\n  ? [a, b]\n  : value\n",
+        "? |2-\n  key\n: [value]\n",
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let mut mapping = editor.root();
+                if source.starts_with("outer:") {
+                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                }
+                let (key, value) = editor.mapping_entries(&mapping)?.remove(0);
+                match editor.node(&key)?.kind() {
+                    astral_yaml::edit::NodeKind::Scalar { style, .. } => {
+                        editor.set_scalar_style(&key, *style)?
+                    }
+                    _ => editor.set_collection_style(&key, CollectionStyle::Block)?,
+                }
+                // Force a visible change even when the key already has its requested style.
+                editor.replace(&value, "updated")
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     ? |2-
+       key
+    -: value
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     ? >2-
+       key
+    -: value
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -? - a
+    +?
+    +  - a
+       - b
+    -: value
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -? k: v
+    -: value
+    +?
+    +  k: v
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -? [a, b]
+    -: value
+    +?
+    +  - a
+    +  - b
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -? {k: v}
+    -: value
+    +?
+    +  k: v
+    +: updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     outer:
+    -  ? [a, b]
+    -  : value
+    +  ?
+    +    - a
+    +    - b
+    +  : updated
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     ? |2-
+       key
+    -: [value]
+    +: updated
+    ");
+}
+
+#[test]
+fn implicit_block_keys_keep_their_own_scalar_context() {
+    let mut diffs = Vec::new();
+    for source in ["old: value\n", "{old: value}\n", "outer:\n  old: value\n"] {
+        for key in ["'---'", "'...'", "'a,b'", "'a[b]'"] {
+            let mut document = EditableDocument::parse(source).unwrap();
+            document
+                .edit(|editor| {
+                    let mut mapping = editor.root();
+                    if source.starts_with("outer:") {
+                        mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                    }
+                    let key_handle = editor.mapping_entries(&mapping)?.remove(0).0;
+                    editor.replace_preserving_style(&key_handle, key)
+                })
+                .unwrap();
+            diffs.push(edit_diff(source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old: value
+    +---: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old: value
+    +...: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old: value
+    +a,b: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old: value
+    +a[b]: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old: value}
+    +{---: value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old: value}
+    +{...: value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old: value}
+    +{"a,b": value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old: value}
+    +{"a[b]": value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     outer:
+    -  old: value
+    +  ---: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     outer:
+    -  old: value
+    +  ...: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     outer:
+    -  old: value
+    +  a,b: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     outer:
+    -  old: value
+    +  a[b]: value
     "#);
 }
