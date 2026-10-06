@@ -231,3 +231,163 @@ fn value_setters_can_request_multiline_scalar_styles() {
     +  ⏎
     ");
 }
+
+#[test]
+fn typed_root_setters_distinguish_strings_from_document_markers() {
+    // Document markers: https://yaml.org/spec/1.2.2/#912-document-markers
+    let mut diffs = Vec::new();
+    for source in ["old\n", "--- old\n", "  old\n", "\u{feff}old\n", "&a old\n"] {
+        for value in ["---", "...", "--- text", "... text", "---\ntext"] {
+            let mut document = Editable::<String>::parse(source).unwrap();
+            document
+                .edit(|editor| editor.root_mut().set(value))
+                .unwrap();
+            assert_eq!(document.value(), value);
+            if source == "old\n" || value == "---" {
+                diffs.push(edit_diff(source, document.source()));
+            }
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"---"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"..."
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"--- text"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"... text"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -old
+    +"---\ntext"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    ---- old
+    +--- ---
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -  old
+    +  ---
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -﻿old
+    +﻿"---"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -&a old
+    +&a ---
+    "#);
+}
+
+#[test]
+fn typed_setters_preserve_comments_interleaved_with_properties() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source =
+            "key: # header\n  &a # anchor\n  # before content\n  old\n".replace('\n', newline);
+        let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
+        document
+            .edit(|editor| editor.root_mut().field("key")?.set("new"))
+            .unwrap();
+        assert_eq!(document.value()["key"], "new");
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header
+       &a # anchor
+    -  # before content
+    -  old
+    +    # before content
+    +    new
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header␍
+       &a # anchor␍
+    -  # before content␍
+    -  old␍
+    +    # before content␍
+    +    new␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header␍   &a # anchor␍-  # before content␍-  old␍+    # before content␍+    new␍
+    ");
+}
+
+#[test]
+fn typed_setters_terminate_an_empty_roots_header_comment() {
+    let source = "--- # keep";
+    let mut diffs = Vec::new();
+    for value in [
+        serde_json::json!("new"),
+        serde_json::json!(["new"]),
+        serde_json::json!({"key": "new"}),
+    ] {
+        let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
+        document
+            .edit(|editor| editor.root_mut().set(&value))
+            .unwrap();
+        assert_eq!(document.value(), &value);
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # keep
+    \ No newline at end of file
+    +--- # keep
+    +new
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # keep
+    \ No newline at end of file
+    +--- # keep
+    +["new"]
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    ---- # keep
+    \ No newline at end of file
+    +--- # keep
+    +{"key": "new"}
+    \ No newline at end of file
+    "#);
+}
