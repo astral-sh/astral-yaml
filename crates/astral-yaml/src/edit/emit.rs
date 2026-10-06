@@ -263,13 +263,13 @@ impl Emitter<'_> {
         if self.trailing_block_scalar {
             // Blank lines immediately following a block scalar belong to its
             // content. The emitted value supplies all of them itself.
-            let suffix = &source[span.end()..];
-            span.end = match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
-                Some(index) => suffix[..index]
-                    .rfind(['\r', '\n'])
-                    .map_or(span.end(), |offset| span.end() + offset + 1),
-                None => source.len(),
-            };
+            span.end = following_line_breaks(source, span.end());
+        } else if let Some(start) = self.erased_root_line() {
+            // An omitted root has no token to occupy its former line. Leaving
+            // that line behind would turn adjacent leading comments into
+            // detached comments, or indent a following document marker.
+            span.start = start;
+            span.end = following_line_breaks(source, span.end());
         }
         let suffix = &source[span.end()..];
         let suffix_has_break = suffix
@@ -292,6 +292,25 @@ impl Emitter<'_> {
             text: self.output,
             span,
         })
+    }
+
+    fn erased_root_line(&self) -> Option<usize> {
+        if self.root != self.document.root
+            || self.region.is_empty()
+            || !self.output.is_empty()
+            || !omitted(&self.document.nodes[self.root.0])
+        {
+            return None;
+        }
+        let prefix = self.document.source[..self.region.start()]
+            .rsplit(['\r', '\n'])
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('\u{feff}');
+        prefix
+            .bytes()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
+            .then_some(self.region.start() - prefix.len())
     }
 
     fn push(&mut self, text: &str) -> Result<(), Error> {
@@ -800,6 +819,25 @@ impl Emitter<'_> {
         }
         let context = Context::value(value_indent, flow, indent);
         self.node_with_comments(id, context, suffix, depth, comments)
+    }
+}
+
+/// An empty plain scalar without properties has no syntax token of its own.
+pub(super) fn omitted(node: &super::Node) -> bool {
+    node.anchor.is_none()
+        && node.tag.is_none()
+        && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
+}
+
+/// Consume complete whitespace-only lines, retaining the indentation of any
+/// following syntax. Both a block scalar and an erased root own these breaks.
+fn following_line_breaks(source: &str, start: usize) -> usize {
+    let suffix = &source[start..];
+    match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
+        Some(index) => suffix[..index]
+            .rfind(['\r', '\n'])
+            .map_or(start, |offset| start + offset + 1),
+        None => source.len(),
     }
 }
 

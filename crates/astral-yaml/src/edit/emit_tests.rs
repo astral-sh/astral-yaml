@@ -585,3 +585,48 @@ fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
     ]
     "#);
 }
+
+#[test]
+fn omitted_roots_own_their_erased_line() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# leading\n---\nold\n...\n",
+            "# leading\n---\n  old\n\n...\n",
+            "\u{feff}---\n  old\n...\n",
+            "--- old\n...\n",
+            "# leading\n---\n|+\n  old\n\n...\n",
+            "---\n\n...\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut candidate = EditableDocument::parse(&source).unwrap();
+            candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+                value: String::new(),
+                style: crate::ScalarStyle::Plain,
+            };
+            outputs.push(candidate.normalized_yaml().unwrap());
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r##"
+    [
+        "# leading\n---\n...\n",
+        "# leading\n---\n...\n",
+        "\u{feff}---\n...\n",
+        "--- \n...\n",
+        "# leading\n---\n...\n",
+        "---\n\n...\n",
+        "# leading\r\n---\r\n...\r\n",
+        "# leading\r\n---\r\n...\r\n",
+        "\u{feff}---\r\n...\r\n",
+        "--- \r\n...\r\n",
+        "# leading\r\n---\r\n...\r\n",
+        "---\r\n\r\n...\r\n",
+        "# leading\r---\r...\r",
+        "# leading\r---\r...\r",
+        "\u{feff}---\r...\r",
+        "--- \r...\r",
+        "# leading\r---\r...\r",
+        "---\r\r...\r",
+    ]
+    "##);
+}
