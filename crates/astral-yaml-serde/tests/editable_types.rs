@@ -359,23 +359,111 @@ fn incompatible_kind_changes_roll_back_source_value_and_span() {
 }
 
 #[test]
-fn kind_changes_that_move_outer_comments_roll_back() {
-    let source = "# attached\n1\n";
-    for replacement in ["- 2\n- 3", "[2, 3]", "two: 2", "{two: 2}"] {
-        let mut document = Editable::<Spanned<Shape>>::parse(source).unwrap();
-        let span = document.value().span;
-        assert!(from_str::<Shape>(replacement).is_ok());
-
-        // Collections would attach this comment to their first child.
-        let error = document
-            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap_err();
-        assert_eq!(
-            error.message,
-            "emission changed comment ownership or placement"
-        );
-        assert_eq!(document.syntax().source(), source);
-        assert_eq!(document.value().value, Shape::Scalar(1));
-        assert_eq!(document.value().span, span);
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn kind_changes_create_boundaries_for_outer_comments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "# attached\n1\n".replace('\n', newline);
+        for replacement in ["- 2\n- 3", "[2, 3]", "two: 2", "{two: 2}"] {
+            let mut document = Editable::<Spanned<Shape>>::parse(&source).unwrap();
+            let expected = from_str::<Shape>(replacement).unwrap();
+            document
+                .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
+                .unwrap();
+            assert_eq!(document.value().value, expected);
+            let syntax = document.syntax();
+            assert_eq!(
+                document.value().span,
+                syntax.node(syntax.root()).unwrap().span()
+            );
+            diffs.push(edit_diff(&source, document.source()));
+        }
     }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     # attached
+    -1
+    +---
+    +- 2
+    +- 3
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached
+    -1
+    +---
+    +[2, 3]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached
+    -1
+    +---
+    +two: 2
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached
+    -1
+    +---
+    +{two: 2}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     # attached␍
+    -1␍
+    +---␍
+    +- 2␍
+    +- 3␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍
+    -1␍
+    +---␍
+    +[2, 3]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍
+    -1␍
+    +---␍
+    +two: 2␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍
+    -1␍
+    +---␍
+    +{two: 2}␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     # attached␍-1␍+---␍+- 2␍+- 3␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍-1␍+---␍+[2, 3]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍-1␍+---␍+two: 2␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+     # attached␍-1␍+---␍+{two: 2}␍
+    ");
 }

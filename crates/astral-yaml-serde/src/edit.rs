@@ -285,7 +285,8 @@ impl<'doc> Cursor<'_, 'doc> {
     /// space in `text` when the emitted comment should start with `# `.
     ///
     /// # Errors
-    /// Rejects invalid text, conflicting inline comments, and resource limits.
+    /// Rejects invalid text and resource limits. Commit rejects placements that
+    /// cannot preserve the node's attachments.
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
         self.mutate(|cursor| {
             let index = cursor.syntax.node(&cursor.handle)?.comments().len();
