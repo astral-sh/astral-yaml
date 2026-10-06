@@ -743,16 +743,15 @@ impl RootLayout {
                 .any(|comment| self.kind.needs_suffix_boundary(comment))
     }
 
-    /// A dedented comment terminates the final block scalar, including one
-    /// nested in a block collection. Preserve that boundary when deleting it.
+    /// A removed suffix comment can expose retained whitespace to the final
+    /// scalar, even when the same transaction introduces that scalar. Preserve
+    /// the boundary using the candidate's layout, not the original scalar style.
     fn removed_scalar_boundary(
         &self,
         original: &EditableDocument,
         root: &super::Node,
     ) -> Option<usize> {
-        if !self.kind.ends_with_block_scalar()
-            || Layout::new(original).tail(original.root).is_none()
-        {
+        if !self.kind.ends_with_block_scalar() {
             return None;
         }
         let end = original.nodes[original.root.0].span.end();

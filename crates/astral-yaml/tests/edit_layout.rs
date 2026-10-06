@@ -539,6 +539,11 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
                 None,
             ),
             (
+                "outer:\n  key: old\n# trailing\n\n",
+                Some((" trailing", CommentPlacement::Trailing)),
+                None,
+            ),
+            (
                 "outer:\n  key: old\n\n# root\n",
                 Some((" root", CommentPlacement::Detached)),
                 None,
@@ -739,4 +744,52 @@ fn required_collection_boundaries_do_not_override_explicit_styles() {
         .unwrap_err();
     assert_eq!(document.source(), source);
     insta::assert_snapshot!(error.message, @"requested style is not representable in this context");
+}
+
+#[test]
+fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "outer:\n  key: old\n# trailing\n\n".replace('\n', newline);
+        let mut document = EditableDocument::parse(&source).unwrap();
+        document
+            .edit(|editor| {
+                editor.remove_comment(&editor.root(), 0)?;
+                editor.replace(&first_leaf(editor), "|+\n  new\n\n")
+            })
+            .unwrap();
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,7 @@
+     outer:
+    -  key: old
+    -# trailing
+    +  key: |2+
+    +    new
+    +    ⏎
+    +...
+    +
+     ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,7 @@
+     outer:␍
+    -  key: old␍
+    -# trailing␍
+    +  key: |2+␍
+    +    new␍
+    +    ␍
+    +...␍
+    +␍
+     ␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,7 @@
+     outer:␍-  key: old␍-# trailing␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ␍
+    ");
 }
