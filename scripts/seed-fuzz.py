@@ -58,6 +58,8 @@ TYPED_EXAMPLES = [
     "# leading\n42 # inline\n\n# detached\n",
     "nested: # header\n  # child\n  value: 1 # inline\n  # tail\n# root tail\n",
     "[ # opening\n # item\n 1,\n # trailing\n] # closing\n",
+    "# child\n[ # open\n  old\n] # close\n",
+    "# child\n{ # open\n  key: old\n} # close\n",
     "? [a, # key child\n b] # key\n: 1 # value\n",
     "&self [*self # cycle\n]",
     "\ufeff# BOM\nvalue: 1\r\n",
