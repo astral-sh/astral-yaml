@@ -826,3 +826,126 @@ fn typed_collection_edits_retain_outside_comments() {
     -outer:␍-# leading␍-  {key: old}␍+outer: {␍+  # leading␍+  key: old, "added": "new"}␍ unknown: keep␍
     "#);
 }
+
+#[test]
+fn typed_collection_edits_use_document_comment_boundaries() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "---\n[ # open\n  old\n] # close\n...\n".replace('\n', newline);
+        let mut document = Editable::<Vec<String>>::parse(&source).unwrap();
+        document
+            .edit(|editor| {
+                let mut root = editor.root_mut();
+                root.set_collection_style(CollectionStyle::Block)?;
+                root.push("new")?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(document.value(), &["old", "new"]);
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+    ----
+    -[ # open
+    -  old
+    -] # close
+    -...
+    +--- # open
+    +- old
+    +- "new"
+    +... # close
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+    ----␍
+    -[ # open␍
+    -  old␍
+    -] # close␍
+    -...␍
+    +--- # open␍
+    +- old␍
+    +- "new"␍
+    +... # close␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+    ----␍-[ # open␍-  old␍-] # close␍-...␍+--- # open␍+- old␍+- "new"␍+... # close␍
+    "#);
+}
+
+#[test]
+fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "---\n# leading\nold # inline\n...\n".replace('\n', newline);
+        let mut document = Editable::<Option<String>>::parse(&source).unwrap();
+        document
+            .edit_syntax(|editor| editor.replace(&editor.root(), "---\n"))
+            .unwrap();
+        assert_eq!(document.value(), &None);
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----
+     # leading
+    -old # inline
+    +--- # inline
+     ...
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----␍
+     # leading␍
+    -old # inline␍
+    +--- # inline␍
+     ...␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+    ----␍ # leading␍-old # inline␍+--- # inline␍ ...␍
+    ");
+}
+
+#[test]
+fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "  old\n# tail\n".replace('\n', newline);
+        let mut document = Editable::<String>::parse(&source).unwrap();
+        document
+            .edit(|editor| editor.root_mut().set_scalar_style(ScalarStyle::Literal))
+            .unwrap();
+        assert_eq!(document.value(), "old");
+        diffs.push(edit_diff(&source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-
+       old
+     # tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-␍
+       old␍
+     # tail␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    +  |2-␍   old␍ # tail␍
+    ");
+}
