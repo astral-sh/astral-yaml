@@ -1,5 +1,6 @@
 use super::{
     Comment, CommentPosition, EditableDocument, NodeKind,
+    layout::Layout,
     view::{Emission, Syntax},
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
@@ -64,6 +65,7 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
         region,
         Context::value(indent, flow, if id == document.root { 0 } else { indent }),
         &document.nodes[id.0].comments,
+        &Layout::new(Syntax { nodes: document.nodes, root: document.root }),
     )
 }
 
@@ -74,12 +76,14 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     region: Span,
     context: Context,
     root_comments: &'a [Comment<Location>],
+    layout: &Layout,
 ) -> Result<Rendered, Error> {
     let document = document.into();
     let indent = context.indent;
     let flow = context.in_flow();
     let mut emitter = Emitter {
         document,
+        layout,
         root: id,
         root_comments,
         region,
@@ -293,8 +297,9 @@ enum ErasedRootLine {
     Shared,
 }
 
-struct Emitter<'a, Location> {
+struct Emitter<'a, 'layout, Location> {
     document: Emission<'a, Location>,
+    layout: &'layout Layout,
     root: NodeId,
     root_comments: &'a [Comment<Location>],
     region: Span,
@@ -305,7 +310,7 @@ struct Emitter<'a, Location> {
     trailing_block_scalar: bool,
 }
 
-impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
+impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: self.region,
@@ -713,7 +718,12 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
         let node = &self.document.nodes[id.0];
         match &node.kind {
             NodeKind::Scalar { value, style } => {
-                self.scalar(value, *style, context, &mut comments)?;
+                self.scalar(
+                    value,
+                    self.layout.scalar_style(id, *style),
+                    context,
+                    &mut comments,
+                )?;
             }
             NodeKind::Alias { target } => {
                 let name = self.document.nodes[target.0]

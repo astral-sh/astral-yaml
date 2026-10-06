@@ -1,7 +1,7 @@
 use crate::CollectionStyle;
 use astral_yaml_dev::edit_diff;
 
-use super::{EditableDocument, Editor, NodeKind, Span, same_style};
+use super::{EditableDocument, Editor, Layout, NodeKind, RootLayout, Span, same_style};
 
 #[test]
 fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
@@ -25,8 +25,10 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     document.nodes[first.0].span = Span::new(2, 10).unwrap();
     let mut editor = Editor::new(&document);
     editor.rewrites.extend([first, last]);
+    let syntax = Layout::new(&editor.candidate);
+    let layout = RootLayout::new(&document, &editor.candidate, &syntax);
     assert_eq!(
-        editor.rewrite_regions().unwrap(),
+        editor.rewrite_regions(&layout, &syntax).unwrap(),
         [(document.root, document.nodes[document.root.0].span)]
     );
 }
@@ -36,7 +38,9 @@ fn empty_transactions_do_not_require_rewrite_work() {
     let document = EditableDocument::parse("one").unwrap();
     let editor = Editor::new(&document);
     editor.work.set(0);
-    assert_eq!(editor.rewrite_regions().unwrap(), []);
+    let syntax = Layout::new(&editor.candidate);
+    let layout = RootLayout::new(&document, &editor.candidate, &syntax);
+    assert_eq!(editor.rewrite_regions(&layout, &syntax).unwrap(), []);
 }
 
 #[test]
@@ -56,13 +60,21 @@ fn outer_comment_plans_obey_work_and_output_limits() {
             .unwrap();
     }
     let region = document.nodes[document.root.0].span;
+    let syntax = Layout::new(&editor.candidate);
+    let layout = RootLayout::new(&document, &editor.candidate, &syntax);
     assert_eq!(
-        editor.root_comments(Some(region)).unwrap_err().message,
+        editor
+            .root_comments(Some(region), &layout)
+            .unwrap_err()
+            .message,
         "emitted YAML exceeds input byte limit"
     );
     editor.work.set(0);
     assert_eq!(
-        editor.root_comments(Some(region)).unwrap_err().message,
+        editor
+            .root_comments(Some(region), &layout)
+            .unwrap_err()
+            .message,
         "editing resource limit exceeded"
     );
 }
@@ -312,4 +324,22 @@ fn patch_application_checks_intervals_utf8_and_complete_output_size() {
         ),
     ]
     "#);
+}
+
+#[test]
+fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
+    let document = EditableDocument::parse("outer:\n  value: old\n\n# detached\n").unwrap();
+    let mut editor = Editor::new(&document);
+    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
+    let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
+    editor.replace(&value, "|+\n  new\n\n").unwrap();
+    let syntax = Layout::new(&editor.candidate);
+    let layout = RootLayout::new(&document, &editor.candidate, &syntax);
+    assert_eq!(
+        editor.rewrite_regions(&layout, &syntax).unwrap(),
+        [(
+            document.root,
+            super::emit::region(&document, document.root, true)
+        )]
+    );
 }

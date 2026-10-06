@@ -1,5 +1,7 @@
 use super::{
-    Comment, CommentPosition, EditableDocument, Node, NodeKind, emit, framing::RootComments,
+    Comment, CommentPosition, EditableDocument, Node, NodeKind, emit,
+    framing::{RootComments, RootLayout},
+    layout::Layout,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{
@@ -719,8 +721,19 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn rewrite_regions(&self) -> Result<Vec<(NodeId, Span)>, Error> {
+    fn rewrite_regions(
+        &self,
+        layout: &RootLayout,
+        syntax: &Layout,
+    ) -> Result<Vec<(NodeId, Span)>, Error> {
         let mut ids: Vec<_> = self.rewrites.iter().copied().collect();
+        if layout.needs_scalar_boundary(&self.candidate)
+            && syntax
+                .tail(self.candidate.root)
+                .is_some_and(|tail| ids.iter().any(|&id| self.ancestor(id, tail)))
+        {
+            ids.push(self.candidate.root);
+        }
         loop {
             if !ids.is_empty() {
                 self.charge(self.original.nodes.len())?;
@@ -762,8 +775,7 @@ impl<'a> Editor<'a> {
                         }
                     }
                     if id == self.candidate.root {
-                        region =
-                            super::framing::root_region(self.original, &self.candidate, region);
+                        region = super::framing::root_region(self.original, layout, region);
                     }
                     (id, region)
                 })
@@ -813,36 +825,42 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn root_comments(&self, region: Option<Span>) -> Result<RootComments, Error> {
+    fn root_comments(
+        &self,
+        region: Option<Span>,
+        layout: &RootLayout,
+    ) -> Result<RootComments, Error> {
         self.charge(
             self.original.nodes[self.original.root.0].comments.len()
                 + self.candidate.nodes[self.candidate.root.0].comments.len(),
         )?;
-        RootComments::plan(self.original, &self.candidate, region)
+        RootComments::plan(self.original, &self.candidate, region, layout)
     }
 
     fn finish(mut self) -> Result<EditableDocument, Error> {
         if let Some(error) = self.failure.take() {
             return Err(error);
         }
+        let syntax = Layout::new(&self.candidate);
         let framed = if self.rewrites.is_empty() && !self.root_comments_changed {
             None
         } else {
-            super::framing::prepare(self.original, &mut self.candidate)
+            super::framing::prepare(self.original, &mut self.candidate, &syntax)
         };
         let editor = Editor {
             original: framed.as_ref().unwrap_or(self.original),
             ..self
         };
-        editor.render()
+        editor.render(&syntax)
     }
 
-    fn render(self) -> Result<EditableDocument, Error> {
-        let regions = self.rewrite_regions()?;
+    fn render(self, syntax: &Layout) -> Result<EditableDocument, Error> {
+        let layout = RootLayout::new(self.original, &self.candidate, syntax);
+        let regions = self.rewrite_regions(&layout, syntax)?;
         let root_region = regions.iter().find(|&&(id, _)| id == self.candidate.root);
         let mut root_comments = if root_region.is_some() || self.root_comments_changed {
             let region = root_region.map(|&(_, region)| region);
-            Some(self.root_comments(region)?)
+            Some(self.root_comments(region, &layout)?)
         } else {
             None
         };
@@ -874,6 +892,7 @@ impl<'a> Editor<'a> {
                     region,
                     context,
                     &comments.rendered,
+                    syntax,
                 )?
             } else {
                 emit::render_with_comments(
@@ -882,6 +901,7 @@ impl<'a> Editor<'a> {
                     region,
                     context,
                     &self.candidate.nodes[id.0].comments,
+                    syntax,
                 )?
             };
             patches.push((rendered.span, rendered.text));

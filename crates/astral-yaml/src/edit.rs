@@ -2,6 +2,7 @@
 
 mod emit;
 mod framing;
+mod layout;
 mod transaction;
 mod view;
 

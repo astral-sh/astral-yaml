@@ -2,7 +2,7 @@
 //! Plan their final positions separately from the root's syntax, so deleting a
 //! comment does not delete the framing boundary that can host its replacement.
 
-use super::{Comment, CommentPosition, EditableDocument, emit};
+use super::{Comment, CommentPosition, EditableDocument, emit, layout::Layout};
 use crate::{Error, Span, comments::CommentPlacement};
 use std::collections::{HashMap, HashSet};
 
@@ -30,8 +30,9 @@ struct Anchor {
 pub(super) fn prepare(
     original: &EditableDocument,
     candidate: &mut EditableDocument,
+    syntax: &Layout,
 ) -> Option<EditableDocument> {
-    let layout = RootLayout::new(original, candidate);
+    let layout = RootLayout::new(original, candidate, syntax);
     let root = &candidate.nodes[candidate.root.0];
     let collection = matches!(
         layout.kind,
@@ -209,6 +210,7 @@ impl RootComments {
         original: &EditableDocument,
         candidate: &EditableDocument,
         region: Option<Span>,
+        layout: &RootLayout,
     ) -> Result<Self, Error> {
         let comments = &candidate.nodes[candidate.root.0].comments;
         let Some(region) = region else {
@@ -221,7 +223,6 @@ impl RootComments {
             plan.changed_comments(original, None);
             return Ok(plan);
         };
-        let layout = RootLayout::new(original, candidate);
         let mut following = vec![None; comments.len()];
         let mut next = None;
         for (index, comment) in comments.iter().enumerate().rev() {
@@ -262,7 +263,7 @@ impl RootComments {
                         .filter(ordered)
                 })
                 .or_else(|| {
-                    marker_anchor(original, &layout, comment, index, region, next).filter(ordered)
+                    marker_anchor(original, layout, comment, index, region, next).filter(ordered)
                 });
             let Some(mut anchor) = anchor else {
                 plan.rendered.push(comment.clone());
@@ -444,29 +445,6 @@ impl RootKind {
                     && comment.position == CommentPosition::After
             }
             _ => false,
-        }
-    }
-}
-
-/// Block collection delimiters do not terminate the final child's scalar.
-/// Its boundary requirements therefore propagate to the enclosing root.
-fn block_scalar_tail(document: &EditableDocument) -> bool {
-    let mut id = document.root;
-    loop {
-        match &document.nodes[id.0].kind {
-            super::NodeKind::Sequence {
-                items,
-                style: crate::CollectionStyle::Block,
-            } if !items.is_empty() => id = *items.last().expect("nonempty sequence"),
-            super::NodeKind::Mapping {
-                entries,
-                style: crate::CollectionStyle::Block,
-            } if !entries.is_empty() => id = entries.last().expect("nonempty mapping").1,
-            super::NodeKind::Scalar {
-                style: crate::ScalarStyle::Literal | crate::ScalarStyle::Folded,
-                ..
-            } => return true,
-            _ => return false,
         }
     }
 }
@@ -690,7 +668,7 @@ fn occupied_markers(original: &EditableDocument, root: &super::Node, body: Span)
         .collect()
 }
 
-struct RootLayout {
+pub(super) struct RootLayout {
     kind: RootKind,
     body: Span,
     root_start: usize,
@@ -699,7 +677,11 @@ struct RootLayout {
 }
 
 impl RootLayout {
-    fn new(original: &EditableDocument, candidate: &EditableDocument) -> Self {
+    pub(super) fn new(
+        original: &EditableDocument,
+        candidate: &EditableDocument,
+        syntax: &Layout,
+    ) -> Self {
         let root_start = original.nodes[original.root.0].span.start();
         let body = Span {
             start: original.start_marker.map_or(0, |marker| {
@@ -722,7 +704,7 @@ impl RootLayout {
                     if emit::block_collection(&root.kind, false) {
                         RootKind::BlockCollection {
                             header: emit::has_inline_header(root, false),
-                            scalar_tail: block_scalar_tail(candidate),
+                            scalar_tail: syntax.tail(candidate.root).is_some(),
                         }
                     } else {
                         RootKind::FlowCollection
@@ -753,6 +735,14 @@ impl RootLayout {
         }
     }
 
+    pub(super) fn needs_scalar_boundary(&self, candidate: &EditableDocument) -> bool {
+        self.kind.ends_with_block_scalar()
+            && candidate.nodes[candidate.root.0]
+                .comments
+                .iter()
+                .any(|comment| self.kind.needs_suffix_boundary(comment))
+    }
+
     /// A dedented comment terminates the final block scalar, including one
     /// nested in a block collection. Preserve that boundary when deleting it.
     fn removed_scalar_boundary(
@@ -760,7 +750,9 @@ impl RootLayout {
         original: &EditableDocument,
         root: &super::Node,
     ) -> Option<usize> {
-        if !self.kind.ends_with_block_scalar() || !block_scalar_tail(original) {
+        if !self.kind.ends_with_block_scalar()
+            || Layout::new(original).tail(original.root).is_none()
+        {
             return None;
         }
         let end = original.nodes[original.root.0].span.end();
@@ -822,10 +814,9 @@ impl RootLayout {
 
 pub(super) fn root_region(
     original: &EditableDocument,
-    candidate: &EditableDocument,
+    layout: &RootLayout,
     mut region: Span,
 ) -> Span {
-    let layout = RootLayout::new(original, candidate);
     for comment in &original.nodes[original.root.0].comments {
         if !layout.fixed(comment) {
             region.start = region.start().min(comment.span.start());
@@ -1085,9 +1076,11 @@ mod tests {
             &original,
             &candidate,
             Some(emit::region(&original, original.root, true)),
+            &RootLayout::new(&original, &candidate, &Layout::new(&candidate)),
         )
         .unwrap();
-        let framed = prepare(&original, &mut candidate).unwrap();
+        let syntax = Layout::new(&candidate);
+        let framed = prepare(&original, &mut candidate, &syntax).unwrap();
         for (old, new) in original.nodes.iter().zip(&framed.nodes) {
             assert_eq!(
                 old.span.slice(&original.source),
@@ -1105,6 +1098,7 @@ mod tests {
             &framed,
             &candidate,
             Some(emit::region(&framed, framed.root, true)),
+            &RootLayout::new(&framed, &candidate, &syntax),
         )
         .unwrap();
         insta::assert_debug_snapshot!((before.rendered.len(), after.rendered.len(), framed.source), @r#"
