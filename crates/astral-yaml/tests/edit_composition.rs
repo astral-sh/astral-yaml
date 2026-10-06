@@ -144,6 +144,14 @@ fn framing_comment_edits_compose_with_content_edits() {
         ("old", &[]),
         ("---", &[]),
         (
+            "# child\n[ # open\n  old\n] # close\n",
+            &[(" open", Inline), (" close", Inline)],
+        ),
+        (
+            "# child\n{ # open\n  key: old\n} # close\n",
+            &[(" open", Inline), (" close", Inline)],
+        ),
+        (
             "# prefix\nold\n# tail\n",
             &[(" prefix", Leading), (" tail", Trailing)],
         ),
@@ -492,5 +500,38 @@ fn check_retained_occurrences(original: &EditableDocument, document: &EditableDo
                 .collect::<Vec<_>>()
         };
         assert_eq!(comments(original, old), comments(document, new));
+    }
+}
+
+#[test]
+fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
+    use CommentPlacement::{Detached, Inline, Trailing};
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "# child\n[ # open\n  old\n] # close\n".replace('\n', newline);
+        let mut document = EditableDocument::parse(&source).unwrap();
+        let mut expected = vec![(" open".to_owned(), Inline), (" close".to_owned(), Inline)];
+        for (index, placement) in [Inline, Inline, Trailing, Inline, Detached]
+            .into_iter()
+            .enumerate()
+        {
+            let text = format!(" added {index}");
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    let count = editor.node(&root)?.comments().len();
+                    editor.insert_comment(&root, count, &text, placement)
+                })
+                .unwrap();
+            expected.push((text, placement));
+            assert_eq!(comments(&document), expected);
+        }
+        document
+            .edit(|editor| editor.replace(&editor.root(), "'false'"))
+            .unwrap();
+        assert_eq!(comments(&document), expected);
+        assert_eq!(
+            content(&document, document.root()),
+            Content::Scalar("false".to_owned())
+        );
     }
 }

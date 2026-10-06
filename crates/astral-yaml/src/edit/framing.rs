@@ -78,7 +78,10 @@ pub(super) fn prepare(
         })
         .collect();
     insertions.extend(suffix);
-    let root_start = original.nodes[original.root.0].span.start();
+    // A descendant's prefix may begin before the root token (for example a
+    // leading comment on the first item of a flow collection). Keep generated
+    // framing outside the complete subtree rewrite, not just the root token.
+    let root_start = emit::region(original, original.root, false).start();
     let root_line = (layout.inline.start.is_some()
         || (original.nodes[original.root.0].span.is_empty() && !insertions.is_empty()))
         && original

@@ -575,3 +575,84 @@ fn detached_suffix_comments_follow_inserted_root_content() {
      ---␍-...␍+new␍+␍+# gap␍+... # end␍
     ");
 }
+
+#[test]
+fn generated_start_markers_precede_descendant_prefixes() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# child\n[ # open\n  old\n] # close\n",
+            "# child\n{ # open\n  key: old\n} # close\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    let index = editor.node(&root)?.comments().len();
+                    editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child
+    -[ # open
+    -  old
+    -] # close
+    +--- # open
+    +[ # close
+    +  # child
+    +  old] # added
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child
+    -{ # open
+    -  key: old
+    -} # close
+    +--- # open
+    +{ # close
+    +  # child
+    +  key: old} # added
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child␍
+    -[ # open␍
+    -  old␍
+    -] # close␍
+    +--- # open␍
+    +[ # close␍
+    +  # child␍
+    +  old] # added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child␍
+    -{ # open␍
+    -  key: old␍
+    -} # close␍
+    +--- # open␍
+    +{ # close␍
+    +  # child␍
+    +  key: old} # added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child␍-[ # open␍-  old␍-] # close␍+--- # open␍+[ # close␍+  # child␍+  old] # added␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -# child␍-{ # open␍-  key: old␍-} # close␍+--- # open␍+{ # close␍+  # child␍+  key: old} # added␍
+    ");
+}

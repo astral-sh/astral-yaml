@@ -893,17 +893,12 @@ impl<'a> Editor<'a> {
         // Suffix insertions at an empty root's position follow its syntax.
         // Stable sorting retains candidate order for insertions at the same point.
         patches.sort_by_key(|(span, _)| (span.start(), span.end()));
-        let mut source = String::new();
-        let mut position = 0;
-        for (span, replacement) in patches {
-            source.push_str(&self.original.source[position..span.start()]);
-            source.push_str(&replacement);
-            position = span.end();
-            if source.len() > self.original.options.max_input_bytes {
-                return Err(self.error("emitted YAML exceeds input byte limit"));
-            }
-        }
-        source.push_str(&self.original.source[position..]);
+        let source = apply_patches(
+            &self.original.source,
+            patches,
+            self.original.options.max_input_bytes,
+        )
+        .map_err(|message| self.error(message))?;
         let parsed = EditableDocument::parse_with_options(&source, self.original.options)?;
         let correspondence = emit::correspondence(&self.candidate, &parsed)
             .ok_or_else(|| self.error("emission changed YAML content or alias identity"))?;
@@ -940,6 +935,42 @@ impl<'a> Editor<'a> {
         }
         false
     }
+}
+
+/// Apply ordered, disjoint byte patches. Validate each span's UTF-8 boundaries
+/// before slicing, and include the retained suffix in the output limit.
+fn apply_patches(
+    source: &str,
+    patches: Vec<(Span, String)>,
+    limit: usize,
+) -> Result<String, &'static str> {
+    let mut output = String::new();
+    let mut position = 0;
+    for (span, replacement) in patches {
+        let prefix = source
+            .get(position..span.start())
+            .ok_or("overlapping or invalid source patches")?;
+        source
+            .get(span.start()..span.end())
+            .ok_or("overlapping or invalid source patches")?;
+        output
+            .len()
+            .checked_add(prefix.len())
+            .and_then(|size| size.checked_add(replacement.len()))
+            .filter(|&size| size <= limit)
+            .ok_or("emitted YAML exceeds input byte limit")?;
+        output.push_str(prefix);
+        output.push_str(&replacement);
+        position = span.end();
+    }
+    let suffix = &source[position..];
+    output
+        .len()
+        .checked_add(suffix.len())
+        .filter(|&size| size <= limit)
+        .ok_or("emitted YAML exceeds input byte limit")?;
+    output.push_str(suffix);
+    Ok(output)
 }
 
 fn remap(node: &mut Node, map: impl Fn(NodeId) -> NodeId) {

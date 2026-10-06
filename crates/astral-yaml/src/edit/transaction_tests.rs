@@ -262,3 +262,54 @@ fn collection_rewrites_include_their_comment_context() {
      outer:␍-# detached␍-  - old␍+  # detached␍+␍+  [old, new]␍
     ");
 }
+
+#[test]
+fn patch_application_checks_intervals_utf8_and_complete_output_size() {
+    let mut results = Vec::new();
+    for (patches, limit) in [
+        (vec![], 4),
+        (vec![(0, 2, "X")], 4),
+        (vec![(2, 2, "1"), (2, 2, "2")], 6),
+        (vec![(2, 4, "X"), (3, 4, "Y")], 10),
+        (vec![(2, 5, "X")], 10),
+        (vec![(0, 1, "X")], 10),
+        (vec![(2, 2, "123")], 4),
+        (vec![(0, 2, "123")], 4),
+    ] {
+        let patches = patches
+            .into_iter()
+            .map(|(start, end, replacement)| {
+                (Span::new(start, end).unwrap(), replacement.to_owned())
+            })
+            .collect();
+        results.push(super::apply_patches("éab", patches, limit));
+    }
+    insta::assert_debug_snapshot!(results, @r#"
+    [
+        Ok(
+            "éab",
+        ),
+        Ok(
+            "Xab",
+        ),
+        Ok(
+            "é12ab",
+        ),
+        Err(
+            "overlapping or invalid source patches",
+        ),
+        Err(
+            "overlapping or invalid source patches",
+        ),
+        Err(
+            "overlapping or invalid source patches",
+        ),
+        Err(
+            "emitted YAML exceeds input byte limit",
+        ),
+        Err(
+            "emitted YAML exceeds input byte limit",
+        ),
+    ]
+    "#);
+}
