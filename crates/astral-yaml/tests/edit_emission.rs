@@ -366,3 +366,31 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
     ]
     "##);
 }
+
+#[test]
+fn normalization_preserves_explicit_scalar_types() {
+    let mut outputs = Vec::new();
+    for source in [
+        "!!str 42",
+        "!!null null",
+        "!!bool true",
+        "!!int '42'",
+        "!!float 1.0",
+    ] {
+        outputs.push(
+            EditableDocument::parse(source)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+        );
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "!<tag:yaml.org,2002:str> 42",
+        "!<tag:yaml.org,2002:null> null",
+        "!<tag:yaml.org,2002:bool> true",
+        "!<tag:yaml.org,2002:int> '42'",
+        "!<tag:yaml.org,2002:float> 1.0",
+    ]
+    "#);
+}

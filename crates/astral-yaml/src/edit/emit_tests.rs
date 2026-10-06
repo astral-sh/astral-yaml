@@ -506,6 +506,7 @@ fn detached_prefixes_are_emitted_before_content() {
             "# detached\n\nnew\n",
             "# detached\n\n# leading\nnew\n",
             "# detached\n\n- new\n",
+            "# first\n\n# detached\n\nnew\n",
         ] {
             let source = source.replace('\n', newline);
             let document = EditableDocument::parse(&source).unwrap();
@@ -528,12 +529,15 @@ fn detached_prefixes_are_emitted_before_content() {
         "# detached\n\nnew",
         "# detached\n\n# leading\nnew",
         "# detached\n\n- new",
+        "# first\n\n# detached\n\nnew",
         "# detached\r\n\r\nnew",
         "# detached\r\n\r\n# leading\r\nnew",
         "# detached\r\n\r\n- new",
+        "# first\r\n\r\n# detached\r\n\r\nnew",
         "# detached\r\rnew",
         "# detached\r\r# leading\rnew",
         "# detached\r\r- new",
+        "# first\r\r# detached\r\rnew",
     ]
     "##);
 }
