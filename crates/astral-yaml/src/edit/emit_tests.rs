@@ -630,3 +630,91 @@ fn omitted_roots_own_their_erased_line() {
     ]
     "##);
 }
+
+#[test]
+fn block_scalar_suffix_comments_use_the_parent_indentation() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "  old\n# tail\n",
+            "    old\n# tail\n",
+            "  old # inline\n# tail\n",
+            "  &a old # inline\n# tail\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut candidate = EditableDocument::parse(&source).unwrap();
+            let NodeKind::Scalar { style, .. } = &mut candidate.nodes[candidate.root.0].kind else {
+                unreachable!()
+            };
+            *style = crate::ScalarStyle::Literal;
+            let region = region(&candidate, candidate.root, true);
+            let rendered = render(
+                &candidate,
+                candidate.root,
+                region,
+                super::indent(&source, region.start()),
+                false,
+            )
+            .unwrap();
+            let output = format!(
+                "{}{}{}",
+                &source[..rendered.span.start()],
+                rendered.text,
+                &source[rendered.span.end()..]
+            );
+            let parsed = EditableDocument::parse(&output).unwrap();
+            let matched = correspondence(&candidate, &parsed)
+                .unwrap_or_else(|| panic!("{source:?} -> {output:?}"));
+            assert!(
+                super::comments_preserved(&candidate, &parsed, &matched),
+                "{source:?} -> {output:?}; {:?}",
+                parsed.nodes[parsed.root.0].comments
+            );
+            outputs.push(output);
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "  |2-\n  old\n# tail\n",
+        "    |2-\n  old\n# tail\n",
+        "  |2- # inline\n  old\n# tail\n",
+        "  &a |2- # inline\n  old\n# tail\n",
+        "  |2-\r\n  old\r\n# tail\r\n",
+        "    |2-\r\n  old\r\n# tail\r\n",
+        "  |2- # inline\r\n  old\r\n# tail\r\n",
+        "  &a |2- # inline\r\n  old\r\n# tail\r\n",
+        "  |2-\r  old\r# tail\r",
+        "    |2-\r  old\r# tail\r",
+        "  |2- # inline\r  old\r# tail\r",
+        "  &a |2- # inline\r  old\r# tail\r",
+    ]
+    "#);
+}
+
+#[test]
+fn omitted_roots_own_their_line_when_comments_are_emitted() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = "---\nold\n...\n".replace('\n', newline);
+        let mut candidate = EditableDocument::parse(&source).unwrap();
+        let root = &mut candidate.nodes[candidate.root.0];
+        root.kind = NodeKind::Scalar {
+            value: String::new(),
+            style: crate::ScalarStyle::Plain,
+        };
+        root.comments.push(super::Comment {
+            text: " added".to_owned(),
+            placement: crate::comments::CommentPlacement::Leading,
+            position: super::CommentPosition::Before,
+            span: crate::Span::new(0, 0).unwrap(),
+        });
+        outputs.push(candidate.normalized_yaml().unwrap());
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "---\n# added\n...\n",
+        "---\r\n# added\r\n...\r\n",
+        "---\r# added\r...\r",
+    ]
+    "#);
+}

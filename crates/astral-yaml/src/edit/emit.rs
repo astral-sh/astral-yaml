@@ -136,6 +136,19 @@ impl Context {
         }
     }
 
+    /// Block scalar content and suffix comments use the parent's indentation,
+    /// even when properties or leading comments move the header farther in.
+    fn scalar_indent(self, style: ScalarStyle) -> usize {
+        match self.position {
+            Position::Block { parent_indent }
+                if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) =>
+            {
+                parent_indent
+            }
+            _ => self.indent,
+        }
+    }
+
     fn in_flow(self) -> bool {
         matches!(
             self.position,
@@ -297,7 +310,6 @@ impl Emitter<'_> {
     fn erased_root_line(&self) -> Option<usize> {
         if self.root != self.document.root
             || self.region.is_empty()
-            || !self.output.is_empty()
             || !omitted(&self.document.nodes[self.root.0])
         {
             return None;
@@ -610,7 +622,11 @@ impl Emitter<'_> {
                 }
             }
         }
-        self.after(comments, indent, suffix)
+        let suffix_indent = match &node.kind {
+            NodeKind::Scalar { style, .. } => context.scalar_indent(*style),
+            _ => indent,
+        };
+        self.after(comments, suffix_indent, suffix)
     }
 
     fn sequence(
@@ -726,14 +742,7 @@ impl Emitter<'_> {
         context: Context,
         comments: &mut Comments,
     ) -> Result<(), Error> {
-        let indent = match context.position {
-            Position::Block { parent_indent }
-                if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) =>
-            {
-                parent_indent
-            }
-            _ => context.indent,
-        };
+        let indent = context.scalar_indent(style);
         let position = match context.position {
             Position::Flow => ScalarPosition::Flow,
             Position::ImplicitKey { flow: true } => ScalarPosition::FlowKey,
