@@ -155,6 +155,12 @@ fn rendering_obeys_work_and_output_budgets() {
         ("[42]", 1, 100, "emission resource limit exceeded"),
         ("42", 100, 1, "emitted YAML exceeds input byte limit"),
         (
+            "# leading\na: value\n",
+            100,
+            3,
+            "emitted YAML exceeds input byte limit",
+        ),
+        (
             "a: # note\n  - value\n",
             100,
             3,
@@ -345,10 +351,9 @@ fn root_scalar_candidates_respect_document_position() {
     ] {
         for replacement in ["---", "... text"] {
             let mut document = EditableDocument::parse(source).unwrap();
-            let NodeKind::Scalar { value, .. } = &mut document.nodes[document.root.0].kind else {
-                panic!("scalar root");
-            };
-            replacement.clone_into(value);
+            if let NodeKind::Scalar { value, .. } = &mut document.nodes[document.root.0].kind {
+                replacement.clone_into(value);
+            }
             outputs.push(document.normalized_yaml().unwrap());
         }
     }
@@ -382,6 +387,7 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
             "...",
             "a,b",
             "a[b]",
+            "- item",
             "x: value",
             "first\rsecond",
             "a\n- b",
@@ -394,14 +400,22 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
                 format!("{{{text}: value}}")
             };
             let parsed = crate::parse(&source).unwrap();
-            let crate::NodeKind::Mapping { entries, .. } =
-                &parsed.node(parsed.documents()[0].root).unwrap().kind
-            else {
-                panic!("mapping");
-            };
-            let crate::NodeKind::Scalar(key) = &parsed.node(entries[0].key).unwrap().kind else {
-                panic!("scalar key");
-            };
+            let root = parsed.node(parsed.documents()[0].root).unwrap();
+            assert!(
+                matches!(&root.kind, crate::NodeKind::Mapping { entries, .. }
+                if entries.len() == 1)
+            );
+            let key = parsed
+                .nodes()
+                .iter()
+                .find_map(|node| {
+                    if let crate::NodeKind::Scalar(key) = &node.kind {
+                        Some(key)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
             assert_eq!(key.value, value);
             outputs.push(source);
         }
@@ -412,6 +426,7 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
         "...: value",
         "a,b: value",
         "a[b]: value",
+        "\"- item\": value",
         "\"x: value\": value",
         "\"first\\rsecond\": value",
         "\"a\\n- b\": value",
@@ -420,6 +435,7 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
         "{...: value}",
         "{\"a,b\": value}",
         "{\"a[b]\": value}",
+        "{\"- item\": value}",
         "{\"x: value\": value}",
         "{\"first\\rsecond\": value}",
         "{a\n\n  - b: value}",
@@ -432,11 +448,12 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
 fn removed_properties_leave_room_for_retained_header_comments() {
     let source = "key: !!str # tag\n  &a # anchor\n  # before value\n  old\n";
     let mut document = EditableDocument::parse(source).unwrap();
-    let NodeKind::Mapping { entries, .. } = &document.nodes[document.root.0].kind else {
-        panic!("mapping");
-    };
-    let value = entries[0].1;
-    document.nodes[value.0].tag = None;
+    let value = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.anchor.as_deref() == Some("a"))
+        .unwrap();
+    value.tag = None;
     insta::assert_snapshot!(document.normalized_yaml().unwrap(), @"
     key: # tag
       &a # anchor
