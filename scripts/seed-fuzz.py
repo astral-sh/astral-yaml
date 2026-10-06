@@ -112,11 +112,16 @@ def seed_editable(root: Path, inputs: list[Path]) -> None:
     corpus.mkdir(parents=True, exist_ok=True)
     sources = [path.read_bytes() for path in inputs]
     sources.extend(example.encode("utf-8") for example in TYPED_EXAMPLES)
+    operations = [
+        bytes(depth + operation for operation in range(8))
+        for depth in (0, 32, 64, 96, 128, 160, 192, 224)
+    ]
+    operations.extend(
+        [bytes([15, 15, 23, 15, 31, 15, 6, 15]), bytes([7, 15, 15, 6, 15, 23, 15, 31])]
+    )
     for source in sources:
-        for depth in (0, 32, 64, 96, 128, 160, 192, 224):
-            write_seed(
-                corpus, bytes(depth + operation for operation in range(8)) + source
-            )
+        for sequence in operations:
+            write_seed(corpus, sequence + source)
     print("Seeded bounded syntax and value-based edit sequences")
 
 

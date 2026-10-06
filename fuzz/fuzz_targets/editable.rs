@@ -60,7 +60,20 @@ fuzz_target!(|data: &[u8]| {
                     4 => editor.remove_entry(&node, 0),
                     5 => editor.set_scalar_style(&node, ScalarStyle::SingleQuoted),
                     6 => editor.set_collection_style(&node, CollectionStyle::Block),
-                    _ => editor.insert_comment(&node, 0, " fuzz", CommentPlacement::Leading),
+                    _ => {
+                        let placement = match (operation >> 3) & 3 {
+                            0 => CommentPlacement::Leading,
+                            1 => CommentPlacement::Inline,
+                            2 => CommentPlacement::Trailing,
+                            _ => CommentPlacement::Detached,
+                        };
+                        let index = if placement == CommentPlacement::Leading {
+                            0
+                        } else {
+                            editor.node(&node)?.comments().len()
+                        };
+                        editor.insert_comment(&node, index, " fuzz", placement)
+                    }
                 }
             })
         } else {

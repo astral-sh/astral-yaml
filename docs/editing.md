@@ -132,13 +132,13 @@ scalar text is retained, including empty values read by Serde as strings. Block
 content uses two-space indentation and the document's first line-ending
 convention, defaulting to LF. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
-represented in its surrounding context. Root inline comments can use an existing
-tag, anchor, or document marker as a header when a collection changes to block
-style. Existing block content placed in a flow context is emitted in a compatible
-style.
+represented in its surrounding context. Inline comments need distinct syntax
+headers, supplied by tags, anchors, flow delimiters, or document markers. Root
+edits can add document markers when the new layout needs more headers. Existing
+block content placed in a flow context is emitted in a compatible style.
 Explicit keys in block mappings can retain block scalar or collection styles.
-Comments at flow-opening delimiters stay there while the collection retains flow
-presentation, including when closing comments remain outside the rewritten region.
+Flow-opening positions guide comment emission. When headers must be reassigned,
+inline comments retain their owner, placement, and owner-local order.
 
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
@@ -155,10 +155,12 @@ with `# `. A requested
 attachment that cannot survive emission is rejected rather than reassigned.
 Comments retain their order within each owner, including across transactions.
 
-When document markers are present, changing the root's layout can move its
-comments to those boundaries. Leading comments can move before `---`, inline
-comments onto a marker, and trailing or detached comments after `...`. These moves
-retain the comments' root ownership and order. Rewrites also manage the separation
+Changing the root's layout can move its comments to document boundaries. Leading
+comments can move before `---`, inline comments onto a marker, and trailing or
+detached comments after `...`. The editor adds missing markers when needed;
+multiple `...` lines can host separate inline comments without adding another
+YAML document. Existing markers and fixed comments constrain where new headers
+can go. These moves retain the comments' root ownership and order. Rewrites also manage the separation
 before `...`, keeping trailing comments adjacent and preserving blank separation
 for detached comments after the marker. Replacing the root with an omitted
 value removes its former standalone line so it does not leave a blank line that
