@@ -108,10 +108,11 @@ checks, without Serde type or duplicate-key validation. The existing parser's
 
 `source()` borrows the committed source, `to_yaml()` clones it, and `into_yaml()`
 consumes the document and returns its source without cloning. An unchanged
-document is reproduced exactly. Scalar replacements preserve source outside the
-replaced range. A structural edit may rewrite its collection, or an enclosing
-collection when the surrounding syntax requires it. Outside those regions,
-original text is copied.
+document is reproduced exactly. Edits rewrite the selected node or an enclosing
+collection when the surrounding syntax requires it. This includes scalar
+replacements whose comments are interleaved with tags or anchors: the enclosing
+field supplies their header and indentation. Outside rewritten regions, original
+text is copied.
 
 Rewrites include adjacent separators when YAML assigns them to the replacement,
 such as trailing blank lines that would become part of a block scalar's value.
@@ -123,7 +124,8 @@ content uses two-space indentation and the document's first line-ending
 convention, defaulting to LF. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
 represented in its surrounding context. Existing block content placed in a flow
-context is emitted in a compatible style.
+context is emitted in a compatible style. Explicit keys in block mappings can
+retain block scalar or collection styles.
 
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
