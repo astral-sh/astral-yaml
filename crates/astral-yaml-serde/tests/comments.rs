@@ -591,3 +591,68 @@ fn comment_protocol_tracks_consumption() {
     assert!(from_str::<Protocol>("42 # note").is_ok());
     assert!(from_str::<Protocol>("1 # note").is_err());
 }
+
+#[test]
+fn document_markers_bound_child_comment_ownership() {
+    let source = "# before directives\n%YAML 1.2\n# before marker\n--- # start\n# first field\nkey:\n  - old\n... # end\n  # after document\n";
+    let mut snapshots = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = source.replace('\n', newline);
+        let value: Commented<'_, BTreeMap<String, Commented<'_, Vec<Commented<'_, String>>>>> =
+            from_str(&source).unwrap();
+        snapshots.push(comment_snapshot(
+            &source,
+            &[
+                ("root", &value.comments),
+                ("key", &value["key"].comments),
+                ("key[0]", &value["key"][0].comments),
+            ],
+        ));
+    }
+    insta::assert_snapshot!(snapshots.join("\n"), @"
+      |
+    1 | # before directives
+      | ^^^^^^^^^^^^^^^^^^^ root: Leading
+    2 | %YAML 1.2
+    3 | # before marker
+      | ^^^^^^^^^^^^^^^ root: Leading
+    4 | --- # start
+      |     ^^^^^^^ root: Inline
+    5 | # first field
+      | ^^^^^^^^^^^^^ root: Leading, key: Leading
+    6 | key:
+    7 |   - old
+    8 | ... # end
+      |     ^^^^^ root: Inline
+    9 |   # after document
+      |   ^^^^^^^^^^^^^^^^ root: Trailing
+    key[0]: (none)
+      |
+    1 | # before directives
+      | ^^^^^^^^^^^^^^^^^^^ root: Leading
+    2 | %YAML 1.2
+    3 | # before marker
+      | ^^^^^^^^^^^^^^^ root: Leading
+    4 | --- # start
+      |     ^^^^^^^ root: Inline
+    5 | # first field
+      | ^^^^^^^^^^^^^ root: Leading, key: Leading
+    6 | key:
+    7 |   - old
+    8 | ... # end
+      |     ^^^^^ root: Inline
+    9 |   # after document
+      |   ^^^^^^^^^^^^^^^^ root: Trailing
+    key[0]: (none)
+      |
+    1 | # before directives␍%YAML 1.2␍# before marker␍--- # start␍# first field␍key:␍  - old␍... # end␍  # after document␍
+      | ^^^^^^^^^^^^^^^^^^^           ^^^^^^^^^^^^^^^     ^^^^^^^ ^^^^^^^^^^^^^                  ^^^^^   ^^^^^^^^^^^^^^^^ root: Trailing
+      | |                             |                   |       |                              |
+      | |                             |                   |       |                              root: Inline
+      | |                             |                   |       root: Leading, key: Leading
+      | |                             |                   root: Inline
+      | |                             root: Leading
+      | root: Leading
+    key[0]: (none)
+    ");
+}
