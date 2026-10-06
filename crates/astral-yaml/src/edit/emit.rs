@@ -301,9 +301,13 @@ impl Emitter<'_> {
             }
         }
         let suffix = &source[span.end()..];
-        let suffix_has_break = suffix
-            .trim_start_matches([' ', '\t'])
-            .starts_with(['\r', '\n']);
+        let trimmed = suffix.trim_start_matches([' ', '\t']);
+        let suffix_has_break = trimmed.starts_with(['\r', '\n']);
+        if self.pending_indent.is_some() && suffix_has_break {
+            // Share the retained terminator, but not the old line's trailing
+            // spaces: they would become part of the emitted comment's text.
+            span.end += suffix.len() - trimmed.len();
+        }
         let needs_break = self.pending_indent.take().is_some()
             || self
                 .document

@@ -9,6 +9,7 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
         ("!custom", "!custom null", false),
         ("!!null null", "!!null null", true),
         ("!!bool true", "!!bool true", true),
+        ("!!int '42'", "!!int 42", true),
         ("!!float 1.0", "!!float 1.0", true),
         ("!!str 42", "!!int 42", false),
         ("1", "2", false),
@@ -645,6 +646,39 @@ fn omitted_roots_own_their_erased_line() {
         "---\r\r...\r",
     ]
     "##);
+}
+
+#[test]
+fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in ["old \n", "old \t \n", "[old] \t\n"] {
+            let source = source.replace('\n', newline);
+            let mut candidate = EditableDocument::parse(&source).unwrap();
+            candidate.nodes[candidate.root.0]
+                .comments
+                .push(super::Comment {
+                    text: " added".to_owned(),
+                    placement: crate::comments::CommentPlacement::Trailing,
+                    position: super::CommentPosition::After,
+                    span: crate::Span::new(0, 0).unwrap(),
+                });
+            outputs.push(candidate.normalized_yaml().unwrap());
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r#"
+    [
+        "old\n# added\n",
+        "old\n# added\n",
+        "[old]\n# added\n",
+        "old\r\n# added\r\n",
+        "old\r\n# added\r\n",
+        "[old]\r\n# added\r\n",
+        "old\r# added\r",
+        "old\r# added\r",
+        "[old]\r# added\r",
+    ]
+    "#);
 }
 
 #[test]
