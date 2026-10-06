@@ -177,7 +177,7 @@ fn normalization_preserves_separate_header_comments() {
         "a: &a # anchor\n  |2 # header\n  text\n",
         "a: !<tag:yaml.org,2002:str> # anchor\n  &a # tag\n  |2 # header\n  text\n",
         "a: # field\n  !<tag:yaml.org,2002:seq> # anchor\n  &a # tag\n  - item\n",
-        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a # opening\n  [item] # closing\n",
+        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a [ # opening\n  item] # closing\n",
         "a: [ # opening\n  item] # closing\n",
         "a: { # opening\n  key: value} # closing\n",
     ]
