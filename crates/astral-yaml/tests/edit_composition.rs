@@ -15,12 +15,15 @@ enum Operation {
     PrependLeading,
     AppendTrailing,
     AppendInline,
+    AppendDetached,
     SetSequence,
     SetScalar,
     SetMapping,
     SetFlowSequence,
     SetLiteral,
     SetEmpty,
+    SetTailSequence,
+    SetTailMapping,
 }
 
 impl Operation {
@@ -53,6 +56,11 @@ impl Operation {
             Self::AppendInline => {
                 editor.insert_comment(&root, count, " inline", CommentPlacement::Inline)
             }
+            Self::AppendDetached => {
+                editor.insert_comment(&root, count, " detached", CommentPlacement::Detached)
+            }
+            Self::SetTailSequence => editor.replace(&root, "- |+\n    new\n\n"),
+            Self::SetTailMapping => editor.replace(&root, "key: |+\n  new\n\n"),
             Self::SetSequence => editor.replace(&root, "- new\n"),
             Self::SetScalar => editor.replace(&root, "value"),
             Self::SetMapping => editor.replace(&root, "key: new\n"),
@@ -65,6 +73,8 @@ impl Operation {
 
     fn content(self) -> Option<&'static str> {
         match self {
+            Self::SetTailSequence => Some("- |+\n    new\n\n"),
+            Self::SetTailMapping => Some("key: |+\n  new\n\n"),
             Self::SetSequence => Some("- new\n"),
             Self::SetScalar => Some("value"),
             Self::SetMapping => Some("key: new\n"),
@@ -97,6 +107,9 @@ impl Operation {
                 comments.insert(0, (" leading".to_owned(), CommentPlacement::Leading));
             }
             Self::AppendInline => comments.push((" inline".to_owned(), CommentPlacement::Inline)),
+            Self::AppendDetached => {
+                comments.push((" detached".to_owned(), CommentPlacement::Detached));
+            }
             Self::AppendTrailing => {
                 comments.push((" trailing".to_owned(), CommentPlacement::Trailing));
             }
@@ -120,7 +133,6 @@ fn framing_comment_edits_compose_with_content_edits() {
     // Markers provide root-owned boundaries independent of the root's kind:
     // https://yaml.org/spec/1.2.2/#912-document-markers
     // Every case must succeed. Rejections are failures, not discarded samples.
-    use CommentPlacement::{Inline, Leading, Trailing};
     use Operation::{
         AppendInline, AppendTrailing, PrependLeading, RemoveFirst, RemoveLast, ReplaceFirst,
         ReplaceLast, SetEmpty, SetFlowSequence, SetLiteral, SetMapping, SetScalar, SetSequence,
@@ -140,7 +152,26 @@ fn framing_comment_edits_compose_with_content_edits() {
         SetLiteral,
         SetEmpty,
     ];
-    let cases: &[(&str, &[(&str, CommentPlacement)])] = &[
+
+    for newline in ["\n", "\r\n", "\r"] {
+        for &(source, initial) in root_cases() {
+            let source = source.replace('\n', newline);
+            let original = EditableDocument::parse(&source).unwrap();
+            for first in operations {
+                for second in operations {
+                    for third in operations {
+                        let sequence = [first, second, third];
+                        check_root_sequence(&original, &source, initial, sequence);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn root_cases() -> &'static [(&'static str, &'static [(&'static str, CommentPlacement)])] {
+    use CommentPlacement::{Inline, Leading, Trailing};
+    &[
         ("old", &[]),
         ("---", &[]),
         (
@@ -187,28 +218,71 @@ fn framing_comment_edits_compose_with_content_edits() {
             "# prefix\n---\n- old\n...\n# tail\n",
             &[(" prefix", Leading), (" tail", Trailing)],
         ),
+    ]
+}
+
+#[test]
+fn longer_root_edits_match_the_independent_model() {
+    use Operation::*;
+    let operations = [
+        AppendInline,
+        AppendDetached,
+        ReplaceFirst,
+        ReplaceLast,
+        RemoveFirst,
+        RemoveLast,
+        PrependLeading,
+        AppendTrailing,
+        SetSequence,
+        SetScalar,
+        SetMapping,
+        SetFlowSequence,
+        SetLiteral,
+        SetEmpty,
+        SetTailSequence,
+        SetTailMapping,
     ];
     for newline in ["\n", "\r\n", "\r"] {
-        for &(source, initial) in cases {
+        for &(source, initial) in root_cases() {
             let source = source.replace('\n', newline);
             let original = EditableDocument::parse(&source).unwrap();
-            for first in operations {
-                for second in operations {
-                    for third in operations {
-                        let sequence = [first, second, third];
-                        check_root_sequence(&original, &source, initial, sequence);
+            for seed in 1..=128u64 {
+                let mut state = seed;
+                let mut sequence = [SetScalar; 48];
+                let mut planned: Vec<_> = initial
+                    .iter()
+                    .map(|(text, placement)| (text.to_string(), *placement))
+                    .collect();
+                for operation in &mut sequence {
+                    // Deterministic sampling makes failures reproducible without
+                    // a random-number dependency or exponentially many cases.
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    let index = state % u64::try_from(operations.len()).unwrap();
+                    *operation = operations[usize::try_from(index).unwrap()];
+                    // A trailing suffix cannot follow detached suffix comments:
+                    // markers do not reset its adjacency to the document body.
+                    if matches!(operation, AppendTrailing)
+                        && planned
+                            .iter()
+                            .any(|(_, placement)| *placement == CommentPlacement::Detached)
+                    {
+                        *operation = AppendInline;
                     }
+                    operation.model(&mut planned);
                 }
+                check_root_sequence(&original, &source, initial, sequence);
             }
         }
     }
 }
 
-fn check_root_sequence(
+fn check_root_sequence<const N: usize>(
     original: &EditableDocument,
     source: &str,
     initial: &[(&str, CommentPlacement)],
-    sequence: [Operation; 3],
+    sequence: [Operation; N],
 ) {
     let mut expected = initial
         .iter()
@@ -229,10 +303,30 @@ fn check_root_sequence(
     assert_eq!(comments(&combined), expected, "{source:?}, {sequence:?}");
 
     let mut separate = original.clone();
+    let mut step_comments = initial
+        .iter()
+        .map(|&(text, placement)| (text.to_owned(), placement))
+        .collect();
+    let mut step_content = content(original, original.root());
     for operation in sequence {
+        operation.model(&mut step_comments);
+        if let Some(fragment) = operation.content() {
+            let expected = EditableDocument::parse(fragment).unwrap();
+            step_content = content(&expected, expected.root());
+        }
         separate
             .edit(|editor| operation.apply(editor))
             .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
+        assert_eq!(
+            comments(&separate),
+            step_comments,
+            "{source:?}, {sequence:?}"
+        );
+        assert_eq!(
+            content(&separate, separate.root()),
+            step_content,
+            "{source:?}, {sequence:?}"
+        );
     }
     assert_eq!(comments(&separate), expected, "{source:?}, {sequence:?}");
     // Compare with the requested fragment as well as the

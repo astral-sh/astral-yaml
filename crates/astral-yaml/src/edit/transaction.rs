@@ -825,7 +825,7 @@ impl<'a> Editor<'a> {
         if let Some(error) = self.failure.take() {
             return Err(error);
         }
-        let framed = if self.rewrites.is_empty() {
+        let framed = if self.rewrites.is_empty() && !self.root_comments_changed {
             None
         } else {
             super::framing::prepare(self.original, &mut self.candidate)
@@ -888,6 +888,7 @@ impl<'a> Editor<'a> {
         }
         if let Some(comments) = root_comments.as_mut() {
             patches.append(&mut comments.after_body);
+            comments.finish_suffix(self.original, &mut patches);
         }
         // Prefix insertions at a replacement's start precede that replacement.
         // Suffix insertions at an empty root's position follow its syntax.

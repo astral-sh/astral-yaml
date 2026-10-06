@@ -865,15 +865,16 @@ fn new_detached_comments_share_the_following_comment_gap() {
 }
 
 #[test]
-fn removing_the_last_gap_cannot_change_block_scalar_content() {
-    // After removing the last entry, preserving this comment's detached
-    // placement would require a blank line that changes the keep scalar.
-    for (source, sequence) in [
-        ("a: |+\n  text\n\n# detached\n\nb: removed\n", false),
-        ("- |+\n  text\n\n# detached\n\n- removed\n", true),
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        assert!(
+fn removing_the_last_gap_preserves_block_scalar_content() {
+    // A document boundary keeps detached suffix separation outside the scalar.
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for (source, sequence) in [
+            ("a: |+\n  text\n\n# detached\n\nb: removed\n", false),
+            ("- |+\n  text\n\n# detached\n\n- removed\n", true),
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
             document
                 .edit(|editor| {
                     let root = editor.root();
@@ -883,10 +884,73 @@ fn removing_the_last_gap_cannot_change_block_scalar_content() {
                         editor.remove_entry(&root, 1)
                     }
                 })
-                .is_err()
-        );
-        assert_eq!(document.source(), source);
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
     }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -a: |+
+    +a: |2+
+       text
+    +  ⏎
+    +...
+     ⏎
+     # detached
+    -
+    -b: removed
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -- |+
+    +- |2+
+       text
+    +  ⏎
+    +...
+     ⏎
+     # detached
+    -
+    -- removed
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -a: |+␍
+    +a: |2+␍
+       text␍
+    +  ␍
+    +...␍
+     ␍
+     # detached␍
+    -␍
+    -b: removed␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -- |+␍
+    +- |2+␍
+       text␍
+    +  ␍
+    +...␍
+     ␍
+     # detached␍
+    -␍
+    -- removed␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -a: |+␍+a: |2+␍   text␍+  ␍+...␍ ␍ # detached␍-␍-b: removed␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -- |+␍+- |2+␍   text␍+  ␍+...␍ ␍ # detached␍-␍-- removed␍
+    ");
 }
 
 #[test]

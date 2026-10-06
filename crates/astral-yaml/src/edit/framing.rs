@@ -12,6 +12,8 @@ pub(super) struct RootComments {
     pub(super) patches: Vec<(Span, String)>,
     /// At an empty root's insertion point, suffix comments follow its syntax.
     pub(super) after_body: Vec<(Span, String)>,
+    /// Trailing attachments require adjacency through document suffix markers.
+    trailing_end: Option<usize>,
 }
 
 /// A source boundary with explicit separation on either side of a comment.
@@ -43,16 +45,14 @@ pub(super) fn prepare(
                     .iter()
                     .any(|comment| comment.placement == CommentPlacement::Leading))
             || layout.inline.start.is_some());
-    let suffix = if matches!(layout.kind, RootKind::Omitted) {
+    let removed_boundary = layout.removed_scalar_boundary(original, root);
+    let suffix = if matches!(layout.kind, RootKind::Omitted) || layout.kind.ends_with_block_scalar()
+    {
         root.comments
             .iter()
-            .position(|comment| {
-                comment.placement == CommentPlacement::Trailing
-                    || (comment.placement == CommentPlacement::Detached
-                        && comment.position == CommentPosition::After)
-            })
+            .position(|comment| layout.kind.needs_suffix_boundary(comment))
             .and_then(|index| match original.end_marker {
-                None => Some(original.source.len()),
+                None => Some(removed_boundary.unwrap_or(original.source.len())),
                 Some(marker) => root
                     .comments
                     .iter()
@@ -77,7 +77,7 @@ pub(super) fn prepare(
             EndSlot::Missing(at) => Some(*at),
         })
         .collect();
-    insertions.extend(suffix);
+    insertions.extend(removed_boundary.or(suffix));
     // A descendant's prefix may begin before the root token (for example a
     // leading comment on the first item of a flow collection). Keep generated
     // framing outside the complete subtree rewrite, not just the root token.
@@ -216,8 +216,7 @@ impl RootComments {
             // Text-only framing edits must not relocate unchanged body comments.
             let mut plan = Self {
                 rendered: comments.clone(),
-                patches: Vec::new(),
-                after_body: Vec::new(),
+                ..Self::default()
             };
             plan.changed_comments(original, None);
             return Ok(plan);
@@ -238,6 +237,9 @@ impl RootComments {
         let mut bytes = 0usize;
         for (index, comment) in comments.iter().enumerate() {
             if layout.fixed(comment) {
+                if comment.placement == CommentPlacement::Trailing {
+                    plan.trailing_end = Some(comment.span.start());
+                }
                 previous = Some(index);
                 previous_position = comment.span.end();
                 plan.rendered.push(comment.clone());
@@ -262,10 +264,22 @@ impl RootComments {
                 .or_else(|| {
                     marker_anchor(original, &layout, comment, index, region, next).filter(ordered)
                 });
-            let Some(anchor) = anchor else {
+            let Some(mut anchor) = anchor else {
                 plan.rendered.push(comment.clone());
                 continue;
             };
+            // A neighboring detached comment can supply separation only after
+            // the final trailing attachment. Earlier blank lines are reclaimed
+            // by finish_suffix when headers move past them.
+            if comment.placement == CommentPlacement::Detached
+                && comment.position == CommentPosition::After
+                && anchor.before.is_empty()
+                && plan
+                    .trailing_end
+                    .is_some_and(|end| !blank_between(&original.source, end, anchor.at))
+            {
+                anchor.before.push_str(emit::newline(&original.source));
+            }
             bytes = bytes
                 .checked_add(anchor.before.len() + 1 + comment.text.len() + anchor.after.len())
                 .filter(|&size| size <= original.options.max_input_bytes)
@@ -274,6 +288,9 @@ impl RootComments {
                     message: "emitted YAML exceeds input byte limit",
                 })?;
             previous_position = anchor.at;
+            if comment.placement == CommentPlacement::Trailing {
+                plan.trailing_end = Some(anchor.at);
+            }
             let text = format!("{}#{}{}", anchor.before, comment.text, anchor.after);
             let patches = if region.is_empty()
                 && anchor.at == region.end()
@@ -300,6 +317,51 @@ impl RootComments {
         Ok(plan)
     }
 
+    /// Whitespace between the body and suffix markers still determines comment
+    /// attachment. Discard orphan blank lines before a trailing comment, while
+    /// leaving bytes already owned by a rendered or removed region to its patch.
+    pub(super) fn finish_suffix(
+        &self,
+        original: &EditableDocument,
+        patches: &mut Vec<(Span, String)>,
+    ) {
+        let Some(end) = self.trailing_end else {
+            return;
+        };
+        let source = &original.source;
+        let mut at = original.nodes[original.root.0].span.end();
+        let mut covered: Vec<_> = patches.iter().map(|(span, _)| *span).collect();
+        covered.sort_by_key(|span| (span.start(), span.end()));
+        while at < end {
+            let line_end = line_end(source, at);
+            let next = line_end
+                + if source[line_end..].starts_with("\r\n") {
+                    2
+                } else {
+                    usize::from(line_end < source.len())
+                };
+            let whole_line = at == 0 || source[..at].ends_with(['\r', '\n']);
+            let index = covered.partition_point(|span| span.end() <= at);
+            let owned = covered.get(index).is_some_and(|span| span.start() < next);
+            if whole_line
+                && next <= end
+                && !owned
+                && source[at..line_end]
+                    .bytes()
+                    .all(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                patches.push((
+                    Span {
+                        start: at,
+                        end: next,
+                    },
+                    String::new(),
+                ));
+            }
+            at = next;
+        }
+    }
+
     /// A rewritten body owns its separation from the end marker. If an outer
     /// detached comment relied on that separation, give it a blank line on the
     /// retained side of the marker instead.
@@ -309,7 +371,8 @@ impl RootComments {
         }) else {
             return;
         };
-        if !blank_between(&original.source, marker.end(), comment.span.start()) {
+        let after = self.trailing_end.unwrap_or(0).max(marker.end());
+        if !blank_between(&original.source, after, comment.span.start()) {
             let start = original.source[..comment.span.start()]
                 .rfind(['\r', '\n'])
                 .map_or(0, |index| index + 1);
@@ -354,7 +417,58 @@ enum RootKind {
     Omitted,
     BlockScalar,
     FlowCollection,
-    BlockCollection { header: bool },
+    BlockCollection { header: bool, scalar_tail: bool },
+}
+
+impl RootKind {
+    fn ends_with_block_scalar(self) -> bool {
+        matches!(
+            self,
+            Self::BlockScalar
+                | Self::BlockCollection {
+                    scalar_tail: true,
+                    ..
+                }
+        )
+    }
+
+    fn needs_suffix_boundary(self, comment: &Comment) -> bool {
+        match self {
+            Self::Omitted => {
+                comment.placement == CommentPlacement::Trailing
+                    || (comment.placement == CommentPlacement::Detached
+                        && comment.position == CommentPosition::After)
+            }
+            kind if kind.ends_with_block_scalar() => {
+                comment.placement == CommentPlacement::Detached
+                    && comment.position == CommentPosition::After
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Block collection delimiters do not terminate the final child's scalar.
+/// Its boundary requirements therefore propagate to the enclosing root.
+fn block_scalar_tail(document: &EditableDocument) -> bool {
+    let mut id = document.root;
+    loop {
+        match &document.nodes[id.0].kind {
+            super::NodeKind::Sequence {
+                items,
+                style: crate::CollectionStyle::Block,
+            } if !items.is_empty() => id = *items.last().expect("nonempty sequence"),
+            super::NodeKind::Mapping {
+                entries,
+                style: crate::CollectionStyle::Block,
+            } if !entries.is_empty() => id = entries.last().expect("nonempty mapping").1,
+            super::NodeKind::Scalar {
+                style: crate::ScalarStyle::Literal | crate::ScalarStyle::Folded,
+                ..
+            } => return true,
+            _ => return false,
+        }
+    }
 }
 
 /// Inline comments need syntax on their line. Reserve the root's own headers
@@ -476,7 +590,10 @@ impl InlineLayout {
                     .then_some(comment.span.start())
             }));
         }
-        let reserve_boundary = matches!(kind, RootKind::Omitted)
+        let reserve_boundary = root
+            .comments
+            .iter()
+            .any(|comment| kind.needs_suffix_boundary(comment))
             && end.first().is_some_and(|&index| suffix_start < index);
         let slots = end_slots(original, root, body, &end, &occupied, reserve_boundary);
         Self {
@@ -605,6 +722,7 @@ impl RootLayout {
                     if emit::block_collection(&root.kind, false) {
                         RootKind::BlockCollection {
                             header: emit::has_inline_header(root, false),
+                            scalar_tail: block_scalar_tail(candidate),
                         }
                     } else {
                         RootKind::FlowCollection
@@ -624,7 +742,8 @@ impl RootLayout {
             body,
             root_start,
             suffix_boundary: original.end_marker.filter(|_| {
-                matches!(kind, RootKind::Omitted | RootKind::BlockScalar)
+                matches!(kind, RootKind::Omitted)
+                    || kind.ends_with_block_scalar()
                     || root
                         .comments
                         .iter()
@@ -632,6 +751,36 @@ impl RootLayout {
             }),
             inline,
         }
+    }
+
+    /// A dedented comment terminates the final block scalar, including one
+    /// nested in a block collection. Preserve that boundary when deleting it.
+    fn removed_scalar_boundary(
+        &self,
+        original: &EditableDocument,
+        root: &super::Node,
+    ) -> Option<usize> {
+        if !self.kind.ends_with_block_scalar() || !block_scalar_tail(original) {
+            return None;
+        }
+        let end = original.nodes[original.root.0].span.end();
+        if original
+            .end_marker
+            .is_some_and(|marker| marker.start() <= end)
+        {
+            return None;
+        }
+        let retained: HashSet<_> = root
+            .comments
+            .iter()
+            .filter(|comment| !comment.span.is_empty())
+            .map(|comment| comment.span.start())
+            .collect();
+        original.nodes[original.root.0]
+            .comments
+            .iter()
+            .any(|comment| comment.span.start() >= end && !retained.contains(&comment.span.start()))
+            .then_some(end)
     }
 
     /// Comments already in the framing retain their source anchors. Comments
@@ -657,10 +806,15 @@ impl RootLayout {
             // together supplies the indentation boundary after the scalar.
             RootKind::BlockScalar => false,
             RootKind::FlowCollection => comment.placement != CommentPlacement::Leading,
-            RootKind::BlockCollection { header } => match comment.placement {
+            RootKind::BlockCollection {
+                header,
+                scalar_tail,
+            } => match comment.placement {
                 CommentPlacement::Leading | CommentPlacement::Trailing => false,
                 CommentPlacement::Inline => header,
-                CommentPlacement::Detached => true,
+                CommentPlacement::Detached => {
+                    !(scalar_tail && comment.position == CommentPosition::After)
+                }
             },
         }
     }
@@ -765,15 +919,19 @@ fn marker_anchor(
                 return Some(before_marker(at, comment.placement, newline));
             }
             let slot = layout.inline.end.partition_point(|&inline| inline <= index);
-            if let Some(slot) = layout.inline.slots.get(slot) {
+            if let Some(slot) = layout.inline.slots.get(slot).filter(|slot| {
+                slot.marker().is_some_and(|marker| {
+                    next.is_none_or(|next| marker.start() <= next.span.start())
+                })
+            }) {
                 let marker = slot.marker()?;
                 return Some(before_marker(marker.start(), comment.placement, newline));
             }
             let marker = original
-                .extra_end_markers
-                .last()
-                .copied()
-                .or(original.end_marker)?;
+                .end_marker
+                .iter()
+                .chain(&original.extra_end_markers)
+                .rfind(|marker| next.is_none_or(|next| marker.end() <= next.span.start()))?;
             let at = line_end(&original.source, marker.end());
             Some(Anchor {
                 at,
