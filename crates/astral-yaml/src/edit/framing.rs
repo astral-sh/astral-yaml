@@ -674,6 +674,7 @@ pub(super) struct RootLayout {
     root_start: usize,
     suffix_boundary: Option<Span>,
     inline: InlineLayout,
+    indented_suffixes: HashSet<usize>,
 }
 
 impl RootLayout {
@@ -719,6 +720,23 @@ impl RootLayout {
             .take_while(|comment| comment.placement == CommentPlacement::Leading)
             .count();
         let inline = InlineLayout::new(original, root, body, kind, leading_count);
+        // Flow delimiters can keep an indented suffix attached to the root.
+        // Block descendants introduced by an edit can claim the same comment.
+        // Render these suffixes at the root's indentation with its final body.
+        let indent = emit::indent(&original.source, root_start);
+        let indented_suffixes = root
+            .comments
+            .iter()
+            .filter(|comment| {
+                matches!(kind, RootKind::BlockCollection { .. })
+                    && comment.placement == CommentPlacement::Detached
+                    && comment.position == CommentPosition::After
+                    && !comment.span.is_empty()
+                    && contains(body, comment.span)
+                    && emit::indent(&original.source, comment.span.start()) > indent
+            })
+            .map(|comment| comment.span.start())
+            .collect();
         Self {
             kind,
             body,
@@ -732,6 +750,7 @@ impl RootLayout {
                         .any(|comment| comment.placement == CommentPlacement::Trailing)
             }),
             inline,
+            indented_suffixes,
         }
     }
 
@@ -741,6 +760,10 @@ impl RootLayout {
                 .comments
                 .iter()
                 .any(|comment| self.kind.needs_suffix_boundary(comment))
+    }
+
+    pub(super) fn needs_suffix_context(&self) -> bool {
+        !self.indented_suffixes.is_empty()
     }
 
     /// A removed suffix comment can expose retained whitespace to the final
@@ -777,7 +800,10 @@ impl RootLayout {
     /// Comments already in the framing retain their source anchors. Comments
     /// within the body may depend on syntax removed by the final candidate.
     fn fixed(&self, comment: &Comment) -> bool {
-        if comment.span.is_empty() || self.inline.moved.contains(&comment.span.start()) {
+        if comment.span.is_empty()
+            || self.inline.moved.contains(&comment.span.start())
+            || self.indented_suffixes.contains(&comment.span.start())
+        {
             return false;
         }
         if !contains(self.body, comment.span) {

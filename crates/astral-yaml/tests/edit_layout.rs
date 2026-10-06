@@ -394,6 +394,20 @@ enum Operation {
 }
 
 impl Operation {
+    const ALL: [Self; 11] = [
+        Self::Scalar,
+        Self::Sequence,
+        Self::Plain,
+        Self::RootComment,
+        Self::InnerComment,
+        Self::RemoveRootComment,
+        Self::RemoveInnerComment,
+        Self::AddSibling,
+        Self::RemoveSibling,
+        Self::Flow,
+        Self::Block,
+    ];
+
     fn apply(self, editor: &mut Editor<'_>) -> Result<(), astral_yaml::Error> {
         let root = editor.root();
         let inner = editor.mapping_entries(&root)?[0].1.clone();
@@ -516,23 +530,14 @@ impl Model {
 
 #[test]
 fn nested_layout_edits_match_an_independent_model_after_each_commit() {
-    use Operation::*;
-    let operations = [
-        Scalar,
-        Sequence,
-        Plain,
-        RootComment,
-        InnerComment,
-        RemoveRootComment,
-        RemoveInnerComment,
-        AddSibling,
-        RemoveSibling,
-        Flow,
-        Block,
-    ];
     for newline in ["\n", "\r\n", "\r"] {
         for (source, root, inner) in [
             ("outer:\n  key: old\n", None, None),
+            (
+                "outer: {key: old}\n\n   # root\n",
+                Some((" root", CommentPlacement::Detached)),
+                None,
+            ),
             (
                 "outer: {key: old} # inline\n",
                 None,
@@ -581,9 +586,9 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
             // while an enclosing trailing attachment requires adjacency.
             let operations =
                 if root.is_some_and(|(_, placement)| placement == CommentPlacement::Trailing) {
-                    &operations[..10]
+                    &Operation::ALL[..10]
                 } else {
-                    &operations[..]
+                    &Operation::ALL[..]
                 };
             for &first in operations {
                 for &second in operations {
@@ -796,5 +801,123 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
     +++ after.yaml
     @@ -1,4 +1,7 @@
      outer:␍-  key: old␍-# trailing␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ␍
+    ");
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "{outer: {key: old}} # inline\n\n   # root\n",
+            "outer: {key: old}\n\n   # root\n",
+            "[{key: old}]\n\n   # root\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            let expected_comments = comments(&document);
+            document
+                .edit(|editor| {
+                    let mut pending = vec![editor.root()];
+                    while let Some(handle) = pending.pop() {
+                        match editor.node(&handle)?.kind() {
+                            NodeKind::Mapping { .. } => {
+                                pending.extend(
+                                    editor.mapping_entries(&handle)?.into_iter().map(|(_, v)| v),
+                                );
+                            }
+                            NodeKind::Sequence { .. } => {
+                                pending.extend(editor.sequence_items(&handle)?);
+                            }
+                            _ => continue,
+                        }
+                        editor
+                            .set_collection_style(&handle, astral_yaml::CollectionStyle::Block)?;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(comments(&document), expected_comments);
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}} # inline
+    +--- # inline
+    +outer:
+    +  key: old
+     ⏎
+    -   # root
+    +# root
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -outer: {key: old}
+    +outer:
+    +  key: old
+     ⏎
+    -   # root
+    +# root
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -[{key: old}]
+    +-
+    +  key: old
+     ⏎
+    -   # root
+    +# root
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}} # inline␍
+    +--- # inline␍
+    +outer:␍
+    +  key: old␍
+     ␍
+    -   # root␍
+    +# root␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -outer: {key: old}␍
+    +outer:␍
+    +  key: old␍
+     ␍
+    -   # root␍
+    +# root␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -[{key: old}]␍
+    +-␍
+    +  key: old␍
+     ␍
+    -   # root␍
+    +# root␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -{outer: {key: old}} # inline␍+--- # inline␍+outer:␍+  key: old␍ ␍-   # root␍+# root␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -outer: {key: old}␍+outer:␍+  key: old␍ ␍-   # root␍+# root␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -[{key: old}]␍+-␍+  key: old␍ ␍-   # root␍+# root␍
     ");
 }

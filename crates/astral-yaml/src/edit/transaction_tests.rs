@@ -361,3 +361,22 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
     assert!(syntax.flow(inner.id));
     editor.finish().unwrap();
 }
+
+#[test]
+fn indented_root_suffixes_share_the_body_rewrite_context() {
+    let document = EditableDocument::parse("outer: {value: old}\n\n   # root\n").unwrap();
+    let mut editor = Editor::new(&document);
+    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
+    let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
+    editor.replace(&value, "new").unwrap();
+    let syntax = Layout::new(&editor.candidate);
+    let layout = RootLayout::new(&document, &editor.candidate, &syntax);
+    assert_eq!(
+        editor.rewrite_regions(&layout, &syntax).unwrap(),
+        [(
+            document.root,
+            super::emit::region(&document, document.root, true)
+        )]
+    );
+    editor.finish().unwrap();
+}

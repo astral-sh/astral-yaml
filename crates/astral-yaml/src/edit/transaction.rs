@@ -727,10 +727,11 @@ impl<'a> Editor<'a> {
         syntax: &Layout,
     ) -> Result<Vec<(NodeId, Span)>, Error> {
         let mut ids: Vec<_> = self.rewrites.iter().copied().collect();
-        if layout.needs_scalar_boundary(&self.candidate)
-            && syntax
-                .tail(self.candidate.root)
-                .is_some_and(|tail| ids.iter().any(|&id| self.ancestor(id, tail)))
+        if (!ids.is_empty() && layout.needs_suffix_context())
+            || (layout.needs_scalar_boundary(&self.candidate)
+                && syntax
+                    .tail(self.candidate.root)
+                    .is_some_and(|tail| ids.iter().any(|&id| self.ancestor(id, tail))))
         {
             ids.push(self.candidate.root);
         }
