@@ -201,7 +201,12 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn mark(&mut self, mut id: NodeId) {
+    fn mark(&mut self, id: NodeId) {
+        self.rewrites.insert(id);
+    }
+
+    /// Select the syntax context from the final candidate, after all mutations.
+    fn rewrite_root(&self, mut id: NodeId) -> NodeId {
         // Changes below a key can make an enclosing implicit key multiline or
         // too long. Include its mapping so emission can use explicit notation.
         let edited = id;
@@ -236,7 +241,7 @@ impl<'a> Editor<'a> {
             }
             id = parent;
         }
-        self.rewrites.insert(id);
+        id
     }
 
     fn needs_mapping_rewrite(&self, id: NodeId, parent: NodeId) -> bool {
@@ -755,25 +760,26 @@ impl<'a> Editor<'a> {
     }
 
     fn rewrite_regions(&self) -> Result<Vec<(NodeId, Span)>, Error> {
-        let mut ids: Vec<_> = self
-            .rewrites
-            .iter()
-            .copied()
-            .filter(|&id| {
-                let mut current = self.parents[id.0];
-                while let Some(parent) = current {
-                    if self.rewrites.contains(&parent) {
-                        return false;
-                    }
-                    current = self.parents[parent.0];
-                }
-                true
-            })
-            .collect();
+        let mut ids: Vec<_> = self.rewrites.iter().copied().collect();
         loop {
             if !ids.is_empty() {
                 self.charge(self.original.nodes.len())?;
             }
+            let roots: HashSet<_> = ids.into_iter().map(|id| self.rewrite_root(id)).collect();
+            ids = roots
+                .iter()
+                .copied()
+                .filter(|&id| {
+                    let mut current = self.parents[id.0];
+                    while let Some(parent) = current {
+                        if roots.contains(&parent) {
+                            return false;
+                        }
+                        current = self.parents[parent.0];
+                    }
+                    true
+                })
+                .collect();
             let mut regions: Vec<_> = ids
                 .iter()
                 .map(|&id| {
@@ -798,6 +804,35 @@ impl<'a> Editor<'a> {
                     (id, region)
                 })
                 .collect();
+
+            let mut expanded = false;
+            for &(id, region) in &regions {
+                let Some(parent) = self.parents[id.0] else {
+                    continue;
+                };
+                let original = &self.original.nodes[id.0];
+                let collection = matches!(
+                    self.candidate.nodes[id.0].kind,
+                    NodeKind::Sequence { .. } | NodeKind::Mapping { .. }
+                );
+                let outer_comments = collection
+                    && original.comments.iter().any(|comment| {
+                        comment.span.start() < original.span.start()
+                            || comment.span.end() > original.span.end()
+                    });
+                // A descendant prefix can move the region before the node's
+                // indentation or field header. A collection's outer comments
+                // can also change attachment when its delimiters move. Render
+                // the parent to supply both the syntax and comment context.
+                // The document root keeps its separate framing-comment plan.
+                if region.start() < original.span.start() || outer_comments {
+                    ids.push(parent);
+                    expanded = true;
+                }
+            }
+            if expanded {
+                continue;
+            }
             regions.sort_by_key(|(_, span)| span.start());
             let Some(pair) = regions
                 .windows(2)
@@ -810,7 +845,6 @@ impl<'a> Editor<'a> {
             while !self.ancestor(parent, right) {
                 parent = self.parents[parent.0].expect("common document root");
             }
-            ids.retain(|&id| !self.ancestor(parent, id));
             ids.push(parent);
         }
     }
@@ -1059,6 +1093,7 @@ fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
         DetachedBefore,
         LeadingBefore,
         Header,
+        Opening,
         BeforeChild(usize),
         InlineAfter,
         TrailingAfter,
@@ -1097,6 +1132,7 @@ fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
             _ => Boundary::LeadingBefore,
         },
         CommentPosition::Header => Boundary::Header,
+        CommentPosition::Opening => Boundary::Opening,
         CommentPosition::BeforeChild(child) => Boundary::BeforeChild(positions[&child]),
         CommentPosition::After if comment.placement == CommentPlacement::Inline => {
             Boundary::InlineAfter
