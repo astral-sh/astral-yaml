@@ -250,6 +250,12 @@ enum ScalarPosition {
     FlowKey,
 }
 
+/// Erasing a root can remove its entire line or leave a document marker behind.
+enum ErasedRootLine {
+    Standalone { start: usize },
+    Shared,
+}
+
 struct Emitter<'a> {
     document: &'a EditableDocument,
     root: NodeId,
@@ -277,12 +283,22 @@ impl Emitter<'_> {
             // Blank lines immediately following a block scalar belong to its
             // content. The emitted value supplies all of them itself.
             span.end = following_line_breaks(source, span.end());
-        } else if let Some(start) = self.erased_root_line() {
+        } else if let Some(line) = self.erased_root_line() {
             // An omitted root has no token to occupy its former line. Leaving
             // that line behind would turn adjacent leading comments into
             // detached comments, or indent a following document marker.
-            span.start = start;
             span.end = following_line_breaks(source, span.end());
+            match line {
+                ErasedRootLine::Standalone { start } => span.start = start,
+                ErasedRootLine::Shared => {
+                    // A retained marker still needs its line terminator. The
+                    // root's original span may already include that break,
+                    // as it does for a block scalar.
+                    if source[self.region.start()..span.end()].contains(['\r', '\n']) {
+                        self.line(0)?;
+                    }
+                }
+            }
         }
         let suffix = &source[span.end()..];
         let suffix_has_break = suffix
@@ -307,7 +323,7 @@ impl Emitter<'_> {
         })
     }
 
-    fn erased_root_line(&self) -> Option<usize> {
+    fn erased_root_line(&self) -> Option<ErasedRootLine> {
         if self.root != self.document.root
             || self.region.is_empty()
             || !omitted(&self.document.nodes[self.root.0])
@@ -319,10 +335,13 @@ impl Emitter<'_> {
             .next()
             .unwrap_or("")
             .trim_start_matches('\u{feff}');
-        prefix
-            .bytes()
-            .all(|byte| matches!(byte, b' ' | b'\t'))
-            .then_some(self.region.start() - prefix.len())
+        if prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
+            Some(ErasedRootLine::Standalone {
+                start: self.region.start() - prefix.len(),
+            })
+        } else {
+            Some(ErasedRootLine::Shared)
+        }
     }
 
     fn push(&mut self, text: &str) -> Result<(), Error> {

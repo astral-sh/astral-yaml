@@ -594,7 +594,11 @@ fn omitted_roots_own_their_erased_line() {
             "# leading\n---\nold\n...\n",
             "# leading\n---\n  old\n\n...\n",
             "\u{feff}---\n  old\n...\n",
+            "--- old",
+            "--- old\n",
             "--- old\n...\n",
+            "# leading\n--- old\n\n...\n",
+            "# leading\n--- |-\n  old\n\n...\n",
             "# leading\n---\n|+\n  old\n\n...\n",
             "---\n\n...\n",
         ] {
@@ -612,19 +616,31 @@ fn omitted_roots_own_their_erased_line() {
         "# leading\n---\n...\n",
         "# leading\n---\n...\n",
         "\u{feff}---\n...\n",
+        "--- ",
+        "--- \n",
         "--- \n...\n",
+        "# leading\n--- \n...\n",
+        "# leading\n--- \n...\n",
         "# leading\n---\n...\n",
         "---\n\n...\n",
         "# leading\r\n---\r\n...\r\n",
         "# leading\r\n---\r\n...\r\n",
         "\u{feff}---\r\n...\r\n",
+        "--- ",
+        "--- \r\n",
         "--- \r\n...\r\n",
+        "# leading\r\n--- \r\n...\r\n",
+        "# leading\r\n--- \r\n...\r\n",
         "# leading\r\n---\r\n...\r\n",
         "---\r\n\r\n...\r\n",
         "# leading\r---\r...\r",
         "# leading\r---\r...\r",
         "\u{feff}---\r...\r",
+        "--- ",
+        "--- \r",
         "--- \r...\r",
+        "# leading\r--- \r...\r",
+        "# leading\r--- \r...\r",
         "# leading\r---\r...\r",
         "---\r\r...\r",
     ]
@@ -643,10 +659,10 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
         ] {
             let source = source.replace('\n', newline);
             let mut candidate = EditableDocument::parse(&source).unwrap();
-            let NodeKind::Scalar { style, .. } = &mut candidate.nodes[candidate.root.0].kind else {
-                unreachable!()
+            candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+                value: "old".to_owned(),
+                style: crate::ScalarStyle::Literal,
             };
-            *style = crate::ScalarStyle::Literal;
             let region = region(&candidate, candidate.root, true);
             let rendered = render(
                 &candidate,
@@ -663,13 +679,8 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
                 &source[rendered.span.end()..]
             );
             let parsed = EditableDocument::parse(&output).unwrap();
-            let matched = correspondence(&candidate, &parsed)
-                .unwrap_or_else(|| panic!("{source:?} -> {output:?}"));
-            assert!(
-                super::comments_preserved(&candidate, &parsed, &matched),
-                "{source:?} -> {output:?}; {:?}",
-                parsed.nodes[parsed.root.0].comments
-            );
+            let matched = correspondence(&candidate, &parsed).unwrap();
+            assert!(super::comments_preserved(&candidate, &parsed, &matched));
             outputs.push(output);
         }
     }
