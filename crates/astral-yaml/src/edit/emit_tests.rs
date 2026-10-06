@@ -473,3 +473,66 @@ fn removed_properties_leave_room_for_retained_header_comments() {
         old
     ");
 }
+
+#[test]
+fn detached_comments_preserve_their_structural_boundaries() {
+    for (before, after, expected) in [
+        ("# note\n\nvalue\n", "value\n\n# note\n", false),
+        (
+            "a: old\n\n# note\n\nb: old\nc: old\n",
+            "a: old\nb: old\n\n# note\n\nc: old\n",
+            false,
+        ),
+        ("# note\n\n- old\n", "[\n# note\n\nold]\n", true),
+        ("# note\n\na: old\n", "{\n# note\n\na: old}\n", true),
+        ("# note\n\nvalue\n", "# note\n\n'value'\n", true),
+    ] {
+        let before = EditableDocument::parse(before).unwrap();
+        let after = EditableDocument::parse(after).unwrap();
+        let correspondence = correspondence(&before, &after).unwrap();
+        assert_eq!(
+            super::comments_preserved(&before, &after, &correspondence),
+            expected
+        );
+    }
+}
+
+#[test]
+fn detached_prefixes_are_emitted_before_content() {
+    let mut outputs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in [
+            "# detached\n\nnew\n",
+            "# detached\n\n# leading\nnew\n",
+            "# detached\n\n- new\n",
+        ] {
+            let source = source.replace('\n', newline);
+            let document = EditableDocument::parse(&source).unwrap();
+            // Including outer comments exercises the same emitter path used by
+            // imported fragments, which have no retained source prefix.
+            let span = region(&document, document.root, true);
+            let rendered = render(&document, document.root, span, 0, false).unwrap();
+            let parsed = EditableDocument::parse(&rendered.text).unwrap();
+            let correspondence = correspondence(&document, &parsed).unwrap();
+            assert!(super::comments_preserved(
+                &document,
+                &parsed,
+                &correspondence
+            ));
+            outputs.push(rendered.text);
+        }
+    }
+    insta::assert_debug_snapshot!(outputs, @r##"
+    [
+        "# detached\n\nnew",
+        "# detached\n\n# leading\nnew",
+        "# detached\n\n- new",
+        "# detached\r\n\r\nnew",
+        "# detached\r\n\r\n# leading\r\nnew",
+        "# detached\r\n\r\n- new",
+        "# detached\r\rnew",
+        "# detached\r\r# leading\rnew",
+        "# detached\r\r- new",
+    ]
+    "##);
+}

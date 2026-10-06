@@ -395,6 +395,31 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    fn prefix(&mut self, comments: &mut Comments, indent: usize) -> Result<(), Error> {
+        self.before(comments, indent)?;
+        while comments
+            .remaining
+            .as_slice()
+            .first()
+            .is_some_and(|comment| {
+                comment.position == CommentPosition::Before
+                    && comment.placement == CommentPlacement::Detached
+            })
+        {
+            let comment = comments.remaining.next().expect("detached prefix comment");
+            if !self.output.is_empty() {
+                self.line(indent)?;
+            }
+            self.push("#")?;
+            self.push(&comment.text)?;
+            self.push(self.newline)?;
+            self.push(self.newline)?;
+            self.line(indent)?;
+            self.before(comments, indent)?;
+        }
+        Ok(())
+    }
+
     fn between(
         &mut self,
         comments: &mut Comments,
@@ -471,7 +496,7 @@ impl Emitter<'_> {
             return Err(self.error("emission resource limit exceeded"));
         }
         self.work -= 1;
-        self.before(&mut comments, indent)?;
+        self.prefix(&mut comments, indent)?;
         self.properties(id, indent, flow, &mut comments)?;
         let node = &self.document.nodes[id.0];
         match &node.kind {
@@ -989,14 +1014,42 @@ pub(super) fn comments_preserved(
         let Some(target) = target else {
             return true;
         };
-        let left = &expected.nodes[id].comments;
-        let right = &actual.nodes[target.0].comments;
+        let left_node = &expected.nodes[id];
+        let right_node = &actual.nodes[target.0];
+        let left = &left_node.comments;
+        let right = &right_node.comments;
         left.len() == right.len()
-            && left
-                .iter()
-                .zip(right)
-                .all(|(left, right)| left.text == right.text && left.placement == right.placement)
+            && left.iter().zip(right).all(|(left, right)| {
+                if left.text != right.text || left.placement != right.placement {
+                    return false;
+                }
+                if left.placement != CommentPlacement::Detached {
+                    return true;
+                }
+                let left = detached_position(&left_node.kind, left.position);
+                let right = detached_position(&right_node.kind, right.position);
+                match (left, right) {
+                    (CommentPosition::BeforeChild(left), CommentPosition::BeforeChild(right)) => {
+                        correspondence[left.0] == Some(right)
+                    }
+                    _ => left == right,
+                }
+            })
     })
+}
+
+/// A detached prefix and the gap before the first child describe the same
+/// boundary, even when collection delimiters or properties move around it.
+fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosition {
+    if !matches!(position, CommentPosition::Before | CommentPosition::Header) {
+        return position;
+    }
+    let first = match kind {
+        NodeKind::Sequence { items, .. } => items.first().copied(),
+        NodeKind::Mapping { entries, .. } => entries.first().map(|&(key, _)| key),
+        _ => None,
+    };
+    first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
 fn scalar_type(node: &super::Node) -> crate::schema::ScalarType {
