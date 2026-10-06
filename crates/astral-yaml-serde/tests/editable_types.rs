@@ -165,71 +165,65 @@ fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
     sequence to scalar
     --- before.yaml
     +++ after.yaml
-    @@ -1,4 +1,4 @@
+    @@ -1,4 +1,3 @@
      # config
     -value:
     -  [1, 2]
     +value: 3
      untouched: keep # sibling
-    +
 
     scalar to sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,6 @@
-     # config
-     value:
-    -  1
-    +  - 2
-    +  - 3
-     untouched: keep # sibling
-    +
-
-    mapping to scalar
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     # config
-    -value:
-    -  {one: 1}
-    +value: 2
-     untouched: keep # sibling
-    +
-
-    scalar to mapping
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,5 @@
      # config
      value:
     -  1
+    +  - 2
+    +  - 3
+     untouched: keep # sibling
+
+    mapping to scalar
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,3 @@
+     # config
+    -value:
+    -  {one: 1}
+    +value: 2
+     untouched: keep # sibling
+
+    scalar to mapping
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     # config
+     value:
+    -  1
     +  two: 2
      untouched: keep # sibling
-    +
 
     sequence to mapping
     --- before.yaml
     +++ after.yaml
-    @@ -1,5 +1,4 @@
+    @@ -1,5 +1,3 @@
      # config
     -value:
     -  - 1
     -  - 2
     +value: {three: 3}
      untouched: keep # sibling
-    +
 
     mapping to sequence
     --- before.yaml
     +++ after.yaml
-    @@ -1,5 +1,4 @@
+    @@ -1,5 +1,3 @@
      # config
     -value:
     -  one: 1
     -  two: 2
     +value: [3, 4]
      untouched: keep # sibling
-    +
     ");
 }
 

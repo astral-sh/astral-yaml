@@ -391,3 +391,210 @@ fn typed_setters_terminate_an_empty_roots_header_comment() {
     \ No newline at end of file
     "#);
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn typed_setters_fill_empty_documents_without_consuming_markers() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for value in [
+            serde_json::json!("new"),
+            serde_json::json!(["a", "b"]),
+            serde_json::json!({"a": "b"}),
+        ] {
+            let source = "# config\n%YAML 1.2\n---\n... # end\n".replace('\n', newline);
+            let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
+            document
+                .edit(|editor| editor.root_mut().set(&value))
+                .unwrap();
+            assert_eq!(document.value(), &value);
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config
+     %YAML 1.2
+     ---
+    +new
+     ... # end
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config
+     %YAML 1.2
+     ---
+    +["a", "b"]
+     ... # end
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config
+     %YAML 1.2
+     ---
+    +{"a": "b"}
+     ... # end
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍
+     %YAML 1.2␍
+     ---␍
+    +new␍
+     ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍
+     %YAML 1.2␍
+     ---␍
+    +["a", "b"]␍
+     ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍
+     %YAML 1.2␍
+     ---␍
+    +{"a": "b"}␍
+     ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍ %YAML 1.2␍ ---␍+new␍ ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍ %YAML 1.2␍ ---␍+["a", "b"]␍ ... # end␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+     # config␍ %YAML 1.2␍ ---␍+{"a": "b"}␍ ... # end␍
+    "#);
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
+    // Chomping: https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+    let mut diffs = Vec::new();
+    for chomp in ["-", "", "+"] {
+        for sequence in [false, true] {
+            let source = if sequence {
+                format!("- old\n\n# detached\n\n- |{chomp}\n  text\n\n")
+            } else {
+                format!("a: old\n\n# detached\n\nb: |{chomp}\n  text\n\n")
+            };
+            let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
+            let mut expected = document.value().clone();
+            if sequence {
+                expected
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(0, serde_json::json!("new"));
+            } else {
+                expected["added"] = serde_json::json!("new");
+            }
+            document
+                .edit(|editor| {
+                    if sequence {
+                        editor.root_mut().insert(0, "new")?;
+                    } else {
+                        editor.root_mut().set_entry("added", "new")?;
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(document.value(), &expected);
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -2,6 +2,6 @@
+     ⏎
+     # detached
+     ⏎
+    -b: |-
+    +b: |2-
+       text
+    -
+    +"added": "new"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,7 +1,7 @@
+    +- "new"
+     - old
+     ⏎
+     # detached
+     ⏎
+    -- |-
+    +- |2-
+       text
+    -
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -2,6 +2,6 @@
+     ⏎
+     # detached
+     ⏎
+    -b: |
+    +b: |2
+       text
+    -
+    +"added": "new"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,7 +1,7 @@
+    +- "new"
+     - old
+     ⏎
+     # detached
+     ⏎
+    -- |
+    +- |2
+       text
+    -
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -2,6 +2,7 @@
+     ⏎
+     # detached
+     ⏎
+    -b: |+
+    +b: |2+
+       text
+    -
+    +  ⏎
+    +"added": "new"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,7 +1,8 @@
+    +- "new"
+     - old
+     ⏎
+     # detached
+     ⏎
+    -- |+
+    +- |2+
+       text
+    -
+    +  ⏎
+    "#);
+}

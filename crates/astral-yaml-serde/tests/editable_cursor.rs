@@ -296,14 +296,13 @@ fn optional_lookup_and_removal_distinguish_absence() {
             root.reborrow().get("second")?.unwrap().set(3)
         })
         .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,2 @@
+    @@ -1,2 +1 @@
     -first: 1 # removed
     -second: 2 # retained
     +second: 3 # retained
-    +
     ");
 }
 
