@@ -598,3 +598,102 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
     +  ⏎
     "#);
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn typed_collection_edits_preserve_root_property_comments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in ["&root [old] # inline\n", "!!seq [old] # inline\n"] {
+            let source = source.replace('\n', newline);
+            let mut document = Editable::<Vec<String>>::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    editor
+                        .root_mut()
+                        .set_collection_style(CollectionStyle::Block)?;
+                    editor.root_mut().push("new")?;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(document.value(), &["old", "new"]);
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -&root [old] # inline
+    +&root # inline
+    +- old
+    +- "new"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -!!seq [old] # inline
+    +!<tag:yaml.org,2002:seq> # inline
+    +- old
+    +- "new"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -&root [old] # inline␍
+    +&root # inline␍
+    +- old␍
+    +- "new"␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -!!seq [old] # inline␍
+    +!<tag:yaml.org,2002:seq> # inline␍
+    +- old␍
+    +- "new"␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -&root [old] # inline␍+&root # inline␍+- old␍+- "new"␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    -!!seq [old] # inline␍+!<tag:yaml.org,2002:seq> # inline␍+- old␍+- "new"␍
+    "#);
+}
+
+#[test]
+fn commented_fragments_refresh_the_typed_view() {
+    let source = "a: old\n\n# tail\n";
+    let mut document =
+        Editable::<std::collections::BTreeMap<String, String>>::parse(source).unwrap();
+    document
+        .edit_syntax(|editor| {
+            editor.replace(&editor.root(), "# leading\na: one\n\n# middle\n\nb: two\n")
+        })
+        .unwrap();
+    assert_eq!(
+        document.value(),
+        &std::collections::BTreeMap::from([
+            ("a".to_owned(), "one".to_owned()),
+            ("b".to_owned(), "two".to_owned()),
+        ])
+    );
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,8 @@
+    -a: old
+    +# leading
+    +a: one
+    +
+    +# middle
+    +
+    +b: two
+     ⏎
+     # tail
+    ");
+}
