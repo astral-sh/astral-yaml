@@ -343,3 +343,21 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
         )]
     );
 }
+
+#[test]
+fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
+    let document = EditableDocument::parse("outer:\n  value: old\n# trailing\n").unwrap();
+    let mut editor = Editor::new(&document);
+    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
+    editor
+        .insert_comment(
+            &inner,
+            0,
+            " detached",
+            crate::comments::CommentPlacement::Detached,
+        )
+        .unwrap();
+    let syntax = Layout::new(&editor.candidate);
+    assert!(syntax.flow(inner.id));
+    editor.finish().unwrap();
+}

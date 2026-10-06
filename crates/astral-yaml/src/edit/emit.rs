@@ -707,6 +707,11 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         depth: usize,
         mut comments: Comments<Location>,
     ) -> Result<(), Error> {
+        let context = if self.layout.flow(id) {
+            Context::flow(context.indent)
+        } else {
+            context
+        };
         let indent = context.indent;
         let flow = context.in_flow();
         if depth >= self.document.options.max_depth || self.work == 0 {
@@ -946,7 +951,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         let indent = context.indent;
         let flow = context.in_flow();
         let node = &self.document.nodes[id.0];
-        let block = block_collection(&node.kind, flow);
+        let block = block_collection(&node.kind, flow || self.layout.flow(id));
         let properties = usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
         let leading = comments.needs_value_line(properties);
         let mut value_indent = if block || flow || leading {

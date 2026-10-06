@@ -534,6 +534,11 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
         for (source, root, inner) in [
             ("outer:\n  key: old\n", None, None),
             (
+                "outer:\n  key: old\n# trailing\n",
+                Some((" trailing", CommentPlacement::Trailing)),
+                None,
+            ),
+            (
                 "outer:\n  key: old\n\n# root\n",
                 Some((" root", CommentPlacement::Detached)),
                 None,
@@ -562,9 +567,17 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
                         .collect()
                 }),
             };
-            for first in operations {
-                for second in operations {
-                    for third in operations {
+            // A nested block-style request cannot enclose a detached suffix
+            // while an enclosing trailing attachment requires adjacency.
+            let operations =
+                if root.is_some_and(|(_, placement)| placement == CommentPlacement::Trailing) {
+                    &operations[..10]
+                } else {
+                    &operations[..]
+                };
+            for &first in operations {
+                for &second in operations {
+                    for &third in operations {
                         let sequence = [first, second, third];
                         let mut model = initial.clone();
                         let mut separate = original.clone();
@@ -592,4 +605,138 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
             }
         }
     }
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn nested_detached_comments_keep_enclosing_trailing_attachments() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for (source, depth) in [
+            ("outer:\n  key: old\n# trailing\n", 1),
+            ("outer:\n  key: |+\n    old\n\n# trailing\n", 1),
+            (
+                "outer:\n  inner:\n    key: old\n  # trailing\nnext: retained\n",
+                2,
+            ),
+        ] {
+            let source = source.replace('\n', newline);
+            let mut document = EditableDocument::parse(&source).unwrap();
+            document
+                .edit(|editor| {
+                    let mut owner = editor.root();
+                    for _ in 0..depth {
+                        owner = editor.mapping_entries(&owner)?[0].1.clone();
+                    }
+                    editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
+                })
+                .unwrap();
+            diffs.push(edit_diff(&source, document.source()));
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -outer:
+    -  key: old
+    +outer: {key: old
+    +  ⏎
+    +  # detached
+    +  }
+     # trailing
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+    -outer:
+    -  key: |+
+    -    old
+    -
+    +outer: {key: "old\n\n"
+    +  ⏎
+    +  # detached
+    +  }
+     # trailing
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+     outer:
+    -  inner:
+    -    key: old
+    +  inner: {key: old
+    +    ⏎
+    +    # detached
+    +    }
+       # trailing
+     next: retained
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -outer:␍
+    -  key: old␍
+    +outer: {key: old␍
+    +  ␍
+    +  # detached␍
+    +  }␍
+     # trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+    -outer:␍
+    -  key: |+␍
+    -    old␍
+    -␍
+    +outer: {key: "old\n\n"␍
+    +  ␍
+    +  # detached␍
+    +  }␍
+     # trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+     outer:␍
+    -  inner:␍
+    -    key: old␍
+    +  inner: {key: old␍
+    +    ␍
+    +    # detached␍
+    +    }␍
+       # trailing␍
+     next: retained␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -outer:␍-  key: old␍+outer: {key: old␍+  ␍+  # detached␍+  }␍ # trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+    -outer:␍-  key: |+␍-    old␍-␍+outer: {key: "old\n\n"␍+  ␍+  # detached␍+  }␍ # trailing␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,7 @@
+     outer:␍-  inner:␍-    key: old␍+  inner: {key: old␍+    ␍+    # detached␍+    }␍   # trailing␍ next: retained␍
+    "#);
+}
+
+#[test]
+fn required_collection_boundaries_do_not_override_explicit_styles() {
+    let source = "outer:\n  key: old\n# trailing\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    let error = document
+        .edit(|editor| {
+            let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
+            editor.insert_comment(&inner, 0, " detached", CommentPlacement::Detached)?;
+            editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)
+        })
+        .unwrap_err();
+    assert_eq!(document.source(), source);
+    insta::assert_snapshot!(error.message, @"requested style is not representable in this context");
 }
