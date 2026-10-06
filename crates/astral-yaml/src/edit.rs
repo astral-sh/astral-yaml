@@ -79,6 +79,53 @@ pub(crate) enum CommentPosition {
     After,
 }
 
+impl CommentPosition {
+    fn for_comment(
+        stream: &crate::Stream<'_>,
+        owner: NodeId,
+        attached: &crate::comments::AttachedComment<'_>,
+        content_start: usize,
+    ) -> Self {
+        let node = &stream.nodes()[owner.0];
+        let at = attached.comment.span.start();
+        if at < node.span.start() {
+            CommentPosition::Before
+        } else if at < content_start {
+            CommentPosition::Header
+        } else if attached.placement == CommentPlacement::Inline
+            && at < node.span.end()
+            && matches!(
+                node.kind,
+                crate::NodeKind::Sequence {
+                    style: CollectionStyle::Flow,
+                    ..
+                } | crate::NodeKind::Mapping {
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            )
+        {
+            CommentPosition::Opening
+        } else if attached.placement == CommentPlacement::Detached {
+            let following = match &node.kind {
+                crate::NodeKind::Sequence { items, .. } => {
+                    let index = items.partition_point(|id| stream.nodes()[id.0].span.start() <= at);
+                    items.get(index).copied()
+                }
+                crate::NodeKind::Mapping { entries, .. } => {
+                    let index = entries
+                        .partition_point(|entry| stream.nodes()[entry.key.0].span.start() <= at);
+                    entries.get(index).map(|entry| entry.key)
+                }
+                _ => None,
+            };
+            following.map_or(CommentPosition::After, CommentPosition::BeforeChild)
+        } else {
+            CommentPosition::After
+        }
+    }
+}
+
 impl EditableDocument {
     /// Retains exactly one YAML document, normalizing CR and CRLF line endings
     /// to LF. All source spans and diagnostics refer to the normalized source.
@@ -149,44 +196,7 @@ impl EditableDocument {
                     .unwrap_or(node.span.start());
                 crate::comments::skip_trivia(source, properties_end).min(node.span.end())
             });
-            let position = if attached.comment.span.start() < node.span.start() {
-                CommentPosition::Before
-            } else if attached.comment.span.start() < content_start {
-                CommentPosition::Header
-            } else if attached.placement == CommentPlacement::Inline
-                && attached.comment.span.start() < node.span.end()
-                && matches!(
-                    node.kind,
-                    crate::NodeKind::Sequence {
-                        style: CollectionStyle::Flow,
-                        ..
-                    } | crate::NodeKind::Mapping {
-                        style: CollectionStyle::Flow,
-                        ..
-                    }
-                )
-            {
-                CommentPosition::Opening
-            } else if attached.placement == crate::comments::CommentPlacement::Detached {
-                let at = attached.comment.span.start();
-                let following = match &node.kind {
-                    crate::NodeKind::Sequence { items, .. } => {
-                        let index =
-                            items.partition_point(|id| stream.nodes()[id.0].span.start() <= at);
-                        items.get(index).copied()
-                    }
-                    crate::NodeKind::Mapping { entries, .. } => {
-                        let index = entries.partition_point(|entry| {
-                            stream.nodes()[entry.key.0].span.start() <= at
-                        });
-                        entries.get(index).map(|entry| entry.key)
-                    }
-                    _ => None,
-                };
-                following.map_or(CommentPosition::After, CommentPosition::BeforeChild)
-            } else {
-                CommentPosition::After
-            };
+            let position = CommentPosition::for_comment(&stream, owner, attached, content_start);
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
