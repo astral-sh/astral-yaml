@@ -430,13 +430,26 @@ impl Emitter<'_> {
     fn flow_start(
         &mut self,
         delimiter: &str,
+        id: NodeId,
         comments: &mut Comments,
         indent: usize,
     ) -> Result<(), Error> {
         self.push(delimiter)?;
         // A closing comment may remain outside the rendered region. Its
         // visibility must not determine where the opening comment is emitted.
-        if (comments.at_opening() || comments.needs_header()) && self.inline(comments)? {
+        // Only the final nested comment can use the closing delimiter's inline
+        // slot: later full-line suffixes must stay inside the collection.
+        // Document suffixes can remain outside the root's closing delimiter.
+        let closing_inline = comments
+            .remaining
+            .as_slice()
+            .last()
+            .is_some_and(|comment| comment.placement == CommentPlacement::Inline);
+        if (comments.at_opening()
+            || comments.needs_header()
+            || (id != self.document.root && !closing_inline))
+            && self.inline(comments)?
+        {
             self.line(indent)?;
             self.before(comments, indent)?;
         }
@@ -631,7 +644,7 @@ impl Emitter<'_> {
             NodeKind::Mapping { entries, style } => {
                 let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
                 if is_flow {
-                    self.flow_start("{", &mut comments, indent + 2)?;
+                    self.flow_start("{", id, &mut comments, indent + 2)?;
                 } else if node.anchor.is_some() || node.tag.is_some() {
                     self.line(indent)?;
                 }
@@ -692,7 +705,7 @@ impl Emitter<'_> {
         let indent = context.indent;
         let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
         if is_flow {
-            self.flow_start("[", comments, indent + 2)?;
+            self.flow_start("[", id, comments, indent + 2)?;
             for (index, &item) in items.iter().enumerate() {
                 if index != 0 {
                     self.push(" ")?;

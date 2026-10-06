@@ -767,3 +767,130 @@ fn omitted_roots_own_their_line_when_comments_are_emitted() {
     ]
     "#);
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn full_line_suffixes_reserve_an_earlier_inline_header() {
+    let mut diffs = Vec::new();
+    for newline in ["\n", "\r\n", "\r"] {
+        for source in ["outer: [old] # inline\n", "outer: {key: old} # inline\n"] {
+            for placement in [
+                crate::comments::CommentPlacement::Trailing,
+                crate::comments::CommentPlacement::Detached,
+            ] {
+                let source = source.replace('\n', newline);
+                let mut candidate = EditableDocument::parse(&source).unwrap();
+                let mut children = Vec::new();
+                super::children(&candidate.nodes[candidate.root.0].kind, &mut children);
+                let inner = children[1];
+                candidate.nodes[inner.0].comments.push(super::Comment {
+                    text: " added".to_owned(),
+                    placement,
+                    position: super::CommentPosition::After,
+                    span: crate::Span::new(0, 0).unwrap(),
+                });
+                diffs.push(astral_yaml_dev::edit_diff(
+                    &source,
+                    &candidate.normalized_yaml().unwrap(),
+                ));
+            }
+        }
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: [old] # inline
+    +outer: [ # inline
+    +  old
+    +  # added
+    +  ]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: [old] # inline
+    +outer: [ # inline
+    +  old
+    +  ⏎
+    +  # added
+    +  ]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: {key: old} # inline
+    +outer: { # inline
+    +  key: old
+    +  # added
+    +  }
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: {key: old} # inline
+    +outer: { # inline
+    +  key: old
+    +  ⏎
+    +  # added
+    +  }
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: [old] # inline␍
+    +outer: [ # inline␍
+    +  old␍
+    +  # added␍
+    +  ]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: [old] # inline␍
+    +outer: [ # inline␍
+    +  old␍
+    +  ␍
+    +  # added␍
+    +  ]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: {key: old} # inline␍
+    +outer: { # inline␍
+    +  key: old␍
+    +  # added␍
+    +  }␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: {key: old} # inline␍
+    +outer: { # inline␍
+    +  key: old␍
+    +  ␍
+    +  # added␍
+    +  }␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: [old] # inline␍+outer: [ # inline␍+  old␍+  # added␍+  ]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: [old] # inline␍+outer: [ # inline␍+  old␍+  ␍+  # added␍+  ]␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -outer: {key: old} # inline␍+outer: { # inline␍+  key: old␍+  # added␍+  }␍
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -outer: {key: old} # inline␍+outer: { # inline␍+  key: old␍+  ␍+  # added␍+  }␍
+    ");
+}
