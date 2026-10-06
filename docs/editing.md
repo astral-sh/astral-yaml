@@ -80,6 +80,8 @@ returns that value only after the transaction commits.
 Before commit, the editor emits and reparses the candidate, checks content,
 alias identity, requested styles, and comment ownership, placement, and order,
 then deserializes `T`.
+Rewrite regions are selected from the final candidate, so intermediate style
+changes do not force a larger rewrite when the final syntax fits in place.
 Any error leaves the original source and typed value intact. This includes
 missing required fields, out-of-range values, and duplicate mapping keys.
 
@@ -113,6 +115,8 @@ collection when the surrounding syntax requires it. This includes scalar
 replacements whose comments are interleaved with tags or anchors: the enclosing
 field supplies their header and indentation. Outside rewritten regions, original
 text is copied.
+Collection rewrites also include the parent when comments outside the node's span
+need its header or indentation to retain their attachment.
 
 Rewrites include adjacent separators when YAML assigns them to the replacement,
 such as trailing blank lines that would become part of a block scalar's value.
@@ -130,6 +134,8 @@ represented in its surrounding context. Root inline comments move onto an
 existing tag or anchor header when a collection changes to block style. Existing
 block content placed in a flow context is emitted in a compatible style.
 Explicit keys in block mappings can retain block scalar or collection styles.
+Comments at flow-opening delimiters stay there while the collection retains flow
+presentation, including when closing comments remain outside the rewritten region.
 
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
