@@ -89,6 +89,19 @@ impl Layout {
         layout
     }
 
+    /// Multiline syntax needs its enclosing block indentation when the old
+    /// token shares a line with a field or compact collection indicator.
+    pub(super) fn multiline(&self, id: NodeId, kind: &NodeKind) -> bool {
+        match kind {
+            NodeKind::Scalar { value, style } => match self.scalar_style(id, *style) {
+                ScalarStyle::Literal | ScalarStyle::Folded => true,
+                ScalarStyle::Plain | ScalarStyle::SingleQuoted => value.contains('\n'),
+                ScalarStyle::DoubleQuoted => false,
+            },
+            _ => !self.flow(id) && emit::block_collection(kind, false),
+        }
+    }
+
     pub(super) fn tail(&self, id: NodeId) -> Option<NodeId> {
         match self.tails[id.0] {
             Tail::Scalar(scalar) if !self.quoted[scalar.0] => Some(scalar),

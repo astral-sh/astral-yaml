@@ -779,7 +779,10 @@ impl RootLayout {
         if !self.kind.ends_with_block_scalar() {
             return None;
         }
-        let end = original.nodes[original.root.0].span.end();
+        // Descendant suffix comments can extend past the root's token span.
+        // Keep a generated boundary outside the entire subtree rewrite so
+        // removing those comments cannot erase the marker with them.
+        let end = emit::region(original, original.root, false).end();
         let boundary = original
             .end_marker
             .map_or(original.source.len(), Span::start);

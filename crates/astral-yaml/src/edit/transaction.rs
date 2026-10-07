@@ -201,7 +201,7 @@ impl<'a> Editor<'a> {
     }
 
     /// Select the syntax context from the final candidate, after all mutations.
-    fn rewrite_root(&self, mut id: NodeId) -> NodeId {
+    fn rewrite_root(&self, mut id: NodeId, syntax: &Layout) -> NodeId {
         // Changes below a key can make an enclosing implicit key multiline or
         // too long. Include its mapping so emission can use explicit notation.
         let edited = id;
@@ -219,16 +219,13 @@ impl<'a> Editor<'a> {
 
         while let Some(parent) = self.parents[id.0] {
             if id.0 < self.original.nodes.len() {
-                let block = matches!(&self.candidate.nodes[id.0].kind,
-                    NodeKind::Sequence { items, style: CollectionStyle::Block } if !items.is_empty())
-                    || matches!(&self.candidate.nodes[id.0].kind,
-                    NodeKind::Mapping { entries, style: CollectionStyle::Block } if !entries.is_empty());
+                let multiline = syntax.multiline(id, &self.candidate.nodes[id.0].kind);
                 let start = self.original.nodes[id.0].span.start();
                 let prefix = self.original.source[..start]
                     .rsplit('\n')
                     .next()
                     .unwrap_or("");
-                if (!block || prefix.bytes().all(|byte| byte == b' '))
+                if (!multiline || prefix.bytes().all(|byte| byte == b' '))
                     && !self.needs_mapping_rewrite(id, parent)
                 {
                     break;
@@ -736,7 +733,10 @@ impl<'a> Editor<'a> {
             if !ids.is_empty() {
                 self.charge(self.original.nodes.len())?;
             }
-            let roots: HashSet<_> = ids.into_iter().map(|id| self.rewrite_root(id)).collect();
+            let roots: HashSet<_> = ids
+                .into_iter()
+                .map(|id| self.rewrite_root(id, syntax))
+                .collect();
             ids = roots
                 .iter()
                 .copied()

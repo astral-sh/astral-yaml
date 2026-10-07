@@ -767,3 +767,113 @@ fn implicit_block_keys_keep_their_own_scalar_context() {
     +  a[b]: value
     "#);
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
+    use astral_yaml::edit::NodeKind;
+
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            - key: 'old'
+        "},
+        indoc! {r"
+            - key: ['old']
+        "},
+        indoc! {r"
+            outer:
+              - key: [['old']]
+            untouched : value
+        "},
+        indoc! {r"
+            - - key: 'old'
+        "},
+        indoc! {r#"
+            - key: ["new\n\n"]
+        "#},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let mut node = editor.root();
+                loop {
+                    node = match editor.node(&node)?.kind() {
+                        NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
+                        NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
+                        _ => break,
+                    };
+                }
+                if matches!(
+                    editor.node(&node)?.kind(),
+                    NodeKind::Scalar {
+                        style: ScalarStyle::DoubleQuoted,
+                        ..
+                    }
+                ) {
+                    return editor.set_scalar_style(&node, ScalarStyle::SingleQuoted);
+                }
+                editor.replace_preserving_style(
+                    &node,
+                    indoc! {r"
+                        |+
+                          new
+
+                    "},
+                )
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,5 @@
+    -- key: 'old'
+    +-
+    +  key: 'new
+    +
+    +
+    +    '
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -- key: ['old']
+    +- key: ['new
+    +
+    +
+    +    ']
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,6 @@
+     outer:
+    -  - key: [['old']]
+    +  - key: [['new
+    +
+    +
+    +      ']]
+     untouched : value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,6 @@
+    -- - key: 'old'
+    +-
+    +  -
+    +    key: 'new
+    +
+    +
+    +      '
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,4 @@
+    -- key: ["new\n\n"]
+    +- key: ['new
+    +
+    +
+    +    ']
+    "#);
+}

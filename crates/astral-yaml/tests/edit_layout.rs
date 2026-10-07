@@ -1041,3 +1041,149 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
      # tail
     ");
 }
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
+fn generated_suffix_boundaries_follow_descendant_comment_regions() {
+    use astral_yaml::edit::NodeKind;
+
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            outer:
+              value: old
+
+              # nested
+
+            # keep
+
+            # remove
+        "},
+        indoc! {r"
+            -
+              - old
+
+              # nested
+
+            # keep
+
+            # remove
+        "},
+        indoc! {r"
+            outer:
+              inner:
+                value: old
+
+                # nested
+
+            # keep
+
+            # remove
+        "},
+        indoc! {r"
+            outer:
+              value: old
+
+              # nested
+            ...
+
+            # keep
+
+            # remove
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                editor.remove_comment(&root, 1)?;
+                let mut node = root.clone();
+                loop {
+                    node = match editor.node(&node)?.kind() {
+                        NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
+                        NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
+                        _ => break,
+                    };
+                    while !editor.node(&node)?.comments().is_empty() {
+                        editor.remove_comment(&node, 0)?;
+                    }
+                }
+                editor.replace(
+                    &node,
+                    indoc! {r"
+                |+
+                  new
+
+            "},
+                )
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,8 +1,9 @@
+     outer:
+    -  value: old
+    +  value: |2+
+    +    new
+    +    ⏎
+    +...
+     ⏎
+    -  # nested
+     ⏎
+     # keep
+     ⏎
+    -# remove
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,8 +1,9 @@
+     -
+    -  - old
+    +  - |2+
+    +    new
+    +    ⏎
+    +...
+     ⏎
+    -  # nested
+     ⏎
+     # keep
+     ⏎
+    -# remove
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,9 +1,10 @@
+     outer:
+       inner:
+    -    value: old
+    +    value: |2+
+    +      new
+    +      ⏎
+    +...
+     ⏎
+    -    # nested
+     ⏎
+     # keep
+     ⏎
+    -# remove
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,9 +1,8 @@
+     outer:
+    -  value: old
+    -
+    -  # nested
+    +  value: |2+
+    +    new
+    +    ⏎
+     ...
+     ⏎
+     # keep
+     ⏎
+    -# remove
+    "#);
+}
