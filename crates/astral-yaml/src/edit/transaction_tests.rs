@@ -1,8 +1,29 @@
 use crate::CollectionStyle;
-use crate::edit::{draft::same_style, framing::RootLayout};
+use crate::edit::{
+    draft::{Candidate, same_style},
+    emit,
+    framing::RootLayout,
+    plan::Plan,
+    view::Syntax,
+};
 use astral_yaml_dev::{edit_diff, indoc};
 
 use super::{EditableDocument, Editor, Layout, NodeKind, Source, Span};
+
+fn plan<'a>(
+    editor: &'a Editor<'_>,
+    source: &'a Source,
+    candidate: &'a Candidate,
+    rendering: Syntax<'a, Option<Span>>,
+) -> Plan<'a> {
+    super::plan(
+        source,
+        candidate,
+        rendering,
+        &editor.rewrites,
+        editor.root_comments_changed,
+    )
+}
 
 #[test]
 fn a_rendering_copy_cannot_redefine_the_committed_edit() {
@@ -16,24 +37,21 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
 
     // A broken planning or rendering pass must not change the draft against
     // which commit is checked. Deliberately corrupt only the rendering copy.
-    let mut planned = editor.candidate.clone();
-    planned.nodes[value.id.0].kind = NodeKind::Scalar {
+    let candidate = editor.draft.clone().freeze();
+    let mut planned = Syntax::from(&candidate).nodes.to_vec();
+    planned[value.id.0].kind = NodeKind::Scalar {
         value: "incorrect".to_owned(),
         style: crate::ScalarStyle::Plain,
     };
+    let planned = Syntax {
+        nodes: &planned,
+        root: document.root,
+    };
     let source_index = Source::from(&document);
-    let output = editor
-        .plan(&source_index, (&planned).into())
-        .render(&Layout::new(&planned))
+    let output = plan(&editor, &source_index, &candidate, planned)
+        .render(&Layout::new(planned))
         .unwrap();
-    let error = editor
-        .candidate
-        .commit(
-            &output,
-            document.options,
-            document.nodes[document.root.0].span,
-        )
-        .unwrap_err();
+    let error = candidate.commit(&output).unwrap_err();
     insta::assert_snapshot!(
         format!("{}\nCommit: {}", edit_diff(source, &output), error.message),
         @"
@@ -69,12 +87,12 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     document.nodes[first.0].span = Span::new(2, 10).unwrap();
     let mut editor = Editor::new(&document);
     editor.rewrites.extend([first, last]);
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
+    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(document.root, document.nodes[document.root.0].span)]
@@ -85,13 +103,13 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
 fn empty_transactions_do_not_require_rewrite_work() {
     let document = EditableDocument::parse("one").unwrap();
     let editor = Editor::new(&document);
-    editor.work.set(0);
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    candidate.work().set(0);
+    let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
+    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         []
@@ -118,21 +136,20 @@ fn outer_comment_plans_obey_work_and_output_limits() {
             .unwrap();
     }
     let region = document.nodes[document.root.0].span;
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
+    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
         "emitted YAML exceeds input byte limit"
     );
-    editor.work.set(0);
+    candidate.work().set(0);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
@@ -343,18 +360,15 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             "},
         )
         .unwrap();
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
+    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
-        [(
-            document.root,
-            super::emit::region(&document, document.root, true)
-        )]
+        [(document.root, emit::region(&document, document.root, true))]
     );
 }
 
@@ -376,7 +390,8 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
             crate::comments::CommentPlacement::Detached,
         )
         .unwrap();
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    let syntax = Layout::new(&candidate);
     assert!(syntax.flow(inner.id));
     editor.finish().unwrap();
 }
@@ -393,18 +408,15 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
     let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
     editor.replace(&value, "new").unwrap();
-    let syntax = Layout::new(&editor.candidate);
+    let candidate = editor.draft.clone().freeze();
+    let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
+    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        editor
-            .plan(&source_index, (&editor.candidate).into())
+        plan(&editor, &source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
-        [(
-            document.root,
-            super::emit::region(&document, document.root, true)
-        )]
+        [(document.root, emit::region(&document, document.root, true))]
     );
     editor.finish().unwrap();
 }

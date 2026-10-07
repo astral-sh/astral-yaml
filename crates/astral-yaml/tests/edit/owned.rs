@@ -1079,3 +1079,53 @@ fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
      other: retained
     ");
 }
+
+#[test]
+fn replacement_handles_survive_composed_structural_edits() {
+    use astral_yaml::{CollectionStyle, ScalarStyle};
+
+    let source = indoc! {r"
+        selected: [old, removed] # keep
+        retained: untouched
+    "};
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let selected = editor.mapping_entries(&editor.root())?[0].1.clone();
+            let old_children = editor.sequence_items(&selected)?;
+            for child in &old_children {
+                editor.set_scalar_style(child, ScalarStyle::SingleQuoted)?;
+            }
+            editor.replace(
+                &selected,
+                "&root {first: [&leaf value, *leaf], self: *root}",
+            )?;
+            let first = editor.mapping_entries(&selected)?[0].1.clone();
+            let leaf = editor.sequence_items(&first)?[0].clone();
+            editor.replace(&leaf, "&leaf {nested: value}")?;
+            editor.set_collection_style(&first, CollectionStyle::Block)?;
+            editor.remove_entry(&selected, 0)?;
+            editor.insert_entry(&selected, 1, "tail", "&tail [*tail]")?;
+            let tail = editor.mapping_entries(&selected)?[1].1.clone();
+            editor.insert_item(&tail, 1, "temporary")?;
+            let temporary = editor.sequence_items(&tail)?[1].clone();
+            editor.remove_item(&tail, 1)?;
+            editor.set_collection_style(&tail, CollectionStyle::Flow)?;
+            for removed in old_children.into_iter().chain([first, leaf, temporary]) {
+                assert!(
+                    editor.node(&removed).is_err(),
+                    "a retired handle cannot revive"
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -selected: [old, removed] # keep
+    +selected: &root {self: *root, tail: &tail [*tail]} # keep
+     retained: untouched
+    ");
+}

@@ -1,18 +1,13 @@
 use super::{
-    Comment, CommentPosition, EditableDocument, Node, NodeKind,
-    draft::{Draft, map_locations},
-    emit,
+    CommentPosition, EditableDocument, Node, NodeKind,
+    draft::{Candidate, Draft},
     layout::Layout,
     plan::Plan,
     source::Source,
     view::Syntax,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
-use std::{
-    cell::Cell,
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 #[cfg(test)]
 #[path = "transaction_tests.rs"]
@@ -32,14 +27,10 @@ pub struct Handle {
 #[derive(Debug)]
 pub struct Editor<'a> {
     original: &'a EditableDocument,
-    candidate: Draft,
+    draft: Draft,
     transaction: Arc<()>,
-    parents: Vec<Option<NodeId>>,
-    alive: Vec<bool>,
     rewrites: HashSet<NodeId>,
     root_comments_changed: bool,
-    work: Cell<usize>,
-    introduced_bytes: usize,
     failure: Option<Error>,
 }
 
@@ -76,24 +67,12 @@ impl EditableDocument {
 
 impl<'a> Editor<'a> {
     fn new(original: &'a EditableDocument) -> Self {
-        let mut parents = vec![None; original.nodes.len()];
-        for (index, node) in original.nodes.iter().enumerate() {
-            let mut children = Vec::new();
-            emit::children(&node.kind, &mut children);
-            for child in children {
-                parents[child.0] = Some(NodeId(index));
-            }
-        }
         Self {
             original,
-            candidate: Draft::from(original),
+            draft: Draft::from(original),
             transaction: Arc::new(()),
-            parents,
-            alive: vec![true; original.nodes.len()],
             rewrites: HashSet::new(),
             root_comments_changed: false,
-            work: Cell::new(original.options.max_nodes),
-            introduced_bytes: 0,
             failure: None,
         }
     }
@@ -105,21 +84,9 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn charge(&self, amount: usize) -> Result<(), Error> {
-        let remaining = self
-            .work
-            .get()
-            .checked_sub(amount)
-            .ok_or_else(|| self.error("editing resource limit exceeded"))?;
-        self.work.set(remaining);
-        Ok(())
-    }
-
     fn id(&self, handle: &Handle) -> Result<NodeId, Error> {
-        self.charge(1)?;
-        if !Arc::ptr_eq(&self.transaction, &handle.transaction)
-            || !self.alive.get(handle.id.0).copied().unwrap_or(false)
-        {
+        self.draft.charge(1)?;
+        if !Arc::ptr_eq(&self.transaction, &handle.transaction) || !self.draft.contains(handle.id) {
             return Err(self.error("foreign or deleted edit handle"));
         }
         Ok(handle.id)
@@ -149,7 +116,7 @@ impl<'a> Editor<'a> {
     /// The root of this transaction's candidate document.
     #[must_use]
     pub fn root(&self) -> Handle {
-        self.handle(self.candidate.root)
+        self.handle(self.draft.root())
     }
 
     /// Inspects a live node in this transaction.
@@ -157,7 +124,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Rejects foreign/deleted handles and exhausted work budgets.
     pub fn node(&self, handle: &Handle) -> Result<&Node<Option<Span>>, Error> {
-        Ok(&self.candidate.nodes[self.id(handle)?.0])
+        Ok(self.draft.node(self.id(handle)?))
     }
 
     /// Returns sequence-item handles in source order.
@@ -168,7 +135,7 @@ impl<'a> Editor<'a> {
         let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
             return Err(self.error("expected a sequence"));
         };
-        self.charge(items.len())?;
+        self.draft.charge(items.len())?;
         Ok(items.iter().map(|&id| self.handle(id)).collect())
     }
 
@@ -180,7 +147,7 @@ impl<'a> Editor<'a> {
         let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
             return Err(self.error("expected a mapping"));
         };
-        self.charge(entries.len())?;
+        self.draft.charge(entries.len())?;
         Ok(entries
             .iter()
             .map(|&(key, value)| (self.handle(key), self.handle(value)))
@@ -192,64 +159,7 @@ impl<'a> Editor<'a> {
     }
 
     fn mark_parent(&mut self, id: NodeId) {
-        self.mark(self.parents[id.0].unwrap_or(id));
-    }
-
-    fn remove_tree(&mut self, id: NodeId) -> Result<(), Error> {
-        let mut pending = vec![id];
-        while let Some(id) = pending.pop() {
-            self.charge(1)?;
-            self.alive[id.0] = false;
-            self.rewrites.remove(&id);
-            self.candidate.requested_styles.remove(&id);
-            emit::children(&self.candidate.nodes[id.0].kind, &mut pending);
-        }
-        Ok(())
-    }
-
-    fn import(&mut self, yaml: &str, parent: Option<NodeId>) -> Result<NodeId, Error> {
-        self.introduced_bytes = self
-            .introduced_bytes
-            .checked_add(yaml.len())
-            .filter(|&size| size <= self.original.options.max_input_bytes)
-            .ok_or_else(|| self.error("inserted YAML exceeds input byte limit"))?;
-        let mut depth = 0;
-        let mut ancestor = parent;
-        while let Some(id) = ancestor {
-            depth += 1;
-            ancestor = self.parents[id.0];
-        }
-        if depth >= self.original.options.max_depth {
-            return Err(self.error("editing nesting limit exceeded"));
-        }
-        let available = self
-            .original
-            .options
-            .max_nodes
-            .saturating_sub(self.candidate.nodes.len());
-        let mut options = self.original.options;
-        options.max_nodes = available;
-        options.max_depth -= depth;
-        let document = EditableDocument::parse_with_options(yaml, options)?;
-        self.charge(document.nodes.len())?;
-        let offset = self.candidate.nodes.len();
-        let root = NodeId(document.root.0 + offset);
-        for node in document.nodes {
-            let mut node = map_locations(node, |_| None);
-            remap(&mut node, |id| NodeId(id.0 + offset));
-            self.candidate.nodes.push(node);
-            self.alive.push(true);
-            self.parents.push(None);
-        }
-        self.parents[root.0] = parent;
-        for index in offset..self.candidate.nodes.len() {
-            let mut children = Vec::new();
-            emit::children(&self.candidate.nodes[index].kind, &mut children);
-            for child in children {
-                self.parents[child.0] = Some(NodeId(index));
-            }
-        }
-        Ok(root)
+        self.mark(self.draft.parent(id).unwrap_or(id));
     }
 
     /// Replaces a node with a parsed single-node YAML fragment, retaining its
@@ -276,73 +186,10 @@ impl<'a> Editor<'a> {
     fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let offset = editor.candidate.nodes.len();
-            let root = editor.import(yaml, editor.parents[id.0])?;
-            if preserve {
-                let old = &editor.candidate.nodes[id.0];
-                let mut replacement = editor.candidate.nodes[root.0].clone();
-                replacement.anchor.clone_from(&old.anchor);
-                match (&old.kind, &mut replacement.kind) {
-                    (
-                        NodeKind::Scalar {
-                            style: previous, ..
-                        },
-                        NodeKind::Scalar { style, .. },
-                    ) => {
-                        if emit::meaning(&editor.candidate.nodes[root.0], *previous)
-                            == emit::meaning(&editor.candidate.nodes[root.0], *style)
-                        {
-                            *style = *previous;
-                        }
-                    }
-                    (
-                        NodeKind::Sequence {
-                            style: previous, ..
-                        },
-                        NodeKind::Sequence { style, .. },
-                    )
-                    | (
-                        NodeKind::Mapping {
-                            style: previous, ..
-                        },
-                        NodeKind::Mapping { style, .. },
-                    ) => {
-                        *style = *previous;
-                    }
-                    _ => {}
-                }
-                editor.candidate.nodes[root.0] = replacement;
-            }
-            let simple = inline_node(&editor.candidate.nodes[id.0])
-                && inline_node(&editor.candidate.nodes[root.0]);
-            let comments = merged_comments(
-                &editor.candidate.nodes[id.0],
-                &editor.candidate.nodes[root.0],
-            );
-            let span = editor.candidate.nodes[id.0].span;
-            editor.remove_tree(id)?;
-            editor.alive[id.0] = true;
-            editor.alive[root.0] = false;
-            editor.candidate.nodes[id.0] = editor.candidate.nodes[root.0].clone();
-            editor.candidate.nodes[id.0].comments = comments;
-            editor.candidate.nodes[id.0].span = span;
-            for index in offset..editor.candidate.nodes.len() {
-                remap(&mut editor.candidate.nodes[index], |target| {
-                    if target == root { id } else { target }
-                });
-                if editor.parents[index] == Some(root) {
-                    editor.parents[index] = Some(id);
-                }
-            }
-            remap(&mut editor.candidate.nodes[id.0], |target| {
-                if target == root { id } else { target }
-            });
-            if simple
-                && editor.candidate.nodes[id.0]
-                    .comments
-                    .iter()
-                    .all(|c| c.span.is_some())
-            {
+            let simple = inline_node(editor.draft.node(id));
+            editor.draft.replace(id, yaml, preserve)?;
+            let node = editor.draft.node(id);
+            if simple && inline_node(node) && node.comments.iter().all(|c| c.span.is_some()) {
                 editor.mark(id);
             } else {
                 editor.mark_parent(id);
@@ -363,14 +210,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(sequence)?;
-            let child = editor.import(yaml, Some(id))?;
-            let NodeKind::Sequence { items, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                return Err(editor.error("expected a sequence"));
-            };
-            if index > items.len() {
-                return Err(editor.error("item index out of bounds"));
-            }
-            items.insert(index, child);
+            editor.draft.insert_item(id, index, yaml)?;
             editor.mark(id);
             Ok(())
         })
@@ -383,16 +223,7 @@ impl<'a> Editor<'a> {
     pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(sequence)?;
-            let NodeKind::Sequence { items, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                return Err(editor.error("expected a sequence"));
-            };
-            if index >= items.len() {
-                return Err(editor.error("item index out of bounds"));
-            }
-            let child = items.remove(index);
-            let following = items.get(index).copied();
-            retarget_comments(&mut editor.candidate.nodes[id.0], child, following);
-            editor.remove_tree(child)?;
+            editor.draft.remove_item(id, index)?;
             editor.mark(id);
             Ok(())
         })
@@ -411,15 +242,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(mapping)?;
-            let key = editor.import(key, Some(id))?;
-            let value = editor.import(value, Some(id))?;
-            let NodeKind::Mapping { entries, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                return Err(editor.error("expected a mapping"));
-            };
-            if index > entries.len() {
-                return Err(editor.error("entry index out of bounds"));
-            }
-            entries.insert(index, (key, value));
+            editor.draft.insert_entry(id, index, key, value)?;
             editor.mark(id);
             Ok(())
         })
@@ -432,17 +255,7 @@ impl<'a> Editor<'a> {
     pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(mapping)?;
-            let NodeKind::Mapping { entries, .. } = &mut editor.candidate.nodes[id.0].kind else {
-                return Err(editor.error("expected a mapping"));
-            };
-            if index >= entries.len() {
-                return Err(editor.error("entry index out of bounds"));
-            }
-            let (key, value) = entries.remove(index);
-            let following = entries.get(index).map(|&(key, _)| key);
-            retarget_comments(&mut editor.candidate.nodes[id.0], key, following);
-            editor.remove_tree(key)?;
-            editor.remove_tree(value)?;
+            editor.draft.remove_entry(id, index)?;
             editor.mark(id);
             Ok(())
         })
@@ -456,18 +269,7 @@ impl<'a> Editor<'a> {
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let NodeKind::Scalar { style: current, .. } = &mut editor.candidate.nodes[id.0].kind
-            else {
-                return Err(editor.error("expected a scalar"));
-            };
-            let before = *current;
-            *current = style;
-            if super::emit::meaning(&editor.candidate.nodes[id.0], before)
-                != super::emit::meaning(&editor.candidate.nodes[id.0], style)
-            {
-                return Err(editor.error("requested style changes the scalar type"));
-            }
-            editor.candidate.requested_styles.insert(id);
+            let before = editor.draft.set_scalar_style(id, style)?;
             if matches!(before, ScalarStyle::Literal | ScalarStyle::Folded)
                 || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
             {
@@ -491,12 +293,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            match &mut editor.candidate.nodes[id.0].kind {
-                NodeKind::Sequence { style: current, .. }
-                | NodeKind::Mapping { style: current, .. } => *current = style,
-                _ => return Err(editor.error("expected a collection")),
-            }
-            editor.candidate.requested_styles.insert(id);
+            editor.draft.set_collection_style(id, style)?;
             editor.mark(id);
             Ok(())
         })
@@ -517,32 +314,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            editor.comment_text(text)?;
-            let comments = &mut editor.candidate.nodes[id.0].comments;
-            if index > comments.len() {
-                return Err(editor.error("comment index out of bounds"));
-            }
-            comments.insert(
-                index,
-                Comment {
-                    text: text.to_owned(),
-                    placement,
-                    position: if placement == CommentPlacement::Leading {
-                        CommentPosition::Before
-                    } else if placement == CommentPlacement::Detached {
-                        comments[index..]
-                            .iter()
-                            .find_map(|comment| match comment.position {
-                                CommentPosition::BeforeChild(_) => Some(comment.position),
-                                _ => None,
-                            })
-                            .unwrap_or(CommentPosition::After)
-                    } else {
-                        CommentPosition::After
-                    },
-                    span: None,
-                },
-            );
+            editor.draft.insert_comment(id, index, text, placement)?;
             editor.mark_parent(id);
             Ok(())
         })
@@ -560,12 +332,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            editor.comment_text(text)?;
-            let Some(comment) = editor.candidate.nodes[id.0].comments.get_mut(index) else {
-                return Err(editor.error("comment index out of bounds"));
-            };
-            text.clone_into(&mut comment.text);
-            let span = comment.span;
+            let span = editor.draft.replace_comment(id, index, text)?;
             editor.comment_change(id, span);
             Ok(())
         })
@@ -578,26 +345,10 @@ impl<'a> Editor<'a> {
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let comments = &mut editor.candidate.nodes[id.0].comments;
-            if index >= comments.len() {
-                return Err(editor.error("comment index out of bounds"));
-            }
-            let comment = comments.remove(index);
-            editor.comment_change(id, comment.span);
+            let span = editor.draft.remove_comment(id, index)?;
+            editor.comment_change(id, span);
             Ok(())
         })
-    }
-
-    fn comment_text(&mut self, text: &str) -> Result<(), Error> {
-        if text.contains(['\r', '\n']) {
-            return Err(self.error("comment text contains a line break"));
-        }
-        self.introduced_bytes = self
-            .introduced_bytes
-            .checked_add(text.len())
-            .filter(|&size| size <= self.original.options.max_input_bytes)
-            .ok_or_else(|| self.error("inserted YAML exceeds input byte limit"))?;
-        self.charge(1)
     }
 
     fn comment_change(&mut self, id: NodeId, span: Option<Span>) {
@@ -617,146 +368,46 @@ impl<'a> Editor<'a> {
         if let Some(error) = self.failure.take() {
             return Err(error);
         }
-        let syntax = Layout::new(&self.candidate);
+        self.rewrites.retain(|&id| self.draft.contains(id));
+        let candidate = self.draft.freeze();
+        let syntax = Layout::new(&candidate);
         let original = Source::from(self.original);
         let framed = if self.rewrites.is_empty() && !self.root_comments_changed {
             None
         } else {
-            super::framing::prepare(&original, (&self.candidate).into(), &syntax)
+            super::framing::prepare(&original, (&candidate).into(), &syntax)
         };
         let (source, planned) = framed.as_ref().map_or_else(
-            || (&original, (&self.candidate).into()),
+            || (&original, (&candidate).into()),
             |framed| (&framed.source, framed.syntax()),
         );
-        let output = self.plan(source, planned).render(&syntax)?;
-        self.candidate.commit(
-            &output,
-            self.original.options,
-            self.original.nodes[self.original.root.0].span,
+        let output = plan(
+            source,
+            &candidate,
+            planned,
+            &self.rewrites,
+            self.root_comments_changed,
         )
-    }
-
-    fn plan<'b>(&'b self, source: &'b Source, candidate: Syntax<'b, Option<Span>>) -> Plan<'b> {
-        Plan {
-            original: source,
-            candidate,
-            parents: &self.parents,
-            rewrites: &self.rewrites,
-            root_comments_changed: self.root_comments_changed,
-            work: &self.work,
-        }
+        .render(&syntax)?;
+        candidate.commit(&output)
     }
 }
 
-fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
-    for comment in &mut node.comments {
-        if let CommentPosition::BeforeChild(child) = &mut comment.position {
-            *child = map(*child);
-        }
+fn plan<'a>(
+    source: &'a Source,
+    candidate: &'a Candidate,
+    rendering: Syntax<'a, Option<Span>>,
+    rewrites: &'a HashSet<NodeId>,
+    root_comments_changed: bool,
+) -> Plan<'a> {
+    Plan {
+        original: source,
+        candidate: rendering,
+        parents: candidate.parents(),
+        rewrites,
+        root_comments_changed,
+        work: candidate.work(),
     }
-    match &mut node.kind {
-        NodeKind::Sequence { items, .. } => {
-            for item in items {
-                *item = map(*item);
-            }
-        }
-        NodeKind::Mapping { entries, .. } => {
-            for (key, value) in entries {
-                *key = map(*key);
-                *value = map(*value);
-            }
-        }
-        NodeKind::Alias { target, .. } => *target = map(*target),
-        NodeKind::Scalar { .. } => {}
-    }
-}
-
-/// A removed child leaves its preceding gap before the next surviving child.
-fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: Option<NodeId>) {
-    for comment in &mut node.comments {
-        if comment.position == CommentPosition::BeforeChild(removed) {
-            comment.position =
-                following.map_or(CommentPosition::After, CommentPosition::BeforeChild);
-        }
-    }
-}
-
-/// Merge the retained and imported comments at their structural positions.
-/// Each list keeps its own order; retained comments precede imports at a shared
-/// boundary. Collection gaps retain their ordinal position in the replacement.
-fn merged_comments(
-    old: &Node<Option<Span>>,
-    replacement: &Node<Option<Span>>,
-) -> Vec<Comment<Option<Span>>> {
-    #[derive(PartialEq, Eq, PartialOrd, Ord)]
-    enum Boundary {
-        InlineBefore,
-        DetachedBefore,
-        LeadingBefore,
-        Header,
-        Opening,
-        BeforeChild(usize),
-        InlineAfter,
-        TrailingAfter,
-        DetachedAfter,
-    }
-    fn boundaries(kind: &NodeKind) -> Vec<NodeId> {
-        match kind {
-            NodeKind::Sequence { items, .. } => items.clone(),
-            NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
-            _ => Vec::new(),
-        }
-    }
-    let old_children = boundaries(&old.kind);
-    let new_children = boundaries(&replacement.kind);
-    let following: HashMap<_, _> = old_children
-        .into_iter()
-        .enumerate()
-        .map(|(index, child)| (child, new_children.get(index).copied()))
-        .collect();
-    let mut comments = old.comments.clone();
-    for comment in &mut comments {
-        if let CommentPosition::BeforeChild(child) = comment.position {
-            comment.position =
-                following[&child].map_or(CommentPosition::After, CommentPosition::BeforeChild);
-        }
-    }
-    let positions: HashMap<_, _> = new_children
-        .into_iter()
-        .enumerate()
-        .map(|(index, child)| (child, index))
-        .collect();
-    let boundary = |comment: &Comment<Option<Span>>| match comment.position {
-        CommentPosition::Before => match comment.placement {
-            CommentPlacement::Inline => Boundary::InlineBefore,
-            CommentPlacement::Detached => Boundary::DetachedBefore,
-            _ => Boundary::LeadingBefore,
-        },
-        CommentPosition::Header => Boundary::Header,
-        CommentPosition::Opening => Boundary::Opening,
-        CommentPosition::BeforeChild(child) => Boundary::BeforeChild(positions[&child]),
-        CommentPosition::After if comment.placement == CommentPlacement::Inline => {
-            Boundary::InlineAfter
-        }
-        CommentPosition::After if comment.placement == CommentPlacement::Detached => {
-            Boundary::DetachedAfter
-        }
-        CommentPosition::After => Boundary::TrailingAfter,
-    };
-    let mut retained = comments.into_iter().peekable();
-    let mut imported = replacement.comments.iter().cloned().peekable();
-    let mut merged = Vec::with_capacity(retained.len() + imported.len());
-    while let (Some(left), Some(right)) = (retained.peek(), imported.peek()) {
-        let next = if boundary(left) <= boundary(right) {
-            retained.next()
-        } else {
-            imported.next()
-        };
-        merged.push(next.expect("remaining comment"));
-    }
-    merged.extend(retained);
-    merged.extend(imported);
-    merged
 }
 
 fn inline_node(node: &Node<Option<Span>>) -> bool {

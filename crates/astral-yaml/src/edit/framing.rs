@@ -1018,22 +1018,26 @@ mod tests {
         let original = Source::from(&document);
         let mut candidate = Draft::from(&document);
         for text in [" added 1", " added 2", " added 3", " added 4"] {
-            candidate.nodes[candidate.root.0].comments.push(Comment {
-                text: text.to_owned(),
-                placement: CommentPlacement::Inline,
-                position: CommentPosition::After,
-                span: None,
-            });
+            candidate
+                .insert_comment(
+                    candidate.root(),
+                    candidate.node(candidate.root()).comments.len(),
+                    text,
+                    CommentPlacement::Inline,
+                )
+                .unwrap();
         }
+        let candidate = candidate.freeze();
+        let candidate = Syntax::from(&candidate);
         let before = RootComments::plan(
             &original,
-            (&candidate).into(),
+            candidate,
             Some(emit::region(&original, original.root, true)),
-            &RootLayout::new(&original, (&candidate).into(), &Layout::new(&candidate)),
+            &RootLayout::new(&original, candidate, &Layout::new(candidate)),
         )
         .unwrap();
-        let syntax = Layout::new(&candidate);
-        let prepared = prepare(&original, (&candidate).into(), &syntax).unwrap();
+        let syntax = Layout::new(candidate);
+        let prepared = prepare(&original, candidate, &syntax).unwrap();
         let framed = &prepared.source;
         for (old, new) in original.nodes.iter().zip(&framed.nodes) {
             assert_eq!(old.span.slice(&original.text), new.span.slice(&framed.text));
