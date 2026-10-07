@@ -46,10 +46,13 @@ Seeding preserves existing corpus discoveries and artifacts.
   It checks the draft after each modeled operation and the committed document
   after each batch, including scalar types, child order, anchors, alias target
   identity, and directly owned leading comments. Comment insertion, replacement,
-  and removal compose with structural edits and layout requests. Its first byte
-  selects the initial graph and batch size; each following
-  three-byte group selects an operation and position. Inputs are limited to 512
-  bytes and 32 operations. Destructive edits are generated only when all retained
+  and removal compose with structural edits and layout requests. Collections vary
+  from zero to three children or entries, and strings include syntax indicators,
+  Unicode, escaped control characters, and multiline content. The first byte
+  selects the batch size; up to the first eight bytes seed the initial graph.
+  Each three-byte group after the first byte selects an operation and position.
+  Inputs are limited to 512 bytes and 32 operations. Destructive edits are
+  generated only when all retained
   aliases still have targets. Canceled item and comment insertions must retain the
   exact source.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,

@@ -19,6 +19,18 @@ const TEXT: &[&str] = &[
     "\u{feff}",
     "\r\n",
     "1.5",
+    "---",
+    "...",
+    "# comment",
+    "? key",
+    ": value",
+    "- item",
+    "tab\tinside",
+    "line\n\nbreak",
+    "nul\0inside",
+    "é\u{2028}end",
+    "\\literal",
+    "quotes'\"",
 ];
 
 #[derive(Clone, Debug)]
@@ -352,10 +364,14 @@ impl Builder {
                 _ => Scalar::String(choice % TEXT.len()),
             })
         } else if choice % 2 == 0 {
-            Kind::Sequence((0..2).map(|_| self.tree(depth - 1, &ancestors)).collect())
+            Kind::Sequence(
+                (0..(choice >> 8) % 4)
+                    .map(|_| self.tree(depth - 1, &ancestors))
+                    .collect(),
+            )
         } else {
             Kind::Mapping(
-                (0..2)
+                (0..(choice >> 8) % 4)
                     .map(|_| {
                         (
                             self.tree(depth - 1, &ancestors),
@@ -720,9 +736,14 @@ pub fn check_recursive_edits(data: &[u8]) {
     if data.len() < 4 || data.len() > 512 {
         return;
     }
+    // The operation bytes also seed the initial graph, so fuzzing can explore
+    // more than the 256 shapes selected by the batch-control byte alone.
+    let mut seed = [0; 8];
+    let length = data.len().min(seed.len());
+    seed[..length].copy_from_slice(&data[..length]);
     let mut builder = Builder {
         next_id: 0,
-        state: u64::from(data[0]),
+        state: u64::from_le_bytes(seed),
     };
     let mut model = builder.document();
     let mut document = EditableDocument::parse(&model.yaml()).unwrap();

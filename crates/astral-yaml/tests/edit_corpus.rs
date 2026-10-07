@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use astral_yaml::{
-    NodeId,
+    CollectionStyle, NodeId,
     comments::CommentPlacement,
     edit::{EditableDocument, NodeKind},
 };
@@ -22,7 +22,7 @@ struct Occurrence {
     content: Content,
     anchor: Option<String>,
     tag: Option<String>,
-    comments: Vec<(String, CommentPlacement)>,
+    comments: Vec<(String, CommentPlacement, Option<usize>)>,
 }
 
 /// Preorder gives corresponding occurrences an identity independent of parser
@@ -51,6 +51,11 @@ fn project(document: &EditableDocument) -> Vec<Occurrence> {
         .into_iter()
         .map(|id| {
             let node = document.node(id).unwrap();
+            let children: Vec<_> = match node.kind() {
+                NodeKind::Sequence { items, .. } => items.clone(),
+                NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
+                _ => Vec::new(),
+            };
             Occurrence {
                 content: match node.kind() {
                     NodeKind::Scalar { value, .. } => Content::Scalar(value.clone()),
@@ -63,7 +68,22 @@ fn project(document: &EditableDocument) -> Vec<Occurrence> {
                 comments: node
                     .comments()
                     .iter()
-                    .map(|comment| (comment.text().to_owned(), comment.placement()))
+                    .map(|comment| {
+                        // Derive the collection gap from public source positions,
+                        // independently of the editor's stored comment boundary.
+                        let gap = (comment.placement() == CommentPlacement::Detached
+                            && !children.is_empty())
+                        .then(|| {
+                            children
+                                .iter()
+                                .position(|&child| {
+                                    comment.span().start()
+                                        < document.node(child).unwrap().span().start()
+                                })
+                                .unwrap_or(children.len())
+                        });
+                        (comment.text().to_owned(), comment.placement(), gap)
+                    })
                     .collect(),
             }
         })
@@ -145,6 +165,70 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
             })
             .unwrap_or_else(|error| panic!("{}: {error}", fixture.file));
         assert_projection(&document, &expected, &fixture.file);
+    }
+    assert!(
+        tested > 0,
+        "the corpus must contain single-document fixtures"
+    );
+}
+
+#[test]
+fn corpus_collection_layout_changes_preserve_the_expected_graph() {
+    let mut tested = 0;
+    for fixture in fixtures::manifest()
+        .into_iter()
+        .filter(fixtures::Fixture::valid_syntax)
+    {
+        let source = fixture.source();
+        if astral_yaml::parse(&source).unwrap().documents().len() != 1 {
+            continue;
+        }
+        let original = EditableDocument::parse(&source).unwrap();
+        tested += 1;
+        let expected = project(&original);
+        let mut document = original;
+        for style in [
+            CollectionStyle::Flow,
+            CollectionStyle::Block,
+            CollectionStyle::Flow,
+        ] {
+            let result = document.edit(|editor| {
+                let mut pending = vec![editor.root()];
+                while let Some(handle) = pending.pop() {
+                    let empty = match editor.node(&handle)?.kind() {
+                        NodeKind::Sequence { items, .. } => {
+                            let empty = items.is_empty();
+                            pending.extend(editor.sequence_items(&handle)?);
+                            empty
+                        }
+                        NodeKind::Mapping { entries, .. } => {
+                            let empty = entries.is_empty();
+                            for (key, value) in editor.mapping_entries(&handle)? {
+                                pending.extend([key, value]);
+                            }
+                            empty
+                        }
+                        _ => continue,
+                    };
+                    editor.set_collection_style(
+                        &handle,
+                        if empty { CollectionStyle::Flow } else { style },
+                    )?;
+                }
+                Ok(())
+            });
+            result.unwrap_or_else(|error| panic!("{} {style:?}: {error}", fixture.file));
+            assert_projection(&document, &expected, &fixture.file);
+            let normalized = document.normalized_yaml().unwrap();
+            let normalized = EditableDocument::parse(&normalized).unwrap();
+            assert_projection(&normalized, &expected, &fixture.file);
+            assert_eq!(
+                normalized.normalized_yaml().unwrap(),
+                normalized.source(),
+                "{}: normalization is idempotent after {style:?}",
+                fixture.file
+            );
+        }
     }
     assert!(
         tested > 0,
