@@ -7,7 +7,7 @@ use std::{cell::Cell, collections::HashMap, ops::Range};
 /// Ancestor wrappers retain this placement when collecting descendant comments.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommentPlacement {
-    /// Immediately precedes a field or sequence item, without a blank line.
+    /// Immediately precedes its node, field, or sequence item, without a blank line.
     Leading,
     /// Follows syntax on the same line, including a node's header.
     Inline,
@@ -304,9 +304,17 @@ impl Tree<'_, '_> {
             return (index, self.placement(node.span, comment));
         };
 
-        // Properties and opening/closing delimiters belong to the collection,
-        // rather than to the first or last child sharing that line.
-        if (node.span.start() <= at && at < collection.start)
+        // An opening delimiter or property header separates the collection
+        // from its children. Comments before that header cannot belong to a
+        // child, including when they precede the collection's complete span.
+        // Implicit block collections instead use indentation: an outdented prefix
+        // belongs to the collection, while aligned prefixes belong to children.
+        // Closing flow delimiters similarly bound the last child.
+        let explicit_header = collection.flow || node.span.start() < collection.start;
+        let outside_indentation =
+            at < node.span.start() && self.lines.column(at) < self.lines.column(collection.start);
+        if outside_indentation
+            || (explicit_header && at < collection.start)
             || (collection.flow && at >= node.span.end())
         {
             return (index, self.placement(node.span, comment));
