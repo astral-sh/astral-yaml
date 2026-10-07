@@ -3,7 +3,7 @@ use crate::edit::draft::Draft;
 use crate::edit::splice::{indent, region, render};
 use astral_yaml_dev::indoc;
 
-/// Exercise emission without constructing a fictitious committed document.
+/// Render a frozen draft against its original source.
 fn render_draft(original: &EditableDocument, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
@@ -608,8 +608,7 @@ fn normalized_syntax_preserves_values_and_comments() {
         let document = EditableDocument::parse(source).unwrap();
         assert_eq!(document.to_yaml(), source);
         let output = document.normalized_yaml().expect(source);
-        // Entering the draft phase changes the location type, not the syntax
-        // or its rendering. Check this across the normalization corpus.
+        // Location types must not affect output.
         assert_eq!(render_draft(&document, Draft::from(&document)), output);
         assert_eq!(
             astral_yaml_dev::benchmarks::documents::<Value>(&output),

@@ -36,10 +36,8 @@ struct LocatedComment<'a> {
     span: Span,
 }
 
-/// Supply document boundaries required by the final root layout. The original
-/// and candidate keep the same node identities; only source coordinates move.
-/// Planning against this framed source lets retained and generated markers use
-/// the same comment-placement rules.
+/// Add document boundaries required by the root layout, relocating source
+/// coordinates while retaining node identities.
 pub(super) fn prepare(
     original: &Source,
     candidate: Syntax<'_, Option<Span>>,

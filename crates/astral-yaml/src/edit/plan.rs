@@ -1,5 +1,4 @@
-//! Source planning reads a frozen draft and a separate source index. It emits
-//! replacement text; it cannot publish a document or alter the semantic draft.
+//! Plan source rewrites from the immutable candidate and original source index.
 
 use super::{
     Comment, Node, NodeKind,
@@ -23,16 +22,14 @@ pub(super) struct Plan<'a> {
     pub(super) work: &'a Cell<usize>,
 }
 
-/// A selected subtree and the exact source reservation used to check overlap.
-/// Rendering consumes this same boundary rather than deriving another range.
+/// A subtree and its source boundary, shared by overlap checks and rendering.
 pub(super) struct Rewrite<'a> {
     pub(super) id: NodeId,
     pub(super) boundary: Boundary<'a>,
     context: emit::Context,
 }
 
-/// Differences between the original syntax and the final intended tree. This
-/// has no mutation history: canceled edits cannot leave stale rewrite marks.
+/// Differences from the final candidate; canceled edits produce no rewrites.
 pub(super) struct Changes {
     roots: HashSet<NodeId>,
     root_comments: bool,

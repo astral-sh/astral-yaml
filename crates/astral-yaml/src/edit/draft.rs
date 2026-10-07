@@ -172,7 +172,6 @@ impl Draft {
 
     /// Assign final identities before attaching a parsed fragment. A replacement
     /// root reuses its destination directly, including self-referential aliases.
-    /// No temporary live root or second remapping pass is needed.
     fn attach(
         &mut self,
         document: EditableDocument,

@@ -8,9 +8,8 @@ use super::{
 };
 use crate::{NodeId, ParseOptions, Span};
 
-/// Retain content boundaries while property spans are still available from
-/// the parser. Source planning must not guess indentation from a property's
-/// position, which can be on an earlier line or after a field indicator.
+/// Index content separately from properties, which can start on another line
+/// or follow a field indicator with different indentation.
 pub(super) fn contents(source: &str, nodes: &[crate::Node<'_>]) -> Vec<Span> {
     nodes
         .iter()
@@ -119,7 +118,7 @@ pub(super) struct Frame<'a> {
     ends: Vec<Marker>,
 }
 
-/// Read-only rendering syntax. It has no mutation operations or commit method.
+/// Rendering syntax with coordinates in the framed source.
 pub(super) struct Prepared {
     pub(super) source: Source,
     nodes: Vec<Node<Option<Span>>>,
