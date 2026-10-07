@@ -73,6 +73,13 @@ The cursor also provides `node()` for inspection, `set_scalar_style()` and
 comments. Styles and `CommentPlacement` are re-exported from
 `astral_yaml_serde::edit`.
 
+Inside a transaction, `node()` returns `Node<Option<Span>>`. A node or comment
+with `Some(span)` refers to its original occurrence in the normalized source;
+replacement retains that provenance even when its text changes. Inserted syntax
+has `None`. An originally omitted value has `Some(empty_span)`, which is distinct
+from an inserted value. After commit, every node and comment has a fresh `Span`
+in the committed source.
+
 ## Transactions
 
 `value()` and `syntax()` inspect the committed state. Cursors see the current
@@ -87,6 +94,9 @@ returns that value only after the transaction commits.
 Before commit, the editor emits and reparses the candidate, checks content,
 alias identity, requested styles, and comment ownership, placement, and order,
 then deserializes `T`.
+Mutations build a draft with no source text. Source planning reads that draft
+and the original document. Any coordinate changes needed for document framing
+belong to a separate rendering view; commit checks still use the unchanged draft.
 Rewrite regions are selected from the final candidate, so intermediate style
 changes do not force a larger rewrite when the final syntax fits in place.
 Root comment changes are also planned from the final candidate. Changing only
