@@ -1,13 +1,12 @@
 use super::{
-    CommentPosition, EditableDocument, Node, NodeKind,
-    draft::{Candidate, Draft},
+    EditableDocument, Node, NodeKind,
+    draft::Draft,
     layout::Layout,
-    plan::Plan,
+    plan::{Changes, Plan},
     source::Source,
-    view::Syntax,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(test)]
 #[path = "transaction_tests.rs"]
@@ -29,8 +28,6 @@ pub struct Editor<'a> {
     original: &'a EditableDocument,
     draft: Draft,
     transaction: Arc<()>,
-    rewrites: HashSet<NodeId>,
-    root_comments_changed: bool,
     failure: Option<Error>,
 }
 
@@ -71,8 +68,6 @@ impl<'a> Editor<'a> {
             original,
             draft: Draft::from(original),
             transaction: Arc::new(()),
-            rewrites: HashSet::new(),
-            root_comments_changed: false,
             failure: None,
         }
     }
@@ -154,14 +149,6 @@ impl<'a> Editor<'a> {
             .collect())
     }
 
-    fn mark(&mut self, id: NodeId) {
-        self.rewrites.insert(id);
-    }
-
-    fn mark_parent(&mut self, id: NodeId) {
-        self.mark(self.draft.parent(id).unwrap_or(id));
-    }
-
     /// Replaces a node with a parsed single-node YAML fragment, retaining its
     /// outer comment attachments. Its handle remains valid; handles to its old
     /// descendants expire. Later operations see the replacement's content.
@@ -186,14 +173,7 @@ impl<'a> Editor<'a> {
     fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let simple = inline_node(editor.draft.node(id));
             editor.draft.replace(id, yaml, preserve)?;
-            let node = editor.draft.node(id);
-            if simple && inline_node(node) && node.comments.iter().all(|c| c.span.is_some()) {
-                editor.mark(id);
-            } else {
-                editor.mark_parent(id);
-            }
             Ok(())
         })
     }
@@ -211,7 +191,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(sequence)?;
             editor.draft.insert_item(id, index, yaml)?;
-            editor.mark(id);
             Ok(())
         })
     }
@@ -224,7 +203,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(sequence)?;
             editor.draft.remove_item(id, index)?;
-            editor.mark(id);
             Ok(())
         })
     }
@@ -243,7 +221,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(mapping)?;
             editor.draft.insert_entry(id, index, key, value)?;
-            editor.mark(id);
             Ok(())
         })
     }
@@ -256,7 +233,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(mapping)?;
             editor.draft.remove_entry(id, index)?;
-            editor.mark(id);
             Ok(())
         })
     }
@@ -269,14 +245,7 @@ impl<'a> Editor<'a> {
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let before = editor.draft.set_scalar_style(id, style)?;
-            if matches!(before, ScalarStyle::Literal | ScalarStyle::Folded)
-                || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
-            {
-                editor.mark_parent(id);
-            } else {
-                editor.mark(id);
-            }
+            editor.draft.set_scalar_style(id, style)?;
             Ok(())
         })
     }
@@ -294,7 +263,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
             editor.draft.set_collection_style(id, style)?;
-            editor.mark(id);
             Ok(())
         })
     }
@@ -315,7 +283,6 @@ impl<'a> Editor<'a> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
             editor.draft.insert_comment(id, index, text, placement)?;
-            editor.mark_parent(id);
             Ok(())
         })
     }
@@ -332,8 +299,7 @@ impl<'a> Editor<'a> {
     ) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let span = editor.draft.replace_comment(id, index, text)?;
-            editor.comment_change(id, span);
+            editor.draft.replace_comment(id, index, text)?;
             Ok(())
         })
     }
@@ -345,34 +311,20 @@ impl<'a> Editor<'a> {
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(|editor| {
             let id = editor.id(handle)?;
-            let span = editor.draft.remove_comment(id, index)?;
-            editor.comment_change(id, span);
+            editor.draft.remove_comment(id, index)?;
             Ok(())
         })
-    }
-
-    fn comment_change(&mut self, id: NodeId, span: Option<Span>) {
-        let root_span = self.original.nodes[self.original.root.0].span;
-        if id == self.original.root
-            && span.is_some_and(|span| {
-                span.start() < root_span.start() || span.end() > root_span.end()
-            })
-        {
-            self.root_comments_changed = true;
-        } else {
-            self.mark_parent(id);
-        }
     }
 
     fn finish(mut self) -> Result<EditableDocument, Error> {
         if let Some(error) = self.failure.take() {
             return Err(error);
         }
-        self.rewrites.retain(|&id| self.draft.contains(id));
         let candidate = self.draft.freeze();
         let syntax = Layout::new(&candidate);
         let original = Source::from(self.original);
-        let framed = if self.rewrites.is_empty() && !self.root_comments_changed {
+        let changes = Changes::between(&original, &candidate, &syntax);
+        let framed = if changes.is_empty() {
             None
         } else {
             super::framing::prepare(&original, (&candidate).into(), &syntax)
@@ -381,46 +333,14 @@ impl<'a> Editor<'a> {
             || (&original, (&candidate).into()),
             |framed| (&framed.source, framed.syntax()),
         );
-        let output = plan(
-            source,
-            &candidate,
-            planned,
-            &self.rewrites,
-            self.root_comments_changed,
-        )
+        let output = Plan {
+            original: source,
+            candidate: planned,
+            parents: candidate.parents(),
+            changes,
+            work: candidate.work(),
+        }
         .render(&syntax)?;
         candidate.commit(&output)
     }
-}
-
-fn plan<'a>(
-    source: &'a Source,
-    candidate: &'a Candidate,
-    rendering: Syntax<'a, Option<Span>>,
-    rewrites: &'a HashSet<NodeId>,
-    root_comments_changed: bool,
-) -> Plan<'a> {
-    Plan {
-        original: source,
-        candidate: rendering,
-        parents: candidate.parents(),
-        rewrites,
-        root_comments_changed,
-        work: candidate.work(),
-    }
-}
-
-fn inline_node(node: &Node<Option<Span>>) -> bool {
-    // Comments between properties and content need the parent's header and
-    // continuation indentation, even when the content itself fits on one line.
-    node.comments
-        .iter()
-        .all(|comment| comment.position != CommentPosition::Header)
-        && matches!(
-            node.kind,
-            NodeKind::Scalar {
-                style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
-                ..
-            } | NodeKind::Alias { .. }
-        )
 }

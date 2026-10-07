@@ -1129,3 +1129,56 @@ fn replacement_handles_survive_composed_structural_edits() {
      retained: untouched
     ");
 }
+
+#[test]
+fn canceled_edits_do_not_expand_the_final_rewrite() {
+    use astral_yaml::ScalarStyle;
+
+    let source = indoc! {r"
+        edited: old
+        untouched:   [x,y]
+    "};
+    let mut diffs = Vec::new();
+    for replacement in [None, Some("new")] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let value = editor.mapping_entries(&editor.root())?[0].1.clone();
+                editor.set_scalar_style(&value, ScalarStyle::Literal)?;
+                editor.set_scalar_style(&value, ScalarStyle::Plain)?;
+                editor.insert_comment(&value, 0, "temporary", CommentPlacement::Leading)?;
+                editor.remove_comment(&value, 0)?;
+                let items = editor.mapping_entries(&editor.root())?[1].1.clone();
+                editor.insert_item(&items, 1, "temporary")?;
+                editor.remove_item(&items, 1)?;
+                editor.set_collection_style(&items, astral_yaml::CollectionStyle::Block)?;
+                editor.set_collection_style(&items, astral_yaml::CollectionStyle::Flow)?;
+                if let Some(replacement) = replacement {
+                    editor.replace(&value, replacement)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let diff = edit_diff(source, document.source());
+        diffs.push(format!(
+            "Final replacement: {replacement:?}\n{}",
+            if diff.is_empty() {
+                "unchanged\n"
+            } else {
+                &diff
+            }
+        ));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    Final replacement: None
+    unchanged
+
+    Final replacement: Some("new")
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -edited: old
+    +edited: new
+     untouched:   [x,y]
+    "#);
+}

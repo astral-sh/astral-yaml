@@ -151,9 +151,7 @@ fn failed_mutations_leave_the_tree_and_membership_unchanged() {
             draft.remove_entry(draft.root(), 0)
         }),
         ("scalar type change", "true", |draft| {
-            draft
-                .set_scalar_style(draft.root(), ScalarStyle::SingleQuoted)
-                .map(|_| ())
+            draft.set_scalar_style(draft.root(), ScalarStyle::SingleQuoted)
         }),
     ];
     let mut errors = Vec::new();

@@ -583,7 +583,7 @@ fn explicit_keys_accept_block_style_requests() {
             .unwrap();
         diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
@@ -602,21 +602,17 @@ fn explicit_keys_accept_block_style_requests() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -? - a
-    +?
-    +  - a
+    @@ -1,3 +1,3 @@
+     ? - a
        - b
     -: value
     +: updated
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,3 @@
-    -? k: v
+    @@ -1,2 +1,2 @@
+     ? k: v
     -: value
-    +?
-    +  k: v
     +: updated
 
     --- before.yaml
@@ -656,7 +652,7 @@ fn explicit_keys_accept_block_style_requests() {
        key
     -: [value]
     +: updated
-    ");
+    "#);
 }
 
 #[test]

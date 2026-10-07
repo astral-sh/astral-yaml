@@ -6,6 +6,7 @@ use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 #[test]
 fn emission_limits_roll_back_root_and_subtree_rewrites() {
     let quoted = format!("\"{}\"", "\\x01".repeat(8));
+    let replacement = format!("\"\\x02{}\"", "\\x01".repeat(7));
     for nested in [false, true] {
         let source = if nested {
             formatdoc! {r"
@@ -31,7 +32,7 @@ fn emission_limits_roll_back_root_and_subtree_rewrites() {
                 } else {
                     editor.root()
                 };
-                editor.set_scalar_style(&value, ScalarStyle::DoubleQuoted)
+                editor.replace(&value, &replacement)
             })
             .unwrap_err();
         assert_eq!(error.message, "emitted YAML exceeds input byte limit");
@@ -367,33 +368,27 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
     let mut diffs = Vec::new();
     for (source, style) in [
         (
-            indoc! {r"
-                'a
-
-                b'
-            "},
+            indoc! {r#"
+                "a\nb"
+            "#},
             ScalarStyle::SingleQuoted,
         ),
         (
-            indoc! {r"
-                a
-
-                b
-            "},
+            indoc! {r#"
+                "a\nb"
+            "#},
             ScalarStyle::Plain,
         ),
         (
-            indoc! {r"
-                |+
-
-            "},
+            indoc! {r#"
+                "\n"
+            "#},
             ScalarStyle::Literal,
         ),
         (
-            indoc! {r"
-                >+
-
-            "},
+            indoc! {r#"
+                "\n"
+            "#},
             ScalarStyle::Folded,
         ),
     ] {
@@ -403,39 +398,37 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
             .unwrap();
         diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,3 @@
-     'a
-     ⏎
-    -b'
+    @@ -1 +1,3 @@
+    -"a\nb"
+    +'a
+    +
     +  b'
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,3 @@
-     a
-     ⏎
-    -b
+    @@ -1 +1,3 @@
+    -"a\nb"
+    +a
+    +
     +  b
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -|+
-    -
+    @@ -1 +1,2 @@
+    -"\n"
     +|2+
     +  ⏎
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,2 @@
-    ->+
-    -
+    @@ -1 +1,2 @@
+    -"\n"
     +>2+
     +  ⏎
-    ");
+    "#);
 }
 
 #[test]

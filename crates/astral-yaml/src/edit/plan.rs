@@ -2,7 +2,9 @@
 //! replacement text; it cannot publish a document or alter the semantic draft.
 
 use super::{
-    NodeKind, emit,
+    Comment, CommentPosition, Node, NodeKind,
+    draft::Candidate,
+    emit,
     framing::{RootComments, RootLayout},
     layout::Layout,
     source::Source,
@@ -15,9 +17,134 @@ pub(super) struct Plan<'a> {
     pub(super) original: &'a Source,
     pub(super) candidate: Syntax<'a, Option<Span>>,
     pub(super) parents: &'a [Option<NodeId>],
-    pub(super) rewrites: &'a HashSet<NodeId>,
-    pub(super) root_comments_changed: bool,
+    pub(super) changes: Changes,
     pub(super) work: &'a Cell<usize>,
+}
+
+/// Differences between the original syntax and the final intended tree. This
+/// has no mutation history: canceled edits cannot leave stale rewrite marks.
+pub(super) struct Changes {
+    roots: HashSet<NodeId>,
+    root_comments: bool,
+}
+
+impl Changes {
+    pub(super) fn between(original: &Source, candidate: &Candidate, layout: &Layout) -> Self {
+        let syntax = Syntax::from(candidate);
+        let original_layout = Layout::new(original);
+        let mut changes = Self {
+            roots: HashSet::new(),
+            root_comments: false,
+        };
+        // New nodes are owned by a retained occurrence whose child list changed.
+        // Retired occurrences have no parent and cannot require a source rewrite.
+        for (index, old) in original.nodes.iter().enumerate() {
+            let id = NodeId(index);
+            let parent = candidate.parents()[index];
+            if parent.is_none() && id != syntax.root {
+                continue;
+            }
+            let new = &syntax.nodes[index];
+            let content = old.kind != new.kind || old.anchor != new.anchor || old.tag != new.tag;
+            let comments = !same_comments(&old.comments, &new.comments);
+            let resolved = original_layout.flow(id) != layout.flow(id)
+                || match (&old.kind, &new.kind) {
+                    (NodeKind::Scalar { style: old, .. }, NodeKind::Scalar { style: new, .. }) => {
+                        original_layout.scalar_style(id, *old) != layout.scalar_style(id, *new)
+                    }
+                    _ => false,
+                };
+            if !content && !comments && !resolved {
+                continue;
+            }
+            if id == syntax.root && !content && !resolved && only_outer_comments(old, new) {
+                changes.root_comments = true;
+                continue;
+            }
+            let attachments = old.comments.len() != new.comments.len()
+                || old
+                    .comments
+                    .iter()
+                    .zip(&new.comments)
+                    .any(|(old, new)| !same_attachment(old, new));
+            let collection = matches!(
+                (&old.kind, &new.kind),
+                (NodeKind::Sequence { .. }, NodeKind::Sequence { .. })
+                    | (NodeKind::Mapping { .. }, NodeKind::Mapping { .. })
+            );
+            // A collection owns its child list and delimiters. Token changes
+            // can also remain local when their properties/comments have no
+            // header. Other shape or attachment changes need the parent header.
+            let local = !attachments && (collection || (inline_node(old) && inline_node(new)));
+            changes
+                .roots
+                .insert(if local { id } else { parent.unwrap_or(id) });
+        }
+        changes
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.roots.is_empty() && !self.root_comments
+    }
+}
+
+fn same_attachment(old: &Comment, new: &Comment<Option<Span>>) -> bool {
+    new.span == Some(old.span) && old.text == new.text && old.placement == new.placement
+}
+
+fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
+    old.len() == new.len()
+        && old
+            .iter()
+            .zip(new)
+            .all(|(old, new)| same_attachment(old, new) && old.position == new.position)
+}
+
+/// Existing comments outside the root token can be edited in the framing while
+/// its body retains its source. Generated comments require a body/layout plan.
+fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
+    let body = |span: Span| span.start() >= old.span.start() && span.end() <= old.span.end();
+    if new.comments.iter().any(|comment| comment.span.is_none()) {
+        return false;
+    }
+    let old_body = old
+        .comments
+        .iter()
+        .filter(|comment| body(comment.span))
+        .map(|comment| {
+            (
+                Some(comment.span),
+                &comment.text,
+                comment.placement,
+                comment.position,
+            )
+        });
+    let new_body = new
+        .comments
+        .iter()
+        .filter(|comment| comment.span.is_some_and(body))
+        .map(|comment| {
+            (
+                comment.span,
+                &comment.text,
+                comment.placement,
+                comment.position,
+            )
+        });
+    old_body.eq(new_body)
+}
+
+fn inline_node<Location>(node: &Node<Location>) -> bool {
+    node.comments
+        .iter()
+        .all(|comment| comment.position != CommentPosition::Header)
+        && matches!(
+            node.kind,
+            NodeKind::Scalar {
+                style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+                ..
+            } | NodeKind::Alias { .. }
+        )
 }
 
 impl Plan<'_> {
@@ -68,18 +195,19 @@ impl Plan<'_> {
         }
 
         while let Some(parent) = self.parents[id.0] {
-            if id.0 < self.original.nodes.len() {
-                let multiline = syntax.multiline(id, &self.candidate.nodes[id.0].kind);
-                let start = self.original.nodes[id.0].span.start();
-                let prefix = self.original.text[..start]
-                    .rsplit('\n')
-                    .next()
-                    .unwrap_or("");
-                if (!multiline || prefix.bytes().all(|byte| byte == b' '))
-                    && !self.needs_mapping_rewrite(id, parent)
-                {
-                    break;
-                }
+            // Changes only selects retained occurrences. Their ownership path
+            // also belongs to the original source; imported nodes are covered
+            // by the retained collection whose child list changed.
+            let multiline = syntax.multiline(id, &self.candidate.nodes[id.0].kind);
+            let start = self.original.nodes[id.0].span.start();
+            let prefix = self.original.text[..start]
+                .rsplit('\n')
+                .next()
+                .unwrap_or("");
+            if (!multiline || prefix.bytes().all(|byte| byte == b' '))
+                && !self.needs_mapping_rewrite(id, parent)
+            {
+                break;
             }
             id = parent;
         }
@@ -146,7 +274,7 @@ impl Plan<'_> {
         layout: &RootLayout,
         syntax: &Layout,
     ) -> Result<Vec<(NodeId, Span)>, Error> {
-        let mut ids: Vec<_> = self.rewrites.iter().copied().collect();
+        let mut ids: Vec<_> = self.changes.roots.iter().copied().collect();
         if (!ids.is_empty() && layout.needs_suffix_context())
             || (layout.needs_scalar_boundary(self.candidate)
                 && syntax
@@ -265,7 +393,7 @@ impl Plan<'_> {
         let layout = RootLayout::new(self.original, self.candidate, syntax);
         let regions = self.rewrite_regions(&layout, syntax)?;
         let root_region = regions.iter().find(|&&(id, _)| id == self.candidate.root);
-        let mut root_comments = if root_region.is_some() || self.root_comments_changed {
+        let mut root_comments = if root_region.is_some() || self.changes.root_comments {
             let region = root_region.map(|&(_, region)| region);
             Some(self.root_comments(region, &layout)?)
         } else {

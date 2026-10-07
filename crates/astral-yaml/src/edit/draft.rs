@@ -346,11 +346,7 @@ impl Draft {
         Ok(())
     }
 
-    pub(super) fn set_scalar_style(
-        &mut self,
-        id: NodeId,
-        style: ScalarStyle,
-    ) -> Result<ScalarStyle, Error> {
+    pub(super) fn set_scalar_style(&mut self, id: NodeId, style: ScalarStyle) -> Result<(), Error> {
         let before = *self.scalar_style_mut(id)?;
         let node = self.node(id);
         if emit::meaning(node, before) != emit::meaning(node, style) {
@@ -358,7 +354,7 @@ impl Draft {
         }
         *self.scalar_style_mut(id)? = style;
         self.membership_mut(id).requested_style = true;
-        Ok(before)
+        Ok(())
     }
 
     pub(super) fn set_collection_style(
@@ -425,25 +421,22 @@ impl Draft {
         id: NodeId,
         index: usize,
         text: &str,
-    ) -> Result<Option<Span>, Error> {
+    ) -> Result<(), Error> {
         self.comment_text(text)?;
         let Some(comment) = self.slots[id.0].node.comments.get_mut(index) else {
             return Err(self.error("comment index out of bounds"));
         };
         text.clone_into(&mut comment.text);
-        Ok(comment.span)
+        Ok(())
     }
 
-    pub(super) fn remove_comment(
-        &mut self,
-        id: NodeId,
-        index: usize,
-    ) -> Result<Option<Span>, Error> {
+    pub(super) fn remove_comment(&mut self, id: NodeId, index: usize) -> Result<(), Error> {
         let comments = &mut self.slots[id.0].node.comments;
         if index >= comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
-        Ok(comments.remove(index).span)
+        comments.remove(index);
+        Ok(())
     }
 
     pub(super) fn freeze(self) -> Candidate {

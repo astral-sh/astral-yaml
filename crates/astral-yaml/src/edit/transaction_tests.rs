@@ -3,7 +3,7 @@ use crate::edit::{
     draft::{Candidate, same_style},
     emit,
     framing::RootLayout,
-    plan::Plan,
+    plan::{Changes, Plan},
     view::Syntax,
 };
 use astral_yaml_dev::{edit_diff, indoc};
@@ -11,18 +11,18 @@ use astral_yaml_dev::{edit_diff, indoc};
 use super::{EditableDocument, Editor, Layout, NodeKind, Source, Span};
 
 fn plan<'a>(
-    editor: &'a Editor<'_>,
     source: &'a Source,
     candidate: &'a Candidate,
     rendering: Syntax<'a, Option<Span>>,
 ) -> Plan<'a> {
-    super::plan(
-        source,
-        candidate,
-        rendering,
-        &editor.rewrites,
-        editor.root_comments_changed,
-    )
+    let changes = Changes::between(source, candidate, &Layout::new(candidate));
+    Plan {
+        original: source,
+        candidate: rendering,
+        parents: candidate.parents(),
+        changes,
+        work: candidate.work(),
+    }
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
         root: document.root,
     };
     let source_index = Source::from(&document);
-    let output = plan(&editor, &source_index, &candidate, planned)
+    let output = plan(&source_index, &candidate, planned)
         .render(&Layout::new(planned))
         .unwrap();
     let error = candidate.commit(&output).unwrap_err();
@@ -86,13 +86,14 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     // ranges expanded by trivia ownership, before slicing the original source.
     document.nodes[first.0].span = Span::new(2, 10).unwrap();
     let mut editor = Editor::new(&document);
-    editor.rewrites.extend([first, last]);
+    editor.replace(&editor.handle(first), "new_a").unwrap();
+    editor.replace(&editor.handle(last), "new_c").unwrap();
     let candidate = editor.draft.clone().freeze();
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(document.root, document.nodes[document.root.0].span)]
@@ -109,7 +110,7 @@ fn empty_transactions_do_not_require_rewrite_work() {
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         []
@@ -141,7 +142,7 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
@@ -149,7 +150,7 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     );
     candidate.work().set(0);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
@@ -365,7 +366,7 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(document.root, emit::region(&document, document.root, true))]
@@ -374,26 +375,70 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
 
 #[test]
 fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
-    let document = EditableDocument::parse(indoc! {r"
-        outer:
-          value: old
-        # trailing
-    "})
-    .unwrap();
-    let mut editor = Editor::new(&document);
-    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
-    editor
-        .insert_comment(
-            &inner,
-            0,
-            " detached",
-            crate::comments::CommentPlacement::Detached,
-        )
-        .unwrap();
-    let candidate = editor.draft.clone().freeze();
-    let syntax = Layout::new(&candidate);
-    assert!(syntax.flow(inner.id));
-    editor.finish().unwrap();
+    let mut results = Vec::new();
+    for source in [
+        indoc! {r"
+            outer:
+              value: old
+            # trailing
+        "},
+        indoc! {r"
+            outer:
+              value: |-
+                old
+            # trailing
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let mut editor = Editor::new(&document);
+        let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
+        let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
+        let before = editor.draft.clone().freeze();
+        let multiline_before =
+            Layout::new(&before).multiline(value.id, editor.node(&value).unwrap().kind());
+        editor
+            .insert_comment(
+                &inner,
+                0,
+                " detached",
+                crate::comments::CommentPlacement::Detached,
+            )
+            .unwrap();
+        let candidate = editor.draft.clone().freeze();
+        let layout = Layout::new(&candidate);
+        let multiline_after = layout.multiline(value.id, editor.node(&value).unwrap().kind());
+        let edited = editor.finish().unwrap();
+        results.push(format!(
+            "Scalar multiline: {multiline_before} -> {multiline_after}\n{}",
+            edit_diff(source, edited.source())
+        ));
+    }
+    insta::assert_snapshot!(results.join("\n"), @r#"
+    Scalar multiline: false -> false
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+    -outer:
+    -  value: old
+    +outer: {value: old
+    +  ⏎
+    +  # detached
+    +  }
+     # trailing
+
+    Scalar multiline: true -> false
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,5 @@
+    -outer:
+    -  value: |-
+    -    old
+    +outer: {value: "old"
+    +  ⏎
+    +  # detached
+    +  }
+     # trailing
+    "#);
 }
 
 #[test]
@@ -413,7 +458,7 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&editor, &source_index, &candidate, (&candidate).into())
+        plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(document.root, emit::region(&document, document.root, true))]
