@@ -1,5 +1,6 @@
 //! Transaction semantics for successive edits to the same syntax.
 
+use super::support::edit;
 use astral_yaml::{ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -41,22 +42,18 @@ fn removed_subtrees_discard_pending_rewrites_and_style_requests() {
             items: [old, keep]
             other: retained
         "};
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|e| {
-                let items = e.mapping_entries(&e.root())?.remove(0).1;
-                let old = e.sequence_items(&items)?.remove(0);
-                e.replace(&old, "new")?;
-                e.set_scalar_style(&old, ScalarStyle::SingleQuoted)?;
-                if remove {
-                    e.remove_item(&items, 0)?;
-                } else {
-                    e.replace(&items, "[replacement]")?;
-                }
-                Ok(())
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |e| {
+            let items = e.mapping_entries(&e.root())?.remove(0).1;
+            let old = e.sequence_items(&items)?.remove(0);
+            e.replace(&old, "new")?;
+            e.set_scalar_style(&old, ScalarStyle::SingleQuoted)?;
+            if remove {
+                e.remove_item(&items, 0)?;
+            } else {
+                e.replace(&items, "[replacement]")?;
+            }
+            Ok(())
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -123,21 +120,15 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
         ),
         ("[]", "42"),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|e| e.replace_preserving_style(&e.root(), replacement))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |e| {
+            e.replace_preserving_style(&e.root(), replacement)
+        }));
     }
     let source = "[&value 'old', *value]";
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let value = e.sequence_items(&e.root())?.remove(0);
-            e.replace_preserving_style(&value, "\"new\"")
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
+    diffs.push(edit(source, |e| {
+        let value = e.sequence_items(&e.root())?.remove(0);
+        e.replace_preserving_style(&value, "\"new\"")
+    }));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
     +++ after.yaml

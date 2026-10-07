@@ -1,3 +1,4 @@
+use super::support::{edit, edits};
 use astral_yaml::{
     CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
@@ -84,15 +85,11 @@ fn root_comments_retain_the_requested_order() {
             CommentPlacement::Detached,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.insert_comment(&root, 0, " first", placement)?;
-                editor.insert_comment(&root, 2, " last", placement)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            editor.insert_comment(&root, 0, " first", placement)?;
+            editor.insert_comment(&root, 2, " last", placement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -330,13 +327,10 @@ fn root_comment_placement_respects_the_document_prefix() {
         --- value
         ...
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.insert_comment(&editor.root(), 0, " leading", CommentPlacement::Leading)
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let diff = edit(source, |editor| {
+        editor.insert_comment(&editor.root(), 0, " leading", CommentPlacement::Leading)
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,4 @@
@@ -392,11 +386,9 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
             ScalarStyle::Folded,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.set_scalar_style(&editor.root(), style))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.set_scalar_style(&editor.root(), style)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
@@ -433,42 +425,38 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
 
 #[test]
 fn block_scalar_rewrites_own_their_trailing_line_breaks() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             'old'
         "},
-        indoc! {r"
+            indoc! {r"
             'old'
 
         "},
-        "'old'\n  \n  ",
-        indoc! {r"
+            "'old'\n  \n  ",
+            indoc! {r"
             'old' # keep
 
         "},
-        indoc! {r"
+            indoc! {r"
             'old'
 
             ...
         "},
-        indoc! {r"
+            indoc! {r"
             %YAML 1.2 # directive
             --- 'old' # inline
             ... # end
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.replace(&root, "\"\\n\"")?;
-                editor.set_scalar_style(&root, ScalarStyle::Literal)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
+        ],
+        |editor| {
+            let root = editor.root();
+            editor.replace(&root, "\"\\n\"")?;
+            editor.set_scalar_style(&root, ScalarStyle::Literal)
+        },
+    );
+    insta::assert_snapshot!(diffs, @r"
     --- before.yaml
     +++ after.yaml
     @@ -1 +1,2 @@
@@ -531,16 +519,12 @@ fn nested_block_scalar_boundaries_stop_before_following_syntax() {
 
             next: retained
         "};
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
-                let value = editor.mapping_entries(&outer)?.remove(0).1;
-                editor.replace(&value, "\"\\n\"")?;
-                editor.set_scalar_style(&value, style)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
+            let value = editor.mapping_entries(&outer)?.remove(0).1;
+            editor.replace(&value, "\"\\n\"")?;
+            editor.set_scalar_style(&value, style)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml

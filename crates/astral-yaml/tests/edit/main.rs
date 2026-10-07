@@ -1,8 +1,23 @@
 #![cfg(feature = "editable")]
 
+mod aliases;
+mod boundaries;
 mod collection_headers;
+mod collection_suffixes;
+mod comment_boundaries;
+mod comment_merge;
 mod comments;
+mod composition;
+mod document;
 mod emission;
 mod flow_suffixes;
+mod framing;
+mod layout;
+mod mapping;
 mod owned;
+mod real_world;
+mod regions;
+mod scalar_boundaries;
+mod sequential;
 mod support;
+mod transactions;

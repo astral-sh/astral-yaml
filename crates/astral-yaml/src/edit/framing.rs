@@ -1014,7 +1014,7 @@ mod tests {
             ] # close
         "};
         let document = super::super::EditableDocument::parse(source).unwrap();
-        let original = Source::from(&document);
+        let original = document.source.clone();
         let mut candidate = Draft::from(&document);
         for text in [" added 1", " added 2", " added 3", " added 4"] {
             candidate

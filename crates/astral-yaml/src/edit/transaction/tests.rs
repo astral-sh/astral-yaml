@@ -3,12 +3,13 @@ use crate::edit::{
     draft::{Candidate, same_style},
     framing::RootLayout,
     plan::{Changes, Plan},
+    source::Source,
     splice,
     view::Syntax,
 };
 use astral_yaml_dev::{edit_diff, indoc};
 
-use super::{EditableDocument, Editor, Layout, NodeKind, Source, Span};
+use super::{EditableDocument, Editor, Layout, NodeKind, Span};
 
 fn plan<'a>(
     source: &'a Source,
@@ -45,9 +46,9 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
     };
     let planned = Syntax {
         nodes: &planned,
-        root: document.root,
+        root: document.source.root,
     };
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let output = plan(&source_index, &candidate, planned)
         .render(&Layout::new(planned))
         .unwrap();
@@ -70,6 +71,7 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     let mut document = EditableDocument::parse("[[a, b], c]").unwrap();
     let first = crate::NodeId(
         document
+            .source
             .nodes
             .iter()
             .position(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "a"))
@@ -77,6 +79,7 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     );
     let last = crate::NodeId(
         document
+            .source
             .nodes
             .iter()
             .position(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "c"))
@@ -84,13 +87,13 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     );
     // The patch planner must coalesce overlapping retained ranges, including
     // ranges expanded by trivia ownership, before slicing the original source.
-    document.nodes[first.0].span = Span::new(2, 10).unwrap();
+    document.source.nodes[first.0].span = Span::new(2, 10).unwrap();
     let mut editor = Editor::new(&document);
     editor.replace(&editor.handle(first), "new_a").unwrap();
     editor.replace(&editor.handle(last), "new_c").unwrap();
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
@@ -99,7 +102,10 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
             .iter()
             .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
             .collect::<Vec<_>>(),
-        [(document.root, document.nodes[document.root.0].span)]
+        [(
+            document.source.root,
+            document.source.nodes[document.source.root.0].span
+        )]
     );
 }
 
@@ -110,7 +116,7 @@ fn empty_transactions_do_not_require_rewrite_work() {
     let candidate = editor.draft.clone().freeze().unwrap();
     candidate.work().set(0);
     let syntax = Layout::new(&candidate);
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert!(
         plan(&source_index, &candidate, (&candidate).into())
@@ -127,7 +133,7 @@ fn outer_comment_plans_obey_work_and_output_limits() {
         value
     "};
     let mut document = EditableDocument::parse(source).unwrap();
-    document.options.max_input_bytes = source.len();
+    document.source.options.max_input_bytes = source.len();
     let mut editor = Editor::new(&document);
     for index in 0..3 {
         editor
@@ -139,10 +145,10 @@ fn outer_comment_plans_obey_work_and_output_limits() {
             )
             .unwrap();
     }
-    let region = document.nodes[document.root.0].span;
+    let region = document.source.nodes[document.source.root.0].span;
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
@@ -176,8 +182,8 @@ fn requested_style_comparison_checks_kind_and_collection_contents() {
         let right = EditableDocument::parse(right).unwrap();
         assert_eq!(
             same_style(
-                &left.nodes[left.root.0].kind,
-                &right.nodes[right.root.0].kind
+                &left.source.nodes[left.source.root.0].kind,
+                &right.source.nodes[right.source.root.0].kind
             ),
             expected
         );
@@ -314,7 +320,7 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
         .unwrap();
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
@@ -324,8 +330,8 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
             .collect::<Vec<_>>(),
         [(
-            document.root,
-            splice::region(&document, document.root, true)
+            document.source.root,
+            splice::region(&document, document.source.root, true)
         )]
     );
 }
@@ -412,7 +418,7 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     editor.replace(&value, "new").unwrap();
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = Source::from(&document);
+    let source_index = document.source.clone();
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
@@ -422,8 +428,8 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
             .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
             .collect::<Vec<_>>(),
         [(
-            document.root,
-            splice::region(&document, document.root, true)
+            document.source.root,
+            splice::region(&document, document.source.root, true)
         )]
     );
     editor.finish().unwrap();

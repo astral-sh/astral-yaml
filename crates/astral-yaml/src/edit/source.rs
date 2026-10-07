@@ -1,9 +1,8 @@
-//! Original source and its index during render planning. Generated document
-//! boundaries may relocate the index without reparsing it. This is deliberately
-//! a different type from a committed, parsed `EditableDocument`.
+//! Source text and its syntax index. Framing relocates coordinates without
+//! changing the frozen candidate or constructing a committed document.
 
 use super::{
-    EditableDocument, Node,
+    Node,
     draft::map_locations,
     view::{Emission, Syntax},
 };
@@ -42,31 +41,6 @@ pub(super) struct Source {
     pub(super) start_marker: Option<Span>,
     pub(super) end_marker: Option<Span>,
     pub(super) extra_end_markers: Vec<Span>,
-}
-
-impl From<&EditableDocument> for Source {
-    fn from(document: &EditableDocument) -> Self {
-        let EditableDocument {
-            source,
-            nodes,
-            contents,
-            root,
-            options,
-            start_marker,
-            end_marker,
-            extra_end_markers,
-        } = document.clone();
-        Self {
-            text: source,
-            nodes,
-            contents,
-            root,
-            options,
-            start_marker,
-            end_marker,
-            extra_end_markers,
-        }
-    }
 }
 
 impl<'a> From<&'a Source> for Syntax<'a, Span> {

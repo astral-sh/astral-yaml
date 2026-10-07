@@ -1,5 +1,6 @@
 //! Root edits may require document boundaries to preserve comment ownership.
 
+use super::support::edit;
 use astral_yaml::{ParseOptions, comments::CommentPlacement, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -94,11 +95,9 @@ fn root_edits_create_missing_document_boundaries() {
     ];
     let mut diffs = Vec::new();
     for (source, fragment) in cases {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.replace(&editor.root(), fragment))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(&editor.root(), fragment)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -213,11 +212,9 @@ fn inserted_comments_can_create_document_boundaries() {
             CommentPlacement::Trailing,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.insert_comment(&editor.root(), 0, " added", placement))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.insert_comment(&editor.root(), 0, " added", placement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -268,14 +265,11 @@ fn nested_edits_leave_sufficient_root_framing_unchanged() {
         # prefix
         [old, keep]
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let items = editor.sequence_items(&editor.root())?;
-            editor.replace(&items[0], "new")
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let diff = edit(source, |editor| {
+        let items = editor.sequence_items(&editor.root())?;
+        editor.replace(&items[0], "new")
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,2 @@
@@ -430,15 +424,11 @@ fn generated_start_markers_preserve_root_prefixes() {
             } # close
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                let index = editor.node(&root)?.comments().len();
-                editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            let index = editor.node(&root)?.comments().len();
+            editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml

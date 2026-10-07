@@ -1,27 +1,27 @@
 use super::{EditableDocument, NodeKind, correspondence};
+use crate::edit::draft::Draft;
 use crate::edit::splice::{indent, region, render};
-use crate::edit::{draft::Draft, source::Source};
 use astral_yaml_dev::indoc;
 
 /// Exercise emission without constructing a fictitious committed document.
 fn render_draft(original: &EditableDocument, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
-    let source = Source::from(original);
-    let region = region(original, original.root, false);
+    let source = original.source.clone();
+    let region = region(original, original.source.root, false);
     let rendered = render(
         source.emission(syntax),
-        original.root,
+        original.source.root,
         region,
-        indent(&original.source, region.start()),
+        indent(&original.source.text, region.start()),
         false,
     )
     .unwrap();
     let output = format!(
         "{}{}{}",
-        &original.source[..rendered.span.start()],
+        &original.source.text[..rendered.span.start()],
         rendered.text,
-        &original.source[rendered.span.end()..]
+        &original.source.text[rendered.span.end()..]
     );
     candidate.commit(&output).unwrap();
     output
@@ -59,13 +59,13 @@ fn emission_accepts_syntax_without_source_locations() {
         nodes: &nodes,
         root: NodeId(0),
         source,
-        options: original.options,
-        end_marker: original.end_marker,
+        options: original.source.options,
+        end_marker: original.source.end_marker,
     };
     let rendered = render(
         input,
         input.root,
-        original.nodes[original.root.0].span,
+        original.source.nodes[original.source.root.0].span,
         0,
         false,
     )
@@ -344,17 +344,17 @@ fn rendering_obeys_work_and_output_budgets() {
         ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
-        document.options.max_nodes = nodes;
-        document.options.max_input_bytes = bytes;
-        let source = Source::from(&document);
+        document.source.options.max_nodes = nodes;
+        document.source.options.max_input_bytes = bytes;
+        let source = document.source.clone();
         let draft = Draft::from(&document).freeze().unwrap();
-        let region = region(&document, document.root, false);
+        let region = region(&document, document.source.root, false);
         // Both committed syntax and drafts obey the same rendering limits.
         for result in [
-            render(&document, document.root, region, 0, false),
+            render(&document, document.source.root, region, 0, false),
             render(
                 source.emission((&draft).into()),
-                document.root,
+                document.source.root,
                 region,
                 0,
                 false,
@@ -410,6 +410,7 @@ fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
     let source = "[&old value, *old]";
     let mut document = EditableDocument::parse(source).unwrap();
     let target = document
+        .source
         .nodes
         .iter()
         .find_map(|node| match node.kind {
@@ -417,10 +418,10 @@ fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
             _ => None,
         })
         .unwrap();
-    document.nodes[target.0].anchor = Some("new".to_owned());
+    document.source.nodes[target.0].anchor = Some("new".to_owned());
     insta::assert_snapshot!(document.normalized_yaml().unwrap(), @"[&new value, *new]");
 
-    document.nodes[target.0].anchor = None;
+    document.source.nodes[target.0].anchor = None;
     insta::assert_snapshot!(document.normalized_yaml().unwrap_err().message, @"alias target has no anchor");
 }
 
@@ -429,12 +430,14 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
     let mut document = EditableDocument::parse("[&a 1, &a 2, *a]").unwrap();
     let first = crate::NodeId(
         document
+            .source
             .nodes
             .iter()
             .position(|node| node.anchor.as_deref() == Some("a"))
             .unwrap(),
     );
     let target = document
+        .source
         .nodes
         .iter_mut()
         .find_map(|node| {
@@ -463,6 +466,7 @@ fn normalization_rejects_reassigned_comments() {
     "})
     .unwrap();
     let mut comment = document
+        .source
         .nodes
         .iter_mut()
         .find_map(|node| node.comments.pop())
@@ -470,6 +474,7 @@ fn normalization_rejects_reassigned_comments() {
     comment.placement = crate::comments::CommentPlacement::Trailing;
     comment.position = super::CommentPosition::After;
     let value = document
+        .source
         .nodes
         .iter_mut()
         .find(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "one"))
@@ -486,9 +491,9 @@ fn normalization_rejects_reassigned_comments() {
 fn normalization_ignores_comments_on_unreachable_nodes() {
     let mut document = EditableDocument::parse("value").unwrap();
     let fragment = EditableDocument::parse("removed # comment").unwrap();
-    let removed = fragment.nodes[fragment.root.0].clone();
+    let removed = fragment.source.nodes[fragment.source.root.0].clone();
     // Replaced nodes may remain in the arena without belonging to the document.
-    document.nodes.push(removed);
+    document.source.nodes.push(removed);
     assert_eq!(document.normalized_yaml().unwrap(), "value");
 }
 
@@ -647,7 +652,9 @@ fn root_scalar_candidates_respect_document_position() {
     ] {
         for replacement in ["---", "... text"] {
             let mut document = EditableDocument::parse(source).unwrap();
-            if let NodeKind::Scalar { value, .. } = &mut document.nodes[document.root.0].kind {
+            if let NodeKind::Scalar { value, .. } =
+                &mut document.source.nodes[document.source.root.0].kind
+            {
                 replacement.clone_into(value);
             }
             outputs.push(document.normalized_yaml().unwrap());
@@ -752,6 +759,7 @@ fn removed_properties_leave_room_for_retained_header_comments() {
     "};
     let mut document = EditableDocument::parse(source).unwrap();
     let value = document
+        .source
         .nodes
         .iter_mut()
         .find(|node| node.anchor.as_deref() == Some("a"))
@@ -883,8 +891,8 @@ fn detached_prefixes_are_emitted_before_content() {
         let document = EditableDocument::parse(source).unwrap();
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
-        let span = region(&document, document.root, true);
-        let rendered = render(&document, document.root, span, 0, false).unwrap();
+        let span = region(&document, document.source.root, true);
+        let rendered = render(&document, document.source.root, span, 0, false).unwrap();
         let parsed = EditableDocument::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
         assert!(super::comments_preserved(
@@ -1016,7 +1024,7 @@ fn omitted_roots_own_their_erased_line() {
         "},
     ] {
         let mut candidate = EditableDocument::parse(source).unwrap();
-        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+        candidate.source.nodes[candidate.source.root.0].kind = NodeKind::Scalar {
             value: String::new(),
             style: crate::ScalarStyle::Plain,
         };
@@ -1091,14 +1099,14 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
         "},
     ] {
         let mut candidate = EditableDocument::parse(source).unwrap();
-        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+        candidate.source.nodes[candidate.source.root.0].kind = NodeKind::Scalar {
             value: "old".to_owned(),
             style: crate::ScalarStyle::Literal,
         };
-        let region = region(&candidate, candidate.root, true);
+        let region = region(&candidate, candidate.source.root, true);
         let rendered = render(
             &candidate,
-            candidate.root,
+            candidate.source.root,
             region,
             indent(source, region.start()),
             false,

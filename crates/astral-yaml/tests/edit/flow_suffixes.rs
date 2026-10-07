@@ -2,7 +2,7 @@
 
 use super::support::normalize;
 use astral_yaml::edit::EditableDocument;
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{formatdoc, indoc};
 
 #[test]
 fn omitted_final_values_keep_collection_suffix_comments() {

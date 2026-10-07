@@ -3,13 +3,11 @@ use super::{
     draft::Draft,
     layout::Layout,
     plan::{Changes, Plan},
-    source::Source,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::sync::Arc;
 
 #[cfg(test)]
-#[path = "transaction_tests.rs"]
 mod tests;
 
 /// A node reference belonging to one edit transaction. Handles can be cloned,
@@ -74,7 +72,7 @@ impl<'a> Editor<'a> {
 
     fn error(&self, message: &'static str) -> Error {
         Error {
-            span: self.original.nodes[self.original.root.0].span,
+            span: self.original.source.nodes[self.original.source.root.0].span,
             message,
         }
     }
@@ -96,12 +94,15 @@ impl<'a> Editor<'a> {
 
     fn mutate(
         &mut self,
-        operation: impl FnOnce(&mut Self) -> Result<(), Error>,
+        handle: &Handle,
+        operation: impl FnOnce(&mut Draft, NodeId) -> Result<(), Error>,
     ) -> Result<(), Error> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = operation(self);
+        let result = self
+            .id(handle)
+            .and_then(|id| operation(&mut self.draft, id));
         if let Err(error) = &result {
             self.failure = Some(error.clone());
         }
@@ -175,11 +176,7 @@ impl<'a> Editor<'a> {
     }
 
     fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.replace(id, yaml, preserve)?;
-            Ok(())
-        })
+        self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
     }
 
     /// Inserts a parsed item before `index`; `len` appends.
@@ -192,11 +189,7 @@ impl<'a> Editor<'a> {
         index: usize,
         yaml: &str,
     ) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(sequence)?;
-            editor.draft.insert_item(id, index, yaml)?;
-            Ok(())
-        })
+        self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))
     }
 
     /// Removes an item and comments owned by its subtree.
@@ -204,11 +197,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Rejects invalid handles, indices, node kinds, or limits.
     pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(sequence)?;
-            editor.draft.remove_item(id, index)?;
-            Ok(())
-        })
+        self.mutate(sequence, |draft, id| draft.remove_item(id, index))
     }
 
     /// Inserts an ordered mapping entry from two single-node YAML fragments.
@@ -222,10 +211,8 @@ impl<'a> Editor<'a> {
         key: &str,
         value: &str,
     ) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(mapping)?;
-            editor.draft.insert_entry(id, index, key, value)?;
-            Ok(())
+        self.mutate(mapping, |draft, id| {
+            draft.insert_entry(id, index, key, value)
         })
     }
 
@@ -234,11 +221,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Rejects invalid handles, indices, node kinds, or limits.
     pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(mapping)?;
-            editor.draft.remove_entry(id, index)?;
-            Ok(())
-        })
+        self.mutate(mapping, |draft, id| draft.remove_entry(id, index))
     }
 
     /// Requests a scalar style. Commit rejects styles that change the scalar's
@@ -247,11 +230,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Rejects invalid handles, non-scalars, or exhausted work budgets.
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.set_scalar_style(id, style)?;
-            Ok(())
-        })
+        self.mutate(handle, |draft, id| draft.set_scalar_style(id, style))
     }
 
     /// Requests block or flow collection syntax. An empty collection is emitted
@@ -264,11 +243,7 @@ impl<'a> Editor<'a> {
         handle: &Handle,
         style: CollectionStyle,
     ) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.set_collection_style(id, style)?;
-            Ok(())
-        })
+        self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
     }
 
     /// Inserts comment text (without `#` or a line break) at an owner-local index.
@@ -284,10 +259,8 @@ impl<'a> Editor<'a> {
         text: &str,
         placement: CommentPlacement,
     ) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.insert_comment(id, index, text, placement)?;
-            Ok(())
+        self.mutate(handle, |draft, id| {
+            draft.insert_comment(id, index, text, placement)
         })
     }
 
@@ -301,11 +274,7 @@ impl<'a> Editor<'a> {
         index: usize,
         text: &str,
     ) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.replace_comment(id, index, text)?;
-            Ok(())
-        })
+        self.mutate(handle, |draft, id| draft.replace_comment(id, index, text))
     }
 
     /// Removes a directly owned comment.
@@ -313,11 +282,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Rejects invalid handles, indices, or resource limits.
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(|editor| {
-            let id = editor.id(handle)?;
-            editor.draft.remove_comment(id, index)?;
-            Ok(())
-        })
+        self.mutate(handle, |draft, id| draft.remove_comment(id, index))
     }
 
     fn finish(mut self) -> Result<EditableDocument, Error> {
@@ -326,15 +291,15 @@ impl<'a> Editor<'a> {
         }
         let candidate = self.draft.freeze()?;
         let syntax = Layout::new(&candidate);
-        let original = Source::from(self.original);
-        let changes = Changes::between(&original, &candidate, &syntax);
+        let original = &self.original.source;
+        let changes = Changes::between(original, &candidate, &syntax);
         let framed = if changes.is_empty() {
             None
         } else {
-            super::framing::prepare(&original, (&candidate).into(), &syntax)
+            super::framing::prepare(original, (&candidate).into(), &syntax)
         };
         let (source, planned) = framed.as_ref().map_or_else(
-            || (&original, (&candidate).into()),
+            || (original, (&candidate).into()),
             |framed| (&framed.source, framed.syntax()),
         );
         let output = Plan {

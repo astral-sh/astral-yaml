@@ -1,7 +1,8 @@
 //! Comment boundaries must not become block scalar content during an edit.
 
-use astral_yaml::{comments::CommentPlacement, edit::EditableDocument};
-use astral_yaml_dev::{edit_diff, indoc};
+use super::support::{edit, edits};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml_dev::indoc;
 
 #[test]
 fn relocated_inline_headers_keep_detached_suffix_separation() {
@@ -17,18 +18,14 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
 
         # last
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.replace(
-                &editor.root(),
-                indoc! {r"
-                    - new
-                "},
-            )
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
+    diffs.push(edit(source, |editor| {
+        editor.replace(
+            &editor.root(),
+            indoc! {r"
+                - new
+            "},
+        )
+    }));
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -87,15 +84,11 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
         let source = indoc! {r"
             old
         "};
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.insert_comment(&root, 0, " detached", CommentPlacement::Detached)?;
-                editor.replace(&root, fragment)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            editor.insert_comment(&root, 0, " detached", CommentPlacement::Detached)?;
+            editor.replace(&root, fragment)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -167,17 +160,17 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn removing_suffix_comments_does_not_extend_block_scalar_content() {
-    let mut diffs = Vec::new();
-    for source in [
-        "|+\n  new\n\n# tail\n ",
-        indoc! {r"
+    let diffs = edits(
+        [
+            "|+\n  new\n\n# tail\n ",
+            indoc! {r"
             |+
               new
 
             # tail
 
         "},
-        indoc! {r"
+            indoc! {r"
             |+
               new
 
@@ -185,28 +178,24 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
 
             ...
         "},
-        indoc! {r"
+            indoc! {r"
             - |+
                 new
 
             # tail
 
         "},
-        indoc! {r"
+            indoc! {r"
             key: |+
               new
 
             # tail
 
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.remove_comment(&editor.root(), 0))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
+        ],
+        |editor| editor.remove_comment(&editor.root(), 0),
+    );
+    insta::assert_snapshot!(diffs, @r"
     --- before.yaml
     +++ after.yaml
     @@ -1,5 +1,5 @@
@@ -263,36 +252,32 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
 
 #[test]
 fn trailing_comments_can_reclaim_blank_document_suffixes() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             old
 
             ... # inline
         "},
-        indoc! {r"
+            indoc! {r"
             old
             ...
 
             ... # inline
 
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.insert_comment(
-                    &root,
-                    editor.node(&root)?.comments().len(),
-                    " tail",
-                    CommentPlacement::Trailing,
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+        ],
+        |editor| {
+            let root = editor.root();
+            editor.insert_comment(
+                &root,
+                editor.node(&root)?.comments().len(),
+                " tail",
+                CommentPlacement::Trailing,
+            )
+        },
+    );
+    insta::assert_snapshot!(diffs, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
@@ -326,18 +311,14 @@ fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
         ... # inline
         ... # last
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.replace(
-                &editor.root(),
-                indoc! {r"
-                    ---
-                "},
-            )
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
+    diffs.push(edit(source, |editor| {
+        editor.replace(
+            &editor.root(),
+            indoc! {r"
+                ---
+            "},
+        )
+    }));
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml

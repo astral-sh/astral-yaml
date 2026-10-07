@@ -1,3 +1,4 @@
+use super::support::{edit, edits};
 use astral_yaml::edit::EditableDocument;
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -30,18 +31,14 @@ fn imported_aliases_follow_the_retained_or_fragment_anchor() {
             true,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let target = if nested {
-                    editor.mapping_entries(&editor.root())?[0].1.clone()
-                } else {
-                    editor.root()
-                };
-                editor.replace_preserving_style(&target, fragment)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let target = if nested {
+                editor.mapping_entries(&editor.root())?[0].1.clone()
+            } else {
+                editor.root()
+            };
+            editor.replace_preserving_style(&target, fragment)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -74,33 +71,29 @@ fn imported_aliases_follow_the_retained_or_fragment_anchor() {
 
 #[test]
 fn retained_aliases_follow_anchor_changes_outside_the_definition() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             definition: &old before
             first: *old # keep
             second: *old
             untouched:   [a,b]
         "},
-        indoc! {r"
+            indoc! {r"
             {definition: &old before, first: *old, second: *old, untouched:   [a,b]}
         "},
-        indoc! {r"
+            indoc! {r"
             definition: &old before
             ? *old
             : value
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let target = editor.mapping_entries(&editor.root())?[0].1.clone();
-                editor.replace(&target, "&new after")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+        ],
+        |editor| {
+            let target = editor.mapping_entries(&editor.root())?[0].1.clone();
+            editor.replace(&target, "&new after")
+        },
+    );
+    insta::assert_snapshot!(diffs, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,4 @@

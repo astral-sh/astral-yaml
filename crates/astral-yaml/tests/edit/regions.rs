@@ -1,5 +1,6 @@
 //! Comments and separation: <https://yaml.org/spec/1.2.2/#66-comments>.
 
+use super::support::edit;
 use astral_yaml::{
     CollectionStyle,
     edit::{EditableDocument, Editor, Handle, NodeKind},
@@ -202,18 +203,15 @@ fn rewrite_context_is_selected_after_all_mutations() {
         outer:   [old]
         untouched:    keep
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let target = collection(editor, true);
-            // The transient block layout needs its parent. The final flow layout
-            // fits in the original value region and keeps the surrounding source.
-            editor.set_collection_style(&target, CollectionStyle::Block)?;
-            editor.insert_item(&target, 1, "new")?;
-            editor.set_collection_style(&target, CollectionStyle::Flow)
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let diff = edit(source, |editor| {
+        let target = collection(editor, true);
+        // The transient block layout needs its parent. The final flow layout
+        // fits in the original value region and keeps the surrounding source.
+        editor.set_collection_style(&target, CollectionStyle::Block)?;
+        editor.insert_item(&target, 1, "new")?;
+        editor.set_collection_style(&target, CollectionStyle::Flow)
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,2 @@

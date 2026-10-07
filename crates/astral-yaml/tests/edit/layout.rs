@@ -1,5 +1,6 @@
 //! Nested scalar termination and comment separation are layout dependencies.
 
+use super::support::{edit, edits};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use std::fmt::Write;
 
@@ -25,63 +26,59 @@ fn first_leaf(editor: &Editor<'_>) -> Handle {
 fn descendant_edits_preserve_enclosing_comment_boundaries() {
     // Blank separation belongs outside scalar content:
     // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             outer:
               key: old
 
             # detached
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
 
             ...
             # detached
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
 
               # detached
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
 
                 # detached
             next: retained
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
               # trailing
 
             # detached
         "},
-        indoc! {r"
+            indoc! {r"
             - - old
 
               # detached
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                editor.replace(
-                    &first_leaf(editor),
-                    indoc! {r"
-                        |+
-                          new
+        ],
+        |editor| {
+            editor.replace(
+                &first_leaf(editor),
+                indoc! {r"
+                |+
+                  new
 
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+            "},
+            )
+        },
+    );
+    insta::assert_snapshot!(diffs, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,7 @@
@@ -630,17 +627,13 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
             2,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut owner = editor.root();
-                for _ in 0..depth {
-                    owner = editor.mapping_entries(&owner)?[0].1.clone();
-                }
-                editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let mut owner = editor.root();
+            for _ in 0..depth {
+                owner = editor.mapping_entries(&owner)?[0].1.clone();
+            }
+            editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
@@ -710,21 +703,17 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
         # trailing
 
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.remove_comment(&editor.root(), 0)?;
-            editor.replace(
-                &first_leaf(editor),
-                indoc! {r"
-                    |+
-                      new
+    diffs.push(edit(source, |editor| {
+        editor.remove_comment(&editor.root(), 0)?;
+        editor.replace(
+            &first_leaf(editor),
+            indoc! {r"
+                |+
+                  new
 
-                "},
-            )
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
+            "},
+        )
+    }));
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -856,26 +845,22 @@ fn retained_end_markers_bound_removed_suffix_comments() {
             ...
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                let inner = editor.mapping_entries(&root)?[0].1.clone();
-                let leaf = editor.mapping_entries(&inner)?[0].1.clone();
-                editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
-                editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
-                editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
-                editor.replace(
-                    &leaf,
-                    indoc! {r"
-                        |+
-                          new
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            let inner = editor.mapping_entries(&root)?[0].1.clone();
+            let leaf = editor.mapping_entries(&inner)?[0].1.clone();
+            editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
+            editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
+            editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
+            editor.replace(
+                &leaf,
+                indoc! {r"
+                    |+
+                      new
 
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+                "},
+            )
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -948,50 +933,46 @@ fn retained_end_markers_bound_removed_suffix_comments() {
 
 #[test]
 fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             old
             # remove
             # tail
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
             # remove
             # tail
         "},
-        indoc! {r"
+            indoc! {r"
             - - old
             # remove
             # tail
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               key: old
             # remove
             ... # boundary
             # tail
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.remove_comment(&root, 0)?;
-                editor.replace(
-                    &first_leaf(editor),
-                    indoc! {r"
-                    |+
-                      new
+        ],
+        |editor| {
+            let root = editor.root();
+            editor.remove_comment(&root, 0)?;
+            editor.replace(
+                &first_leaf(editor),
+                indoc! {r"
+            |+
+              new
 
-                "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+        "},
+            )
+        },
+    );
+    insta::assert_snapshot!(diffs, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,5 @@
@@ -1047,9 +1028,9 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
 fn generated_suffix_boundaries_follow_descendant_comment_regions() {
     use astral_yaml::edit::NodeKind;
 
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             outer:
               value: old
 
@@ -1059,7 +1040,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
 
             # remove
         "},
-        indoc! {r"
+            indoc! {r"
             -
               - old
 
@@ -1069,7 +1050,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
 
             # remove
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               inner:
                 value: old
@@ -1080,7 +1061,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
 
             # remove
         "},
-        indoc! {r"
+            indoc! {r"
             outer:
               value: old
 
@@ -1091,36 +1072,32 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
 
             # remove
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.remove_comment(&root, 1)?;
-                let mut node = root.clone();
-                loop {
-                    node = match editor.node(&node)?.kind() {
-                        NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
-                        NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
-                        _ => break,
-                    };
-                    while !editor.node(&node)?.comments().is_empty() {
-                        editor.remove_comment(&node, 0)?;
-                    }
+        ],
+        |editor| {
+            let root = editor.root();
+            editor.remove_comment(&root, 1)?;
+            let mut node = root.clone();
+            loop {
+                node = match editor.node(&node)?.kind() {
+                    NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
+                    NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
+                    _ => break,
+                };
+                while !editor.node(&node)?.comments().is_empty() {
+                    editor.remove_comment(&node, 0)?;
                 }
-                editor.replace(
-                    &node,
-                    indoc! {r"
-                |+
-                  new
+            }
+            editor.replace(
+                &node,
+                indoc! {r"
+        |+
+          new
 
-            "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    "},
+            )
+        },
+    );
+    insta::assert_snapshot!(diffs, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,8 +1,9 @@

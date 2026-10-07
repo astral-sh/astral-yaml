@@ -1,36 +1,33 @@
+use super::support::{edit, edits};
 use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
 fn flow_conversion_uses_content_indentation_after_properties() {
-    let mut results = Vec::new();
-    for source in [
-        indoc! {r"
+    let results = edits(
+        [
+            indoc! {r"
             outer: &mapping
               items: &sequence
                 - x
               untouched:   [a,b]
             copy: *sequence
         "},
-        indoc! {r"
+            indoc! {r"
             outer: &mapping
               items: &sequence
               - x
               untouched:   [a,b]
             copy: *sequence
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mapping = editor.mapping_entries(&editor.root())?[0].1.clone();
-                let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
-                editor.set_collection_style(&sequence, CollectionStyle::Flow)
-            })
-            .unwrap();
-        results.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(results.join("\n"), @"
+        ],
+        |editor| {
+            let mapping = editor.mapping_entries(&editor.root())?[0].1.clone();
+            let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
+            editor.set_collection_style(&sequence, CollectionStyle::Flow)
+        },
+    );
+    insta::assert_snapshot!(results, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,5 +1,4 @@
@@ -58,31 +55,27 @@ fn flow_conversion_uses_content_indentation_after_properties() {
 
 #[test]
 fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
-    let mut results = Vec::new();
-    for source in [
-        indoc! {r"
+    let results = edits(
+        [
+            indoc! {r"
             ? - {nested: &a [old]}
             : *a
             outside:   [x,y]
         "},
-        indoc! {r"
+            indoc! {r"
             {? [{nested: &a [old]}]: *a, outside:   [x,y]}
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-                let mapping = editor.sequence_items(&key)?[0].clone();
-                let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
-                let value = editor.sequence_items(&sequence)?[0].clone();
-                editor.replace(&value, "changed")?;
-                editor.insert_item(&sequence, 1, "{child: yes}")
-            })
-            .unwrap();
-        results.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(results.join("\n"), @"
+        ],
+        |editor| {
+            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+            let mapping = editor.sequence_items(&key)?[0].clone();
+            let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
+            let value = editor.sequence_items(&sequence)?[0].clone();
+            editor.replace(&value, "changed")?;
+            editor.insert_item(&sequence, 1, "{child: yes}")
+        },
+    );
+    insta::assert_snapshot!(results, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,4 @@
@@ -107,14 +100,11 @@ fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
     let source = indoc! {r#"
         {"old":value, untouched:   [a,b]}
     "#};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-            editor.replace(&key, "new, key")
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    let diff = edit(source, |editor| {
+        let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+        editor.replace(&key, "new, key")
+    });
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1 +1 @@
@@ -127,25 +117,21 @@ fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
 fn omitted_keys_retain_entries_without_value_indicators() {
     // Empty flow keys need an indicator when their key token disappears:
     // https://yaml.org/spec/1.2.2/#742-flow-mappings
-    let mut results = Vec::new();
-    for source in [
-        indoc! {"
+    let results = edits(
+        [
+            indoc! {"
             {old}
         "},
-        indoc! {"
+            indoc! {"
             {old, retained: untouched}
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-                editor.replace(&key, "---")
-            })
-            .unwrap();
-        results.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(results.join("\n"), @"
+        ],
+        |editor| {
+            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+            editor.replace(&key, "---")
+        },
+    );
+    insta::assert_snapshot!(results, @"
     --- before.yaml
     +++ after.yaml
     @@ -1 +1 @@
@@ -198,24 +184,20 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
             - x"},
     ] {
         for remove in [true, false] {
-            let mut document = EditableDocument::parse(source).unwrap();
-            document
-                .edit(|editor| {
-                    let mut mapping = editor.root();
-                    if source.starts_with("outer:") {
-                        mapping = editor.mapping_entries(&mapping)?.remove(0).1;
-                    } else if source.starts_with('-') {
-                        mapping = editor.sequence_items(&mapping)?.remove(0);
-                    }
-                    let sequence = editor.mapping_entries(&mapping)?.remove(0).1;
-                    if remove {
-                        editor.remove_item(&sequence, 0)
-                    } else {
-                        editor.set_collection_style(&sequence, CollectionStyle::Flow)
-                    }
-                })
-                .unwrap();
-            diffs.push(edit_diff(source, document.source()));
+            diffs.push(edit(source, |editor| {
+                let mut mapping = editor.root();
+                if source.starts_with("outer:") {
+                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                } else if source.starts_with('-') {
+                    mapping = editor.sequence_items(&mapping)?.remove(0);
+                }
+                let sequence = editor.mapping_entries(&mapping)?.remove(0).1;
+                if remove {
+                    editor.remove_item(&sequence, 0)
+                } else {
+                    editor.set_collection_style(&sequence, CollectionStyle::Flow)
+                }
+            }));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
@@ -348,14 +330,10 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
             a: b
             : c"},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let key = editor.mapping_entries(&editor.root())?.remove(1).0;
-                editor.replace(&key, "next")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let key = editor.mapping_entries(&editor.root())?.remove(1).0;
+            editor.replace(&key, "next")
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -444,42 +422,38 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite() {
 fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     // Empty values: https://yaml.org/spec/1.2.2/#742-flow-mappings
     // Explicit entries: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
+    let diffs = edits(
+        [
+            indoc! {r"
             {key}
         "},
-        indoc! {r"
+            indoc! {r"
             {? key}
         "},
-        indoc! {r"
+            indoc! {r"
             ? key
         "},
-        indoc! {r"
+            indoc! {r"
             ?
         "},
-        indoc! {r"
+            indoc! {r"
             ? key # note
         "},
-        indoc! {"
+            indoc! {"
             {key # a colon in a comment:\x20
             }
         "},
-        indoc! {r"
+            indoc! {r"
             key:  # note
             other : 'untouched'
         "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-                editor.replace(&value, "42")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
+        ],
+        |editor| {
+            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+            editor.replace(&value, "42")
+        },
+    );
+    insta::assert_snapshot!(diffs, @"
     --- before.yaml
     +++ after.yaml
     @@ -1 +1 @@
@@ -576,14 +550,10 @@ fn mapping_scalar_key_replacement_preserves_required_separation() {
             "'next'",
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let key = editor.mapping_entries(&editor.root())?.remove(0).0;
-                editor.replace(&key, replacement)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let key = editor.mapping_entries(&editor.root())?.remove(0).0;
+            editor.replace(&key, replacement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
@@ -661,15 +631,12 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
         outer: {"key":"value"}
         other : 'untouched'
     "#};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let mapping = editor.mapping_entries(&editor.root())?.remove(0).1;
-            let key = editor.mapping_entries(&mapping)?.remove(0).0;
-            editor.set_scalar_style(&key, ScalarStyle::Plain)
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    let diff = edit(source, |editor| {
+        let mapping = editor.mapping_entries(&editor.root())?.remove(0).1;
+        let key = editor.mapping_entries(&mapping)?.remove(0).0;
+        editor.set_scalar_style(&key, ScalarStyle::Plain)
+    });
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,2 @@
@@ -830,18 +797,14 @@ fn implicit_block_keys_keep_their_own_scalar_context() {
         "},
     ] {
         for key in ["'---'", "'...'", "'a,b'", "'a[b]'"] {
-            let mut document = EditableDocument::parse(source).unwrap();
-            document
-                .edit(|editor| {
-                    let mut mapping = editor.root();
-                    if source.starts_with("outer:") {
-                        mapping = editor.mapping_entries(&mapping)?.remove(0).1;
-                    }
-                    let key_handle = editor.mapping_entries(&mapping)?.remove(0).0;
-                    editor.replace_preserving_style(&key_handle, key)
-                })
-                .unwrap();
-            diffs.push(edit_diff(source, document.source()));
+            diffs.push(edit(source, |editor| {
+                let mut mapping = editor.root();
+                if source.starts_with("outer:") {
+                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                }
+                let key_handle = editor.mapping_entries(&mapping)?.remove(0).0;
+                editor.replace_preserving_style(&key_handle, key)
+            }));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
@@ -948,37 +911,33 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
             - key: ["new\n\n"]
         "#},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut node = editor.root();
-                loop {
-                    node = match editor.node(&node)?.kind() {
-                        NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
-                        NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
-                        _ => break,
-                    };
+        diffs.push(edit(source, |editor| {
+            let mut node = editor.root();
+            loop {
+                node = match editor.node(&node)?.kind() {
+                    NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
+                    NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
+                    _ => break,
+                };
+            }
+            if matches!(
+                editor.node(&node)?.kind(),
+                NodeKind::Scalar {
+                    style: ScalarStyle::DoubleQuoted,
+                    ..
                 }
-                if matches!(
-                    editor.node(&node)?.kind(),
-                    NodeKind::Scalar {
-                        style: ScalarStyle::DoubleQuoted,
-                        ..
-                    }
-                ) {
-                    return editor.set_scalar_style(&node, ScalarStyle::SingleQuoted);
-                }
-                editor.replace_preserving_style(
-                    &node,
-                    indoc! {r"
-                        |+
-                          new
+            ) {
+                return editor.set_scalar_style(&node, ScalarStyle::SingleQuoted);
+            }
+            editor.replace_preserving_style(
+                &node,
+                indoc! {r"
+                    |+
+                      new
 
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+                "},
+            )
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml

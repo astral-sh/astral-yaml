@@ -12,7 +12,6 @@ use crate::{Error, NodeId, Span, comments::CommentPlacement};
 use std::borrow::Cow;
 
 #[cfg(test)]
-#[path = "splice_tests.rs"]
 mod tests;
 
 /// A rewritten region includes descendant comments, but leaves the root's outer

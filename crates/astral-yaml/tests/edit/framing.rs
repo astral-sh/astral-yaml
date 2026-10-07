@@ -1,5 +1,6 @@
 //! Document framing, source separators, and comments between collection children.
 
+use super::support::edit;
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -27,24 +28,20 @@ fn suffix_boundaries_preserve_detached_comments() {
         "},
     ] {
         for omit in [false, true] {
-            let mut document = EditableDocument::parse(source).unwrap();
-            document
-                .edit(|editor| {
-                    let root = editor.root();
-                    if omit {
-                        editor.replace(
-                            &root,
-                            indoc! {r"
-                                ---
-                            "},
-                        )
-                    } else {
-                        let index = editor.node(&root)?.comments().len() - 1;
-                        editor.insert_comment(&root, index, " added", CommentPlacement::Trailing)
-                    }
-                })
-                .unwrap();
-            diffs.push(edit_diff(source, document.source()));
+            diffs.push(edit(source, |editor| {
+                let root = editor.root();
+                if omit {
+                    editor.replace(
+                        &root,
+                        indoc! {r"
+                            ---
+                        "},
+                    )
+                } else {
+                    let index = editor.node(&root)?.comments().len() - 1;
+                    editor.insert_comment(&root, index, " added", CommentPlacement::Trailing)
+                }
+            }));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -145,15 +142,11 @@ fn structural_edits_preserve_framing_and_outer_comments() {
               # tail
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.insert_entry(&root, 0, "added", "new")?;
-                editor.remove_entry(&root, 1)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            editor.insert_entry(&root, 0, "added", "new")?;
+            editor.remove_entry(&root, 1)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -216,11 +209,9 @@ fn inserted_roots_are_separated_from_end_markers() {
             # tail
         "};
 
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -333,47 +324,43 @@ fn detached_comment_gaps_survive_collection_mutations() {
         ),
     ] {
         for operation in 0..4 {
-            let mut document = EditableDocument::parse(source).unwrap();
-            document
-                .edit(|editor| {
-                    let root = editor.root();
-                    match (sequence, operation) {
-                        (true, 0) => editor.insert_item(&root, 0, "new"),
-                        (false, 0) => editor.insert_entry(&root, 0, "added", "new"),
-                        (true, 1) => editor.remove_item(&root, 1),
-                        (false, 1) => editor.remove_entry(&root, 1),
-                        (true, 2) => editor.replace(
-                            &root,
-                            indoc! {r"
-                                - new
-                                - |+
-                                  other
+            diffs.push(edit(source, |editor| {
+                let root = editor.root();
+                match (sequence, operation) {
+                    (true, 0) => editor.insert_item(&root, 0, "new"),
+                    (false, 0) => editor.insert_entry(&root, 0, "added", "new"),
+                    (true, 1) => editor.remove_item(&root, 1),
+                    (false, 1) => editor.remove_entry(&root, 1),
+                    (true, 2) => editor.replace(
+                        &root,
+                        indoc! {r"
+                            - new
+                            - |+
+                              other
 
-                            "},
-                        ),
-                        (false, 2) => editor.replace(
-                            &root,
-                            indoc! {r"
-                                a: new
-                                b: |+
-                                  other
+                        "},
+                    ),
+                    (false, 2) => editor.replace(
+                        &root,
+                        indoc! {r"
+                            a: new
+                            b: |+
+                              other
 
-                            "},
-                        ),
-                        _ => {
-                            // Import into a nonzero arena offset, then mutate the
-                            // imported collection before committing it.
-                            editor.replace(&root, source)?;
-                            if sequence {
-                                editor.insert_item(&root, 0, "new")
-                            } else {
-                                editor.insert_entry(&root, 0, "added", "new")
-                            }
+                        "},
+                    ),
+                    _ => {
+                        // Import into a nonzero arena offset, then mutate the
+                        // imported collection before committing it.
+                        editor.replace(&root, source)?;
+                        if sequence {
+                            editor.insert_item(&root, 0, "new")
+                        } else {
+                            editor.insert_entry(&root, 0, "added", "new")
                         }
                     }
-                })
-                .unwrap();
-            diffs.push(edit_diff(source, document.source()));
+                }
+            }));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -520,18 +507,14 @@ fn removed_children_leave_their_comments_in_the_surviving_gap() {
             true,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                if sequence {
-                    editor.remove_item(&root, 1)
-                } else {
-                    editor.remove_entry(&root, 1)
-                }
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            if sequence {
+                editor.remove_item(&root, 1)
+            } else {
+                editor.remove_entry(&root, 1)
+            }
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -566,13 +549,10 @@ fn new_detached_comments_share_the_following_comment_gap() {
           text
 
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Detached)
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let diff = edit(source, |editor| {
+        editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Detached)
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,7 +1,10 @@

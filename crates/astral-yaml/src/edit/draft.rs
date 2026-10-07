@@ -8,7 +8,6 @@ use crate::{
 use std::{cell::Cell, collections::HashMap};
 
 #[cfg(test)]
-#[path = "draft_tests.rs"]
 mod tests;
 
 #[derive(Clone, Debug)]
@@ -61,6 +60,7 @@ pub(super) struct Candidate {
 
 impl From<&EditableDocument> for Draft {
     fn from(document: &EditableDocument) -> Self {
+        let document = &document.source;
         let mut draft = Self {
             slots: document
                 .nodes
@@ -154,7 +154,7 @@ impl Draft {
         options.max_nodes = available;
         options.max_depth -= depth;
         let document = EditableDocument::parse_with_options(yaml, options)?;
-        self.charge(document.nodes.len())?;
+        self.charge(document.source.nodes.len())?;
         Ok(document)
     }
 
@@ -175,10 +175,11 @@ impl Draft {
     /// No temporary live root or second remapping pass is needed.
     fn attach(
         &mut self,
-        mut document: EditableDocument,
+        document: EditableDocument,
         parent: Option<NodeId>,
         replacement: Option<(NodeId, bool)>,
     ) -> NodeId {
+        let mut document = document.source;
         let fragment_root = document.root;
         let root = replacement.map_or(NodeId(self.slots.len()), |(id, _)| id);
         let offset = self.slots.len() + usize::from(replacement.is_none());
@@ -325,7 +326,7 @@ impl Draft {
         let value = self.fragment(
             value,
             Some(id),
-            self.available().saturating_sub(key.nodes.len()),
+            self.available().saturating_sub(key.source.nodes.len()),
         )?;
         let key = self.attach(key, Some(id), None);
         let value = self.attach(value, Some(id), None);
@@ -510,7 +511,7 @@ impl Candidate {
             .ok_or_else(|| error("emission changed YAML content or alias identity"))?;
         for &id in &self.requested_styles {
             let target = correspondence[id.0].expect("styled node is retained");
-            if !same_style(&self.nodes[id.0].kind, &parsed.nodes[target.0].kind) {
+            if !same_style(&self.nodes[id.0].kind, &parsed.source.nodes[target.0].kind) {
                 return Err(error(
                     "requested style is not representable in this context",
                 ));

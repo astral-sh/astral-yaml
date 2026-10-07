@@ -25,14 +25,7 @@ use crate::{
 /// to this document's current, normalized view.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
-    pub(crate) source: String,
-    pub(crate) nodes: Vec<Node>,
-    pub(crate) contents: Vec<Span>,
-    pub(crate) root: NodeId,
-    pub(crate) options: ParseOptions,
-    pub(crate) start_marker: Option<Span>,
-    pub(crate) end_marker: Option<Span>,
-    pub(crate) extra_end_markers: Vec<Span>,
+    source: source::Source,
 }
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
@@ -209,36 +202,38 @@ impl EditableDocument {
             });
         }
         Ok(Self {
-            nodes,
-            contents,
-            root: document.root,
-            options,
-            start_marker: document.start_marker,
-            end_marker: document.end_marker,
-            extra_end_markers: stream
-                .document_end_markers()
-                .iter()
-                .copied()
-                .filter(|marker| {
-                    document
-                        .end_marker
-                        .is_some_and(|first| marker.start() > first.start())
-                })
-                .collect(),
-            source: source.into_owned(),
+            source: source::Source {
+                nodes,
+                contents,
+                root: document.root,
+                options,
+                start_marker: document.start_marker,
+                end_marker: document.end_marker,
+                extra_end_markers: stream
+                    .document_end_markers()
+                    .iter()
+                    .copied()
+                    .filter(|marker| {
+                        document
+                            .end_marker
+                            .is_some_and(|first| marker.start() > first.start())
+                    })
+                    .collect(),
+                text: source.into_owned(),
+            },
         })
     }
 
     /// Returns the document's current source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
-        self.source.clone()
+        self.source.text.clone()
     }
 
     /// Consumes the document and returns its committed source without cloning it.
     #[must_use]
     pub fn into_yaml(self) -> String {
-        self.source
+        self.source.text
     }
 
     /// Emits the document with normalized whitespace, preserving comments and
@@ -248,20 +243,20 @@ impl EditableDocument {
     /// Returns an error if emission exceeds resource limits or cannot preserve
     /// scalar text, alias identity, or comment ownership and placement.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
-        let region = splice::region(self, self.root, false);
-        let indent = splice::indent(&self.source, region.start());
-        let rendered = splice::render(self, self.root, region, indent, false)?;
+        let region = splice::region(self, self.source.root, false);
+        let indent = splice::indent(&self.source.text, region.start());
+        let rendered = splice::render(self, self.source.root, region, indent, false)?;
         let output = splice::PatchSet::new(
-            &self.source,
+            &self.source.text,
             vec![(rendered.span, rendered.text)],
-            self.options.max_input_bytes,
+            self.source.options.max_input_bytes,
         )
         .map_err(|message| Error {
             span: region,
             message,
         })?
         .apply();
-        let parsed = Self::parse_with_options(&output, self.options)?;
+        let parsed = Self::parse_with_options(&output, self.source.options)?;
         let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
             span: region,
             message: "emission changed YAML content or alias identity",
@@ -278,25 +273,25 @@ impl EditableDocument {
     /// The current committed UTF-8 source, with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
-        &self.source
+        &self.source.text
     }
 
     /// The root of this document's current syntax view.
     #[must_use]
     pub fn root(&self) -> NodeId {
-        self.root
+        self.source.root
     }
 
     /// Looks up a node in the current syntax view.
     #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(id.0)
+        self.source.nodes.get(id.0)
     }
 
     /// Parser limits used when constructing this document.
     #[must_use]
     pub fn options(&self) -> ParseOptions {
-        self.options
+        self.source.options
     }
 }
 

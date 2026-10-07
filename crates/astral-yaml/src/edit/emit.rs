@@ -1064,6 +1064,7 @@ pub(super) fn correspondence<'a, Location: 'a>(
     actual: &EditableDocument,
 ) -> Option<Vec<Option<NodeId>>> {
     let expected = expected.into();
+    let actual = &actual.source;
     let mut pending = vec![(expected.root, actual.root)];
     let mut correspondence = vec![None; expected.nodes.len()];
     let mut aliases = Vec::new();
@@ -1122,6 +1123,7 @@ pub(super) fn comments_preserved<'a, Location: 'a>(
     correspondence: &[Option<NodeId>],
 ) -> bool {
     let expected = expected.into();
+    let actual = &actual.source;
     correspondence.iter().enumerate().all(|(id, target)| {
         let Some(target) = target else {
             return true;

@@ -1,5 +1,6 @@
 //! Comment placement across fragment replacement and presentation changes.
 
+use super::support::edit;
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -76,11 +77,9 @@ fn replacement_merges_comments_at_their_structural_positions() {
             "},
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -427,27 +426,23 @@ fn nested_fragment_prefixes_belong_to_the_selected_value() {
             - keep
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                let value = if source.starts_with("outer") {
-                    editor.mapping_entries(&root)?.remove(0).1
-                } else {
-                    editor.sequence_items(&root)?.remove(0)
-                };
-                editor.replace(
-                    &value,
-                    indoc! {r"
-                        # detached
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            let value = if source.starts_with("outer") {
+                editor.mapping_entries(&root)?.remove(0).1
+            } else {
+                editor.sequence_items(&root)?.remove(0)
+            };
+            editor.replace(
+                &value,
+                indoc! {r"
+                    # detached
 
-                        # leading
-                        new
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+                    # leading
+                    new
+                "},
+            )
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -505,35 +500,32 @@ fn merged_comment_gaps_survive_further_replacement_and_removal() {
 
         # tail
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let root = editor.root();
-            editor.replace(
-                &root,
-                indoc! {r"
-                    a: one
+    let diff = edit(source, |editor| {
+        let root = editor.root();
+        editor.replace(
+            &root,
+            indoc! {r"
+                a: one
 
-                    # first
+                # first
 
-                    b: two
-                "},
-            )?;
-            editor.replace(
-                &root,
-                indoc! {r"
-                    a: first
+                b: two
+            "},
+        )?;
+        editor.replace(
+            &root,
+            indoc! {r"
+                a: first
 
-                    # second
+                # second
 
-                    b: middle
-                    c: last
-                "},
-            )?;
-            editor.remove_entry(&root, 1)
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+                b: middle
+                c: last
+            "},
+        )?;
+        editor.remove_entry(&root, 1)
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,10 @@

@@ -1,8 +1,8 @@
 //! Edits to the pinned corpus retain presentation outside the changed nodes.
 //! YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
 
-use astral_yaml::edit::{EditableDocument, Editor, Handle, NodeKind};
-use astral_yaml_dev::edit_diff;
+use super::support::edit;
+use astral_yaml::edit::{Editor, Handle, NodeKind};
 
 fn mapping_value(editor: &Editor<'_>, path: &[&str]) -> Handle {
     let mut node = editor.root();
@@ -22,15 +22,12 @@ fn mapping_value(editor: &Editor<'_>, path: &[&str]) -> Handle {
 
 #[test]
 fn ci_permission_edit_preserves_the_inline_comment() {
-    let source = include_str!("../../../fixtures/real-world/compose-ci.yaml");
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let contents = mapping_value(editor, &["permissions", "contents"]);
-            editor.replace(&contents, "write")
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let source = include_str!("../../../../fixtures/real-world/compose-ci.yaml");
+    let diff = edit(source, |editor| {
+        let contents = mapping_value(editor, &["permissions", "contents"]);
+        editor.replace(&contents, "write")
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,7 +1,7 @@
@@ -47,15 +44,12 @@ fn ci_permission_edit_preserves_the_inline_comment() {
 
 #[test]
 fn openapi_server_insertion_preserves_surrounding_sections() {
-    let source = include_str!("../../../fixtures/real-world/openapi-petstore.yaml");
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let servers = mapping_value(editor, &["servers"]);
-            editor.insert_item(&servers, 1, "url: https://staging.example.com/v2")
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    let source = include_str!("../../../../fixtures/real-world/openapi-petstore.yaml");
+    let diff = edit(source, |editor| {
+        let servers = mapping_value(editor, &["servers"]);
+        editor.insert_item(&servers, 1, "url: https://staging.example.com/v2")
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -12,7 +12,10 @@
@@ -76,17 +70,14 @@ fn openapi_server_insertion_preserves_surrounding_sections() {
 #[test]
 fn compose_healthcheck_edit_preserves_service_comments_and_siblings() {
     let source = include_str!(
-        "../../../fixtures/real-world/docker-awesome-compose-nginx-flask-mysql-compose-457480dd.yaml"
+        "../../../../fixtures/real-world/docker-awesome-compose-nginx-flask-mysql-compose-457480dd.yaml"
     );
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let healthcheck = mapping_value(editor, &["services", "db", "healthcheck"]);
-            editor.remove_entry(&healthcheck, 2)?;
-            editor.insert_entry(&healthcheck, 3, "timeout", "5s")
-        })
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    let diff = edit(source, |editor| {
+        let healthcheck = mapping_value(editor, &["services", "db", "healthcheck"]);
+        editor.remove_entry(&healthcheck, 2)?;
+        editor.insert_entry(&healthcheck, 3, "timeout", "5s")
+    });
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -9,8 +9,8 @@

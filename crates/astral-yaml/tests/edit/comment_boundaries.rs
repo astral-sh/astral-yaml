@@ -1,5 +1,6 @@
-use astral_yaml::{comments::CommentPlacement, edit::EditableDocument};
-use astral_yaml_dev::{edit_diff, indoc};
+use super::support::edit;
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml_dev::indoc;
 
 #[derive(Clone, Copy)]
 enum Target {
@@ -49,19 +50,15 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
             Target::Value,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                let owner = match target {
-                    Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
-                    Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
-                    Target::Item => editor.sequence_items(&root)?[0].clone(),
-                };
-                editor.insert_comment(&owner, 0, " collection", CommentPlacement::Leading)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            let owner = match target {
+                Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
+                Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
+                Target::Item => editor.sequence_items(&root)?[0].clone(),
+            };
+            editor.insert_comment(&owner, 0, " collection", CommentPlacement::Leading)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
