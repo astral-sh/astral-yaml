@@ -32,5 +32,8 @@ jobs:
       - name: Run unit, integration, and doc tests
         run: cargo test --workspace --all-features --locked
 
+      - name: Test without optional features
+        run: cargo test --workspace --no-default-features --locked
+
       - name: Enforce coverage
         run: cargo xtask cov

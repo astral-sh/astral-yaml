@@ -251,7 +251,7 @@ pub(crate) fn run(html: bool) -> Result<()> {
         let mut tests = Command::new(&cargo);
         tests
             .current_dir(&root)
-            .args(["test", "--tests", "--locked", "--target"])
+            .args(["test", "--tests", "--all-features", "--locked", "--target"])
             .arg(&toolchain.host)
             .arg("--target-dir")
             .arg(directory.join("build"))

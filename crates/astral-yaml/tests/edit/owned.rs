@@ -133,8 +133,7 @@ fn editable_sources_normalize_line_breaks_before_assigning_spans() {
         escaped: "\r\n"
     "#};
     let expected = EditableDocument::parse(source).unwrap();
-    // Line-ending variation belongs at the input boundary, rather than in every
-    // structural edit test. Include mixed and consecutive physical line breaks.
+    // Include mixed and consecutive physical line breaks.
     for input in [
         source.to_owned(),
         source.replace('\n', "\r\n"),
