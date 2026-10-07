@@ -62,6 +62,9 @@ impl Changes {
                     (NodeKind::Scalar { style: old, .. }, NodeKind::Scalar { style: new, .. }) => {
                         original_layout.scalar_style(id, *old) != layout.scalar_style(id, *new)
                     }
+                    (NodeKind::Alias { target: old }, NodeKind::Alias { target: new }) => {
+                        original.nodes[old.0].anchor != syntax.nodes[new.0].anchor
+                    }
                     _ => false,
                 };
             if !content && !comments && !resolved {

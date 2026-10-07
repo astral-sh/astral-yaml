@@ -152,6 +152,8 @@ impl<'a> Editor<'a> {
     /// Replaces a node with a parsed single-node YAML fragment, retaining its
     /// outer comment attachments. Its handle remains valid; handles to its old
     /// descendants expire. Later operations see the replacement's content.
+    /// Existing aliases to the node use its new anchor. Commit rejects a missing
+    /// anchor or shadowing that would change an alias's target identity.
     ///
     /// # Errors
     /// Rejects invalid fragments, handles, or limits.
@@ -159,8 +161,10 @@ impl<'a> Editor<'a> {
         self.replace_impl(handle, yaml, false)
     }
 
-    /// Replaces a node from a YAML fragment, retaining its anchor, outer comments,
+    /// Replaces a node from a YAML fragment, retaining any existing anchor, outer comments,
     /// and compatible scalar or collection style. The fragment supplies tags.
+    /// Its anchor is used when the original node has none. Aliases in the fragment
+    /// retain their target identity when an existing anchor takes its place.
     /// Unlike an explicit style request, the retained style may fall back when
     /// the new content cannot use it.
     ///
@@ -320,7 +324,7 @@ impl<'a> Editor<'a> {
         if let Some(error) = self.failure.take() {
             return Err(error);
         }
-        let candidate = self.draft.freeze();
+        let candidate = self.draft.freeze()?;
         let syntax = Layout::new(&candidate);
         let original = Source::from(self.original);
         let changes = Changes::between(&original, &candidate, &syntax);

@@ -127,7 +127,7 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
         inserted_alias,
         "an imported alias targets its own fragment root"
     );
-    let candidate = draft.freeze();
+    let candidate = draft.freeze().unwrap();
     assert_eq!(candidate.requested_styles, [tail]);
 }
 

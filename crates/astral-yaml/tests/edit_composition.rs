@@ -530,7 +530,9 @@ fn content(document: &EditableDocument, id: astral_yaml::NodeId) -> Content {
                 .map(|&(key, value)| (content(document, key), content(document, value)))
                 .collect(),
         ),
-        NodeKind::Alias { name, .. } => Content::Alias(name.clone()),
+        NodeKind::Alias { target } => {
+            Content::Alias(document.node(*target).unwrap().anchor().unwrap().to_owned())
+        }
     }
 }
 

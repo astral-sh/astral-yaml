@@ -37,7 +37,7 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
 
     // A broken planning or rendering pass must not change the draft against
     // which commit is checked. Deliberately corrupt only the rendering copy.
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     let mut planned = Syntax::from(&candidate).nodes.to_vec();
     planned[value.id.0].kind = NodeKind::Scalar {
         value: "incorrect".to_owned(),
@@ -88,7 +88,7 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     let mut editor = Editor::new(&document);
     editor.replace(&editor.handle(first), "new_a").unwrap();
     editor.replace(&editor.handle(last), "new_c").unwrap();
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
@@ -107,7 +107,7 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
 fn empty_transactions_do_not_require_rewrite_work() {
     let document = EditableDocument::parse("one").unwrap();
     let editor = Editor::new(&document);
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     candidate.work().set(0);
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
@@ -140,7 +140,7 @@ fn outer_comment_plans_obey_work_and_output_limits() {
             .unwrap();
     }
     let region = document.nodes[document.root.0].span;
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
@@ -313,7 +313,7 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             "},
         )
         .unwrap();
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
@@ -351,7 +351,7 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
         let mut editor = Editor::new(&document);
         let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
         let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
-        let before = editor.draft.clone().freeze();
+        let before = editor.draft.clone().freeze().unwrap();
         let multiline_before =
             Layout::new(&before).multiline(value.id, editor.node(&value).unwrap().kind());
         editor
@@ -362,7 +362,7 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
                 crate::comments::CommentPlacement::Detached,
             )
             .unwrap();
-        let candidate = editor.draft.clone().freeze();
+        let candidate = editor.draft.clone().freeze().unwrap();
         let layout = Layout::new(&candidate);
         let multiline_after = layout.multiline(value.id, editor.node(&value).unwrap().kind());
         let edited = editor.finish().unwrap();
@@ -411,7 +411,7 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
     let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
     editor.replace(&value, "new").unwrap();
-    let candidate = editor.draft.clone().freeze();
+    let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);

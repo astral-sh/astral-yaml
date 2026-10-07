@@ -1028,7 +1028,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let candidate = candidate.freeze();
+        let candidate = candidate.freeze().unwrap();
         let candidate = Syntax::from(&candidate);
         let before = RootComments::plan(
             &original,

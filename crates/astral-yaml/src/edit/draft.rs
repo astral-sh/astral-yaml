@@ -439,7 +439,21 @@ impl Draft {
         Ok(())
     }
 
-    pub(super) fn freeze(self) -> Candidate {
+    /// Planning only receives a graph whose live aliases have live, anchored
+    /// targets. A transaction may temporarily remove a definition while also
+    /// removing its aliases, so this check belongs at the end of mutation.
+    pub(super) fn freeze(self) -> Result<Candidate, Error> {
+        for slot in self.slots.iter().filter(|slot| slot.membership.is_some()) {
+            if let NodeKind::Alias { target } = slot.node.kind {
+                if !self.contains(target) {
+                    return Err(self.error("alias target was removed"));
+                }
+                if self.node(target).anchor.is_none() {
+                    return Err(self.error("alias target has no anchor"));
+                }
+            }
+        }
+
         let mut nodes = Vec::with_capacity(self.slots.len());
         let mut parents = Vec::with_capacity(self.slots.len());
         let mut requested_styles = Vec::new();
@@ -455,7 +469,7 @@ impl Draft {
             };
             parents.push(parent);
         }
-        Candidate {
+        Ok(Candidate {
             nodes,
             root: self.root,
             parents,
@@ -463,7 +477,7 @@ impl Draft {
             options: self.options,
             diagnostic_span: self.diagnostic_span,
             work: self.work,
-        }
+        })
     }
 }
 
@@ -510,7 +524,9 @@ impl Candidate {
 }
 
 fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>) {
-    replacement.anchor.clone_from(&old.anchor);
+    if let Some(anchor) = &old.anchor {
+        replacement.anchor = Some(anchor.clone());
+    }
     let compatible = match (&old.kind, &replacement.kind) {
         (
             NodeKind::Scalar {

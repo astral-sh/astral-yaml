@@ -5,7 +5,7 @@ use astral_yaml_dev::indoc;
 
 /// Exercise emission without constructing a fictitious committed document.
 fn render_draft(original: &EditableDocument, draft: Draft) -> String {
-    let candidate = draft.freeze();
+    let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
     let source = Source::from(original);
     let region = region(original, original.root, false);
@@ -347,7 +347,7 @@ fn rendering_obeys_work_and_output_budgets() {
         document.options.max_nodes = nodes;
         document.options.max_input_bytes = bytes;
         let source = Source::from(&document);
-        let draft = Draft::from(&document).freeze();
+        let draft = Draft::from(&document).freeze().unwrap();
         let region = region(&document, document.root, false);
         // Both committed syntax and drafts obey the same rendering limits.
         for result in [
