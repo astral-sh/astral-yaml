@@ -9,5 +9,6 @@ mod value;
 
 pub use annotations::span_snapshot;
 pub use events::events;
+pub use indoc::{formatdoc, indoc};
 pub use spans::validate_spans;
 pub use value::Value;

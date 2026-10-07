@@ -1,12 +1,15 @@
 //! Owned YAML syntax for source-preserving editing.
 
+use std::borrow::Cow;
+
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
     comments::{CommentIndex, CommentPlacement},
     parse_with_options,
 };
 
-/// An owned source document. Node IDs refer only to this document's current view.
+/// An owned source document with LF line endings. Node IDs and spans refer only
+/// to this document's current, normalized view.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
     pub(crate) source: String,
@@ -56,7 +59,8 @@ pub struct Comment {
 }
 
 impl EditableDocument {
-    /// Retains exactly one YAML document and its UTF-8 source.
+    /// Retains exactly one YAML document, normalizing CR and CRLF line endings
+    /// to LF. All source spans and diagnostics refer to the normalized source.
     ///
     /// # Errors
     /// Returns a syntax, document-count, or resource-limit error.
@@ -64,12 +68,16 @@ impl EditableDocument {
         Self::parse_with_options(source, ParseOptions::default())
     }
 
-    /// Retains one document using explicit parser limits.
+    /// Retains one document using explicit parser limits and LF line endings.
+    /// The input byte limit applies before normalization. Source spans and
+    /// diagnostics refer to the normalized source.
     ///
     /// # Errors
     /// Returns a syntax, document-count, or resource-limit error.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
-        let stream = parse_with_options(source, options)?;
+        options.check_input(source.len())?;
+        let source = lf_source(source);
+        let stream = parse_with_options(&source, options)?;
         let [document] = stream.documents() else {
             return Err(Error {
                 span: stream.span(),
@@ -118,14 +126,14 @@ impl EditableDocument {
             });
         }
         Ok(Self {
-            source: source.to_owned(),
             nodes,
             root: document.root,
             options,
+            source: source.into_owned(),
         })
     }
 
-    /// The current committed UTF-8 source.
+    /// The current committed UTF-8 source, with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
@@ -148,6 +156,20 @@ impl EditableDocument {
     pub fn options(&self) -> ParseOptions {
         self.options
     }
+}
+
+/// Normalize physical line breaks without changing escaped scalar content.
+fn lf_source(source: &str) -> Cow<'_, str> {
+    let Some(first) = source.find('\r') else {
+        return Cow::Borrowed(source);
+    };
+    let mut normalized = String::with_capacity(source.len());
+    normalized.push_str(&source[..first]);
+    for segment in source[first + 1..].split('\r') {
+        normalized.push('\n');
+        normalized.push_str(segment.strip_prefix('\n').unwrap_or(segment));
+    }
+    Cow::Owned(normalized)
 }
 
 impl Node {
