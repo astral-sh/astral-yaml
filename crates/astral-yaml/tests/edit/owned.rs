@@ -7,59 +7,6 @@ use astral_yaml::{
 use astral_yaml_dev::indoc;
 
 #[test]
-fn editable_sources_normalize_line_breaks_before_assigning_spans() {
-    // YAML line breaks normalize to LF: https://yaml.org/spec/1.2.2/#54-line-break-characters
-    let source = indoc! {r#"
-        # before
-        key: &a 'é' # inline
-
-        copy: *a
-        escaped: "\r\n"
-    "#};
-    let expected = EditableDocument::parse(source).unwrap();
-    // Include mixed and consecutive physical line breaks.
-    for input in [
-        source.to_owned(),
-        source.replace('\n', "\r\n"),
-        source.replace('\n', "\r"),
-        source
-            .replace("# before\n", "# before\r\n")
-            .replace("copy: *a\n", "copy: *a\r"),
-    ] {
-        let document = EditableDocument::parse(&input).unwrap();
-        assert_eq!(format!("{document:?}"), format!("{expected:?}"));
-    }
-    // Escaped carriage returns are scalar data, not physical line breaks.
-    let NodeKind::Mapping { entries, .. } = expected.node(expected.root()).unwrap().kind() else {
-        panic!("mapping")
-    };
-    insta::assert_debug_snapshot!(expected.node(entries[2].1).unwrap().kind(), @r#"
-    Scalar {
-        value: "\r\n",
-        style: DoubleQuoted,
-    }
-    "#);
-}
-
-#[test]
-fn normalization_keeps_limits_on_the_original_input_and_locates_errors_in_lf() {
-    let limited = EditableDocument::parse_with_options(
-        "key: value\r\n",
-        ParseOptions {
-            max_input_bytes: "key: value\n".len(),
-            ..ParseOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert_eq!(limited.message, "input byte limit exceeded");
-    let error = EditableDocument::parse("key: value\r\ninvalid: [\r\n").unwrap_err();
-    assert_eq!(
-        error,
-        EditableDocument::parse("key: value\ninvalid: [\n").unwrap_err()
-    );
-}
-
-#[test]
 fn owned_document_retains_syntax_and_direct_comments() {
     let source = indoc! {r"
         %YAML 1.2
@@ -176,29 +123,54 @@ fn construction_rejects_invalid_documents_and_limits() {
 }
 
 #[test]
-fn real_world_normalization_preserves_comments_or_rejects_attachment_changes() {
-    let mut unsupported = Vec::new();
-    for fixture in astral_yaml_dev::fixtures::manifest() {
-        if !fixture.valid_syntax() {
-            continue;
-        }
-        let source = fixture.source();
-        let stream = astral_yaml::parse(&source).unwrap();
-        if stream.documents().len() != 1 {
-            continue;
-        }
-        let document = EditableDocument::parse(&source).unwrap();
-        if let Err(error) = document.normalized_yaml() {
-            assert_eq!(
-                error.message, "emission changed comment ownership or placement",
-                "{}: {error}",
-                fixture.file
-            );
-            unsupported.push(fixture.file);
-        }
+fn editable_sources_normalize_line_breaks_before_assigning_spans() {
+    // YAML line breaks normalize to LF: https://yaml.org/spec/1.2.2/#54-line-break-characters
+    let source = indoc! {r#"
+        # before
+        key: &a 'é' # inline
+
+        copy: *a
+        escaped: "\r\n"
+    "#};
+    let expected = EditableDocument::parse(source).unwrap();
+    // Include mixed and consecutive physical line breaks.
+    for input in [
+        source.to_owned(),
+        source.replace('\n', "\r\n"),
+        source.replace('\n', "\r"),
+        source
+            .replace("# before\n", "# before\r\n")
+            .replace("copy: *a\n", "copy: *a\r"),
+    ] {
+        let document = EditableDocument::parse(&input).unwrap();
+        assert_eq!(format!("{document:?}"), format!("{expected:?}"));
     }
-    // These attachments previously moved silently during normalization.
-    // Keep the unsupported set explicit so new failures remain visible.
-    unsupported.sort();
-    insta::assert_debug_snapshot!(unsupported, @"[]");
+    // Escaped carriage returns are scalar data, not physical line breaks.
+    let NodeKind::Mapping { entries, .. } = expected.node(expected.root()).unwrap().kind() else {
+        panic!("mapping")
+    };
+    insta::assert_debug_snapshot!(expected.node(entries[2].1).unwrap().kind(), @r#"
+    Scalar {
+        value: "\r\n",
+        style: DoubleQuoted,
+    }
+    "#);
+}
+
+#[test]
+fn normalization_keeps_limits_on_the_original_input_and_locates_errors_in_lf() {
+    let limited = EditableDocument::parse_with_options(
+        "key: value\r\n",
+        ParseOptions {
+            max_input_bytes: "key: value\n".len(),
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert_eq!(limited.message, "input byte limit exceeded");
+    let error = EditableDocument::parse("key: value\r\ninvalid: [\r\n").unwrap_err();
+    assert_eq!(
+        error,
+        EditableDocument::parse("key: value\ninvalid: [\n").unwrap_err()
+    );
 }

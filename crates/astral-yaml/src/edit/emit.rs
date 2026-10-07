@@ -40,28 +40,12 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
 
 pub(super) fn indent(source: &str, at: usize) -> usize {
     source[..at]
-        .rsplit(['\r', '\n'])
+        .rsplit('\n')
         .next()
         .unwrap_or("")
         .bytes()
         .take_while(|&byte| byte == b' ')
         .count()
-}
-
-pub(super) fn newline(source: &str) -> &'static str {
-    match source
-        .bytes()
-        .position(|byte| matches!(byte, b'\r' | b'\n'))
-    {
-        Some(index) if source.as_bytes()[index] == b'\r' => {
-            if source.as_bytes().get(index + 1) == Some(&b'\n') {
-                "\r\n"
-            } else {
-                "\r"
-            }
-        }
-        _ => "\n",
-    }
 }
 
 pub(super) fn render(
@@ -75,7 +59,6 @@ pub(super) fn render(
         document,
         root: id,
         region,
-        newline: newline(&document.source),
         output: String::new(),
         work: document.options.max_nodes,
         pending_indent: None,
@@ -260,7 +243,6 @@ struct Emitter<'a> {
     document: &'a EditableDocument,
     root: NodeId,
     region: Span,
-    newline: &'static str,
     output: String,
     work: usize,
     // A comment terminator is materialized only when following syntax needs it.
@@ -294,7 +276,7 @@ impl Emitter<'_> {
                     // A retained marker still needs its line terminator. The
                     // root's original span may already include that break,
                     // as it does for a block scalar.
-                    if source[self.region.start()..span.end()].contains(['\r', '\n']) {
+                    if source[self.region.start()..span.end()].contains('\n') {
                         self.line(0)?;
                     }
                 }
@@ -302,7 +284,7 @@ impl Emitter<'_> {
         }
         let suffix = &source[span.end()..];
         let trimmed = suffix.trim_start_matches([' ', '\t']);
-        let suffix_has_break = trimmed.starts_with(['\r', '\n']);
+        let suffix_has_break = trimmed.starts_with('\n');
         if self.pending_indent.is_some() && suffix_has_break {
             // Share the retained terminator, but not the old line's trailing
             // spaces: they would become part of the emitted comment's text.
@@ -313,13 +295,13 @@ impl Emitter<'_> {
                 .document
                 .end_marker
                 .is_some_and(|marker| marker.start() == span.end())
-            || (!span.is_empty() && source[..span.end()].ends_with(['\r', '\n']));
+            || (!span.is_empty() && source[..span.end()].ends_with('\n'));
         if needs_break
             && !self.output.is_empty()
-            && !self.output.ends_with(['\r', '\n'])
+            && !self.output.ends_with('\n')
             && !suffix_has_break
         {
-            self.push(self.newline)?;
+            self.push("\n")?;
         }
         Ok(Rendered {
             text: self.output,
@@ -335,7 +317,7 @@ impl Emitter<'_> {
             return None;
         }
         let prefix = self.document.source[..self.region.start()]
-            .rsplit(['\r', '\n'])
+            .rsplit('\n')
             .next()
             .unwrap_or("")
             .trim_start_matches('\u{feff}');
@@ -374,12 +356,12 @@ impl Emitter<'_> {
         self.pending_indent = None;
         if let Some(index) = self
             .output
-            .rfind(['\r', '\n'])
+            .rfind('\n')
             .filter(|&index| self.output[index + 1..].bytes().all(|byte| byte == b' '))
         {
             self.output.truncate(index + 1);
         } else {
-            self.push(self.newline)?;
+            self.push("\n")?;
         }
         for _ in 0..indent {
             self.push(" ")?;
@@ -508,8 +490,8 @@ impl Emitter<'_> {
             }
             self.push("#")?;
             self.push(&comment.text)?;
-            self.push(self.newline)?;
-            self.push(self.newline)?;
+            self.push("\n")?;
+            self.push("\n")?;
             self.line(indent)?;
             self.before(comments, indent)?;
         }
@@ -531,15 +513,15 @@ impl Emitter<'_> {
             let comment = comments.remaining.next().expect("comment before child");
             self.line(indent)?;
             if !self.trailing_block_scalar {
-                self.push(self.newline)?;
+                self.push("\n")?;
             }
             self.line(indent)?;
             self.push("#")?;
             self.push(&comment.text)?;
             // Blank separation on both sides keeps a container comment from
             // becoming a leading comment on the following child.
-            self.push(self.newline)?;
-            self.push(self.newline)?;
+            self.push("\n")?;
+            self.push("\n")?;
             self.line(indent)?;
         }
         Ok(())
@@ -556,14 +538,14 @@ impl Emitter<'_> {
     fn comment(&mut self, comment: &Comment, indent: usize) -> Result<(), Error> {
         if comment.placement == CommentPlacement::Inline
             && self.pending_indent.is_none()
-            && !self.output.ends_with(['\n', '\r'])
+            && !self.output.ends_with('\n')
         {
             self.push(" ")?;
         } else {
             self.line(indent)?;
         }
         if comment.placement == CommentPlacement::Detached {
-            self.push(self.newline)?;
+            self.push("\n")?;
             self.line(indent)?;
         }
         self.push("#")?;
@@ -815,12 +797,12 @@ impl Emitter<'_> {
             Position::Block { .. } if self.at_document_boundary() => ScalarPosition::Document,
             Position::Block { .. } => ScalarPosition::Block,
         };
-        let text = scalar(value, style, position, indent, self.newline);
+        let text = scalar(value, style, position, indent);
         if text.starts_with(['|', '>']) {
-            let (header, body) = text.split_once(self.newline).expect("block scalar header");
+            let (header, body) = text.split_once('\n').expect("block scalar header");
             self.push(header)?;
             self.inline(comments)?;
-            self.push(self.newline)?;
+            self.push("\n")?;
             self.push(body)?;
             self.trailing_block_scalar = true;
             return Ok(());
@@ -831,11 +813,11 @@ impl Emitter<'_> {
     fn at_document_boundary(&self) -> bool {
         // Document markers are recognized only at column zero. Include the
         // retained source prefix when emission has not started a new line.
-        if let Some(index) = self.output.rfind(['\r', '\n']) {
+        if let Some(index) = self.output.rfind('\n') {
             return self.output[index + 1..].is_empty();
         }
         let prefix = self.document.source[..self.region.start()]
-            .rsplit(['\r', '\n'])
+            .rsplit('\n')
             .next()
             .unwrap_or("");
         prefix.trim_start_matches('\u{feff}').is_empty() && self.output.is_empty()
@@ -857,13 +839,13 @@ impl Emitter<'_> {
         } else {
             ScalarPosition::Block
         };
-        let text = scalar(value, *style, position, 0, self.newline);
+        let text = scalar(value, *style, position, 0);
         let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
         let anchor = node
             .anchor
             .as_ref()
             .map_or(0, |anchor| anchor.chars().count() + 2);
-        !text.contains(['\r', '\n']) && text.chars().count() + tag + anchor <= 1024
+        !text.contains('\n') && text.chars().count() + tag + anchor <= 1024
     }
 
     fn value(
@@ -909,7 +891,7 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
     let suffix = &source[start..];
     match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
         Some(index) => suffix[..index]
-            .rfind(['\r', '\n'])
+            .rfind('\n')
             .map_or(start, |offset| start + offset + 1),
         None => source.len(),
     }
@@ -951,7 +933,7 @@ fn quoted(value: &str) -> String {
     result
 }
 
-fn flow_scalar(value: &str, indent: usize, newline: &str) -> String {
+fn flow_scalar(value: &str, indent: usize) -> String {
     let continuation = " ".repeat(indent + 2);
     let mut result = String::new();
     let mut after_break = false;
@@ -961,9 +943,9 @@ fn flow_scalar(value: &str, indent: usize, newline: &str) -> String {
             // empty line retains every decoded break, including at the edges
             // of a single-quoted scalar.
             if !after_break {
-                result.push_str(newline);
+                result.push('\n');
             }
-            result.push_str(newline);
+            result.push('\n');
             after_break = true;
         } else {
             if after_break {
@@ -979,7 +961,7 @@ fn flow_scalar(value: &str, indent: usize, newline: &str) -> String {
     result
 }
 
-fn block_scalar(value: &str, style: ScalarStyle, indent: usize, newline: &str) -> String {
+fn block_scalar(value: &str, style: ScalarStyle, indent: usize) -> String {
     let indicator = if style == ScalarStyle::Literal {
         '|'
     } else {
@@ -1016,40 +998,31 @@ fn block_scalar(value: &str, style: ScalarStyle, indent: usize, newline: &str) -
             body.push_str(line);
         }
     }
-    let mut result = format!("{indicator}2{chomp}{newline}");
+    let mut result = format!("{indicator}2{chomp}\n");
     let indentation = " ".repeat(indent + 2);
     for line in body.split_terminator('\n') {
         result.push_str(&indentation);
         result.push_str(line);
-        result.push_str(newline);
+        result.push('\n');
     }
     result
 }
 
-fn scalar(
-    value: &str,
-    style: ScalarStyle,
-    position: ScalarPosition,
-    indent: usize,
-    newline: &str,
-) -> String {
+fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usize) -> String {
     // Check the generated scalar in its actual flow/block context. This also
     // handles plain-scalar punctuation, folding, and explicit indentation.
     let candidate = match style {
         // Empty scalar text is observable through Serde string visitors and
         // application tags, even when the core schema resolves it as null.
         ScalarStyle::Plain if value.is_empty() => return String::new(),
-        ScalarStyle::Plain => flow_scalar(value, indent, newline),
+        ScalarStyle::Plain => flow_scalar(value, indent),
         ScalarStyle::SingleQuoted => {
-            format!(
-                "'{}'",
-                flow_scalar(value, indent, newline).replace('\'', "''")
-            )
+            format!("'{}'", flow_scalar(value, indent).replace('\'', "''"))
         }
         ScalarStyle::Literal | ScalarStyle::Folded
             if matches!(position, ScalarPosition::Block | ScalarPosition::Document) =>
         {
-            block_scalar(value, style, indent, newline)
+            block_scalar(value, style, indent)
         }
         ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
             return quoted(value);

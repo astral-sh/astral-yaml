@@ -194,7 +194,7 @@ impl EditableDocument {
                     .map(|property| property.span.end())
                     .max()
                     .unwrap_or(node.span.start());
-                crate::comments::skip_trivia(source, properties_end).min(node.span.end())
+                crate::comments::skip_trivia(&source, properties_end).min(node.span.end())
             });
             let position = CommentPosition::for_comment(&stream, owner, attached, content_start);
             nodes[owner.0].comments.push(Comment {
@@ -213,7 +213,7 @@ impl EditableDocument {
         })
     }
 
-    /// Returns the document's current source, preserving its formatting.
+    /// Returns the document's current source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.source.clone()

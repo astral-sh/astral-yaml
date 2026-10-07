@@ -1,4 +1,5 @@
 use super::{EditableDocument, NodeKind, correspondence, region, render};
+use astral_yaml_dev::indoc;
 
 #[test]
 fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
@@ -29,23 +30,78 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
 fn comment_comparison_preserves_each_owners_order() {
     for (before, after, expected) in [
         (
-            "# first\n# second\nvalue\n",
-            "# first\n# second\nvalue\n",
+            indoc! {r"
+                # first
+                # second
+                value
+            "},
+            indoc! {r"
+                # first
+                # second
+                value
+            "},
             true,
         ),
         (
-            "# first\n# second\nvalue\n",
-            "# second\n# first\nvalue\n",
+            indoc! {r"
+                # first
+                # second
+                value
+            "},
+            indoc! {r"
+                # second
+                # first
+                value
+            "},
             false,
         ),
         (
-            "value\n\n# first\n\n# second\n",
-            "value\n\n# second\n\n# first\n",
+            indoc! {r"
+                value
+
+                # first
+
+                # second
+            "},
+            indoc! {r"
+                value
+
+                # second
+
+                # first
+            "},
             false,
         ),
-        ("# first\nvalue\n", "value # first\n", false),
-        ("# first\nvalue\n", "value\n", false),
-        ("value\n", "# first\nvalue\n", false),
+        (
+            indoc! {r"
+                # first
+                value
+            "},
+            indoc! {r"
+                value # first
+            "},
+            false,
+        ),
+        (
+            indoc! {r"
+                # first
+                value
+            "},
+            indoc! {r"
+                value
+            "},
+            false,
+        ),
+        (
+            indoc! {r"
+                value
+            "},
+            indoc! {r"
+                # first
+                value
+            "},
+            false,
+        ),
     ] {
         let before = EditableDocument::parse(before).unwrap();
         let after = EditableDocument::parse(after).unwrap();
@@ -76,39 +132,36 @@ fn scalar_emission_preserves_representable_line_breaks() {
                 continue;
             }
             for indent in [0, 2, 4] {
-                for newline in ["\n", "\r\n", "\r"] {
-                    for flow in [false, true] {
-                        if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
-                            continue;
-                        }
-                        let text = super::scalar(
-                            value,
-                            style,
-                            if flow {
-                                super::ScalarPosition::Flow
-                            } else {
-                                super::ScalarPosition::Block
-                            },
-                            indent,
-                            newline,
-                        );
-                        let source = if flow {
-                            format!("[{text}]")
-                        } else {
-                            format!("{}value: {text}", " ".repeat(indent))
-                        };
-                        let stream = crate::parse(&source).unwrap();
-                        let mut node = stream.node(stream.documents()[0].root).unwrap();
-                        if let crate::NodeKind::Sequence { items, .. } = &node.kind {
-                            node = stream.node(items[0]).unwrap();
-                        } else if let crate::NodeKind::Mapping { entries, .. } = &node.kind {
-                            node = stream.node(entries[0].value).unwrap();
-                        }
-                        assert!(
-                            matches!(&node.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
-                            "{style:?}, {flow}, {indent}, {newline:?}, {value:?} -> {text:?}"
-                        );
+                for flow in [false, true] {
+                    if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
+                        continue;
                     }
+                    let text = super::scalar(
+                        value,
+                        style,
+                        if flow {
+                            super::ScalarPosition::Flow
+                        } else {
+                            super::ScalarPosition::Block
+                        },
+                        indent,
+                    );
+                    let source = if flow {
+                        format!("[{text}]")
+                    } else {
+                        format!("{}value: {text}", " ".repeat(indent))
+                    };
+                    let stream = crate::parse(&source).unwrap();
+                    let mut node = stream.node(stream.documents()[0].root).unwrap();
+                    if let crate::NodeKind::Sequence { items, .. } = &node.kind {
+                        node = stream.node(items[0]).unwrap();
+                    } else if let crate::NodeKind::Mapping { entries, .. } = &node.kind {
+                        node = stream.node(entries[0].value).unwrap();
+                    }
+                    assert!(
+                        matches!(&node.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
+                        "{style:?}, {flow}, {indent}, {value:?} -> {text:?}"
+                    );
                 }
             }
         }
@@ -120,7 +173,7 @@ fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
     use crate::ScalarStyle;
     for style in [ScalarStyle::Plain, ScalarStyle::SingleQuoted] {
         for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
-            let text = super::scalar(value, style, super::ScalarPosition::Block, 2, "\n");
+            let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
             let parsed = crate::parse(&text).unwrap();
             let node = parsed.node(parsed.documents()[0].root).unwrap();
             assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
@@ -129,7 +182,7 @@ fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
     }
     for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
         for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
-            let text = super::scalar(value, style, super::ScalarPosition::Block, 2, "\n");
+            let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
             let source = format!("  value: {text}");
             let parsed = crate::parse(&source).unwrap();
             let node = parsed
@@ -156,25 +209,43 @@ fn rendering_obeys_work_and_output_budgets() {
         ("[42]", 1, 100, "emission resource limit exceeded"),
         ("42", 100, 1, "emitted YAML exceeds input byte limit"),
         (
-            "a: old\n\n# detached\n\nb: new\n",
+            indoc! {r"
+                a: old
+
+                # detached
+
+                b: new
+            "},
             100,
             10,
             "emitted YAML exceeds input byte limit",
         ),
         (
-            "- old\n\n# detached\n\n- new\n",
+            indoc! {r"
+                - old
+
+                # detached
+
+                - new
+            "},
             100,
             10,
             "emitted YAML exceeds input byte limit",
         ),
         (
-            "# leading\na: value\n",
+            indoc! {r"
+                # leading
+                a: value
+            "},
             100,
             3,
             "emitted YAML exceeds input byte limit",
         ),
         (
-            "a: # note\n  - value\n",
+            indoc! {r"
+                a: # note
+                  - value
+            "},
             100,
             3,
             "emitted YAML exceeds input byte limit",
@@ -198,8 +269,20 @@ fn rendering_obeys_work_and_output_budgets() {
 #[test]
 fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
     for (value, flow) in [
-        ("first\n---\nsecond", false),
-        ("]\n---\n[", true),
+        (
+            indoc! {r"
+                first
+                ---
+                second"},
+            false,
+        ),
+        (
+            indoc! {r"
+                ]
+                ---
+                ["},
+            true,
+        ),
         ("key]: value #", true),
         ("first, second", true),
         ("] # empty sequence", true),
@@ -215,7 +298,6 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
                 super::ScalarPosition::Block
             },
             0,
-            "\n",
         );
         let parsed = crate::parse(&output).unwrap();
         assert_eq!(parsed.documents().len(), 1, "{output:?}");
@@ -256,7 +338,11 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
 
 #[test]
 fn normalization_rejects_reassigned_comments() {
-    let mut document = EditableDocument::parse("a: one\nb: two\n").unwrap();
+    let mut document = EditableDocument::parse(indoc! {r"
+        a: one
+        b: two
+    "})
+    .unwrap();
     let value = document
         .nodes
         .iter_mut()
@@ -291,6 +377,7 @@ fn normalization_ignores_comments_on_unreachable_nodes() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn normalized_syntax_preserves_values_and_comments() {
     use astral_yaml_dev::Value;
     for source in [
@@ -302,35 +389,100 @@ fn normalized_syntax_preserves_values_and_comments() {
         "0xff",
         "'a''b'",
         r#""a\"b\\c""#,
-        "\"a\\nb\\r\\t\\0\\u0085\\u2028\\u2029\"",
+        indoc! {r#"
+        "a\nb\r\t\0\u0085\u2028\u2029""#},
         "{name: 'café', numbers: [1, 2]}",
         "{&key name: value}",
+        "{? [a, b]: value}",
+        "{? {key: value}: other}",
         "{!!str name: value}",
-        "  name: value\n",
+        r"  name: value
+",
         "[{}, [], null]",
-        "---\n# start\nfirst: one # inline\nsecond:\n  - two\n  - three\n# end\n...\n",
-        "[1, # one\n 2]",
-        "{a: 1, # one\n b: 2}",
-        "a: [ # opening\n  item] # closing\n",
-        "a: { # opening\n  key: value} # closing\n",
-        "a: &a # anchor\n  | # header\n    text\n",
-        "? [a, b]\n: value\n",
-        "? |\n  line\n",
+        indoc! {r"
+            ---
+            # start
+            first: one # inline
+            second:
+              - two
+              - three
+            # end
+            ...
+        "},
+        indoc! {r"
+            [1, # one
+             2]"},
+        indoc! {r"
+            {a: 1, # one
+             b: 2}"},
+        indoc! {r"
+            a: [ # opening
+              item] # closing
+        "},
+        indoc! {r"
+            a: { # opening
+              key: value} # closing
+        "},
+        indoc! {r"
+            a: &a # anchor
+              | # header
+                text
+        "},
+        indoc! {r"
+            ? [a, b]
+            : value
+        "},
+        indoc! {r"
+            ? |
+              line
+        "},
         "[&a [1, 2], *a]",
-        "text: |-\n  first\n  second\n",
-        "text: >-\n  first\n\n  second\n",
-        "text: |+\n  first\n\n",
-        "text: >\n  first\n  second\n",
-        "first: one\r\nsecond: two\r\n",
-        "first: one\rsecond: two\r",
-        "- one\n- two\n",
+        indoc! {r"
+            text: |-
+              first
+              second
+        "},
+        indoc! {r"
+            text: >-
+              first
+
+              second
+        "},
+        indoc! {r"
+            text: |+
+              first
+
+        "},
+        indoc! {r"
+            text: >
+              first
+              second
+        "},
+        indoc! {r"
+            - one
+            - two
+        "},
         "!!str 42",
         "!<tag:yaml.org,2002:seq> [1]",
         "! text",
-        "&root\na: value\n",
-        "&root\n- value\n",
-        "? key # key note\n: value\n",
-        "a: one\n\n# detached\nb: two\n",
+        indoc! {r"
+            &root
+            a: value
+        "},
+        indoc! {r"
+            &root
+            - value
+        "},
+        indoc! {r"
+            ? key # key note
+            : value
+        "},
+        indoc! {r"
+            a: one
+
+            # detached
+            b: two
+        "},
     ] {
         let document = EditableDocument::parse(source).unwrap();
         assert_eq!(document.to_yaml(), source);
@@ -354,13 +506,25 @@ fn normalized_syntax_preserves_values_and_comments() {
 fn root_scalar_candidates_respect_document_position() {
     let mut outputs = Vec::new();
     for source in [
-        "old\n",
-        "--- old\n",
-        "  old\n",
+        indoc! {r"
+            old
+        "},
+        indoc! {r"
+            --- old
+        "},
+        r"  old
+",
         "\u{feff}old\n",
-        "&root old\n",
-        "! old\n",
-        "# before\nold\n",
+        indoc! {r"
+            &root old
+        "},
+        indoc! {r"
+            ! old
+        "},
+        indoc! {r"
+            # before
+            old
+        "},
     ] {
         for replacement in ["---", "... text"] {
             let mut document = EditableDocument::parse(source).unwrap();
@@ -403,10 +567,12 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
             "- item",
             "x: value",
             "first\rsecond",
-            "a\n- b",
+            indoc! {r"
+                a
+                - b"},
             "x: one, y",
         ] {
-            let text = super::scalar(value, crate::ScalarStyle::Plain, position, 0, "\n");
+            let text = super::scalar(value, crate::ScalarStyle::Plain, position, 0);
             let source = if position == ScalarPosition::BlockKey {
                 format!("{text}: value")
             } else {
@@ -459,7 +625,12 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
 
 #[test]
 fn removed_properties_leave_room_for_retained_header_comments() {
-    let source = "key: !!str # tag\n  &a # anchor\n  # before value\n  old\n";
+    let source = indoc! {r"
+        key: !!str # tag
+          &a # anchor
+          # before value
+          old
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     let value = document
         .nodes
@@ -478,15 +649,79 @@ fn removed_properties_leave_room_for_retained_header_comments() {
 #[test]
 fn detached_comments_preserve_their_structural_boundaries() {
     for (before, after, expected) in [
-        ("# note\n\nvalue\n", "value\n\n# note\n", false),
         (
-            "a: old\n\n# note\n\nb: old\nc: old\n",
-            "a: old\nb: old\n\n# note\n\nc: old\n",
+            indoc! {r"
+                # note
+
+                value
+            "},
+            indoc! {r"
+                value
+
+                # note
+            "},
             false,
         ),
-        ("# note\n\n- old\n", "[\n# note\n\nold]\n", true),
-        ("# note\n\na: old\n", "{\n# note\n\na: old}\n", true),
-        ("# note\n\nvalue\n", "# note\n\n'value'\n", true),
+        (
+            indoc! {r"
+                a: old
+
+                # note
+
+                b: old
+                c: old
+            "},
+            indoc! {r"
+                a: old
+                b: old
+
+                # note
+
+                c: old
+            "},
+            false,
+        ),
+        (
+            indoc! {r"
+                # note
+
+                - old
+            "},
+            indoc! {r"
+                [
+                # note
+
+                old]
+            "},
+            true,
+        ),
+        (
+            indoc! {r"
+                # note
+
+                a: old
+            "},
+            indoc! {r"
+                {
+                # note
+
+                a: old}
+            "},
+            true,
+        ),
+        (
+            indoc! {r"
+                # note
+
+                value
+            "},
+            indoc! {r"
+                # note
+
+                'value'
+            "},
+            true,
+        ),
     ] {
         let before = EditableDocument::parse(before).unwrap();
         let after = EditableDocument::parse(after).unwrap();
@@ -501,28 +736,44 @@ fn detached_comments_preserve_their_structural_boundaries() {
 #[test]
 fn detached_prefixes_are_emitted_before_content() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "# detached\n\nnew\n",
-            "# detached\n\n# leading\nnew\n",
-            "# detached\n\n- new\n",
-            "# first\n\n# detached\n\nnew\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let document = EditableDocument::parse(&source).unwrap();
-            // Including outer comments exercises the same emitter path used by
-            // imported fragments, which have no retained source prefix.
-            let span = region(&document, document.root, true);
-            let rendered = render(&document, document.root, span, 0, false).unwrap();
-            let parsed = EditableDocument::parse(&rendered.text).unwrap();
-            let correspondence = correspondence(&document, &parsed).unwrap();
-            assert!(super::comments_preserved(
-                &document,
-                &parsed,
-                &correspondence
-            ));
-            outputs.push(rendered.text);
-        }
+    for source in [
+        indoc! {r"
+            # detached
+
+            new
+        "},
+        indoc! {r"
+            # detached
+
+            # leading
+            new
+        "},
+        indoc! {r"
+            # detached
+
+            - new
+        "},
+        indoc! {r"
+            # first
+
+            # detached
+
+            new
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        // Including outer comments exercises the same emitter path used by
+        // imported fragments, which have no retained source prefix.
+        let span = region(&document, document.root, true);
+        let rendered = render(&document, document.root, span, 0, false).unwrap();
+        let parsed = EditableDocument::parse(&rendered.text).unwrap();
+        let correspondence = correspondence(&document, &parsed).unwrap();
+        assert!(super::comments_preserved(
+            &document,
+            &parsed,
+            &correspondence
+        ));
+        outputs.push(rendered.text);
     }
     insta::assert_debug_snapshot!(outputs, @r##"
     [
@@ -530,14 +781,6 @@ fn detached_prefixes_are_emitted_before_content() {
         "# detached\n\n# leading\nnew",
         "# detached\n\n- new",
         "# first\n\n# detached\n\nnew",
-        "# detached\r\n\r\nnew",
-        "# detached\r\n\r\n# leading\r\nnew",
-        "# detached\r\n\r\n- new",
-        "# first\r\n\r\n# detached\r\n\r\nnew",
-        "# detached\r\rnew",
-        "# detached\r\r# leading\rnew",
-        "# detached\r\r- new",
-        "# first\r\r# detached\r\rnew",
     ]
     "##);
 }
@@ -545,27 +788,48 @@ fn detached_prefixes_are_emitted_before_content() {
 #[test]
 fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "[ # open\n  old\n] # close\n",
-            "{ # open\n  key: old\n} # close\n",
-            "&a [ # open\n  old\n] # close\n",
-            "!!seq # tag\n&a [ # open\n  old\n] # close\n",
-            "[ # open\n]\n",
-            "key: [ # open\n  old\n  ]\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let document = EditableDocument::parse(&source).unwrap();
-            let output = document.normalized_yaml().unwrap();
-            assert_eq!(
-                EditableDocument::parse(&output)
-                    .unwrap()
-                    .normalized_yaml()
-                    .unwrap(),
-                output
-            );
-            outputs.push(output);
-        }
+    for source in [
+        indoc! {r"
+            [ # open
+              old
+            ] # close
+        "},
+        indoc! {r"
+            { # open
+              key: old
+            } # close
+        "},
+        indoc! {r"
+            &a [ # open
+              old
+            ] # close
+        "},
+        indoc! {r"
+            !!seq # tag
+            &a [ # open
+              old
+            ] # close
+        "},
+        indoc! {r"
+            [ # open
+            ]
+        "},
+        indoc! {r"
+            key: [ # open
+              old
+              ]
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let output = document.normalized_yaml().unwrap();
+        assert_eq!(
+            EditableDocument::parse(&output)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+            output
+        );
+        outputs.push(output);
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
@@ -575,18 +839,6 @@ fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
         "!<tag:yaml.org,2002:seq> # tag\n  &a [ # open\n  old] # close\n",
         "[ # open\n  ]\n",
         "key: [ # open\n  old]\n",
-        "[ # open\r\n  old] # close\r\n",
-        "{ # open\r\n  key: old} # close\r\n",
-        "&a [ # open\r\n  old] # close\r\n",
-        "!<tag:yaml.org,2002:seq> # tag\r\n  &a [ # open\r\n  old] # close\r\n",
-        "[ # open\r\n  ]\r\n",
-        "key: [ # open\r\n  old]\r\n",
-        "[ # open\r  old] # close\r",
-        "{ # open\r  key: old} # close\r",
-        "&a [ # open\r  old] # close\r",
-        "!<tag:yaml.org,2002:seq> # tag\r  &a [ # open\r  old] # close\r",
-        "[ # open\r  ]\r",
-        "key: [ # open\r  old]\r",
     ]
     "#);
 }
@@ -594,27 +846,62 @@ fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
 #[test]
 fn omitted_roots_own_their_erased_line() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "# leading\n---\nold\n...\n",
-            "# leading\n---\n  old\n\n...\n",
-            "\u{feff}---\n  old\n...\n",
-            "--- old",
-            "--- old\n",
-            "--- old\n...\n",
-            "# leading\n--- old\n\n...\n",
-            "# leading\n--- |-\n  old\n\n...\n",
-            "# leading\n---\n|+\n  old\n\n...\n",
-            "---\n\n...\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut candidate = EditableDocument::parse(&source).unwrap();
-            candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
-                value: String::new(),
-                style: crate::ScalarStyle::Plain,
-            };
-            outputs.push(candidate.normalized_yaml().unwrap());
-        }
+    for source in [
+        indoc! {r"
+            # leading
+            ---
+            old
+            ...
+        "},
+        indoc! {r"
+            # leading
+            ---
+              old
+
+            ...
+        "},
+        "\u{feff}---\n  old\n...\n",
+        "--- old",
+        indoc! {r"
+            --- old
+        "},
+        indoc! {r"
+            --- old
+            ...
+        "},
+        indoc! {r"
+            # leading
+            --- old
+
+            ...
+        "},
+        indoc! {r"
+            # leading
+            --- |-
+              old
+
+            ...
+        "},
+        indoc! {r"
+            # leading
+            ---
+            |+
+              old
+
+            ...
+        "},
+        indoc! {r"
+            ---
+
+            ...
+        "},
+    ] {
+        let mut candidate = EditableDocument::parse(source).unwrap();
+        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+            value: String::new(),
+            style: crate::ScalarStyle::Plain,
+        };
+        outputs.push(candidate.normalized_yaml().unwrap());
     }
     insta::assert_debug_snapshot!(outputs, @r##"
     [
@@ -628,26 +915,6 @@ fn omitted_roots_own_their_erased_line() {
         "# leading\n--- \n...\n",
         "# leading\n---\n...\n",
         "---\n\n...\n",
-        "# leading\r\n---\r\n...\r\n",
-        "# leading\r\n---\r\n...\r\n",
-        "\u{feff}---\r\n...\r\n",
-        "--- ",
-        "--- \r\n",
-        "--- \r\n...\r\n",
-        "# leading\r\n--- \r\n...\r\n",
-        "# leading\r\n--- \r\n...\r\n",
-        "# leading\r\n---\r\n...\r\n",
-        "---\r\n\r\n...\r\n",
-        "# leading\r---\r...\r",
-        "# leading\r---\r...\r",
-        "\u{feff}---\r...\r",
-        "--- ",
-        "--- \r",
-        "--- \r...\r",
-        "# leading\r--- \r...\r",
-        "# leading\r--- \r...\r",
-        "# leading\r---\r...\r",
-        "---\r\r...\r",
     ]
     "##);
 }
@@ -655,32 +922,29 @@ fn omitted_roots_own_their_erased_line() {
 #[test]
 fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in ["old \n", "old \t \n", "[old] \t\n"] {
-            let source = source.replace('\n', newline);
-            let mut candidate = EditableDocument::parse(&source).unwrap();
-            candidate.nodes[candidate.root.0]
-                .comments
-                .push(super::Comment {
-                    text: " added".to_owned(),
-                    placement: crate::comments::CommentPlacement::Trailing,
-                    position: super::CommentPosition::After,
-                    span: crate::Span::new(0, 0).unwrap(),
-                });
-            outputs.push(candidate.normalized_yaml().unwrap());
-        }
+    for source in [
+        indoc! {"
+            old\x20
+        "},
+        "old \t \n",
+        "[old] \t\n",
+    ] {
+        let mut candidate = EditableDocument::parse(source).unwrap();
+        candidate.nodes[candidate.root.0]
+            .comments
+            .push(super::Comment {
+                text: " added".to_owned(),
+                placement: crate::comments::CommentPlacement::Trailing,
+                position: super::CommentPosition::After,
+                span: crate::Span::new(0, 0).unwrap(),
+            });
+        outputs.push(candidate.normalized_yaml().unwrap());
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
         "old\n# added\n",
         "old\n# added\n",
         "[old]\n# added\n",
-        "old\r\n# added\r\n",
-        "old\r\n# added\r\n",
-        "[old]\r\n# added\r\n",
-        "old\r# added\r",
-        "old\r# added\r",
-        "[old]\r# added\r",
     ]
     "#);
 }
@@ -688,39 +952,48 @@ fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
 #[test]
 fn block_scalar_suffix_comments_use_the_parent_indentation() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "  old\n# tail\n",
-            "    old\n# tail\n",
-            "  old # inline\n# tail\n",
-            "  &a old # inline\n# tail\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut candidate = EditableDocument::parse(&source).unwrap();
-            candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
-                value: "old".to_owned(),
-                style: crate::ScalarStyle::Literal,
-            };
-            let region = region(&candidate, candidate.root, true);
-            let rendered = render(
-                &candidate,
-                candidate.root,
-                region,
-                super::indent(&source, region.start()),
-                false,
-            )
-            .unwrap();
-            let output = format!(
-                "{}{}{}",
-                &source[..rendered.span.start()],
-                rendered.text,
-                &source[rendered.span.end()..]
-            );
-            let parsed = EditableDocument::parse(&output).unwrap();
-            let matched = correspondence(&candidate, &parsed).unwrap();
-            assert!(super::comments_preserved(&candidate, &parsed, &matched));
-            outputs.push(output);
-        }
+    for source in [
+        indoc! {r"
+              old
+            # tail
+        "},
+        indoc! {r"
+                old
+            # tail
+        "},
+        indoc! {r"
+              old # inline
+            # tail
+        "},
+        indoc! {r"
+              &a old # inline
+            # tail
+        "},
+    ] {
+        let mut candidate = EditableDocument::parse(source).unwrap();
+        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+            value: "old".to_owned(),
+            style: crate::ScalarStyle::Literal,
+        };
+        let region = region(&candidate, candidate.root, true);
+        let rendered = render(
+            &candidate,
+            candidate.root,
+            region,
+            super::indent(source, region.start()),
+            false,
+        )
+        .unwrap();
+        let output = format!(
+            "{}{}{}",
+            &source[..rendered.span.start()],
+            rendered.text,
+            &source[rendered.span.end()..]
+        );
+        let parsed = EditableDocument::parse(&output).unwrap();
+        let matched = correspondence(&candidate, &parsed).unwrap();
+        assert!(super::comments_preserved(&candidate, &parsed, &matched));
+        outputs.push(output);
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
@@ -728,14 +1001,6 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
         "    |2-\n  old\n# tail\n",
         "  |2- # inline\n  old\n# tail\n",
         "  &a |2- # inline\n  old\n# tail\n",
-        "  |2-\r\n  old\r\n# tail\r\n",
-        "    |2-\r\n  old\r\n# tail\r\n",
-        "  |2- # inline\r\n  old\r\n# tail\r\n",
-        "  &a |2- # inline\r\n  old\r\n# tail\r\n",
-        "  |2-\r  old\r# tail\r",
-        "    |2-\r  old\r# tail\r",
-        "  |2- # inline\r  old\r# tail\r",
-        "  &a |2- # inline\r  old\r# tail\r",
     ]
     "#);
 }
@@ -743,27 +1008,27 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
 #[test]
 fn omitted_roots_own_their_line_when_comments_are_emitted() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        let source = "---\nold\n...\n".replace('\n', newline);
-        let mut candidate = EditableDocument::parse(&source).unwrap();
-        let root = &mut candidate.nodes[candidate.root.0];
-        root.kind = NodeKind::Scalar {
-            value: String::new(),
-            style: crate::ScalarStyle::Plain,
-        };
-        root.comments.push(super::Comment {
-            text: " added".to_owned(),
-            placement: crate::comments::CommentPlacement::Leading,
-            position: super::CommentPosition::Before,
-            span: crate::Span::new(0, 0).unwrap(),
-        });
-        outputs.push(candidate.normalized_yaml().unwrap());
-    }
+    let source = indoc! {r"
+        ---
+        old
+        ...
+    "};
+    let mut candidate = EditableDocument::parse(source).unwrap();
+    let root = &mut candidate.nodes[candidate.root.0];
+    root.kind = NodeKind::Scalar {
+        value: String::new(),
+        style: crate::ScalarStyle::Plain,
+    };
+    root.comments.push(super::Comment {
+        text: " added".to_owned(),
+        placement: crate::comments::CommentPlacement::Leading,
+        position: super::CommentPosition::Before,
+        span: crate::Span::new(0, 0).unwrap(),
+    });
+    outputs.push(candidate.normalized_yaml().unwrap());
     insta::assert_debug_snapshot!(outputs, @r#"
     [
         "---\n# added\n...\n",
-        "---\r\n# added\r\n...\r\n",
-        "---\r# added\r...\r",
     ]
     "#);
 }
@@ -772,28 +1037,32 @@ fn omitted_roots_own_their_line_when_comments_are_emitted() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn full_line_suffixes_reserve_an_earlier_inline_header() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in ["outer: [old] # inline\n", "outer: {key: old} # inline\n"] {
-            for placement in [
-                crate::comments::CommentPlacement::Trailing,
-                crate::comments::CommentPlacement::Detached,
-            ] {
-                let source = source.replace('\n', newline);
-                let mut candidate = EditableDocument::parse(&source).unwrap();
-                let mut children = Vec::new();
-                super::children(&candidate.nodes[candidate.root.0].kind, &mut children);
-                let inner = children[1];
-                candidate.nodes[inner.0].comments.push(super::Comment {
-                    text: " added".to_owned(),
-                    placement,
-                    position: super::CommentPosition::After,
-                    span: crate::Span::new(0, 0).unwrap(),
-                });
-                diffs.push(astral_yaml_dev::edit_diff(
-                    &source,
-                    &candidate.normalized_yaml().unwrap(),
-                ));
-            }
+    for source in [
+        indoc! {r"
+            outer: [old] # inline
+        "},
+        indoc! {r"
+            outer: {key: old} # inline
+        "},
+    ] {
+        for placement in [
+            crate::comments::CommentPlacement::Trailing,
+            crate::comments::CommentPlacement::Detached,
+        ] {
+            let mut candidate = EditableDocument::parse(source).unwrap();
+            let mut children = Vec::new();
+            super::children(&candidate.nodes[candidate.root.0].kind, &mut children);
+            let inner = children[1];
+            candidate.nodes[inner.0].comments.push(super::Comment {
+                text: " added".to_owned(),
+                placement,
+                position: super::CommentPosition::After,
+                span: crate::Span::new(0, 0).unwrap(),
+            });
+            diffs.push(astral_yaml_dev::edit_diff(
+                source,
+                &candidate.normalized_yaml().unwrap(),
+            ));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -834,63 +1103,5 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  ⏎
     +  # added
     +  }
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,4 @@
-    -outer: [old] # inline␍
-    +outer: [ # inline␍
-    +  old␍
-    +  # added␍
-    +  ]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,5 @@
-    -outer: [old] # inline␍
-    +outer: [ # inline␍
-    +  old␍
-    +  ␍
-    +  # added␍
-    +  ]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,4 @@
-    -outer: {key: old} # inline␍
-    +outer: { # inline␍
-    +  key: old␍
-    +  # added␍
-    +  }␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,5 @@
-    -outer: {key: old} # inline␍
-    +outer: { # inline␍
-    +  key: old␍
-    +  ␍
-    +  # added␍
-    +  }␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,4 @@
-    -outer: [old] # inline␍+outer: [ # inline␍+  old␍+  # added␍+  ]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,5 @@
-    -outer: [old] # inline␍+outer: [ # inline␍+  old␍+  ␍+  # added␍+  ]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,4 @@
-    -outer: {key: old} # inline␍+outer: { # inline␍+  key: old␍+  # added␍+  }␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,5 @@
-    -outer: {key: old} # inline␍+outer: { # inline␍+  key: old␍+  ␍+  # added␍+  }␍
     ");
 }

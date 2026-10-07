@@ -1,81 +1,195 @@
 use astral_yaml::{ParseOptions, edit::EditableDocument};
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
 #[test]
 fn normalization_preserves_header_comments_before_leading_comments() {
     // Multiline comments: https://yaml.org/spec/1.2.2/#66-comments
     let mut outputs = Vec::new();
     for source in [
-        "key: # header\n  # leading\n  value\n",
-        "- # header\n  # leading\n  value\n",
-        "{key: # header\n  # leading\n  value}\n",
-        "# before\nkey: # header\n  # leading\n  value # inline\n",
-        "key: # header\n  # leading\n  | # scalar\n    text\n",
-        "key: # header\n  # leading\n  &a # anchor\n  value # inline\n",
+        indoc! {r"
+            key: # header
+              # leading
+              value
+        "},
+        indoc! {r"
+            - # header
+              # leading
+              value
+        "},
+        indoc! {r"
+            {key: # header
+              # leading
+              value}
+        "},
+        indoc! {r"
+            # before
+            key: # header
+              # leading
+              value # inline
+        "},
+        indoc! {r"
+            key: # header
+              # leading
+              | # scalar
+                text
+        "},
+        indoc! {r"
+            key: # header
+              # leading
+              &a # anchor
+              value # inline
+        "},
     ] {
-        outputs.push(
-            EditableDocument::parse(source)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-        );
+        let output = EditableDocument::parse(source)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap();
+        outputs.push(edit_diff(source, &output));
     }
-    insta::assert_debug_snapshot!(outputs, @r##"
-    [
-        "key: # header\n  # leading\n  value\n",
-        "- # header\n  # leading\n  value\n",
-        "{key: # header\n  # leading\n  value}\n",
-        "# before\nkey: # header\n  # leading\n  value # inline\n",
-        "key: # header\n  # leading\n  |2 # scalar\n  text\n",
-        "key: # header\n  # leading\n  &a # anchor\n    value # inline\n",
-    ]
-    "##);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+
+
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header
+       # leading
+    -  | # scalar
+    -    text
+    +  |2 # scalar
+    +  text
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header
+       # leading
+       &a # anchor
+    -  value # inline
+    +    value # inline
+    ");
 }
 
 #[test]
 fn normalization_retains_multiline_scalar_styles() {
-    let outputs: Vec<_> = ["a\n\nb\n", "'a\n\nb'\n", "|+\n\n", ">+\n\n"]
-        .into_iter()
-        .map(|source| {
-            EditableDocument::parse(source)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap()
-        })
-        .collect();
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "a\n\n  b\n",
-        "'a\n\n  b'\n",
-        "|2+\n  \n",
-        ">2+\n  \n",
+    let outputs: Vec<_> = [
+        indoc! {r"
+            a
+
+            b
+        "},
+        indoc! {r"
+            'a
+
+            b'
+        "},
+        indoc! {r"
+            |+
+
+        "},
+        indoc! {r"
+            >+
+
+        "},
     ]
-    "#);
+    .into_iter()
+    .map(|source| {
+        let output = EditableDocument::parse(source)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap();
+        edit_diff(source, &output)
+    })
+    .collect();
+    insta::assert_snapshot!(outputs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     a
+     ⏎
+    -b
+    +  b
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     'a
+     ⏎
+    -b'
+    +  b'
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -|+
+    -
+    +|2+
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    ->+
+    -
+    +>2+
+    +  ⏎
+    ");
 }
 
 #[test]
 fn normalized_block_scalars_use_their_parent_indentation() {
     let outputs: Vec<_> = [
-        "  |2-\n  first\n  second\n",
-        "  &anchor |2-\n  first\n  second\n",
-        "outer:\n  inner: |-\n    first\n    second\n",
-        "outer:\n  - |+\n    \n",
+        r"  |2-
+  first
+  second
+",
+        r"  &anchor |2-
+  first
+  second
+",
+        indoc! {r"
+            outer:
+              inner: |-
+                first
+                second
+        "},
+        indoc! {"
+            outer:
+              - |+
+            \x20\x20\x20\x20
+        "},
     ]
     .into_iter()
     .map(|source| {
-        EditableDocument::parse(source)
+        let output = EditableDocument::parse(source)
             .unwrap()
             .normalized_yaml()
-            .unwrap()
+            .unwrap();
+        edit_diff(source, &output)
     })
     .collect();
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "  |2-\n  first\n  second\n",
-        "  &anchor |2-\n  first\n  second\n",
-        "outer:\n  inner: |2-\n    first\n    second\n",
-        "outer:\n  - |2+\n    \n",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     outer:
+    -  inner: |-
+    +  inner: |2-
+         first
+         second
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     outer:
+    -  - |+
+    +  - |2+
+         ⏎
+    ");
 }
 
 #[test]
@@ -83,36 +197,87 @@ fn normalization_preserves_leading_comments_in_flow_collections() {
     // Comment separation: https://yaml.org/spec/1.2.2/#66-comments
     let mut outputs = Vec::new();
     for source in [
-        "[\n  # first\n  one, two]\n",
-        "[one,\n  # second\n  two]\n",
-        "{\n  # first\n  one: 1, two: 2}\n",
-        "{one: 1,\n  # second\n  two: 2}\n",
-        "outer: [{\n  # nested\n  one: 1}]\n",
-        "[one, # inline\n  # leading\n  two]\n",
+        indoc! {r"
+            [
+              # first
+              one, two]
+        "},
+        indoc! {r"
+            [one,
+              # second
+              two]
+        "},
+        indoc! {r"
+            {
+              # first
+              one: 1, two: 2}
+        "},
+        indoc! {r"
+            {one: 1,
+              # second
+              two: 2}
+        "},
+        indoc! {r"
+            outer: [{
+              # nested
+              one: 1}]
+        "},
+        indoc! {r"
+            [one, # inline
+              # leading
+              two]
+        "},
     ] {
         let document = EditableDocument::parse(source).unwrap();
-        outputs.push(document.normalized_yaml().unwrap());
+        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "[\n  # first\n  one, two]\n",
-        "[one, \n  # second\n  two]\n",
-        "{\n  # first\n  one: 1, two: 2}\n",
-        "{one: 1, \n  # second\n  two: 2}\n",
-        "outer: [{\n    # nested\n    one: 1}]\n",
-        "[one, # inline\n  # leading\n  two]\n",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -[one,
+    +[one, ⏎
+       # second
+       two]
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -{one: 1,
+    +{one: 1, ⏎
+       # second
+       two: 2}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     outer: [{
+    -  # nested
+    -  one: 1}]
+    +    # nested
+    +    one: 1}]
+    ");
 }
 
 #[test]
 fn normalization_preserves_empty_scalar_text() {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
     for source in [
-        "name:\n",
-        "name: !custom\n",
-        "{name: , other: null}\n",
-        "-\n- !!str\n",
+        indoc! {r"
+            name:
+        "},
+        indoc! {r"
+            name: !custom
+        "},
+        indoc! {r"
+            {name: , other: null}
+        "},
+        indoc! {r"
+            -
+            - !!str
+        "},
     ] {
         let document = EditableDocument::parse(source).unwrap();
         let output = document.normalized_yaml().unwrap();
@@ -140,12 +305,36 @@ fn normalization_preserves_separate_header_comments() {
     // Node properties: https://yaml.org/spec/1.2.2/#69-node-properties
     let mut outputs = Vec::new();
     for source in [
-        "a: &a # anchor\n  | # header\n    text\n",
-        "a: &a # anchor\n  !!str # tag\n  | # header\n    text\n",
-        "a: # field\n  &a # anchor\n  !!seq # tag\n  - item\n",
-        "a: &a # anchor\n  !!seq [ # opening\n    item] # closing\n",
-        "a: [ # opening\n  item] # closing\n",
-        "a: { # opening\n  key: value} # closing\n",
+        indoc! {r"
+            a: &a # anchor
+              | # header
+                text
+        "},
+        indoc! {r"
+            a: &a # anchor
+              !!str # tag
+              | # header
+                text
+        "},
+        indoc! {r"
+            a: # field
+              &a # anchor
+              !!seq # tag
+              - item
+        "},
+        indoc! {r"
+            a: &a # anchor
+              !!seq [ # opening
+                item] # closing
+        "},
+        indoc! {r"
+            a: [ # opening
+              item] # closing
+        "},
+        indoc! {r"
+            a: { # opening
+              key: value} # closing
+        "},
     ] {
         let document = EditableDocument::parse(source).unwrap();
         let output = document.normalized_yaml().unwrap();
@@ -170,18 +359,50 @@ fn normalization_preserves_separate_header_comments() {
             comments(source),
             "{source:?} -> {output:?}"
         );
-        outputs.push(output);
+        outputs.push(edit_diff(source, &output));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "a: &a # anchor\n  |2 # header\n  text\n",
-        "a: !<tag:yaml.org,2002:str> # anchor\n  &a # tag\n  |2 # header\n  text\n",
-        "a: # field\n  !<tag:yaml.org,2002:seq> # anchor\n  &a # tag\n  - item\n",
-        "a: !<tag:yaml.org,2002:seq> # anchor\n  &a [ # opening\n  item] # closing\n",
-        "a: [ # opening\n  item] # closing\n",
-        "a: { # opening\n  key: value} # closing\n",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     a: &a # anchor
+    -  | # header
+    -    text
+    +  |2 # header
+    +  text
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -a: &a # anchor
+    -  !!str # tag
+    -  | # header
+    -    text
+    +a: !<tag:yaml.org,2002:str> # anchor
+    +  &a # tag
+    +  |2 # header
+    +  text
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     a: # field
+    -  &a # anchor
+    -  !!seq # tag
+    +  !<tag:yaml.org,2002:seq> # anchor
+    +  &a # tag
+       - item
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -a: &a # anchor
+    -  !!seq [ # opening
+    -    item] # closing
+    +a: !<tag:yaml.org,2002:seq> # anchor
+    +  &a [ # opening
+    +  item] # closing
+    ");
 }
 
 #[test]
@@ -193,7 +414,10 @@ fn normalization_uses_explicit_keys_when_escaped_syntax_is_long() {
         format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)),
         format!("\"{}\"", "a".repeat(1023)),
     ] {
-        let source = format!("? {key}\n: value\n");
+        let source = formatdoc! {r"
+            ? {key}
+            : value
+        "};
         let output = EditableDocument::parse(&source)
             .unwrap()
             .normalized_yaml()
@@ -211,7 +435,17 @@ fn normalization_uses_explicit_keys_when_escaped_syntax_is_long() {
 
 #[test]
 fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
-    for source in ["---", "---\n", "!!str", "!", "[!!str , ! ]", "a:", "-"] {
+    for source in [
+        "---",
+        indoc! {r"
+            ---
+        "},
+        "!!str",
+        "!",
+        "[!!str , ! ]",
+        "a:",
+        "-",
+    ] {
         let document = EditableDocument::parse(source).unwrap();
         let output = document.normalized_yaml().unwrap();
         let reparsed = EditableDocument::parse(&output).unwrap();
@@ -251,41 +485,107 @@ fn normalization_respects_limits_on_output_expansion() {
 fn normalization_consumes_interleaved_property_comments_in_order() {
     // Node properties and comments: https://yaml.org/spec/1.2.2/#69-node-properties
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "key: # header\n  &a # anchor\n  # leading\n  value\n",
-            "- # header\n  &a # anchor\n  # leading\n  value\n",
-            "key: # header\n  !!str # tag\n  &a # anchor\n  # leading\n  value\n",
-            "key: # header\n  # before anchor\n  &a # anchor\n  # before value\n  value\n",
-            "key: # header\n  &a # anchor\n  # leading\n  |\n    value\n",
-            "{key: # header\n  &a # anchor\n  # leading\n  [value]}\n",
-        ] {
-            let document = EditableDocument::parse(&source.replace('\n', newline)).unwrap();
-            outputs.push(document.normalized_yaml().unwrap());
-        }
+    for source in [
+        indoc! {r"
+            key: # header
+              &a # anchor
+              # leading
+              value
+        "},
+        indoc! {r"
+            - # header
+              &a # anchor
+              # leading
+              value
+        "},
+        indoc! {r"
+            key: # header
+              !!str # tag
+              &a # anchor
+              # leading
+              value
+        "},
+        indoc! {r"
+            key: # header
+              # before anchor
+              &a # anchor
+              # before value
+              value
+        "},
+        indoc! {r"
+            key: # header
+              &a # anchor
+              # leading
+              |
+                value
+        "},
+        indoc! {r"
+            {key: # header
+              &a # anchor
+              # leading
+              [value]}
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "key: # header\n  &a # anchor\n    # leading\n    value\n",
-        "- # header\n  &a # anchor\n    # leading\n    value\n",
-        "key: # header\n  !<tag:yaml.org,2002:str> # tag\n    &a # anchor\n    # leading\n    value\n",
-        "key: # header\n  # before anchor\n  &a # anchor\n    # before value\n    value\n",
-        "key: # header\n  &a # anchor\n    # leading\n    |2\n  value\n",
-        "{key: # header\n  &a # anchor\n  # leading\n  [value]}\n",
-        "key: # header\r\n  &a # anchor\r\n    # leading\r\n    value\r\n",
-        "- # header\r\n  &a # anchor\r\n    # leading\r\n    value\r\n",
-        "key: # header\r\n  !<tag:yaml.org,2002:str> # tag\r\n    &a # anchor\r\n    # leading\r\n    value\r\n",
-        "key: # header\r\n  # before anchor\r\n  &a # anchor\r\n    # before value\r\n    value\r\n",
-        "key: # header\r\n  &a # anchor\r\n    # leading\r\n    |2\r\n  value\r\n",
-        "{key: # header\r\n  &a # anchor\r\n  # leading\r\n  [value]}\r\n",
-        "key: # header\r  &a # anchor\r    # leading\r    value\r",
-        "- # header\r  &a # anchor\r    # leading\r    value\r",
-        "key: # header\r  !<tag:yaml.org,2002:str> # tag\r    &a # anchor\r    # leading\r    value\r",
-        "key: # header\r  # before anchor\r  &a # anchor\r    # before value\r    value\r",
-        "key: # header\r  &a # anchor\r    # leading\r    |2\r  value\r",
-        "{key: # header\r  &a # anchor\r  # leading\r  [value]}\r",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     key: # header
+       &a # anchor
+    -  # leading
+    -  value
+    +    # leading
+    +    value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     - # header
+       &a # anchor
+    -  # leading
+    -  value
+    +    # leading
+    +    value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     key: # header
+    -  !!str # tag
+    -  &a # anchor
+    -  # leading
+    -  value
+    +  !<tag:yaml.org,2002:str> # tag
+    +    &a # anchor
+    +    # leading
+    +    value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     key: # header
+       # before anchor
+       &a # anchor
+    -  # before value
+    -  value
+    +    # before value
+    +    value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+     key: # header
+       &a # anchor
+    -  # leading
+    -  |
+    -    value
+    +    # leading
+    +    |2
+    +  value
+    ");
 }
 
 #[test]
@@ -293,78 +593,188 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
     // Explicit entries: https://yaml.org/spec/1.2.2/#822-block-mappings
     let mut outputs = Vec::new();
     for source in [
-        "? |2-\n  key\n: value\n",
-        "? >2-\n  key\n: value\n",
-        "? - a\n  - b\n: value\n",
-        "? k: v\n: value\n",
-        "outer:\n  ? |2-\n    key\n  : value\n",
-        "? &key\n  - a\n: value\n",
-        "? # header\n  # leading\n  |2-\n  key\n: value\n",
+        indoc! {r"
+            ? |2-
+              key
+            : value
+        "},
+        indoc! {r"
+            ? >2-
+              key
+            : value
+        "},
+        indoc! {r"
+            ? - a
+              - b
+            : value
+        "},
+        indoc! {r"
+            ? k: v
+            : value
+        "},
+        indoc! {r"
+            outer:
+              ? |2-
+                key
+              : value
+        "},
+        indoc! {r"
+            ? &key
+              - a
+            : value
+        "},
+        indoc! {r"
+            ? # header
+              # leading
+              |2-
+              key
+            : value
+        "},
     ] {
         let document = EditableDocument::parse(source).unwrap();
-        outputs.push(document.normalized_yaml().unwrap());
+        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "? |2-\n  key\n: value\n",
-        "? >2-\n  key\n: value\n",
-        "?\n  - a\n  - b\n: value\n",
-        "?\n  k: v\n: value\n",
-        "outer:\n  ? |2-\n    key\n  : value\n",
-        "?\n  &key \n  - a\n: value\n",
-        "? # header\n  # leading\n  |2-\n  key\n: value\n",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -? - a
+    +?
+    +  - a
+       - b
+     : value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,3 @@
+    -? k: v
+    +?
+    +  k: v
+     : value
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -? &key
+    +?
+    +  &key ⏎
+       - a
+     : value
+    ");
 }
 
 #[test]
 fn normalization_preserves_framing_and_collection_comment_positions() {
     let mut outputs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "# config\n%YAML 1.2\n---\nkey: old\n...\n  # after\n",
-            "# config\n--- &root\n- old\n...\n",
-            "key: old # inline\n# tail\n",
-            "a: old\n\n# detached\n\nb: |+\n  text\n\n",
-            "a: |+\n  text\n\n# detached\n\nb: old\n",
-            "- old\n\n# detached\n\n- |+\n  text\n\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let document = EditableDocument::parse(&source).unwrap();
-            let output = document.normalized_yaml().unwrap();
-            // Normalization reaches a fixed point, including source separators.
-            assert_eq!(
-                EditableDocument::parse(&output)
-                    .unwrap()
-                    .normalized_yaml()
-                    .unwrap(),
-                output
-            );
-            outputs.push(output);
-        }
+    for source in [
+        indoc! {r"
+            # config
+            %YAML 1.2
+            ---
+            key: old
+            ...
+              # after
+        "},
+        indoc! {r"
+            # config
+            --- &root
+            - old
+            ...
+        "},
+        indoc! {r"
+            key: old # inline
+            # tail
+        "},
+        indoc! {r"
+            a: old
+
+            # detached
+
+            b: |+
+              text
+
+        "},
+        indoc! {r"
+            a: |+
+              text
+
+            # detached
+
+            b: old
+        "},
+        indoc! {r"
+            - old
+
+            # detached
+
+            - |+
+              text
+
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let output = document.normalized_yaml().unwrap();
+        // Normalization reaches a fixed point, including source separators.
+        assert_eq!(
+            EditableDocument::parse(&output)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+            output
+        );
+        outputs.push(edit_diff(source, &output));
     }
-    insta::assert_debug_snapshot!(outputs, @r##"
-    [
-        "# config\n%YAML 1.2\n---\nkey: old\n...\n  # after\n",
-        "# config\n--- &root \n- old\n...\n",
-        "key: old # inline\n# tail\n",
-        "a: old\n\n# detached\n\nb: |2+\n  text\n  \n",
-        "a: |2+\n  text\n  \n# detached\n\nb: old\n",
-        "- old\n\n# detached\n\n- |2+\n  text\n  \n",
-        "# config\r\n%YAML 1.2\r\n---\r\nkey: old\r\n...\r\n  # after\r\n",
-        "# config\r\n--- &root \r\n- old\r\n...\r\n",
-        "key: old # inline\r\n# tail\r\n",
-        "a: old\r\n\r\n# detached\r\n\r\nb: |2+\r\n  text\r\n  \r\n",
-        "a: |2+\r\n  text\r\n  \r\n# detached\r\n\r\nb: old\r\n",
-        "- old\r\n\r\n# detached\r\n\r\n- |2+\r\n  text\r\n  \r\n",
-        "# config\r%YAML 1.2\r---\rkey: old\r...\r  # after\r",
-        "# config\r--- &root \r- old\r...\r",
-        "key: old # inline\r# tail\r",
-        "a: old\r\r# detached\r\rb: |2+\r  text\r  \r",
-        "a: |2+\r  text\r  \r# detached\r\rb: old\r",
-        "- old\r\r# detached\r\r- |2+\r  text\r  \r",
-    ]
-    "##);
+    insta::assert_snapshot!(outputs.join("\n"), @"
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     # config
+    ---- &root
+    +--- &root ⏎
+     - old
+     ...
+
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -2,6 +2,6 @@
+     ⏎
+     # detached
+     ⏎
+    -b: |+
+    +b: |2+
+       text
+    -
+    +  ⏎
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +1,6 @@
+    -a: |+
+    +a: |2+
+       text
+    -
+    +  ⏎
+     # detached
+     ⏎
+     b: old
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -2,6 +2,6 @@
+     ⏎
+     # detached
+     ⏎
+    -- |+
+    +- |2+
+       text
+    -
+    +  ⏎
+    ");
 }
 
 #[test]
@@ -377,20 +787,51 @@ fn normalization_preserves_explicit_scalar_types() {
         "!!int '42'",
         "!!float 1.0",
     ] {
-        outputs.push(
-            EditableDocument::parse(source)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-        );
+        let output = EditableDocument::parse(source)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap();
+        outputs.push(edit_diff(source, &output));
     }
-    insta::assert_debug_snapshot!(outputs, @r#"
-    [
-        "!<tag:yaml.org,2002:str> 42",
-        "!<tag:yaml.org,2002:null> null",
-        "!<tag:yaml.org,2002:bool> true",
-        "!<tag:yaml.org,2002:int> '42'",
-        "!<tag:yaml.org,2002:float> 1.0",
-    ]
-    "#);
+    insta::assert_snapshot!(outputs.join("\n"), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!str 42
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:str> 42
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!null null
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:null> null
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!bool true
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:bool> true
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!int '42'
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:int> '42'
+    \ No newline at end of file
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -!!float 1.0
+    \ No newline at end of file
+    +!<tag:yaml.org,2002:float> 1.0
+    \ No newline at end of file
+    ");
 }
