@@ -100,6 +100,12 @@ the draft freezes into an immutable candidate. Source planning compares its
 final syntax and resolved layout with the original document. Any coordinate
 changes needed for document framing belong to a separate rendering view;
 commit checks still use the unchanged candidate.
+The planner reserves each subtree's adjacent whitespace before combining
+overlapping rewrites. The emitter receives explicit placement and comment
+ownership and reports how its output ends; it cannot change source ranges.
+Patch construction preserves insertion order at shared boundaries and checks
+UTF-8 boundaries, disjoint intervals, and the complete output size before
+applying them.
 Temporary style changes, comments added and then removed, and insertions removed
 before commit do not force rewrites. Requesting an already-active style checks
 that constraint without requiring re-emission.
