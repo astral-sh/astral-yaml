@@ -300,7 +300,7 @@ impl Plan<'_> {
         }
         if let Some(comments) = root_comments.as_mut() {
             patches.append(&mut comments.after_body);
-            comments.finish_suffix(self.original, &mut patches);
+            comments.finish_separation(self.original, &mut patches);
         }
         PatchSet::new(
             &self.original.text,

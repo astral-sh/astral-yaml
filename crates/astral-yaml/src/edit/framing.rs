@@ -20,6 +20,7 @@ pub(super) struct RootComments {
     pub(super) after_body: Vec<(Span, String)>,
     /// Trailing attachments require adjacency through document suffix markers.
     trailing_end: Option<usize>,
+    leading_start: Option<usize>,
 }
 
 /// A source boundary with explicit separation on either side of a comment.
@@ -94,6 +95,7 @@ pub(super) fn prepare(
     // framing outside the complete subtree rewrite, not just the root token.
     let root_start = splice::region(original, original.root, false).start();
     let root_line = (layout.inline.start.is_some()
+        || syntax.separate_root()
         || (original.nodes[original.root.0].span.is_empty() && !insertions.is_empty()))
         && original
             .start_marker
@@ -146,6 +148,8 @@ impl RootComments {
             if let Some(span) = layout.fixed(comment) {
                 if comment.placement == CommentPlacement::Trailing {
                     plan.trailing_end = Some(span.start());
+                } else if comment.placement == CommentPlacement::Leading {
+                    plan.leading_start = Some(span.end());
                 }
                 previous = Some(LocatedComment { comment, span });
                 previous_position = span.end();
@@ -177,7 +181,7 @@ impl RootComments {
             };
             // A neighboring detached comment can supply separation only after
             // the final trailing attachment. Earlier blank lines are reclaimed
-            // by finish_suffix when headers move past them.
+            // by finish_separation when headers move past them.
             if comment.placement == CommentPlacement::Detached
                 && comment.position == CommentPosition::After
                 && anchor.before.is_empty()
@@ -197,6 +201,8 @@ impl RootComments {
             previous_position = anchor.at;
             if comment.placement == CommentPlacement::Trailing {
                 plan.trailing_end = Some(anchor.at);
+            } else if comment.placement == CommentPlacement::Leading {
+                plan.leading_start = Some(anchor.at);
             }
             let text = format!("{}#{}{}", anchor.before, comment.text, anchor.after);
             let patches = if region.is_empty()
@@ -243,15 +249,25 @@ impl RootComments {
         plan
     }
 
-    /// Whitespace between the body and suffix markers still determines comment
-    /// attachment. Discard orphan blank lines before a trailing comment, while
-    /// leaving bytes already owned by a rendered or removed region to its patch.
-    pub(super) fn finish_suffix(&self, original: &Source, patches: &mut Vec<(Span, String)>) {
-        let Some(end) = self.trailing_end else {
-            return;
-        };
+    /// Leading and trailing comments require adjacency through document markers.
+    /// Reclaim blank lines outside rewrites when a comment crosses a marker.
+    pub(super) fn finish_separation(&self, original: &Source, patches: &mut Vec<(Span, String)>) {
+        let root = original.nodes[original.root.0].span;
+        if let Some(start) = self.leading_start {
+            Self::remove_blank_lines(original, start, root.start(), patches);
+        }
+        if let Some(end) = self.trailing_end {
+            Self::remove_blank_lines(original, root.end(), end, patches);
+        }
+    }
+
+    fn remove_blank_lines(
+        original: &Source,
+        mut at: usize,
+        end: usize,
+        patches: &mut Vec<(Span, String)>,
+    ) {
         let source = &original.text;
-        let mut at = original.nodes[original.root.0].span.end();
         let mut covered: Vec<_> = patches.iter().map(|(span, _)| *span).collect();
         covered.sort_by_key(|span| (span.start(), span.end()));
         while at < end {

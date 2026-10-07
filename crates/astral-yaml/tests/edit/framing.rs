@@ -5,6 +5,118 @@ use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
+fn descendant_inline_comments_are_separate_from_document_markers() {
+    use astral_yaml::{comments::CommentPlacement, edit::NodeKind};
+
+    let diff = super::support::edits(
+        [
+            indoc! {r"
+                # root
+                --- {key: value}
+            "},
+            indoc! {r"
+                --- [item]
+            "},
+            indoc! {r"
+                --- &root {key: value}
+                ...
+            "},
+        ],
+        |editor| {
+            let root = editor.root();
+            let child = match editor.node(&root)?.kind() {
+                NodeKind::Mapping { .. } => editor.mapping_entries(&root)?[0].0.clone(),
+                _ => editor.sequence_items(&root)?[0].clone(),
+            };
+            editor.insert_comment(&child, 0, " added", CommentPlacement::Inline)
+        },
+    );
+    insta::assert_snapshot!(diff, @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+     # root
+    ---- {key: value}
+    +--- ⏎
+    +{? key # added
+    +  : value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,3 @@
+    ---- [item]
+    +--- ⏎
+    +[item # added
+    +  ]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    ---- &root {key: value}
+    +--- ⏎
+    +&root {? key # added
+    +  : value}
+     ...
+    ");
+}
+
+#[test]
+fn leading_comments_remain_adjacent_across_document_markers() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let diff = super::support::edits(
+        [
+            indoc! {r"
+                ---
+
+                {key: value}
+            "},
+            indoc! {r"
+                %YAML 1.2
+                ---
+
+                key: value
+            "},
+            indoc! {r"
+                ---
+
+                # retained
+                &root {key: value}
+            "},
+        ],
+        |editor| editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading),
+    );
+    insta::assert_snapshot!(diff, @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    +# added
+     ---
+    -
+     {key: value}
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     %YAML 1.2
+    +# added
+     ---
+    -
+     key: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    +# added
+    +# retained
+     ---
+    -
+    -# retained
+     &root {key: value}
+    ");
+}
+
+#[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn suffix_boundaries_preserve_detached_comments() {
     use astral_yaml::comments::CommentPlacement;

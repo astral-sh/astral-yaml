@@ -19,6 +19,7 @@ pub(super) struct Layout {
     tails: Vec<Tail>,
     quoted: Vec<bool>,
     flow: Vec<bool>,
+    descendant_inline: bool,
 }
 
 impl Layout {
@@ -30,10 +31,17 @@ impl Layout {
             tails: vec![Tail::Closed; document.nodes.len()],
             quoted: vec![false; document.nodes.len()],
             flow: vec![false; document.nodes.len()],
+            descendant_inline: false,
         };
         while let Some((id, prefix_before_slot)) = pending.pop() {
             let node = &document.nodes[id.0];
             order.push(id);
+            if id != document.root {
+                layout.descendant_inline |= node
+                    .comments
+                    .iter()
+                    .any(|comment| comment.placement == CommentPlacement::Inline);
+            }
             if id != document.root && emit::block_collection(&node.kind, false) {
                 layout.flow[id.0] = !emit::block_headers_cover_comments(node, prefix_before_slot);
             }
@@ -133,6 +141,12 @@ impl Layout {
 
     pub(super) fn flow(&self, id: NodeId) -> bool {
         self.flow[id.0]
+    }
+
+    /// The document marker owns its entire line's comments. Keep a root with
+    /// descendant inline comments off that line when rewriting its syntax.
+    pub(super) fn separate_root(&self) -> bool {
+        self.descendant_inline
     }
 
     pub(super) fn scalar_style(&self, id: NodeId, style: ScalarStyle) -> ScalarStyle {
