@@ -1046,6 +1046,9 @@ mod tests {
                 assert_eq!(old.span.slice(&original.text), new.span.slice(&framed.text));
             }
         }
+        for (old, new) in original.contents.iter().zip(&framed.contents) {
+            assert_eq!(old.slice(&original.text), new.slice(&framed.text));
+        }
         // The same mapping relocates rendering provenance. Generated syntax
         // stays source-less, and every retained location still names its text.
         for (old, new) in candidate.nodes.iter().zip(prepared.syntax().nodes) {

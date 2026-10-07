@@ -50,7 +50,13 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
     for (name, text, ending) in [
         ("token", "new", Ending::Token),
         ("comment", "new # comment", Ending::Comment),
-        ("block scalar", "|-\n  new", Ending::BlockScalar),
+        (
+            "block scalar",
+            indoc! {"
+            |-
+              new"},
+            Ending::BlockScalar,
+        ),
     ] {
         let replacement = boundary
             .complete(

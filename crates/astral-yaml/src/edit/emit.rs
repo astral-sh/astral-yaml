@@ -693,7 +693,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     fn key(&mut self, key: NodeId, context: Context, depth: usize) -> Result<(), Error> {
         let indent = context.indent;
         let is_flow = context.in_flow();
-        let simple = simple_key(&self.document.nodes[key.0], is_flow);
+        let simple = key_form(&self.document.nodes[key.0], is_flow) != KeyForm::Explicit;
         if !simple && !is_flow {
             self.push("?")?;
             let key_comments = self.node_comments(key);
@@ -830,15 +830,25 @@ pub(super) fn omitted<Location>(node: &super::Node<Location>) -> bool {
         && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
 }
 
-pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> bool {
+/// The spelling emitted in a mapping-key position. Only quoted keys can share
+/// an adjacent value indicator with an unseparated value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum KeyForm {
+    Explicit,
+    Implicit,
+    Quoted,
+}
+
+pub(super) fn key_form<Location>(node: &super::Node<Location>, flow: bool) -> KeyForm {
     let NodeKind::Scalar { value, style } = &node.kind else {
-        return false;
+        return KeyForm::Explicit;
     };
     if !node.comments.is_empty() || matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
-        return false;
+        return KeyForm::Explicit;
     }
-    // YAML limits the entire implicit key, including escapes and properties,
-    // to 1024 source characters on one line.
+    // Determine whether the requested spelling needs explicit notation before
+    // imposing implicit-key restrictions. Multiline styles can survive in an
+    // explicit key. The implicit limit includes properties and escapes.
     let position = if flow {
         ScalarPosition::Flow
     } else {
@@ -850,7 +860,13 @@ pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> 
         .anchor
         .as_ref()
         .map_or(0, |anchor| anchor.chars().count() + 2);
-    !text.contains('\n') && text.chars().count() + tag + anchor <= 1024
+    if text.contains('\n') || text.chars().count() + tag + anchor > 1024 {
+        KeyForm::Explicit
+    } else if text.starts_with(['\'', '"']) {
+        KeyForm::Quoted
+    } else {
+        KeyForm::Implicit
+    }
 }
 
 /// Whether block presentation provides a header for an inline content comment.

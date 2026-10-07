@@ -5,6 +5,7 @@ mod emit;
 mod framing;
 mod layout;
 mod plan;
+mod scope;
 mod source;
 mod splice;
 mod transaction;
@@ -26,6 +27,7 @@ use crate::{
 pub struct EditableDocument {
     pub(crate) source: String,
     pub(crate) nodes: Vec<Node>,
+    pub(crate) contents: Vec<Span>,
     pub(crate) root: NodeId,
     pub(crate) options: ParseOptions,
     pub(crate) start_marker: Option<Span>,
@@ -195,20 +197,10 @@ impl EditableDocument {
                 }
             })
             .collect();
-        let mut content_starts = vec![None; nodes.len()];
+        let contents = source::contents(&source, stream.nodes());
         for (owner, attached) in CommentIndex::new(&stream, 0)?.direct() {
-            let node = &stream.nodes()[owner.0];
-            let content_start = *content_starts[owner.0].get_or_insert_with(|| {
-                let properties_end = node
-                    .anchor
-                    .iter()
-                    .chain(node.tag.iter())
-                    .map(|property| property.span.end())
-                    .max()
-                    .unwrap_or(node.span.start());
-                crate::comments::skip_trivia(&source, properties_end).min(node.span.end())
-            });
-            let position = CommentPosition::for_comment(&stream, owner, attached, content_start);
+            let position =
+                CommentPosition::for_comment(&stream, owner, attached, contents[owner.0].start());
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
@@ -218,6 +210,7 @@ impl EditableDocument {
         }
         Ok(Self {
             nodes,
+            contents,
             root: document.root,
             options,
             start_marker: document.start_marker,

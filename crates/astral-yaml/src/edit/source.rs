@@ -9,10 +9,34 @@ use super::{
 };
 use crate::{NodeId, ParseOptions, Span};
 
+/// Retain content boundaries while property spans are still available from
+/// the parser. Source planning must not guess indentation from a property's
+/// position, which can be on an earlier line or after a field indicator.
+pub(super) fn contents(source: &str, nodes: &[crate::Node<'_>]) -> Vec<Span> {
+    nodes
+        .iter()
+        .map(|node| {
+            let properties_end = node
+                .anchor
+                .iter()
+                .chain(node.tag.iter())
+                .map(|property| property.span.end())
+                .max()
+                .unwrap_or(node.span.start());
+            Span {
+                start: crate::comments::skip_trivia(source, properties_end).min(node.span.end()),
+                end: node.span.end(),
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Source {
     pub(super) text: String,
     pub(super) nodes: Vec<Node>,
+    /// Parsed content ranges exclude tags, anchors, and their intervening trivia.
+    pub(super) contents: Vec<Span>,
     pub(super) root: NodeId,
     pub(super) options: ParseOptions,
     pub(super) start_marker: Option<Span>,
@@ -25,6 +49,7 @@ impl From<&EditableDocument> for Source {
         let EditableDocument {
             source,
             nodes,
+            contents,
             root,
             options,
             start_marker,
@@ -34,6 +59,7 @@ impl From<&EditableDocument> for Source {
         Self {
             text: source,
             nodes,
+            contents,
             root,
             options,
             start_marker,
@@ -243,6 +269,13 @@ impl<'a> Frame<'a> {
         let source = Source {
             text: self.text,
             nodes: source_nodes,
+            contents: self
+                .original
+                .contents
+                .iter()
+                .enumerate()
+                .map(|(index, &span)| self.locations.span(span, NodeId(index) == root))
+                .collect(),
             root,
             options: self.original.options,
             start_marker: self

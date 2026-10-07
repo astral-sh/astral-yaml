@@ -2,16 +2,17 @@
 //! replacement text; it cannot publish a document or alter the semantic draft.
 
 use super::{
-    Comment, CommentPosition, Node, NodeKind,
+    Comment, Node, NodeKind,
     draft::Candidate,
     emit,
     framing::{RootComments, RootLayout},
     layout::Layout,
+    scope::{Scopes, same_attachment},
     source::Source,
     splice::{self, Boundary, PatchSet},
     view::Syntax,
 };
-use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
+use crate::{Error, NodeId, Span, comments::CommentPlacement};
 use std::{cell::Cell, collections::HashSet};
 
 pub(super) struct Plan<'a> {
@@ -27,6 +28,7 @@ pub(super) struct Plan<'a> {
 pub(super) struct Rewrite<'a> {
     pub(super) id: NodeId,
     pub(super) boundary: Boundary<'a>,
+    context: emit::Context,
 }
 
 /// Differences between the original syntax and the final intended tree. This
@@ -69,24 +71,7 @@ impl Changes {
                 changes.root_comments = true;
                 continue;
             }
-            let attachments = old.comments.len() != new.comments.len()
-                || old
-                    .comments
-                    .iter()
-                    .zip(&new.comments)
-                    .any(|(old, new)| !same_attachment(old, new));
-            let collection = matches!(
-                (&old.kind, &new.kind),
-                (NodeKind::Sequence { .. }, NodeKind::Sequence { .. })
-                    | (NodeKind::Mapping { .. }, NodeKind::Mapping { .. })
-            );
-            // A collection owns its child list and delimiters. Token changes
-            // can also remain local when their properties/comments have no
-            // header. Other shape or attachment changes need the parent header.
-            let local = !attachments && (collection || (inline_node(old) && inline_node(new)));
-            changes
-                .roots
-                .insert(if local { id } else { parent.unwrap_or(id) });
+            changes.roots.insert(id);
         }
         changes
     }
@@ -94,10 +79,6 @@ impl Changes {
     pub(super) fn is_empty(&self) -> bool {
         self.roots.is_empty() && !self.root_comments
     }
-}
-
-fn same_attachment(old: &Comment, new: &Comment<Option<Span>>) -> bool {
-    new.span == Some(old.span) && old.text == new.text && old.placement == new.placement
 }
 
 fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
@@ -142,19 +123,6 @@ fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
     old_body.eq(new_body)
 }
 
-fn inline_node<Location>(node: &Node<Location>) -> bool {
-    node.comments
-        .iter()
-        .all(|comment| comment.position != CommentPosition::Header)
-        && matches!(
-            node.kind,
-            NodeKind::Scalar {
-                style: ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
-                ..
-            } | NodeKind::Alias { .. }
-        )
-}
-
 impl Plan<'_> {
     fn error(&self, message: &'static str) -> Error {
         Error {
@@ -185,100 +153,8 @@ impl Plan<'_> {
         }
     }
 
-    /// Select the syntax context from the final candidate, after all mutations.
-    fn rewrite_root(&self, mut id: NodeId, syntax: &Layout) -> NodeId {
-        // Changes below a key can make an enclosing implicit key multiline or
-        // too long. Include its mapping so emission can use explicit notation.
-        let edited = id;
-        let mut ancestor = id;
-        while let Some(parent) = self.parents[ancestor.0] {
-            if ancestor != edited
-                && matches!(&self.candidate.nodes[parent.0].kind,
-                    NodeKind::Mapping { entries, .. }
-                        if entries.iter().any(|&(key, _)| key == ancestor))
-            {
-                id = parent;
-            }
-            ancestor = parent;
-        }
-
-        while let Some(parent) = self.parents[id.0] {
-            // Changes only selects retained occurrences. Their ownership path
-            // also belongs to the original source; imported nodes are covered
-            // by the retained collection whose child list changed.
-            let multiline = syntax.multiline(id, &self.candidate.nodes[id.0].kind);
-            let start = self.original.nodes[id.0].span.start();
-            let prefix = self.original.text[..start]
-                .rsplit('\n')
-                .next()
-                .unwrap_or("");
-            if (!multiline || prefix.bytes().all(|byte| byte == b' '))
-                && !self.needs_mapping_rewrite(id, parent)
-            {
-                break;
-            }
-            id = parent;
-        }
-        id
-    }
-
-    fn needs_mapping_rewrite(&self, id: NodeId, parent: NodeId) -> bool {
-        let NodeKind::Mapping { entries, style } = &self.original.nodes[parent.0].kind else {
-            return false;
-        };
-        let source = &self.original.text;
-        let span = self.original.nodes[id.0].span;
-        for &(key, value) in entries {
-            if key == id {
-                // Key notation and separation belong to the mapping, outside
-                // the key's span. Reuse the emitter's implicit-key check.
-                let node = &self.candidate.nodes[id.0];
-                let separator = crate::comments::skip_trivia(source, span.end());
-                let plain = matches!(
-                    node.kind,
-                    NodeKind::Scalar {
-                        style: ScalarStyle::Plain,
-                        ..
-                    }
-                );
-                return !emit::simple_key(node, *style == CollectionStyle::Flow)
-                    || (plain
-                        && source[separator..].strip_prefix(':').is_some_and(|suffix| {
-                            suffix.starts_with(|c: char| {
-                                !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
-                            })
-                        }));
-            }
-            if value != id {
-                continue;
-            }
-            // A block sequence may be indentless. Render its mapping when it
-            // becomes flow syntax so the value can follow ':' on the same line.
-            if matches!(
-                self.original.nodes[id.0].kind,
-                NodeKind::Sequence {
-                    style: CollectionStyle::Block,
-                    ..
-                }
-            ) && matches!(&self.candidate.nodes[id.0].kind,
-                    NodeKind::Sequence { items, style }
-                        if items.is_empty() || *style == CollectionStyle::Flow)
-            {
-                return true;
-            }
-            if span.is_empty() {
-                // A value omitted without ':' has no source range in which
-                // a scalar replacement can supply its value indicator.
-                let separator =
-                    crate::comments::skip_trivia(source, self.original.nodes[key.0].span.end());
-                return source.as_bytes().get(separator) != Some(&b':');
-            }
-        }
-        false
-    }
-
-    fn body_region(&self, id: NodeId, layout: &RootLayout) -> Span {
-        let mut region = splice::region(self.original, id, false);
+    fn body_region(&self, id: NodeId, layout: &RootLayout, scopes: &Scopes<'_>) -> Span {
+        let mut region = scopes.body(id);
         if id == self.candidate.root && emit::has_inline_header(&self.candidate.nodes[id.0], false)
         {
             // A root's inline comment must move with its content
@@ -306,6 +182,7 @@ impl Plan<'_> {
         layout: &RootLayout,
         syntax: &Layout,
     ) -> Result<Vec<Rewrite<'_>>, Error> {
+        let scopes = Scopes::new(self.original, self.candidate, syntax);
         let mut ids: Vec<_> = self.changes.roots.iter().copied().collect();
         if (!ids.is_empty() && layout.needs_suffix_context())
             || (layout.needs_scalar_boundary(self.candidate)
@@ -319,10 +196,7 @@ impl Plan<'_> {
             if !ids.is_empty() {
                 self.charge(self.original.nodes.len())?;
             }
-            let roots: HashSet<_> = ids
-                .into_iter()
-                .map(|id| self.rewrite_root(id, syntax))
-                .collect();
+            let roots: HashSet<_> = ids.into_iter().map(|id| scopes.select(id)).collect();
             ids = roots
                 .iter()
                 .copied()
@@ -340,43 +214,16 @@ impl Plan<'_> {
             let regions: Vec<_> = ids
                 .iter()
                 .map(|&id| {
-                    let region = self.body_region(id, layout);
+                    let region = self.body_region(id, layout, &scopes);
                     (id, region)
                 })
                 .collect();
 
-            let mut expanded = false;
-            for &(id, region) in &regions {
-                let Some(parent) = self.parents[id.0] else {
-                    continue;
-                };
-                let original = &self.original.nodes[id.0];
-                let collection = matches!(
-                    self.candidate.nodes[id.0].kind,
-                    NodeKind::Sequence { .. } | NodeKind::Mapping { .. }
-                );
-                let outer_comments = collection
-                    && original.comments.iter().any(|comment| {
-                        comment.span.start() < original.span.start()
-                            || comment.span.end() > original.span.end()
-                    });
-                // A descendant prefix can move the region before the node's
-                // indentation or field header. A collection's outer comments
-                // can also change attachment when its delimiters move. Render
-                // the parent to supply both the syntax and comment context.
-                // The document root keeps its separate framing-comment plan.
-                if region.start() < original.span.start() || outer_comments {
-                    ids.push(parent);
-                    expanded = true;
-                }
-            }
-            if expanded {
-                continue;
-            }
             let mut rewrites: Vec<_> = regions
                 .into_iter()
                 .map(|(id, span)| Rewrite {
                     id,
+                    context: scopes.context(id, span),
                     boundary: Boundary::new(
                         &self.original.text,
                         span,
@@ -429,30 +276,13 @@ impl Plan<'_> {
             .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
         for rewrite in &regions {
             let id = rewrite.id;
-            let region = rewrite.boundary.body();
-            let flow = self.flow_context(id);
-            let indent = splice::indent(&self.original.text, region.start());
-            let context = if self.parents[id.0].is_some_and(|parent| {
-                matches!(
-                    &self.candidate.nodes[parent.0].kind,
-                    NodeKind::Mapping { entries, .. } if entries.iter().any(|&(key, _)| key == id)
-                )
-            }) {
-                emit::Context::key(indent, flow)
-            } else {
-                emit::Context::value(
-                    indent,
-                    flow,
-                    if id == self.candidate.root { 0 } else { indent },
-                )
-            };
             let rendered = if id == self.candidate.root {
                 let comments = root_comments.as_ref().expect("root comment plan");
                 splice::render_with_comments(
                     self.original.emission(self.candidate),
                     id,
                     &rewrite.boundary,
-                    context,
+                    rewrite.context,
                     &comments.rendered,
                     syntax,
                 )?
@@ -461,7 +291,7 @@ impl Plan<'_> {
                     self.original.emission(self.candidate),
                     id,
                     &rewrite.boundary,
-                    context,
+                    rewrite.context,
                     &self.candidate.nodes[id.0].comments,
                     syntax,
                 )?
@@ -479,23 +309,5 @@ impl Plan<'_> {
         )
         .map(PatchSet::apply)
         .map_err(|message| self.error(message))
-    }
-
-    fn flow_context(&self, mut id: NodeId) -> bool {
-        while let Some(parent) = self.parents[id.0] {
-            match &self.candidate.nodes[parent.0].kind {
-                NodeKind::Sequence {
-                    style: CollectionStyle::Flow,
-                    ..
-                }
-                | NodeKind::Mapping {
-                    style: CollectionStyle::Flow,
-                    ..
-                } => return true,
-                _ => {}
-            }
-            id = parent;
-        }
-        false
     }
 }

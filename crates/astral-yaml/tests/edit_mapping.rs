@@ -2,6 +2,165 @@ use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
+fn flow_conversion_uses_content_indentation_after_properties() {
+    let mut results = Vec::new();
+    for source in [
+        indoc! {r"
+            outer: &mapping
+              items: &sequence
+                - x
+              untouched:   [a,b]
+            copy: *sequence
+        "},
+        indoc! {r"
+            outer: &mapping
+              items: &sequence
+              - x
+              untouched:   [a,b]
+            copy: *sequence
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let mapping = editor.mapping_entries(&editor.root())?[0].1.clone();
+                let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
+                editor.set_collection_style(&sequence, CollectionStyle::Flow)
+            })
+            .unwrap();
+        results.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(results.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,4 @@
+     outer: &mapping
+    -  items: &sequence
+    -    - x
+    +  items: &sequence [x]
+       untouched:   [a,b]
+     copy: *sequence
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+    -outer: &mapping
+    -  items: &sequence
+    -  - x
+    -  untouched:   [a,b]
+    +outer:
+    +  &mapping ⏎
+    +  items: &sequence [x]
+    +  untouched: [a, b]
+     copy: *sequence
+    ");
+}
+
+#[test]
+fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
+    let mut results = Vec::new();
+    for source in [
+        indoc! {r"
+            ? - {nested: &a [old]}
+            : *a
+            outside:   [x,y]
+        "},
+        indoc! {r"
+            {? [{nested: &a [old]}]: *a, outside:   [x,y]}
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+                let mapping = editor.sequence_items(&key)?[0].clone();
+                let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
+                let value = editor.sequence_items(&sequence)?[0].clone();
+                editor.replace(&value, "changed")?;
+                editor.insert_item(&sequence, 1, "{child: yes}")
+            })
+            .unwrap();
+        results.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(results.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,4 @@
+    -? - {nested: &a [old]}
+    +?
+    +  - {nested: &a [changed, {child: yes}]}
+     : *a
+    -outside:   [x,y]
+    +outside: [x, y]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -{? [{nested: &a [old]}]: *a, outside:   [x,y]}
+    +{? [{nested: &a [changed, {child: yes}]}]
+    +  : *a, outside: [x, y]}
+    ");
+}
+
+#[test]
+fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
+    let source = indoc! {r#"
+        {"old":value, untouched:   [a,b]}
+    "#};
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+            editor.replace(&key, "new, key")
+        })
+        .unwrap();
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{"old":value, untouched:   [a,b]}
+    +{"new, key":value, untouched:   [a,b]}
+    "#);
+}
+
+#[test]
+fn omitted_keys_retain_entries_without_value_indicators() {
+    // Empty flow keys need an indicator when their key token disappears:
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
+    let mut results = Vec::new();
+    for source in [
+        indoc! {"
+            {old}
+        "},
+        indoc! {"
+            {old, retained: untouched}
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let key = editor.mapping_entries(&editor.root())?[0].0.clone();
+                editor.replace(&key, "---")
+            })
+            .unwrap();
+        results.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(results.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old}
+    +{: }
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -{old, retained: untouched}
+    +{: , retained: untouched}
+    ");
+}
+
+#[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn indentless_sequences_can_become_empty_or_flow_values() {
     // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
