@@ -98,11 +98,15 @@ mod astral {
 }
 
 mod editable {
-    use astral_yaml_dev::Value;
+    use astral_yaml_dev::{Value, indoc};
     use astral_yaml_serde::Editable;
     use divan::{Bencher, black_box};
 
-    const SOURCE: &str = "timeout: 30 # seconds\nservers: [primary, backup]\nextra: 'retained'\n";
+    const SOURCE: &str = indoc! {r"
+        timeout: 30 # seconds
+        servers: [primary, backup]
+        extra: 'retained'
+    "};
 
     #[divan::bench]
     fn parse(bencher: Bencher) {

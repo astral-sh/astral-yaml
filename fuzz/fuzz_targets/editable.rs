@@ -44,7 +44,12 @@ fuzz_target!(|data: &[u8]| {
     let Ok(mut document) = Editable::<Value>::parse(source) else {
         return;
     };
-    assert_eq!(document.to_yaml(), source);
+    assert_eq!(
+        document.source(),
+        source.replace("\r\n", "\n").replace('\r', "\n")
+    );
+    let original: Value = from_str(source).unwrap();
+    assert_eq!(to_string(document.value()), to_string(&original));
 
     for &operation in operations {
         let before = document.to_yaml();
@@ -119,6 +124,7 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(to_string(document.value()), value_before);
         } else {
             let source = document.to_yaml();
+            assert!(!source.contains('\r'));
             let decoded: Value = from_str(&source).unwrap();
             assert_eq!(to_string(document.value()), to_string(&decoded));
         }

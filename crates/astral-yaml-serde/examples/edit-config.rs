@@ -12,7 +12,10 @@ struct Config {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let source = "timeout: 30 # seconds\nservers: [primary, retired]\nextra: 'retained'\n";
+    let source = r"timeout: 30 # seconds
+servers: [primary, retired]
+extra: 'retained'
+";
     let mut config = Editable::<Config>::parse(source)?;
     config.edit(|editor| {
         editor.root_mut().field("timeout")?.set(60)?;

@@ -5,6 +5,13 @@ Edits update the syntax, and a successful transaction deserializes a fresh `T`.
 `T` must implement `DeserializeOwned`; it does not need `Serialize` or `Clone`.
 Unknown fields remain in the syntax representation and output.
 
+Loading an editable document normalizes physical CR and CRLF line endings to LF.
+`source()`, `to_yaml()`, and `into_yaml()` return that normalized source, including
+before the first edit. Node spans, `Spanned<T>` metadata, and error locations all
+use byte offsets in the LF source. Replacement YAML fragments use the same rule.
+Escaped carriage returns in scalar values, such as `"\r"`, retain their meaning.
+The ordinary parser and deserializer continue to use their original input.
+
 ```rust
 use astral_yaml_serde::Editable;
 use serde::Deserialize;
@@ -111,8 +118,8 @@ checks, without Serde type or duplicate-key validation. The existing parser's
 ## Preservation
 
 `source()` borrows the committed source, `to_yaml()` clones it, and `into_yaml()`
-consumes the document and returns its source without cloning. An unchanged
-document is reproduced exactly. Edits rewrite the selected node or an enclosing
+consumes the document and returns its source without cloning. Apart from line
+ending normalization on load, an unchanged document is reproduced exactly. Edits rewrite the selected node or an enclosing
 collection when the surrounding syntax requires it. This includes scalar
 replacements whose comments are interleaved with tags or anchors: the enclosing
 field supplies their header and indentation. Outside rewritten regions, original
@@ -129,8 +136,7 @@ start and end markers belong to the document root.
 Rewritten regions retain entry order, comments, tags, anchors, alias identity,
 and compatible styles. Whitespace and scalar spelling may normalize, but decoded
 scalar text is retained, including empty values read by Serde as strings. Block
-content uses two-space indentation and the document's first line-ending
-convention, defaulting to LF. Empty collections use flow syntax. An explicit
+content uses two-space indentation and LF line endings. Empty collections use flow syntax. An explicit
 style request fails when it would change the scalar's type or cannot be
 represented in its surrounding context. Inline comments need distinct syntax
 headers, supplied by tags, anchors, flow delimiters, or document markers. Root

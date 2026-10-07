@@ -34,8 +34,11 @@ Seeding preserves existing corpus discoveries and artifacts.
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
 - `editable` checks bounded syntax and value-based edit sequences, typed-view
-  consistency, and complete rollback. Its first eight bytes select edits and
+  consistency, LF source normalization, and complete rollback. Its first eight bytes select edits and
   navigation paths; bit 5 selects the value-based API. The rest is YAML.
+- `editable-model` checks valid edits against an independent value and comment
+  model after each batch. Input line-ending variation is checked on load; all
+  subsequent edits must retain LF source and the modeled scalar values.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.

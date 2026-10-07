@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use astral_yaml::comments::CommentPlacement;
+use astral_yaml_dev::indoc;
 use astral_yaml_serde::{
     Editable, Error,
     edit::{CollectionStyle, Editor, NodeKind, ScalarStyle},
@@ -227,6 +228,7 @@ fn apply(
 }
 
 fn check(document: &Editable<Config>, expected: &Config, comments: &Comments) {
+    assert!(!document.source().contains('\r'));
     assert_eq!(document.value(), expected);
     let syntax = document.syntax();
     let root = syntax.node(syntax.root()).unwrap();
@@ -278,13 +280,31 @@ fuzz_target!(|data: &[u8]| {
     let text =
         ["null", "first\n\nlast\n\n", "\r\n", "\u{feff}", &payload][usize::from(controls >> 4) % 5];
     let source = if controls & 1 == 0 {
-        "value: &a old # stable\ncopy: *a\nitems: [x]\nmap: {key: value}\nnested:\n  value: old\n"
+        indoc! {r"
+            value: &a old # stable
+            copy: *a
+            items: [x]
+            map: {key: value}
+            nested:
+              value: old
+        "}
     } else {
-        "---\nvalue: &a |-\n  old\ncopy: *a\nitems: [x]\nmap: {key: value}\nnested:\n  value: old\n...\n"
+        indoc! {r"
+            ---
+            value: &a |-
+              old
+            copy: *a
+            items: [x]
+            map: {key: value}
+            nested:
+              value: old
+            ...
+        "}
     };
     let newline = ["\n", "\r\n", "\r"][usize::from(controls >> 1) % 3];
-    let source = source.replace('\n', newline);
-    let mut document = Editable::<Config>::parse(&source).unwrap();
+    let input = source.replace('\n', newline);
+    let mut document = Editable::<Config>::parse(&input).unwrap();
+    assert_eq!(document.source(), source);
     let mut expected = Config {
         value: "old".to_owned(),
         copy: "old".to_owned(),
