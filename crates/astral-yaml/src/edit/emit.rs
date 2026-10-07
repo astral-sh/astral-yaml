@@ -504,6 +504,26 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
         Ok(())
     }
 
+    /// A block collection's property header owns the space before its first
+    /// field or dash. Keep the first child's leading comments after that slot's
+    /// indicator, where they cannot attach to the enclosing header.
+    fn slot_prefix(
+        &mut self,
+        comments: &mut Comments<Location>,
+        collection: NodeId,
+        first: bool,
+        context: Context,
+    ) -> Result<(), Error> {
+        let parent = &self.document.nodes[collection.0];
+        if first && !context.in_flow() && (parent.anchor.is_some() || parent.tag.is_some()) {
+            return Ok(());
+        }
+        self.before(
+            comments,
+            context.indent + if context.in_flow() { 2 } else { 0 },
+        )
+    }
+
     fn between(
         &mut self,
         comments: &mut Comments<Location>,
@@ -664,9 +684,11 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
                         if is_flow { indent + 2 } else { indent },
                     )?;
                     let mut value_comments = self.node_comments(value);
-                    self.before(
+                    self.slot_prefix(
                         &mut value_comments,
-                        if is_flow { indent + 2 } else { indent },
+                        id,
+                        index == 0,
+                        Context::value(indent, is_flow, indent),
                     )?;
                     self.key(key, Context::value(indent, is_flow, indent), depth + 1)?;
                     self.push(":")?;
@@ -732,7 +754,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
                 }
                 self.between(comments, item, indent)?;
                 let mut comments = self.node_comments(item);
-                self.before(&mut comments, indent)?;
+                self.slot_prefix(&mut comments, id, index == 0, context)?;
                 self.push("-")?;
                 self.value(item, context, "", depth + 1, comments)?;
             }
@@ -882,7 +904,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
         let block = block_collection(&node.kind, flow);
         let properties = usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
         let leading = comments.needs_value_line(properties);
-        let value_indent = if block || flow || leading {
+        let mut value_indent = if block || flow || leading {
             indent + 2
         } else {
             indent
@@ -892,6 +914,13 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
             self.line(value_indent)?;
         } else {
             self.push(" ")?;
+        }
+        if block && properties == 0 && comments.next_is(CommentPlacement::Leading) {
+            // With no delimiter or property header, indentation is the opening
+            // boundary. Put the collection's prefix outside its child slots.
+            self.before(&mut comments, value_indent)?;
+            value_indent += 2;
+            self.line(value_indent)?;
         }
         let context = Context::value(value_indent, flow, indent);
         self.node_with_comments(id, context, suffix, depth, comments)
