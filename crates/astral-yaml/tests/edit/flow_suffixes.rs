@@ -1,13 +1,12 @@
 //! Flow collection suffix comments belong before their closing delimiter.
 
+use super::support::normalize;
 use astral_yaml::edit::EditableDocument;
-use astral_yaml_dev::edit_diff;
 use astral_yaml_dev::{formatdoc, indoc};
 
 #[test]
 fn omitted_final_values_keep_collection_suffix_comments() {
-    let mut diffs = Vec::new();
-    for source in [
+    let diffs = [
         indoc! {r"
             outer: {empty:,
               # trailing
@@ -31,18 +30,8 @@ fn omitted_final_values_keep_collection_suffix_comments() {
               # collection
               }
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        let output = document.normalized_yaml().unwrap();
-        assert_eq!(
-            EditableDocument::parse(&output)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-            output
-        );
-        diffs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -87,8 +76,7 @@ fn omitted_final_values_keep_collection_suffix_comments() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn normalization_keeps_flow_suffixes_inside_their_owner() {
-    let mut diffs = Vec::new();
-    for source in [
+    let diffs = [
         indoc! {r"
             outer: {key: old
               # trailing
@@ -119,18 +107,8 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
 
               }
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        let output = document.normalized_yaml().unwrap();
-        assert_eq!(
-            EditableDocument::parse(&output)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-            output
-        );
-        diffs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml

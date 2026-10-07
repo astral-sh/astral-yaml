@@ -1,11 +1,10 @@
-use astral_yaml::edit::EditableDocument;
-use astral_yaml_dev::{edit_diff, indoc};
+use super::support::normalize;
+use astral_yaml_dev::indoc;
 
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn first_child_comments_stay_inside_property_bearing_collections() {
-    let mut diffs = Vec::new();
-    for source in [
+    let diffs = [
         indoc! {r"
             &mapping
             key:
@@ -45,11 +44,8 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
               # child
                 - item
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        let output = document.normalized_yaml().unwrap();
-        diffs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml

@@ -1,11 +1,11 @@
+use super::support::normalize;
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
 #[test]
 fn normalization_preserves_header_comments_before_leading_comments() {
     // Multiline comments: https://yaml.org/spec/1.2.2/#66-comments
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         indoc! {r"
             key: # header
               # leading
@@ -39,13 +39,8 @@ fn normalization_preserves_header_comments_before_leading_comments() {
               &a # anchor
               value # inline
         "},
-    ] {
-        let output = EditableDocument::parse(source)
-            .unwrap()
-            .normalized_yaml()
-            .unwrap();
-        outputs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
 
@@ -74,7 +69,7 @@ fn normalization_preserves_header_comments_before_leading_comments() {
 
 #[test]
 fn normalization_retains_multiline_scalar_styles() {
-    let outputs: Vec<_> = [
+    let outputs = [
         indoc! {r"
             a
 
@@ -94,15 +89,7 @@ fn normalization_retains_multiline_scalar_styles() {
 
         "},
     ]
-    .into_iter()
-    .map(|source| {
-        let output = EditableDocument::parse(source)
-            .unwrap()
-            .normalized_yaml()
-            .unwrap();
-        edit_diff(source, &output)
-    })
-    .collect();
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -140,7 +127,7 @@ fn normalization_retains_multiline_scalar_styles() {
 
 #[test]
 fn normalized_block_scalars_use_their_parent_indentation() {
-    let outputs: Vec<_> = [
+    let outputs = [
         r"  |2-
   first
   second
@@ -161,15 +148,7 @@ fn normalized_block_scalars_use_their_parent_indentation() {
             \x20\x20\x20\x20
         "},
     ]
-    .into_iter()
-    .map(|source| {
-        let output = EditableDocument::parse(source)
-            .unwrap()
-            .normalized_yaml()
-            .unwrap();
-        edit_diff(source, &output)
-    })
-    .collect();
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
 
@@ -195,8 +174,7 @@ fn normalized_block_scalars_use_their_parent_indentation() {
 #[test]
 fn normalization_preserves_leading_comments_in_flow_collections() {
     // Comment separation: https://yaml.org/spec/1.2.2/#66-comments
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         indoc! {r"
             [
               # first
@@ -227,10 +205,8 @@ fn normalization_preserves_leading_comments_in_flow_collections() {
               # leading
               two]
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
     --- before.yaml
@@ -484,8 +460,7 @@ fn normalization_respects_limits_on_output_expansion() {
 #[test]
 fn normalization_consumes_interleaved_property_comments_in_order() {
     // Node properties and comments: https://yaml.org/spec/1.2.2/#69-node-properties
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         indoc! {r"
             key: # header
               &a # anchor
@@ -525,10 +500,8 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
               # leading
               [value]}
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -591,8 +564,7 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
 #[test]
 fn normalization_preserves_block_styles_in_explicit_keys() {
     // Explicit entries: https://yaml.org/spec/1.2.2/#822-block-mappings
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         indoc! {r"
             ? |2-
               key
@@ -630,10 +602,8 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
               key
             : value
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        outputs.push(edit_diff(source, &document.normalized_yaml().unwrap()));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
 
@@ -668,8 +638,7 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
 
 #[test]
 fn normalization_preserves_framing_and_collection_comment_positions() {
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         indoc! {r"
             # config
             %YAML 1.2
@@ -714,19 +683,8 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
               text
 
         "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        let output = document.normalized_yaml().unwrap();
-        // Normalization reaches a fixed point, including source separators.
-        assert_eq!(
-            EditableDocument::parse(&output)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-            output
-        );
-        outputs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
     --- before.yaml
@@ -779,20 +737,14 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
 
 #[test]
 fn normalization_preserves_explicit_scalar_types() {
-    let mut outputs = Vec::new();
-    for source in [
+    let outputs = [
         "!!str 42",
         "!!null null",
         "!!bool true",
         "!!int '42'",
         "!!float 1.0",
-    ] {
-        let output = EditableDocument::parse(source)
-            .unwrap()
-            .normalized_yaml()
-            .unwrap();
-        outputs.push(edit_diff(source, &output));
-    }
+    ]
+    .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @r"
     --- before.yaml
     +++ after.yaml
