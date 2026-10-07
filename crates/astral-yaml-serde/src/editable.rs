@@ -7,8 +7,10 @@ use serde::de::DeserializeOwned;
 /// Edits operate on syntax, preserving unknown fields, ordering, comments, and
 /// compatible styles. After a successful edit, the typed value is deserialized
 /// again. Syntax or deserialization failures leave both members unchanged.
-/// Unchanged source is emitted exactly; rewritten collections may normalize
-/// whitespace. Use [`Self::to_yaml`] for output, rather than Serde serialization.
+/// Physical CR and CRLF line endings normalize to LF when loading the document.
+/// Source spans and diagnostics refer to this normalized source. Other unchanged
+/// source is emitted exactly; rewritten collections may normalize whitespace.
+/// Use [`Self::to_yaml`] for output, rather than Serde serialization.
 ///
 /// The source and typed value are owned. No `Serialize` or `Clone` implementation
 /// is required for `T`.
@@ -33,7 +35,8 @@ pub struct Editable<T> {
 }
 
 impl<T: DeserializeOwned> Editable<T> {
-    /// Owns one UTF-8 YAML document and deserializes its typed view.
+    /// Normalizes physical line endings to LF, then owns one UTF-8 YAML document
+    /// and deserializes its typed view. Spans and errors use the normalized source.
     ///
     /// # Errors
     /// Returns a syntax, type, document-count, or resource-limit error.
@@ -93,13 +96,13 @@ impl<T> Editable<T> {
         &self.syntax
     }
 
-    /// Borrows the current committed source without allocating.
+    /// Borrows the current committed source with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
         self.syntax.source()
     }
 
-    /// Emits the current committed source, retaining untouched formatting.
+    /// Emits the current committed source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.syntax.to_yaml()

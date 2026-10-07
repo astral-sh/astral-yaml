@@ -1,4 +1,4 @@
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{Editable, Spanned, Tagged};
 use serde::Deserialize;
 
@@ -10,7 +10,10 @@ struct Config {
 #[test]
 fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     let mut config = {
-        let source = String::from("timeout: 30 # seconds\nunknown : ['keep',  2]\n");
+        let source = String::from(indoc! {r"
+            timeout: 30 # seconds
+            unknown : ['keep',  2]
+        "});
         Editable::<Config>::parse(&source).unwrap()
     };
     let before = config.to_yaml();
@@ -39,7 +42,9 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
 #[test]
 fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
     for operation in 0..6 {
-        let source = "timeout: 30 # seconds\n";
+        let source = indoc! {r"
+            timeout: 30 # seconds
+        "};
         let mut config = Editable::<Config>::parse(source).unwrap();
         let result = config.edit_syntax(|e| {
             let root = e.root();
@@ -57,7 +62,15 @@ fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
         assert_eq!(config.value().timeout.value, 30);
         assert_eq!(config.syntax().source(), source);
     }
-    for source in ["[", "---\n1\n---\n2", "timeout: bad"] {
+    for source in [
+        "[",
+        indoc! {r"
+            ---
+            1
+            ---
+            2"},
+        "timeout: bad",
+    ] {
         assert!(Editable::<Config>::parse(source).is_err());
     }
 }
@@ -83,4 +96,65 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     ");
     assert!(value.edit_syntax(|e| e.replace(&e.root(), "42")).is_err());
     assert_eq!(value.value().value, Some(42));
+}
+
+#[test]
+fn typed_metadata_and_errors_use_the_lf_source() {
+    let source = indoc! {r"
+        # café
+        timeout: 30 # seconds
+    "};
+    let mut config = Editable::<Config>::parse(&source.replace('\n', "\r\n")).unwrap();
+    let expected: Config = astral_yaml_serde::from_str(source).unwrap();
+    assert_eq!(config.value().timeout, expected.timeout);
+
+    config
+        .edit(|editor| editor.root_mut().field("timeout")?.set(100))
+        .unwrap();
+    let expected: Config = astral_yaml_serde::from_str(config.source()).unwrap();
+    assert_eq!(config.value().timeout, expected.timeout);
+    insta::assert_snapshot!(edit_diff(source, config.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+     # café
+    -timeout: 30 # seconds
+    +timeout: 100 # seconds
+    ");
+
+    let before = config.to_yaml();
+    assert!(
+        config
+            .edit(|editor| editor.root_mut().field("timeout")?.set("invalid"))
+            .is_err()
+    );
+    assert_eq!(config.source(), before);
+    assert_eq!(config.value().timeout, expected.timeout);
+
+    let invalid = source.replace("30", "invalid");
+    let error = Editable::<Config>::parse(&invalid.replace('\n', "\r\n")).unwrap_err();
+    assert_eq!(
+        error,
+        astral_yaml_serde::from_str::<Config>(&invalid).unwrap_err()
+    );
+}
+
+#[test]
+fn typed_edits_preserve_carriage_returns_in_scalar_values() {
+    let source = indoc! {r#"
+        "before\r\nafter"
+    "#};
+    let mut document = Editable::<String>::parse(&source.replace('\n', "\r")).unwrap();
+    assert_eq!(document.value(), "before\r\nafter");
+    document
+        .edit(|editor| editor.root_mut().set("new\r\nvalue"))
+        .unwrap();
+    assert_eq!(document.value(), "new\r\nvalue");
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -"before\r\nafter"
+    +"new\r\nvalue"
+    "#);
 }

@@ -4,7 +4,7 @@ use astral_yaml::{
     NodeId,
     edit::{EditableDocument, NodeKind},
 };
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{Editable, Spanned, from_str};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -24,7 +24,9 @@ fn kind_changes() -> [(&'static str, &'static str, &'static str, Shape); 6] {
         (
             "scalar to sequence",
             "1",
-            "- 2\n- 3",
+            indoc! {r"
+                - 2
+                - 3"},
             Shape::Sequence(vec![2, 3]),
         ),
         ("mapping to scalar", "{one: 1}", "2", Shape::Scalar(2)),
@@ -36,13 +38,17 @@ fn kind_changes() -> [(&'static str, &'static str, &'static str, Shape); 6] {
         ),
         (
             "sequence to mapping",
-            "- 1\n- 2",
+            indoc! {r"
+                - 1
+                - 2"},
             "{three: 3}",
             Shape::Mapping(BTreeMap::from([("three".to_owned(), 3)])),
         ),
         (
             "mapping to sequence",
-            "one: 1\ntwo: 2",
+            indoc! {r"
+                one: 1
+                two: 2"},
             "[3, 4]",
             Shape::Sequence(vec![3, 4]),
         ),
@@ -63,7 +69,9 @@ fn assert_shape(
 fn root_kind_changes_refresh_the_untagged_variant_and_span() {
     let mut diffs = Vec::new();
     for (name, before, replacement, expected) in kind_changes() {
-        let source = format!("{before}\n");
+        let source = formatdoc! {r"
+            {before}
+        "};
         let mut document = Editable::<Spanned<Shape>>::parse(&source).unwrap();
         document
             .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
@@ -75,10 +83,11 @@ fn root_kind_changes_refresh_the_untagged_variant_and_span() {
             document.syntax().root(),
             &expected,
         );
-        diffs.push(format!(
-            "{name}\n{}",
+        diffs.push(formatdoc! {r"
+            {name}
+            {}",
             edit_diff(&source, document.syntax().source())
-        ));
+        });
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     sequence to scalar
@@ -138,10 +147,14 @@ struct ShapeConfig {
 fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
     let mut diffs = Vec::new();
     for (name, before, replacement, expected) in kind_changes() {
-        let source = format!(
-            "# config\nvalue:\n  {}\nuntouched: keep # sibling\n",
+        let source = formatdoc! {r"
+            # config
+            value:
+              {}
+            untouched: keep # sibling
+        ",
             before.replace('\n', "\n  ")
-        );
+        };
         let mut document = Editable::<ShapeConfig>::parse(&source).unwrap();
         document
             .edit_syntax(|editor| {
@@ -156,10 +169,11 @@ fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
         };
         assert_shape(&document.value().value, syntax, entries[0].1, &expected);
         assert_eq!(document.value().untouched, "keep");
-        diffs.push(format!(
-            "{name}\n{}",
+        diffs.push(formatdoc! {r"
+            {name}
+            {}",
             edit_diff(&source, document.syntax().source())
-        ));
+        });
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     sequence to scalar
@@ -238,7 +252,9 @@ fn scalar_type_changes_refresh_the_typed_value() {
         ("1.5", "'text'", json!("text")),
         ("'text'", "null", Value::Null),
     ] {
-        let source = format!("{before} # value\n");
+        let source = formatdoc! {r"
+            {before} # value
+        "};
         let mut document = Editable::<Value>::parse(&source).unwrap();
         document
             .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
@@ -289,7 +305,9 @@ fn null_and_empty_collections_can_replace_each_other() {
         ("null", "{}", Some(Shape::Mapping(BTreeMap::new()))),
         ("{}", "null", None),
     ] {
-        let source = format!("{before} # nullable\n");
+        let source = formatdoc! {r"
+            {before} # nullable
+        "};
         let mut document = Editable::<Option<Shape>>::parse(&source).unwrap();
         document
             .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
@@ -349,10 +367,24 @@ where
 
 #[test]
 fn incompatible_kind_changes_roll_back_source_value_and_span() {
-    assert_rejected_kind_changes("1 # scalar\n", &1u8, &["[2, 3]", "{two: 2}"]);
-    assert_rejected_kind_changes("[1, 2] # sequence\n", &vec![1u8, 2], &["3", "{three: 3}"]);
     assert_rejected_kind_changes(
-        "one: 1 # mapping\n",
+        indoc! {r"
+            1 # scalar
+        "},
+        &1u8,
+        &["[2, 3]", "{two: 2}"],
+    );
+    assert_rejected_kind_changes(
+        indoc! {r"
+            [1, 2] # sequence
+        "},
+        &vec![1u8, 2],
+        &["3", "{three: 3}"],
+    );
+    assert_rejected_kind_changes(
+        indoc! {r"
+            one: 1 # mapping
+        "},
         &BTreeMap::from([("one".to_owned(), 1u8)]),
         &["2", "[2, 3]"],
     );
@@ -362,22 +394,30 @@ fn incompatible_kind_changes_roll_back_source_value_and_span() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn kind_changes_create_boundaries_for_outer_comments() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        let source = "# attached\n1\n".replace('\n', newline);
-        for replacement in ["- 2\n- 3", "[2, 3]", "two: 2", "{two: 2}"] {
-            let mut document = Editable::<Spanned<Shape>>::parse(&source).unwrap();
-            let expected = from_str::<Shape>(replacement).unwrap();
-            document
-                .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-                .unwrap();
-            assert_eq!(document.value().value, expected);
-            let syntax = document.syntax();
-            assert_eq!(
-                document.value().span,
-                syntax.node(syntax.root()).unwrap().span()
-            );
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    let source = indoc! {r"
+        # attached
+        1
+    "};
+    for replacement in [
+        indoc! {r"
+            - 2
+            - 3"},
+        "[2, 3]",
+        "two: 2",
+        "{two: 2}",
+    ] {
+        let mut document = Editable::<Spanned<Shape>>::parse(source).unwrap();
+        let expected = from_str::<Shape>(replacement).unwrap();
+        document
+            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
+            .unwrap();
+        assert_eq!(document.value().value, expected);
+        let syntax = document.syntax();
+        assert_eq!(
+            document.value().span,
+            syntax.node(syntax.root()).unwrap().span()
+        );
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -412,58 +452,5 @@ fn kind_changes_create_boundaries_for_outer_comments() {
     -1
     +---
     +{two: 2}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-     # attached␍
-    -1␍
-    +---␍
-    +- 2␍
-    +- 3␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍
-    -1␍
-    +---␍
-    +[2, 3]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍
-    -1␍
-    +---␍
-    +two: 2␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍
-    -1␍
-    +---␍
-    +{two: 2}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-     # attached␍-1␍+---␍+- 2␍+- 3␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍-1␍+---␍+[2, 3]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍-1␍+---␍+two: 2␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached␍-1␍+---␍+{two: 2}␍
     ");
 }

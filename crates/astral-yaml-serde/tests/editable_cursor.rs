@@ -1,6 +1,6 @@
 //! Value edits preserve YAML types: <https://yaml.org/spec/1.2.2/#103-core-schema>.
 
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{
     Editable,
     edit::{CollectionStyle, CommentPlacement, NodeKind, ScalarStyle},
@@ -12,11 +12,36 @@ use serde_json::{Value, json};
 fn string_fields_do_not_match_application_tagged_keys() {
     // Node equality includes tags: https://yaml.org/spec/1.2.2/#3213-node-comparison
     for (source, name) in [
-        ("!custom name: old\n", "name"),
-        ("!custom 'name': old\n", "name"),
-        ("!custom true: old\n", "true"),
-        ("!custom 'true': old\n", "true"),
-        ("!<tag:example.org,2026:key> name: old\n", "name"),
+        (
+            indoc! {r"
+                !custom name: old
+            "},
+            "name",
+        ),
+        (
+            indoc! {r"
+                !custom 'name': old
+            "},
+            "name",
+        ),
+        (
+            indoc! {r"
+                !custom true: old
+            "},
+            "true",
+        ),
+        (
+            indoc! {r"
+                !custom 'true': old
+            "},
+            "true",
+        ),
+        (
+            indoc! {r"
+                !<tag:example.org,2026:key> name: old
+            "},
+            "name",
+        ),
     ] {
         let mut document = Editable::<
             std::collections::BTreeMap<astral_yaml_serde::Tagged<String>, String>,
@@ -42,7 +67,10 @@ struct Config {
 
 #[test]
 fn results_are_returned_only_after_callback_syntax_and_type_checks() {
-    let source = "timeout: 30\nservers: [primary]\n";
+    let source = indoc! {r"
+        timeout: 30
+        servers: [primary]
+    "};
     for operation in 0..4 {
         let mut document = Editable::<Config>::parse(source).unwrap();
         let result = document.edit(|e| {
@@ -73,7 +101,11 @@ fn results_are_returned_only_after_callback_syntax_and_type_checks() {
 
 #[test]
 fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
-    let source = "timeout: 30 # seconds\nservers: [primary, retired]\nextra: 'retained'\n";
+    let source = indoc! {r"
+        timeout: 30 # seconds
+        servers: [primary, retired]
+        extra: 'retained'
+    "};
     let mut config = Editable::<Config>::parse(source).unwrap();
     let result = config
         .edit(|e| {
@@ -114,12 +146,24 @@ fn rust_values_never_interpret_strings_as_yaml() {
         ("null", Value::Null),
         ("YAML-looking string", json!("[a, b] # still a string")),
         ("empty string", json!("")),
-        ("escaped string", json!("it's a\nnew line")),
+        (
+            "escaped string",
+            json!(indoc! {r"
+                it's a
+                new line"}),
+        ),
     ] {
-        let mut document = Editable::<Value>::parse("old\n").unwrap();
+        let mut document = Editable::<Value>::parse(indoc! {r"
+            old
+        "})
+        .unwrap();
         document.edit(|e| e.root_mut().set(&value)).unwrap();
         assert_eq!(document.value(), &value);
-        diffs.push(format!("{name}\n{}", edit_diff("old\n", document.source())));
+        diffs.push(formatdoc! {r"
+            {name}
+            {}", edit_diff(indoc! {r"
+                old
+            "}, document.source())});
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     string
@@ -285,7 +329,10 @@ fn fields_use_literal_decoded_string_keys() {
 
 #[test]
 fn optional_lookup_and_removal_distinguish_absence() {
-    let source = "first: 1 # removed\nsecond: 2 # retained\n";
+    let source = indoc! {r"
+        first: 1 # removed
+        second: 2 # retained
+    "};
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -308,7 +355,9 @@ fn optional_lookup_and_removal_distinguish_absence() {
 
 #[test]
 fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
-    let source = "items: [old]\n";
+    let source = indoc! {r"
+        items: [old]
+    "};
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -343,7 +392,10 @@ fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
 
 #[test]
 fn upserts_preserve_existing_positions_and_allow_further_edits() {
-    let source = "first: 'old' # keep\nlast: true\n";
+    let source = indoc! {r"
+        first: 'old' # keep
+        last: true
+    "};
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -370,7 +422,10 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
 
 #[test]
 fn styles_and_comments_can_be_changed_explicitly() {
-    let source = "first: old # original\nlast: retained\n";
+    let source = indoc! {r"
+        first: old # original
+        last: retained
+    "};
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -395,7 +450,10 @@ fn styles_and_comments_can_be_changed_explicitly() {
 
 #[test]
 fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
-    let source = "timeout: 30\nservers: [primary]\n";
+    let source = indoc! {r"
+        timeout: 30
+        servers: [primary]
+    "};
     let mut document = Editable::<Config>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -419,7 +477,10 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
 
 #[test]
 fn aliases_are_not_followed_and_definitions_keep_their_anchor() {
-    let source = "definition: &value 'old'\ncopy: *value\n";
+    let source = indoc! {r"
+        definition: &value 'old'
+        copy: *value
+    "};
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
         .edit(|e| {
@@ -515,7 +576,9 @@ impl Serialize for FailsSerialization {
 fn caught_mutation_errors_still_roll_back_the_transaction() {
     let mut errors = Vec::new();
     for operation in 0..13 {
-        let source = "items: [old]\n";
+        let source = indoc! {r"
+            items: [old]
+        "};
         let mut document = Editable::<Value>::parse(source).unwrap();
         let error = document
             .edit(|e| {
@@ -528,10 +591,12 @@ fn caught_mutation_errors_still_roll_back_the_transaction() {
                         .field("items")?
                         .insert(3, "invalid index")
                         .map(|_| ()),
-                    3 => e
-                        .root_mut()
-                        .field("items")?
-                        .append_comment("bad\ncomment", CommentPlacement::Inline),
+                    3 => e.root_mut().field("items")?.append_comment(
+                        indoc! {r"
+                            bad
+                            comment"},
+                        CommentPlacement::Inline,
+                    ),
                     4 => e
                         .root_mut()
                         .field("items")?
