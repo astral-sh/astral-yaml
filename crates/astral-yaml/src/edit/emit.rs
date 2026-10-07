@@ -219,6 +219,42 @@ impl<'a, Location> Comments<'a, Location> {
     }
 }
 
+/// Block collections can place inline comments on the enclosing indicator and
+/// their properties. A remaining inline comment needs a flow delimiter.
+pub(super) fn block_headers_cover_comments<Location>(
+    node: &super::Node<Location>,
+    prefix_before_slot: bool,
+) -> bool {
+    let mut comments = Comments {
+        remaining: node.comments.iter(),
+    };
+    if prefix_before_slot {
+        while comments.take(CommentPlacement::Leading).is_some() {}
+    }
+    comments.take(CommentPlacement::Inline);
+    while comments
+        .remaining
+        .as_slice()
+        .first()
+        .is_some_and(|comment| {
+            comment.placement == CommentPlacement::Leading
+                || (comment.position == CommentPosition::Before
+                    && comment.placement == CommentPlacement::Detached)
+        })
+    {
+        comments.remaining.next();
+    }
+    for _ in node.tag.iter().chain(node.anchor.iter()) {
+        if comments.take(CommentPlacement::Inline).is_some() {
+            while comments.take(CommentPlacement::Leading).is_some() {}
+        }
+        while comments.take_header().is_some() {}
+    }
+    !comments
+        .remaining
+        .any(|comment| comment.placement == CommentPlacement::Inline)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ScalarPosition {
     Document,

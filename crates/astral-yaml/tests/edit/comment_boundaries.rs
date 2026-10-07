@@ -201,3 +201,61 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers() {
      : value
     ");
 }
+
+#[test]
+fn collection_suffixes_can_precede_a_closing_inline_comment() {
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            outer: &inner
+              key: value
+              # trailing
+        "},
+        indoc! {r"
+            outer: &inner
+              - item
+
+              # detached
+        "},
+        indoc! {r"
+            outer: !!map &inner
+              key: value
+              # trailing
+        "},
+    ] {
+        diffs.push(edit(source, |editor| {
+            let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
+            editor.insert_comment(&inner, 1, " inline", CommentPlacement::Inline)
+        }));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -outer: &inner
+    -  key: value
+    +outer: &inner {key: value,
+       # trailing
+    +  } # inline
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -outer: &inner
+    -  - item
+    -
+    +outer: &inner [item,
+    +  ⏎
+       # detached
+    +  ] # inline
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -outer: !!map &inner
+    -  key: value
+    +outer: !<tag:yaml.org,2002:map> &inner {key: value,
+       # trailing
+    +  } # inline
+    ");
+}

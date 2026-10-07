@@ -35,27 +35,7 @@ impl Layout {
             let node = &document.nodes[id.0];
             order.push(id);
             if id != document.root && emit::block_collection(&node.kind, false) {
-                // Block collections have no content delimiter. Inline comments
-                // need a property or the enclosing slot's indicator. A prefix
-                // kept inside that slot makes its indicator unavailable.
-                let properties =
-                    usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
-                let mut comments = node.comments.iter().peekable();
-                if prefix_before_slot {
-                    while comments
-                        .peek()
-                        .is_some_and(|comment| comment.placement == CommentPlacement::Leading)
-                    {
-                        comments.next();
-                    }
-                }
-                let slot_header = comments
-                    .peek()
-                    .is_some_and(|comment| comment.placement == CommentPlacement::Inline);
-                let inline = comments
-                    .filter(|comment| comment.placement == CommentPlacement::Inline)
-                    .count();
-                layout.flow[id.0] = inline > properties + usize::from(slot_header);
+                layout.flow[id.0] = !emit::block_headers_cover_comments(node, prefix_before_slot);
             }
             let header = node.anchor.is_some() || node.tag.is_some();
             match &node.kind {
