@@ -756,6 +756,7 @@ fn typed_collection_edits_retain_outside_comments() {
         indoc! {r"
             outer:
             # detached
+
               key: old
             unknown: keep
         "},
@@ -787,24 +788,22 @@ fn typed_collection_edits_retain_outside_comments() {
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
     +++ after.yaml
-    @@ -1,4 +1,5 @@
+    @@ -1,5 +1,5 @@
      outer:
     -# detached
-    -  key: old
     +  # detached
-    +
+     ⏎
+    -  key: old
     +  {key: old, "added": "new"}
      unknown: keep
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,4 +1,4 @@
+    @@ -1,4 +1,3 @@
     -outer:
-    -# leading
+     # leading
     -  {key: old}
-    +outer: {
-    +  # leading
-    +  key: old, "added": "new"}
+    +outer: {key: old, "added": "new"}
      unknown: keep
     "#);
 }

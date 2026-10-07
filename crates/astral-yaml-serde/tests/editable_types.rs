@@ -431,10 +431,9 @@ fn kind_changes_create_boundaries_for_outer_comments() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,3 @@
+    @@ -1,2 +1,2 @@
      # attached
     -1
-    +---
     +[2, 3]
 
     --- before.yaml
@@ -447,10 +446,9 @@ fn kind_changes_create_boundaries_for_outer_comments() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,2 +1,3 @@
+    @@ -1,2 +1,2 @@
      # attached
     -1
-    +---
     +{two: 2}
     ");
 }
