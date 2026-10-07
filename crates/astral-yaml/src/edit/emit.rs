@@ -632,7 +632,11 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
             NodeKind::Scalar { value, style } => {
                 self.scalar(value, *style, context, &mut comments)?;
             }
-            NodeKind::Alias { name, .. } => {
+            NodeKind::Alias { target } => {
+                let name = self.document.nodes[target.0]
+                    .anchor
+                    .as_deref()
+                    .ok_or_else(|| self.error("alias target has no anchor"))?;
                 self.push("*")?;
                 self.push(name)?;
             }

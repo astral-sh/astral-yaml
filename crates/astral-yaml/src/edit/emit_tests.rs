@@ -373,6 +373,25 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
 }
 
 #[test]
+fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
+    let source = "[&old value, *old]";
+    let mut document = EditableDocument::parse(source).unwrap();
+    let target = document
+        .nodes
+        .iter()
+        .find_map(|node| match node.kind {
+            NodeKind::Alias { target } => Some(target),
+            _ => None,
+        })
+        .unwrap();
+    document.nodes[target.0].anchor = Some("new".to_owned());
+    insta::assert_snapshot!(document.normalized_yaml().unwrap(), @"[&new value, *new]");
+
+    document.nodes[target.0].anchor = None;
+    insta::assert_snapshot!(document.normalized_yaml().unwrap_err().message, @"alias target has no anchor");
+}
+
+#[test]
 fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
     let mut document = EditableDocument::parse("[&a 1, &a 2, *a]").unwrap();
     let first = crate::NodeId(
