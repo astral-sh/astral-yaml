@@ -100,6 +100,13 @@ the draft freezes into an immutable candidate. Source planning compares its
 final syntax and resolved layout with the original document. Any coordinate
 changes needed for document framing belong to a separate rendering view;
 commit checks still use the unchanged candidate.
+Each retained occurrence has a document, sequence-item, mapping-key, or
+mapping-value context. The same context determines its rewrite scope and the
+emitter's indentation and key rules. When a local edit needs an enclosing
+indicator or comment header, the rewrite expands to that context's owner.
+Parsed content ranges distinguish collection indentation from the positions of
+tags and anchors. Changes inside complex keys also include the enclosing mapping
+so it can choose the key's notation.
 The planner reserves each subtree's adjacent whitespace before combining
 overlapping rewrites. The emitter receives explicit placement and comment
 ownership and reports how its output ends; it cannot change source ranges.
