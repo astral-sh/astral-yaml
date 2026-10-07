@@ -677,21 +677,40 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
 
 #[test]
 fn required_collection_boundaries_do_not_override_explicit_styles() {
-    let source = indoc! {r"
-        outer:
-          key: old
-        # trailing
-    "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    let error = document
-        .edit(|editor| {
-            let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
-            editor.insert_comment(&inner, 0, " detached", CommentPlacement::Detached)?;
-            editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)
-        })
-        .unwrap_err();
-    assert_eq!(document.source(), source);
-    insta::assert_snapshot!(error.message, @"requested style is not representable in this context");
+    for (source, index, placement) in [
+        (
+            indoc! {r"
+                outer:
+                  key: old
+                # trailing
+            "},
+            0,
+            CommentPlacement::Detached,
+        ),
+        (
+            indoc! {r"
+                &root
+                outer:
+                  # collection
+                    key: value
+            "},
+            1,
+            CommentPlacement::Inline,
+        ),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        let error = document
+            .edit(|editor| {
+                let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
+                editor.insert_comment(&inner, index, " added", placement)?;
+                editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)
+            })
+            .unwrap_err();
+        assert_eq!(document.source(), source);
+        insta::allow_duplicates! {
+            insta::assert_snapshot!(error.message, @"requested style is not representable in this context");
+        }
+    }
 }
 
 #[test]
