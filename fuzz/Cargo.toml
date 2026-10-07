@@ -54,6 +54,12 @@ name = "editable-model"
 path = "fuzz_targets/editable_model.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "editable-graph"
+path = "fuzz_targets/editable_graph.rs"
+test = false
+doc = false
 bench = false
 
 [workspace]

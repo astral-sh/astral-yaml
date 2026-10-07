@@ -6,10 +6,10 @@ With `uv` and `rustup` on `PATH`, run:
 cargo xtask fuzz
 ```
 
-The command seeds all six corpora, installs nightly if missing, and adds its
+The command seeds all seven corpora, installs nightly if missing, and adds its
 `rust-src` and `llvm-tools-preview` components. It runs cargo-fuzz through
 `uv run --only-dev --locked`, using the project's pinned development tools.
-The `parse`, `serde`, `decode`, `typed`, `editable`, and `editable-model` targets
+The `parse`, `serde`, `decode`, `typed`, `editable`, `editable-model`, and `editable-graph` targets
 run sequentially for 60 seconds each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
 Setup or fuzzing failures stop the command. Missing `uv` is an error.
 
@@ -41,6 +41,17 @@ Seeding preserves existing corpus discoveries and artifacts.
   subsequent edits must retain LF source and the modeled scalar values. Nested
   mappings also appear in compact sequences up to three levels deep, so scalar
   and comment operations exercise enclosing indentation and suffix boundaries.
+- `editable-graph` checks recursive sequences and mappings, arbitrary complex
+  keys, self references, and repeated anchor names against an independent graph.
+  It checks the draft after each modeled operation and the committed document
+  after each batch, including scalar types, child order, anchors, alias target
+  identity, and directly owned leading comments. Comment insertion, replacement,
+  and removal compose with structural edits and layout requests. Its first byte
+  selects the initial graph and batch size; each following
+  three-byte group selects an operation and position. Inputs are limited to 512
+  bytes and 32 operations. Destructive edits are generated only when all retained
+  aliases still have targets. Canceled item and comment insertions must retain the
+  exact source.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.
@@ -59,7 +70,7 @@ them in `fixtures/regressions` with a regression assertion.
 Replay each corpus, then generate source reports:
 
 ```sh
-for target in parse serde decode typed editable editable-model; do
+for target in parse serde decode typed editable editable-model editable-graph; do
   cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
 uv run --script scripts/fuzz-coverage.py

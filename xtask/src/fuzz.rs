@@ -72,6 +72,7 @@ pub(crate) fn run(args: Vec<OsString>) -> io::Result<ExitCode> {
             "typed",
             "editable",
             "editable-model",
+            "editable-graph",
         ]
         .map(|target| {
             [

@@ -132,10 +132,10 @@ def seed_editable_model(root: Path) -> None:
     corpus.mkdir(parents=True, exist_ok=True)
     sequences = [
         bytes(value for selector in range(32) for value in (operation, selector))
-        for operation in range(19)
+        for operation in range(22)
     ]
     sequences.append(
-        bytes(value for index in range(64) for value in (index % 19, index))
+        bytes(value for index in range(64) for value in (index % 22, index))
     )
     # Exercise scalar termination on both sides of a flow-style change.
     for operations in ((14, 15, 17), (15, 17, 14), (8, 14, 15), (15, 16, 14)):
@@ -163,6 +163,24 @@ def seed_editable_model(root: Path) -> None:
     print("Seeded valid edit sequences with independent value and comment models")
 
 
+def seed_editable_graph(root: Path) -> None:
+    corpus = root / "fuzz/corpus/editable-graph"
+    corpus.mkdir(parents=True, exist_ok=True)
+    for seed in range(256):
+        for stride in (1, 5, 7):
+            sequence = bytes(
+                value
+                for step in range(24)
+                for value in (
+                    ((seed + step * stride) % 256) % 13,
+                    (seed * 13 + step * 23) % 256,
+                    step,
+                )
+            )
+            write_seed(corpus, bytes([seed]) + sequence)
+    print("Seeded recursive graph edits with complex keys and alias identities")
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     inputs = list((root / "fixtures/yaml-test-suite").rglob("in.yaml"))
@@ -174,6 +192,7 @@ def main() -> None:
     seed_typed(root, inputs)
     seed_editable(root, inputs)
     seed_editable_model(root)
+    seed_editable_graph(root)
 
 
 if __name__ == "__main__":

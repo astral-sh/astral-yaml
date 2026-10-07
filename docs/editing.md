@@ -96,8 +96,13 @@ alias identity, requested styles, and comment ownership, placement, and order,
 then deserializes `T`.
 Mutations build a draft with no source text. Its arena owns node identity,
 parentage, deletion, and explicit style requests. When the callback finishes,
-the draft freezes into an immutable candidate. Source planning compares its
-final syntax and resolved layout with the original document. Any coordinate
+the draft freezes into an immutable candidate.
+Alias nodes store their target identity; the target's anchor determines their
+spelling. Freezing requires every live alias to have a live, anchored target.
+An intermediate draft may temporarily remove a definition while subsequent
+operations remove its aliases or restore its anchor.
+Source planning compares the candidate's final syntax and resolved layout with
+the original document. Any coordinate
 changes needed for document framing belong to a separate rendering view;
 commit checks still use the unchanged candidate.
 Each retained occurrence has a document, sequence-item, mapping-key, or
@@ -173,6 +178,13 @@ Explicit keys in block mappings can retain block scalar or collection styles.
 Flow-opening positions guide comment emission. When headers must be reassigned,
 inline comments retain their owner, placement, and owner-local order.
 
+A collection's opening delimiter or property header separates its comments from
+its children's comments. A prefix before that boundary belongs to the collection.
+Implicit block collections use indentation instead: an outdented prefix belongs
+to the collection, while a prefix aligned with its first child belongs to that
+child. A blank line separates detached comments from leading comments. Emission
+retains these boundaries, including when a collection is a complex mapping key.
+
 A node replacement retains its outer comments. Removing an entry or item removes
 comments owned by its subtree, including leading comments attached to that entry.
 Comments owned by the enclosing collection remain. Detached comments between
@@ -225,12 +237,17 @@ could claim their attachment. They are emitted at the root's indentation.
 Value setters retain the selected node's anchor and compatible style, with a
 fallback when that style cannot represent the replacement. Tags come from the
 new value. Lower-level `replace()` takes the fragment's style, tags, and anchor;
-`replace_preserving_style()` retains the original anchor and compatible style.
+`replace_preserving_style()` retains any existing anchor and compatible style.
+When the original has no anchor, the fragment's anchor is retained. Imported
+aliases continue to refer to their definitions even when an existing anchor
+changes the fragment's spelling.
 
-Existing aliases keep their target identity. Edits that remove a referenced
-anchor or make an alias resolve to a different definition fail. Anchor renaming,
-cross-document operations, and original UTF-16/32 byte encoding preservation are
-not supported. The editing API accepts one UTF-8 YAML document.
+Existing aliases keep their target identity. Replacing a definition with a new
+anchor also rewrites retained aliases to use that name, including occurrences
+outside the definition's rewrite. Edits that remove a referenced anchor or make
+an alias resolve to a different definition fail. Cross-document operations and
+original UTF-16/32 byte encoding preservation are not supported. The editing API
+accepts one UTF-8 YAML document.
 
 Value setters serialize only their replacement subtree. Transactions currently
 clone the syntax, render changed regions, reparse the result, and deserialize the
@@ -245,6 +262,18 @@ Transactions consisting only of canceled comment, sequence-item, or mapping-entr
 insertions must also retain the exact source.
 It runs alongside the `editable` target, which exercises arbitrary input
 documents and rollback.
+The `editable-graph` target maintains an independent recursive tree and alias
+graph. It checks each modeled operation's draft and each committed batch against
+its own scalar values, ordered children, anchors, and target identities. Generated
+graphs include complex mapping keys, self references, and repeated anchor names.
+Leading comment insertion, replacement, and removal compose with graph changes;
+the model checks their direct owner, placement, text, and order after each step.
+Generated documents and replacement fragments also contain leading comments, so
+the model checks retained and imported comment ordering across replacements.
+The same model runs deterministic edit sequences in the integration tests.
+The pinned real-world corpus also exercises whole-document normalization and
+composed scalar replacements. An independent traversal compares ordered syntax,
+anchor and alias identities, and comment ownership before and after each case.
 
 `EditableDocument::normalized_yaml()` is an explicit whole-root rendering
 operation. It returns normalized output without changing the document, or an
