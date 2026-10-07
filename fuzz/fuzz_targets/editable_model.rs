@@ -5,10 +5,10 @@
 use std::collections::BTreeMap;
 
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml_dev::indoc;
+use astral_yaml_dev::formatdoc;
 use astral_yaml_serde::{
     Editable, Error,
-    edit::{CollectionStyle, Editor, NodeKind, ScalarStyle},
+    edit::{CollectionStyle, Cursor, Editor, NodeKind, ScalarStyle},
 };
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
@@ -23,8 +23,42 @@ struct Config {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Nested {
-    value: String,
+#[serde(untagged)]
+enum Nested {
+    Mapping { value: String },
+    Sequence(Vec<Self>),
+}
+
+impl Nested {
+    fn value_mut(&mut self) -> &mut String {
+        match self {
+            Self::Mapping { value } => value,
+            Self::Sequence(items) => items[0].value_mut(),
+        }
+    }
+}
+
+fn nested<'editor, 'doc>(
+    editor: &'editor mut Editor<'_, 'doc>,
+) -> Result<Cursor<'editor, 'doc>, Error> {
+    let mut cursor = editor.root_mut().field("nested")?;
+    while matches!(cursor.node()?.kind(), NodeKind::Sequence { .. }) {
+        cursor = cursor.item(0)?;
+    }
+    Ok(cursor)
+}
+
+// A previous flow-root edit can make every enclosing sequence flow-style.
+// Explicit block requests must reopen the entire path to the nested mapping.
+fn set_nested_style(editor: &mut Editor<'_, '_>, style: CollectionStyle) -> Result<(), Error> {
+    let mut cursor = editor.root_mut().field("nested")?;
+    loop {
+        cursor.set_collection_style(style)?;
+        if !matches!(cursor.node()?.kind(), NodeKind::Sequence { .. }) {
+            return Ok(());
+        }
+        cursor = cursor.item(0)?;
+    }
 }
 
 #[derive(Default)]
@@ -78,10 +112,7 @@ fn apply(
             };
             // A flow parent cannot honor an earlier nested block-style request.
             if style == CollectionStyle::Flow {
-                editor
-                    .root_mut()
-                    .field("nested")?
-                    .set_collection_style(style)?;
+                set_nested_style(editor, style)?;
             }
             editor.root_mut().set_collection_style(style)?;
         }
@@ -105,10 +136,7 @@ fn apply(
                 _ => CommentPlacement::Detached,
             };
             if placement == CommentPlacement::Trailing && !comments.nested.is_empty() {
-                editor
-                    .root_mut()
-                    .field("nested")?
-                    .set_collection_style(CollectionStyle::Flow)?;
+                set_nested_style(editor, CollectionStyle::Flow)?;
             }
             let index = if placement == CommentPlacement::Leading {
                 0
@@ -152,12 +180,15 @@ fn apply(
         }
         14 => {
             let syntax = editor.syntax_mut();
-            let nested = syntax
+            let mut nested = syntax
                 .mapping_entries(&syntax.root())?
                 .last()
                 .unwrap()
                 .1
                 .clone();
+            while matches!(syntax.node(&nested)?.kind(), NodeKind::Sequence { .. }) {
+                nested = syntax.sequence_items(&nested)?[0].clone();
+            }
             let value = syntax.mapping_entries(&nested)?[0].1.clone();
             syntax.replace(
                 &value,
@@ -167,7 +198,7 @@ fn apply(
                     ">+\n  new\n\n"
                 },
             )?;
-            "new\n\n".clone_into(&mut expected.nested.value);
+            "new\n\n".clone_into(expected.nested.value_mut());
         }
         15 => {
             // Keep prior exact style requests compatible with this boundary.
@@ -176,22 +207,16 @@ fn apply(
                 .iter()
                 .any(|(_, placement)| *placement == CommentPlacement::Trailing)
             {
-                editor
-                    .root_mut()
-                    .field("nested")?
-                    .set_collection_style(CollectionStyle::Flow)?;
+                set_nested_style(editor, CollectionStyle::Flow)?;
             }
-            editor
-                .root_mut()
-                .field("nested")?
-                .append_comment(" nested", CommentPlacement::Detached)?;
+            nested(editor)?.append_comment(" nested", CommentPlacement::Detached)?;
             comments
                 .nested
                 .push((" nested".to_owned(), CommentPlacement::Detached));
         }
         16 if !comments.nested.is_empty() => {
             let index = selector % comments.nested.len();
-            editor.root_mut().field("nested")?.remove_comment(index)?;
+            nested(editor)?.remove_comment(index)?;
             comments.nested.remove(index);
         }
         17 => {
@@ -209,18 +234,11 @@ fn apply(
             if style == CollectionStyle::Block {
                 editor.root_mut().set_collection_style(style)?;
             }
-            editor
-                .root_mut()
-                .field("nested")?
-                .set_collection_style(style)?;
+            set_nested_style(editor, style)?;
         }
         18 => {
-            editor
-                .root_mut()
-                .field("nested")?
-                .field("value")?
-                .set(text)?;
-            text.clone_into(&mut expected.nested.value);
+            nested(editor)?.field("value")?.set(text)?;
+            text.clone_into(expected.nested.value_mut());
         }
         _ => {}
     }
@@ -252,8 +270,12 @@ fn check(document: &Editable<Config>, expected: &Config, comments: &Comments) {
             })
             .unwrap()
     };
+    let mut nested = field("nested");
+    while let NodeKind::Sequence { items, .. } = syntax.node(nested).unwrap().kind() {
+        nested = items[0];
+    }
     let actual: Vec<_> = syntax
-        .node(field("nested"))
+        .node(nested)
         .unwrap()
         .comments()
         .iter()
@@ -279,25 +301,28 @@ fuzz_target!(|data: &[u8]| {
     let payload = String::from_utf8_lossy(&data[2 + count * 2..]);
     let text =
         ["null", "first\n\nlast\n\n", "\r\n", "\u{feff}", &payload][usize::from(controls >> 4) % 5];
+    // Compact mappings expose indentation inherited through enclosing sequences.
+    let depth = usize::from(controls >> 6);
+    let nested_source = format!("  {}value: 'old'", "- ".repeat(depth));
     let source = if controls & 1 == 0 {
-        indoc! {r"
+        formatdoc! {r"
             value: &a old # stable
             copy: *a
             items: [x]
-            map: {key: value}
+            map: {{key: value}}
             nested:
-              value: old
+            {nested_source}
         "}
     } else {
-        indoc! {r"
+        formatdoc! {r"
             ---
             value: &a |-
               old
             copy: *a
             items: [x]
-            map: {key: value}
+            map: {{key: value}}
             nested:
-              value: old
+            {nested_source}
             ...
         "}
     };
@@ -305,14 +330,18 @@ fuzz_target!(|data: &[u8]| {
     let input = source.replace('\n', newline);
     let mut document = Editable::<Config>::parse(&input).unwrap();
     assert_eq!(document.source(), source);
+    let mut nested = Nested::Mapping {
+        value: "old".to_owned(),
+    };
+    for _ in 0..depth {
+        nested = Nested::Sequence(vec![nested]);
+    }
     let mut expected = Config {
         value: "old".to_owned(),
         copy: "old".to_owned(),
         items: vec!["x".to_owned()],
         map: BTreeMap::from([("key".to_owned(), "value".to_owned())]),
-        nested: Nested {
-            value: "old".to_owned(),
-        },
+        nested,
     };
     let mut comments = Comments::default();
     let batch = [1, 4, 16][usize::from(controls >> 3) % 3];

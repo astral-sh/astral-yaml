@@ -6,11 +6,11 @@ With `uv` and `rustup` on `PATH`, run:
 cargo xtask fuzz
 ```
 
-The command seeds all five corpora, installs nightly if missing, and adds its
+The command seeds all six corpora, installs nightly if missing, and adds its
 `rust-src` and `llvm-tools-preview` components. It runs cargo-fuzz through
 `uv run --only-dev --locked`, using the project's pinned development tools.
-The `parse`, `serde`, `decode`, `typed`, and `editable` targets run sequentially for 60 seconds
-each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
+The `parse`, `serde`, `decode`, `typed`, `editable`, and `editable-model` targets
+run sequentially for 60 seconds each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
 Setup or fuzzing failures stop the command. Missing `uv` is an error.
 
 Extra arguments are passed to cargo-fuzz after the same setup:
@@ -38,7 +38,9 @@ Seeding preserves existing corpus discoveries and artifacts.
   navigation paths; bit 5 selects the value-based API. The rest is YAML.
 - `editable-model` checks valid edits against an independent value and comment
   model after each batch. Input line-ending variation is checked on load; all
-  subsequent edits must retain LF source and the modeled scalar values.
+  subsequent edits must retain LF source and the modeled scalar values. Nested
+  mappings also appear in compact sequences up to three levels deep, so scalar
+  and comment operations exercise enclosing indentation and suffix boundaries.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.
@@ -57,7 +59,7 @@ them in `fixtures/regressions` with a regression assertion.
 Replay each corpus, then generate source reports:
 
 ```sh
-for target in parse serde decode typed editable; do
+for target in parse serde decode typed editable editable-model; do
   cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
 uv run --script scripts/fuzz-coverage.py

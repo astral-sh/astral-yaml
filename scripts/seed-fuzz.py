@@ -150,7 +150,12 @@ def seed_editable_model(root: Path) -> None:
     # With four-operation batches, remove a suffix while introducing a scalar
     # tail in the next transaction. Preserve the preceding inline header.
     sequences.append(bytes([6, 1, 8, 1, 8, 3, 16, 0, 12, 1, 17, 0, 14, 0, 16, 0]))
-    for controls in range(80):
+    # A suffix marker must follow the complete subtree, including a removed
+    # nested comment beyond the final scalar token.
+    sequences.append(bytes([8, 3, 15, 0, 8, 3, 6, 0, 12, 1, 14, 0, 16, 0]))
+    # Preserve multiline quoted scalars in compact mappings at every depth.
+    sequences.append(bytes([18, 0]))
+    for controls in range(256):
         for sequence in sequences:
             for text in ("", "false\n\n", "\ufeff\x00é\r\n"):
                 header = bytes([controls, len(sequence) // 2 - 1])
