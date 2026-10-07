@@ -1,8 +1,11 @@
 //! Owned YAML syntax for source-preserving editing.
 
+mod draft;
 mod emit;
 mod framing;
 mod layout;
+mod plan;
+mod source;
 mod transaction;
 mod view;
 

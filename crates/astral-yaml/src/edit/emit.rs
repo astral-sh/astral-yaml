@@ -11,7 +11,8 @@ mod tests;
 
 /// A rewritten region includes descendant comments, but leaves the root's outer
 /// comments in their original source positions unless explicitly requested.
-pub(super) fn region(document: &EditableDocument, id: NodeId, outer: bool) -> Span {
+pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, outer: bool) -> Span {
+    let document = document.into();
     let root = &document.nodes[id.0];
     let mut start = root.span.start();
     let mut end = root.span.end();
@@ -65,7 +66,10 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
         region,
         Context::value(indent, flow, if id == document.root { 0 } else { indent }),
         &document.nodes[id.0].comments,
-        &Layout::new(Syntax { nodes: document.nodes, root: document.root }),
+        &Layout::new(Syntax {
+            nodes: document.nodes,
+            root: document.root,
+        }),
     )
 }
 
@@ -104,9 +108,9 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     let line_start = region.start() - prefix.len();
     let comment_ended_prefix = region.is_empty()
         && root_comments.iter().any(|comment| {
-            !comment.span.is_empty()
-                && comment.span.start() >= line_start
-                && comment.span.end() <= region.start()
+            comment.span.into().is_some_and(|span| {
+                !span.is_empty() && span.start() >= line_start && span.end() <= region.start()
+            })
         });
     if comment_ended_prefix || (own_line && !prefix.bytes().all(|byte| byte == b' ')) {
         // A retained comment needs a terminating break before any inserted
@@ -504,16 +508,13 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         } else {
             &self.document.nodes[id.0].comments
         };
-        comments
-            .iter()
-            .filter(move |comment| {
-                id != self.root
-                    || comment.span.into().is_none_or(|span| {
-                        span.is_empty()
-                            || (span.start() >= self.region.start()
-                                && span.end() <= self.region.end())
-                    })
-            })
+        comments.iter().filter(move |comment| {
+            id != self.root
+                || comment.span.into().is_none_or(|span| {
+                    span.is_empty()
+                        || (span.start() >= self.region.start() && span.end() <= self.region.end())
+                })
+        })
     }
 
     fn node_comments(&self, id: NodeId) -> Comments<Location> {

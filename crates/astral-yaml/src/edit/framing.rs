@@ -2,7 +2,7 @@
 //! Plan their final positions separately from the root's syntax, so deleting a
 //! comment does not delete the framing boundary that can host its replacement.
 
-use super::{Comment, CommentPosition, EditableDocument, emit, layout::Layout};
+use super::{Comment, CommentPosition, Node, draft::Draft, emit, layout::Layout, source::Source};
 use crate::{Error, Span, comments::CommentPlacement};
 use std::collections::{HashMap, HashSet};
 
@@ -27,11 +27,7 @@ struct Anchor {
 /// and candidate keep the same node identities; only source coordinates move.
 /// Planning against this framed source lets retained and generated markers use
 /// the same comment-placement rules.
-pub(super) fn prepare(
-    original: &EditableDocument,
-    candidate: &mut EditableDocument,
-    syntax: &Layout,
-) -> Option<EditableDocument> {
+pub(super) fn prepare(original: &Source, candidate: &mut Draft, syntax: &Layout) -> Option<Source> {
     let layout = RootLayout::new(original, candidate, syntax);
     let root = &candidate.nodes[candidate.root.0];
     let collection = matches!(
@@ -53,7 +49,7 @@ pub(super) fn prepare(
             .iter()
             .position(|comment| layout.kind.needs_suffix_boundary(comment))
             .and_then(|index| match original.end_marker {
-                None => Some(removed_boundary.unwrap_or(original.source.len())),
+                None => Some(removed_boundary.unwrap_or(original.text.len())),
                 Some(marker) => root
                     .comments
                     .iter()
@@ -61,7 +57,7 @@ pub(super) fn prepare(
                         comment.placement == CommentPlacement::Inline
                             && !comment.span.is_empty()
                             && comment.span.start() >= marker.end()
-                            && comment.span.end() <= line_end(&original.source, marker.end())
+                            && comment.span.end() <= line_end(&original.text, marker.end())
                     })
                     .filter(|&inline| index < inline)
                     .map(|_| marker.start()),
@@ -87,7 +83,7 @@ pub(super) fn prepare(
         || (original.nodes[original.root.0].span.is_empty() && !insertions.is_empty()))
         && original
             .start_marker
-            .is_some_and(|marker| line_end(&original.source, marker.end()) >= root_start);
+            .is_some_and(|marker| line_end(&original.text, marker.end()) >= root_start);
     if !start && !root_line && insertions.is_empty() {
         return None;
     }
@@ -95,12 +91,14 @@ pub(super) fn prepare(
     let mut framed = original.clone();
     insert_end_markers(&mut framed, candidate, insertions);
     if root_line {
-        framed.source.insert(root_start, '\n');
+        framed.text.insert(root_start, '\n');
         shift_spans(&mut framed, root_start, 1);
-        shift_spans(candidate, root_start, 1);
+        shift_nodes(&mut candidate.nodes, root_start, 1);
         // Empty roots have no token to move automatically with their suffix.
-        for document in [&mut framed, &mut *candidate] {
-            let span = &mut document.nodes[document.root.0].span;
+        for span in [
+            &mut framed.nodes[framed.root.0].span,
+            &mut candidate.nodes[candidate.root.0].span,
+        ] {
             if span.is_empty() && span.start() == root_start {
                 span.start += 1;
                 span.end += 1;
@@ -109,33 +107,23 @@ pub(super) fn prepare(
     }
     if start {
         // Prefix comments and blank lines keep their relation to the boundary.
-        let at = original.source[..root_start].rfind('\n').map_or_else(
-            || usize::from(original.source.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
+        let at = original.text[..root_start].rfind('\n').map_or_else(
+            || usize::from(original.text.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
             |index| index + 1,
         );
         let marker = "---\n";
-        framed.source.insert_str(at, marker);
+        framed.text.insert_str(at, marker);
         shift_spans(&mut framed, at, marker.len());
-        shift_spans(candidate, at, marker.len());
+        shift_nodes(&mut candidate.nodes, at, marker.len());
         framed.start_marker = Some(Span {
             start: at,
             end: at + 3,
         });
     }
-    candidate.source.clone_from(&framed.source);
-    candidate.start_marker = framed.start_marker;
-    candidate.end_marker = framed.end_marker;
-    candidate
-        .extra_end_markers
-        .clone_from(&framed.extra_end_markers);
     Some(framed)
 }
 
-fn insert_end_markers(
-    framed: &mut EditableDocument,
-    candidate: &mut EditableDocument,
-    mut insertions: Vec<usize>,
-) {
+fn insert_end_markers(framed: &mut Source, candidate: &mut Draft, mut insertions: Vec<usize>) {
     // Work backwards so every requested location still uses original source
     // coordinates. Existing markers and comments move with each insertion.
     insertions.sort_unstable();
@@ -145,15 +133,15 @@ fn insert_end_markers(
             insertions.pop();
             count += 1;
         }
-        let separator = if at > 0 && !framed.source[..at].ends_with('\n') {
+        let separator = if at > 0 && !framed.text[..at].ends_with('\n') {
             "\n"
         } else {
             ""
         };
         let text = format!("{separator}{}", "...\n".repeat(count));
-        framed.source.insert_str(at, &text);
+        framed.text.insert_str(at, &text);
         shift_spans(framed, at, text.len());
-        shift_spans(candidate, at, text.len());
+        shift_nodes(&mut candidate.nodes, at, text.len());
         let added = (0..count).map(|index| {
             let start = at + separator.len() + index * "...\n".len();
             Span {
@@ -174,37 +162,42 @@ fn insert_end_markers(
     }
 }
 
-fn shift_spans(document: &mut EditableDocument, at: usize, offset: usize) {
-    let shift = |span: &mut Span| {
-        if span.end() > at {
-            if span.start() >= at {
-                span.start += offset;
-            }
-            span.end += offset;
+fn shifted_span(span: &mut Span, at: usize, offset: usize) {
+    if span.end() > at {
+        if span.start() >= at {
+            span.start += offset;
         }
-    };
-    for node in &mut document.nodes {
-        shift(&mut node.span);
+        span.end += offset;
+    }
+}
+
+fn shift_nodes(nodes: &mut [Node], at: usize, offset: usize) {
+    for node in nodes {
+        shifted_span(&mut node.span, at, offset);
         for comment in &mut node.comments {
             if !comment.span.is_empty() {
-                shift(&mut comment.span);
+                shifted_span(&mut comment.span, at, offset);
             }
         }
     }
+}
+
+fn shift_spans(document: &mut Source, at: usize, offset: usize) {
+    shift_nodes(&mut document.nodes, at, offset);
     for marker in document
         .start_marker
         .iter_mut()
         .chain(document.end_marker.iter_mut())
         .chain(document.extra_end_markers.iter_mut())
     {
-        shift(marker);
+        shifted_span(marker, at, offset);
     }
 }
 
 impl RootComments {
     pub(super) fn plan(
-        original: &EditableDocument,
-        candidate: &EditableDocument,
+        original: &Source,
+        candidate: &Draft,
         region: Option<Span>,
         layout: &RootLayout,
     ) -> Result<Self, Error> {
@@ -266,7 +259,7 @@ impl RootComments {
                 && anchor.before.is_empty()
                 && plan
                     .trailing_end
-                    .is_some_and(|end| !blank_between(&original.source, end, anchor.at))
+                    .is_some_and(|end| !blank_between(&original.text, end, anchor.at))
             {
                 anchor.before.push('\n');
             }
@@ -307,7 +300,7 @@ impl RootComments {
         Ok(plan)
     }
 
-    fn retained_body(original: &EditableDocument, comments: &[Comment]) -> Self {
+    fn retained_body(original: &Source, comments: &[Comment]) -> Self {
         // No body rewrite means its existing layout remains authoritative.
         // Text-only framing edits must not relocate unchanged body comments.
         let mut plan = Self {
@@ -329,15 +322,11 @@ impl RootComments {
     /// Whitespace between the body and suffix markers still determines comment
     /// attachment. Discard orphan blank lines before a trailing comment, while
     /// leaving bytes already owned by a rendered or removed region to its patch.
-    pub(super) fn finish_suffix(
-        &self,
-        original: &EditableDocument,
-        patches: &mut Vec<(Span, String)>,
-    ) {
+    pub(super) fn finish_suffix(&self, original: &Source, patches: &mut Vec<(Span, String)>) {
         let Some(end) = self.trailing_end else {
             return;
         };
-        let source = &original.source;
+        let source = &original.text;
         let mut at = original.nodes[original.root.0].span.end();
         let mut covered: Vec<_> = patches.iter().map(|(span, _)| *span).collect();
         covered.sort_by_key(|span| (span.start(), span.end()));
@@ -369,15 +358,15 @@ impl RootComments {
     /// A rewritten body owns its separation from the end marker. If an outer
     /// detached comment relied on that separation, give it a blank line on the
     /// retained side of the marker instead.
-    fn retain_suffix_separation(&mut self, original: &EditableDocument, marker: Span) {
+    fn retain_suffix_separation(&mut self, original: &Source, marker: Span) {
         let Some(comment) = self.rendered.iter().find(|comment| {
             comment.placement == CommentPlacement::Detached && comment.span.start() >= marker.end()
         }) else {
             return;
         };
         let after = self.trailing_end.unwrap_or(0).max(marker.end());
-        if !blank_between(&original.source, after, comment.span.start()) {
-            let start = original.source[..comment.span.start()]
+        if !blank_between(&original.text, after, comment.span.start()) {
+            let start = original.text[..comment.span.start()]
                 .rfind('\n')
                 .map_or(0, |index| index + 1);
             self.patches
@@ -387,7 +376,7 @@ impl RootComments {
 
     /// Compare final comment identities with the original source. Intermediate
     /// replacements and removals do not create independent, overlapping patches.
-    fn changed_comments(&mut self, original: &EditableDocument, region: Option<Span>) {
+    fn changed_comments(&mut self, original: &Source, region: Option<Span>) {
         let retained: HashMap<_, _> = self
             .rendered
             .iter()
@@ -405,7 +394,7 @@ impl RootComments {
                 }
                 None => self
                     .patches
-                    .push((removal_span(&original.source, comment.span), String::new())),
+                    .push((removal_span(&original.text, comment.span), String::new())),
                 _ => {}
             }
         }
@@ -476,7 +465,7 @@ impl EndSlot {
 
 impl InlineLayout {
     fn new(
-        original: &EditableDocument,
+        original: &Source,
         root: &super::Node,
         body: Span,
         kind: RootKind,
@@ -587,7 +576,7 @@ impl InlineLayout {
 /// Allocate suffix headers between fixed neighbors, preserving candidate order.
 /// Missing headers are inserted before the next fixed line, or at EOF.
 fn end_slots(
-    original: &EditableDocument,
+    original: &Source,
     root: &super::Node,
     body: Span,
     end: &[usize],
@@ -621,16 +610,16 @@ fn end_slots(
             while free.peek().is_some_and(|marker| marker.start() < previous) {
                 free.next();
             }
-            let next = following[index].map_or(original.source.len(), Span::start);
+            let next = following[index].map_or(original.text.len(), Span::start);
             if free.peek().is_some_and(|marker| marker.end() <= next) {
                 slots.push(EndSlot::Retained(free.next().expect("available marker")));
             } else {
                 let at = if following[index].is_some() {
-                    original.source[..next]
+                    original.text[..next]
                         .rfind('\n')
                         .map_or(0, |index| index + 1)
                 } else {
-                    original.source.len()
+                    original.text.len()
                 };
                 slots.push(EndSlot::Missing(at));
             }
@@ -644,7 +633,7 @@ fn end_slots(
 
 /// Match fixed inline comments to their preceding marker once. Searching the
 /// ordered marker list avoids scanning every comment for every document suffix.
-fn occupied_markers(original: &EditableDocument, root: &super::Node, body: Span) -> HashSet<usize> {
+fn occupied_markers(original: &Source, root: &super::Node, body: Span) -> HashSet<usize> {
     let markers: Vec<_> = original
         .start_marker
         .iter()
@@ -663,7 +652,7 @@ fn occupied_markers(original: &EditableDocument, root: &super::Node, body: Span)
             }
             let index = markers.partition_point(|marker| marker.end() <= comment.span.start());
             let marker = markers.get(index.checked_sub(1)?)?;
-            (!original.source[marker.end()..comment.span.start()].contains('\n'))
+            (!original.text[marker.end()..comment.span.start()].contains('\n'))
                 .then_some(marker.start())
         })
         .collect()
@@ -679,19 +668,13 @@ pub(super) struct RootLayout {
 }
 
 impl RootLayout {
-    pub(super) fn new(
-        original: &EditableDocument,
-        candidate: &EditableDocument,
-        syntax: &Layout,
-    ) -> Self {
+    pub(super) fn new(original: &Source, candidate: &Draft, syntax: &Layout) -> Self {
         let root_start = original.nodes[original.root.0].span.start();
         let body = Span {
             start: original.start_marker.map_or(0, |marker| {
-                line_end(&original.source, marker.end()).min(root_start)
+                line_end(&original.text, marker.end()).min(root_start)
             }),
-            end: original
-                .end_marker
-                .map_or(original.source.len(), Span::start),
+            end: original.end_marker.map_or(original.text.len(), Span::start),
         };
         let root = &candidate.nodes[candidate.root.0];
         let kind = if emit::omitted(root) {
@@ -724,7 +707,7 @@ impl RootLayout {
         // Flow delimiters can keep an indented suffix attached to the root.
         // Block descendants introduced by an edit can claim the same comment.
         // Render these suffixes at the root's indentation with its final body.
-        let indent = emit::indent(&original.source, root_start);
+        let indent = emit::indent(&original.text, root_start);
         let indented_suffixes = root
             .comments
             .iter()
@@ -734,7 +717,7 @@ impl RootLayout {
                     && comment.position == CommentPosition::After
                     && !comment.span.is_empty()
                     && contains(body, comment.span)
-                    && emit::indent(&original.source, comment.span.start()) > indent
+                    && emit::indent(&original.text, comment.span.start()) > indent
             })
             .map(|comment| comment.span.start())
             .collect();
@@ -755,7 +738,7 @@ impl RootLayout {
         }
     }
 
-    pub(super) fn needs_scalar_boundary(&self, candidate: &EditableDocument) -> bool {
+    pub(super) fn needs_scalar_boundary(&self, candidate: &Draft) -> bool {
         self.kind.ends_with_block_scalar()
             && candidate.nodes[candidate.root.0]
                 .comments
@@ -771,11 +754,7 @@ impl RootLayout {
     /// scalar, even when the same transaction introduces that scalar. Preserve
     /// the boundary using the candidate's layout, not the original scalar style.
     /// Comments past an existing end marker cannot expose scalar content.
-    fn removed_scalar_boundary(
-        &self,
-        original: &EditableDocument,
-        root: &super::Node,
-    ) -> Option<usize> {
+    fn removed_scalar_boundary(&self, original: &Source, root: &super::Node) -> Option<usize> {
         if !self.kind.ends_with_block_scalar() {
             return None;
         }
@@ -783,9 +762,7 @@ impl RootLayout {
         // Keep a generated boundary outside the entire subtree rewrite so
         // removing those comments cannot erase the marker with them.
         let end = emit::region(original, original.root, false).end();
-        let boundary = original
-            .end_marker
-            .map_or(original.source.len(), Span::start);
+        let boundary = original.end_marker.map_or(original.text.len(), Span::start);
         let retained: HashSet<_> = root
             .comments
             .iter()
@@ -803,10 +780,10 @@ impl RootLayout {
             // A block scalar's span can already end at the following line's
             // start; that line belongs to the suffix and must stay outside.
             .then(|| {
-                if original.source[..end].ends_with('\n') {
+                if original.text[..end].ends_with('\n') {
                     end
                 } else {
-                    line_end(&original.source, end)
+                    line_end(&original.text, end)
                 }
             })
     }
@@ -851,11 +828,7 @@ impl RootLayout {
     }
 }
 
-pub(super) fn root_region(
-    original: &EditableDocument,
-    layout: &RootLayout,
-    mut region: Span,
-) -> Span {
+pub(super) fn root_region(original: &Source, layout: &RootLayout, mut region: Span) -> Span {
     for comment in &original.nodes[original.root.0].comments {
         if !layout.fixed(comment) {
             region.start = region.start().min(comment.span.start());
@@ -876,7 +849,7 @@ fn contains(region: Span, span: Span) -> bool {
 }
 
 fn comment_anchor(
-    original: &EditableDocument,
+    original: &Source,
     region: Span,
     comment: &Comment,
     anchor: &Comment,
@@ -889,7 +862,7 @@ fn comment_anchor(
     let separator = format!(
         "{}{}",
         "\n".repeat(breaks),
-        " ".repeat(emit::indent(&original.source, anchor.span.start()))
+        " ".repeat(emit::indent(&original.text, anchor.span.start()))
     );
     Some(if before {
         Anchor {
@@ -907,7 +880,7 @@ fn comment_anchor(
 }
 
 fn marker_anchor(
-    original: &EditableDocument,
+    original: &Source,
     layout: &RootLayout,
     comment: &Comment,
     index: usize,
@@ -925,7 +898,7 @@ fn marker_anchor(
                 || layout.inline.start.is_some_and(|header| index < header);
             if !collection
                 && !precedes_header
-                && line_end(&original.source, marker.end()) < region.start()
+                && line_end(&original.text, marker.end()) < region.start()
             {
                 return None;
             }
@@ -942,7 +915,7 @@ fn marker_anchor(
             if let Some(next) = next.filter(|next| {
                 next.placement == CommentPlacement::Inline && next.span.start() >= layout.body.end()
             }) {
-                let at = original.source[..next.span.start()]
+                let at = original.text[..next.span.start()]
                     .rfind('\n')
                     .map_or(0, |index| index + 1);
                 return Some(before_marker(at, comment.placement));
@@ -961,7 +934,7 @@ fn marker_anchor(
                 .iter()
                 .chain(&original.extra_end_markers)
                 .rfind(|marker| next.is_none_or(|next| marker.end() <= next.span.start()))?;
-            let at = line_end(&original.source, marker.end());
+            let at = line_end(&original.text, marker.end());
             Some(Anchor {
                 at,
                 before: "\n".repeat(if comment.placement == CommentPlacement::Detached {
@@ -976,7 +949,7 @@ fn marker_anchor(
             if let Ok(slot) = layout.inline.end.binary_search(&index) {
                 let marker = layout.inline.slots.get(slot)?.marker()?;
                 return Some(Anchor {
-                    at: line_end(&original.source, marker.end()),
+                    at: line_end(&original.text, marker.end()),
                     before: " ".to_owned(),
                     after: String::new(),
                 });
@@ -986,7 +959,7 @@ fn marker_anchor(
             }
             let marker = original.start_marker?;
             Some(Anchor {
-                at: line_end(&original.source, marker.end()),
+                at: line_end(&original.text, marker.end()),
                 before: " ".to_owned(),
                 after: String::new(),
             })
@@ -1088,11 +1061,18 @@ fn outer_comment_breaks(comment: &Comment, anchor: &Comment, before: bool) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astral_yaml_dev::{edit_diff, indoc};
 
     #[test]
     fn framing_materializes_headers_without_changing_source_span_meaning() {
-        let original = EditableDocument::parse("&a [ # open\n  *a\n] # close\n").unwrap();
-        let mut candidate = original.clone();
+        let source = indoc! {"
+            &a [ # open
+              *a
+            ] # close
+        "};
+        let document = super::super::EditableDocument::parse(source).unwrap();
+        let original = Source::from(&document);
+        let mut candidate = Draft::from(&document);
         for text in [" added 1", " added 2", " added 3", " added 4"] {
             candidate.nodes[candidate.root.0].comments.push(Comment {
                 text: text.to_owned(),
@@ -1111,18 +1091,11 @@ mod tests {
         let syntax = Layout::new(&candidate);
         let framed = prepare(&original, &mut candidate, &syntax).unwrap();
         for (old, new) in original.nodes.iter().zip(&framed.nodes) {
-            assert_eq!(
-                old.span.slice(&original.source),
-                new.span.slice(&framed.source)
-            );
+            assert_eq!(old.span.slice(&original.text), new.span.slice(&framed.text));
             for (old, new) in old.comments.iter().zip(&new.comments) {
-                assert_eq!(
-                    old.span.slice(&original.source),
-                    new.span.slice(&framed.source)
-                );
+                assert_eq!(old.span.slice(&original.text), new.span.slice(&framed.text));
             }
         }
-        assert_eq!(candidate.source, framed.source);
         let after = RootComments::plan(
             &framed,
             &candidate,
@@ -1130,12 +1103,20 @@ mod tests {
             &RootLayout::new(&framed, &candidate, &syntax),
         )
         .unwrap();
-        insta::assert_debug_snapshot!((before.rendered.len(), after.rendered.len(), framed.source), @r#"
-        (
-            6,
-            3,
-            "---\n&a [ # open\n  *a\n] # close\n...\n...\n",
-        )
-        "#);
+        insta::assert_snapshot!(format!(
+            "Retained headers: {} -> {}\n{}",
+            before.rendered.len(), after.rendered.len(), edit_diff(source, &framed.text),
+        ), @"
+        Retained headers: 6 -> 3
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,6 @@
+        +---
+         &a [ # open
+           *a
+         ] # close
+        +...
+        +...
+        ");
     }
 }
