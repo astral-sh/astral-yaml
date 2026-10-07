@@ -14,6 +14,7 @@ cargo fmt --manifest-path fuzz/Cargo.toml --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 cargo test --workspace --all-features --locked
+cargo test --workspace --no-default-features --locked
 uv run --script scripts/verify-fixtures.py
 cargo xtask cov
 ```

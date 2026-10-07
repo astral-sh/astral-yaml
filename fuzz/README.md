@@ -28,33 +28,24 @@ Seeding preserves existing corpus discoveries and artifacts.
 
 ## Targets
 
+The fuzz crate explicitly enables `editable` on both libraries and the shared
+development helpers.
+
 - `parse` checks source ranges, arena references, comment ordering, and error
   ranges. Its seeds include every official test-suite case.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
-- `editable` checks bounded syntax and value-based edit sequences, typed-view
-  consistency, LF source normalization, and complete rollback. Its first eight bytes select edits and
-  navigation paths; bit 5 selects the value-based API. The rest is YAML.
-- `editable-model` checks valid edits against an independent value and comment
-  model after each batch. Input line-ending variation is checked on load; all
-  subsequent edits must retain LF source and the modeled scalar values. Nested
-  mappings also appear in compact sequences up to three levels deep, so scalar
-  and comment operations exercise enclosing indentation and suffix boundaries.
-- `editable-graph` checks recursive sequences and mappings, arbitrary complex
-  keys, self references, and repeated anchor names against an independent graph.
-  It checks the draft after each modeled operation and the committed document
-  after each batch, including scalar types, child order, anchors, alias target
-  identity, and directly owned leading comments. Comment insertion, replacement,
-  and removal compose with structural edits and layout requests. Collections vary
-  from zero to three children or entries, and strings include syntax indicators,
-  Unicode, escaped control characters, and multiline content. The first byte
-  selects the batch size; up to the first eight bytes seed the initial graph.
-  Each three-byte group after the first byte selects an operation and position.
-  Inputs are limited to 512 bytes and 32 operations. Destructive edits are
-  generated only when all retained
-  aliases still have targets. Canceled item and comment insertions must retain the
-  exact source.
+- `editable` checks bounded syntax and typed edits on arbitrary YAML, including
+  LF normalization and rollback. Its first eight bytes select edits and paths;
+  bit 5 selects typed editing. The rest is YAML.
+- `editable-model` checks valid edits against independent value and comment
+  models, including nested collections, aliases, and canceled edits.
+- `editable-graph` checks drafts and commits against an independent recursive
+  tree and alias graph, including complex keys, repeated anchors, and leading
+  comments. Up to eight initial bytes seed the graph; byte zero also selects the
+  batch size. Each subsequent three-byte group selects an operation and position.
+  Inputs are bounded to 512 bytes and 32 operations.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.

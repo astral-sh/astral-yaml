@@ -46,9 +46,9 @@ jobs:
       - name: Build benchmarks
         run: |
           if [ "$COMPARE_IMPLEMENTATIONS" = "true" ]; then
-            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare --bench yaml --bench compare --locked -m simulation
+            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare,editable --bench yaml --bench compare --locked -m simulation
           else
-            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --bench yaml --locked -m simulation
+            uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features editable --bench yaml --locked -m simulation
           fi
 
       - name: Run benchmarks

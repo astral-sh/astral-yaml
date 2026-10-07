@@ -9,6 +9,7 @@ mod comment_merge;
 mod comment_positions;
 mod comments;
 mod composition;
+mod corpus;
 mod document;
 mod emission;
 mod flow_suffixes;

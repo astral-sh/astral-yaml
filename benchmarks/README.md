@@ -7,6 +7,8 @@ Run Astral's benchmarks from the repository root:
 cargo bench -p astral-yaml-dev --bench yaml --locked
 ```
 
+Add `--features editable` to include the editing benchmarks.
+
 To compare implementations, enable the `compare` feature and select its target:
 
 ```sh
@@ -88,7 +90,7 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m
 To include comparisons:
 
 ```sh
-uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare --bench yaml --bench compare --locked -m simulation
+uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare,editable --bench yaml --bench compare --locked -m simulation
 uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --bench compare -m simulation
 ```
 

@@ -28,7 +28,6 @@ There are two primary interfaces:
   and deserialization interface. The serializer uses flow style and quoted
   strings.
 
-
 Use `Spanned<T>` to retain a value's source range and `Commented<'a, T>`
 to borrow its comments. The wrappers compose in either order:
 
@@ -52,10 +51,9 @@ assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 `Spanned<T>` implements `DeserializeOwned` when `T` does. `Commented` borrows
 the input even for owned payloads. Both serialize only their value.
 
-For source-preserving changes, use `Editable<T>` to pair an owned typed view
-with editable syntax. Transactions update both together after parsing and type
-checking. See [editing YAML](docs/editing.md) for the API, preservation contract,
-and metadata-wrapper migration.
+Enable `astral-yaml-serde`'s non-default `editable` feature to use `Editable<T>`.
+Transactions update its owned syntax and typed view together after parsing and
+type checking. See [editing YAML](docs/editing.md) for usage and preservation rules.
 
 Enums use variant names for unit variants and singleton mappings for variants
 with payloads. Serde's representation attributes, including `untagged`, still

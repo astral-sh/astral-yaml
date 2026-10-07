@@ -1,3 +1,5 @@
+#![cfg(feature = "editable")]
+
 use astral_yaml_dev::check_recursive_edits;
 
 #[test]

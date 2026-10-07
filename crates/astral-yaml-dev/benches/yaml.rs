@@ -97,6 +97,7 @@ mod astral {
     }
 }
 
+#[cfg(feature = "editable")]
 mod editable {
     use astral_yaml_dev::{Value, indoc};
     use astral_yaml_serde::Editable;

@@ -1,16 +1,16 @@
 # Editing YAML
 
-`astral_yaml_serde::Editable<T>` owns a YAML document and a read-only typed view.
-Edits update the syntax, and a successful transaction deserializes a fresh `T`.
-`T` must implement `DeserializeOwned`; it does not need `Serialize` or `Clone`.
-Unknown fields remain in the syntax representation and output.
+Editing is disabled by default. Enable `editable` in the crate you use:
 
-Loading an editable document normalizes physical CR and CRLF line endings to LF.
-`source()`, `to_yaml()`, and `into_yaml()` return that normalized source, including
-before the first edit. Node spans, `Spanned<T>` metadata, and error locations all
-use byte offsets in the LF source. Replacement YAML fragments use the same rule.
-Escaped carriage returns in scalar values, such as `"\r"`, retain their meaning.
-The ordinary parser and deserializer continue to use their original input.
+```toml
+[dependencies]
+astral-yaml-serde = { version = "0.1.0", features = ["editable"] }
+```
+
+`astral_yaml_serde::Editable<T>` owns one YAML document and a read-only typed view.
+`T` needs `DeserializeOwned`, but not `Serialize` or `Clone`. Unknown fields remain
+in the syntax and output. For untyped editing, enable `astral-yaml`'s `editable`
+feature and use `astral_yaml::edit::EditableDocument`.
 
 ```rust
 use astral_yaml_serde::Editable;
@@ -27,270 +27,98 @@ assert_eq!(config.source(), "timeout: 60 # seconds\n");
 ```
 
 The [configuration example](../crates/astral-yaml-serde/examples/edit-config.rs)
-also updates a sequence item, inserts an entry, changes collection style, and adds
-a comment.
-Run it with `cargo run -p astral-yaml-serde --example edit-config`.
+also edits collections and comments:
 
-## Selecting and editing values
+```sh
+cargo run -p astral-yaml-serde --features editable --example edit-config
+```
 
-`edit()` exposes an `astral_yaml_serde::edit::Editor` for the candidate document.
-Start with `root_mut()`, then select a decoded string key with `field("name")` or
-a sequence item with `item(index)`. Key names are literal: periods, slashes, and
-brackets have no special meaning. `get("name")` returns `None` for a missing key;
-`field("name")` returns an error. Both reject non-mappings and ambiguous keys.
-Plain numeric and boolean keys do not match their string spellings.
+## Values and syntax
 
-`set(value)` serializes the supplied Rust value and replaces the selected node.
-`set("false")` writes a string; `set(false)` writes a boolean. Strings are never
-interpreted as YAML fragments. Only the supplied value needs `Serialize`; `T`
-does not. Replacing a sequence with a scalar or mapping is allowed when the final
-document still deserializes as `T`.
+Start at `root_mut()`. `field("name")` selects a decoded string key; `get("name")`
+returns `None` when it is missing. Both reject non-mappings and ambiguous keys.
+Names are literal: periods, slashes, and brackets have no special meaning.
+Numeric, boolean, and application-tagged keys do not match their string spellings.
+Use `item(index)` for sequence elements. Navigation never follows aliases.
 
 | Operation | Behavior |
 | --- | --- |
-| `set_entry(name, value)` | Replaces an existing string-keyed value in place, or appends a missing entry. Returns a cursor to the value. |
-| `remove_field(name)` | Removes the entry and returns whether it existed. |
-| `push(value)` | Appends a sequence item and returns a cursor to it. |
-| `insert(index, value)` | Inserts before the current index; `len` appends. Returns a cursor to the new item. |
-| `remove_item(index)` | Removes a sequence item. Subsequent indices reflect the removal. |
+| `set(value)` | Replaces the selected node with a serialized Rust value. |
+| `set_entry(name, value)` | Replaces an existing string-keyed value or appends an entry; selects its value. |
+| `remove_field(name)` | Removes an entry; returns whether it existed. |
+| `push(value)` / `insert(index, value)` | Inserts an item and selects it; index `len` appends. |
+| `remove_item(index)` | Removes an item; later indices reflect the removal. |
+| `reborrow()` | Temporarily borrows a cursor, retaining the parent for further edits. |
 
-Navigation and insertion consume their cursor. Use `reborrow()` to retain a
-parent position for more edits. For a document containing a `servers` sequence:
+Only the supplied value needs `Serialize`. Strings are data: `set("false")` writes
+a string, while `set(false)` writes a boolean. Setters retain the existing anchor,
+outer comments, and compatible style; the new value supplies tags.
 
-```rust
-config.edit(|editor| {
-    let mut servers = editor.root_mut().field("servers")?;
-    servers.reborrow().item(1)?.set("backup")?;
-    servers.reborrow().push("tertiary")?;
-    servers.remove_item(0)?;
-    Ok(())
-})?;
-```
+Use `set_scalar_style()` or `set_collection_style()` for explicit style requests.
+An unrepresentable request fails, except that empty collections always use flow
+syntax. `append_comment()`, `replace_comment()`, and `remove_comment()` edit the
+selected node's own comments. Comment text excludes `#` and line breaks; include
+a leading space for a comment beginning with `# `.
 
-The cursor also provides `node()` for inspection, `set_scalar_style()` and
-`set_collection_style()` for explicit presentation requests, and
-`append_comment()`, `replace_comment()`, and `remove_comment()` for directly owned
-comments. Styles and `CommentPlacement` are re-exported from
-`astral_yaml_serde::edit`.
+`edit_syntax()` and `editor.syntax_mut()` expose handles, arbitrary mapping keys,
+and parsed YAML fragments. `replace()` takes a fragment's style, tags, and anchor;
+`replace_preserving_style()` retains the old anchor and compatible style when
+present. Handles belong to one transaction. Replacement retains the selected
+handle and invalidates its old descendants; deleted and foreign handles fail.
 
-Inside a transaction, `node()` returns `Node<Option<Span>>`. A node or comment
-with `Some(span)` refers to its original occurrence in the normalized source;
-replacement retains that provenance even when its text changes. Inserted syntax
-has `None`. An originally omitted value has `Some(empty_span)`, which is distinct
-from an inserted value. After commit, every node and comment has a fresh `Span`
-in the committed source.
+Inside a transaction, `node()` returns `Node<Option<Span>>`. `Some(span)` identifies
+an original occurrence, even after replacement. An omitted value has an empty
+span; inserted syntax has `None`. Committed nodes have fresh spans.
 
 ## Transactions
 
-`value()` and `syntax()` inspect the committed state. Cursors see the current
-candidate: a node can be set twice, and a newly inserted or replaced collection
-can be navigated and edited in the same transaction. Intermediate candidates do
-not need to deserialize as `T`. Catching a failed mutation inside the callback
-does not make the transaction valid: it still rolls back.
+Cursors see earlier edits in the same callback, including inserted collections.
+Intermediate states need not deserialize as `T`. Aliases may temporarily lack a
+definition if later edits remove the aliases or restore their target's anchor.
 
-The callback can return a value, such as a count of removed entries. `edit()`
-returns that value only after the transaction commits.
+Commit reparses the output and checks scalar text/types, ordered structure, tags,
+anchors, alias targets, requested styles, and comment ownership, placement, and
+order. Typed editing also deserializes a fresh `T`. Callback, mutation, emission,
+or deserialization errors leave both source and typed value unchanged. A failed
+mutation poisons the transaction even if the callback catches its error. Callback
+results are returned only after commit.
 
-Before commit, the editor emits and reparses the candidate, checks content,
-alias identity, requested styles, and comment ownership, placement, and order,
-then deserializes `T`.
-Mutations build a draft with no source text. Its arena owns node identity,
-parentage, deletion, and explicit style requests. When the callback finishes,
-the draft freezes into an immutable candidate.
-Alias nodes store their target identity; the target's anchor determines their
-spelling. Freezing requires every live alias to have a live, anchored target.
-An intermediate draft may temporarily remove a definition while subsequent
-operations remove its aliases or restore its anchor.
-Source planning compares the candidate's final syntax and resolved layout with
-the original document. Any coordinate
-changes needed for document framing belong to a separate rendering view;
-commit checks still use the unchanged candidate.
-Each retained occurrence has a document, sequence-item, mapping-key, or
-mapping-value context. The same context determines its rewrite scope and the
-emitter's indentation and key rules. When a local edit needs an enclosing
-indicator or comment header, the rewrite expands to that context's owner.
-Parsed content ranges distinguish collection indentation from the positions of
-tags and anchors. Changes inside complex keys also include the enclosing mapping
-so it can choose the key's notation.
-The planner reserves each subtree's adjacent whitespace before combining
-overlapping rewrites. The emitter receives explicit placement and comment
-ownership and reports how its output ends; it cannot change source ranges.
-Patch construction preserves insertion order at shared boundaries and checks
-UTF-8 boundaries, disjoint intervals, and the complete output size before
-applying them.
-Temporary style changes, comments added and then removed, and insertions removed
-before commit do not force rewrites. Requesting an already-active style checks
-that constraint without requiring re-emission.
-Root comment changes are also planned from the final candidate. Changing only
-a framing comment's text retains the existing body layout.
-Any error leaves the original source and typed value intact. This includes
-missing required fields, out-of-range values, and duplicate mapping keys.
+Untyped transactions perform the syntax checks without Serde's type or duplicate
+key validation. `value()` and `syntax()` always expose committed state.
 
-Use `edit_syntax()` for syntax handles, arbitrary YAML mapping keys, alias
-inspection, and parsed, single-document YAML fragments. The same syntax editor
-is available through `editor.syntax_mut()` inside a value-based transaction:
+## Source preservation
 
-```rust
-config.edit_syntax(|syntax| {
-    let entries = syntax.mapping_entries(&syntax.root())?;
-    syntax.replace(&entries[0].1, "!!int 60")
-})?;
-```
+Loading a document or replacement fragment normalizes physical CR and CRLF line
+endings to LF. All editing spans and diagnostics refer to that normalized source.
+Escaped carriage returns remain scalar data. Ordinary parsing and deserialization
+retain the original input. Editing accepts a single UTF-8 document; it does not
+preserve UTF-16/32 encoding or support cross-document operations.
 
-Handles belong to one transaction. Replacing a node retains its handle and
-invalidates handles to its removed descendants. Deleted handles and handles from
-previous transactions are rejected. Navigation never follows aliases implicitly;
-use the syntax editor to locate a definition explicitly.
+`source()` borrows the committed text, `to_yaml()` clones it, and `into_yaml()`
+returns it without cloning. Apart from line-ending normalization, unchanged
+source is reproduced exactly. Canceled edits do not force rewrites.
 
-For syntax editing without a typed projection, use
-`astral_yaml::edit::EditableDocument`. Its transactions perform the same syntax
-checks, without Serde type or duplicate-key validation. The existing parser's
-`Stream` remains an immutable, borrowed view.
+Edits rewrite the selected node or an enclosing collection when YAML syntax or
+comment boundaries require it. Outside those regions, source is copied unchanged.
+Rewritten regions retain entry order, scalar text and types, tags, anchors, alias
+targets, comments, and compatible styles. Whitespace and scalar spelling may
+change; block content uses two-space indentation. Directives and existing document
+markers are retained. Additional markers or flow delimiters may be needed to
+separate comments from scalar content.
 
-## Preservation
+Replacement retains a node's outer comments and merges fragment comments at their
+structural positions. Deletion removes comments owned by the deleted subtree.
+Collection-owned detached comments stay before the same following child; deleting
+that child moves them before the next child, or to the collection's end. Whole
+collection replacement retains these positions by index. Unrepresentable comment
+attachments fail. Root comments may move to document markers while retaining
+ownership, placement, and order.
 
-`source()` borrows the committed source, `to_yaml()` clones it, and `into_yaml()`
-consumes the document and returns its source without cloning. Apart from line
-ending normalization on load, an unchanged document is reproduced exactly. Edits rewrite the selected node or an enclosing
-collection when the surrounding syntax requires it. This includes scalar
-replacements whose comments are interleaved with tags or anchors: the enclosing
-field supplies their header and indentation. Outside rewritten regions, original
-text is copied.
-Collection rewrites also include the parent when comments outside the node's span
-need its header or indentation to retain their attachment.
+Aliases retain target identity. Renaming a definition's anchor also updates its
+aliases, including those outside the definition's rewrite. Removing a referenced
+anchor or rebinding an alias to another definition fails.
 
-Rewrites include adjacent separators when YAML assigns them to the replacement,
-such as trailing blank lines that would become part of a block scalar's value.
-Comment terminators share retained line breaks, so repeated rewrites do not add
-blank lines. Directives and document markers are retained; comments outside the
-start and end markers belong to the document root.
-
-Rewritten regions retain entry order, comments, tags, anchors, alias identity,
-and compatible styles. Whitespace and scalar spelling may normalize, but decoded
-scalar text is retained, including empty values read by Serde as strings. Block
-content uses two-space indentation and LF line endings. Empty collections use flow syntax. An explicit
-style request fails when it would change the scalar's type or cannot be
-represented in its surrounding context. Inline comments need distinct syntax
-headers, supplied by tags, anchors, flow delimiters, or document markers. Root
-edits can add document markers when the new layout needs more headers. Existing
-block content placed in a flow context is emitted in a compatible style.
-Explicit keys in block mappings can retain block scalar or collection styles.
-Flow-opening positions guide comment emission. When headers must be reassigned,
-inline comments retain their owner, placement, and owner-local order.
-
-A collection's opening delimiter or property header separates its comments from
-its children's comments. A prefix before that boundary belongs to the collection.
-Implicit block collections use indentation instead: an outdented prefix belongs
-to the collection, while a prefix aligned with its first child belongs to that
-child. A blank line separates detached comments from leading comments. Emission
-retains these boundaries, including when a collection is a complex mapping key.
-
-A node replacement retains its outer comments. Removing an entry or item removes
-comments owned by its subtree, including leading comments attached to that entry.
-Comments owned by the enclosing collection remain. Detached comments between
-children stay before the same following child. Removing that child moves the
-comments before the next child, or after the collection when none remains.
-Replacing a whole collection retains these positions by entry or item index.
-Replacement fragments merge their comments with retained comments by structural
-position, preserving the order within each list. Detached prefixes remain before
-their value, and leading and trailing comments stay adjacent to their syntax.
-Comment editing uses text without `#` or a line break and placement relative to
-its direct owner. Include a leading space in the text for a comment beginning
-with `# `. A requested
-attachment that cannot survive emission is rejected rather than reassigned.
-Comments retain their order within each owner, including across transactions.
-
-Changing the root's layout can move its comments to document boundaries. Leading
-comments can move before `---`, inline comments onto a marker, and trailing or
-detached comments after `...`. The editor adds missing markers when needed;
-multiple `...` lines can host separate inline comments without adding another
-YAML document. Existing markers and fixed comments constrain where new headers
-can go. These moves retain the comments' root ownership and order. Rewrites also manage the separation
-before `...`, keeping trailing comments adjacent and preserving blank separation
-for detached comments after the marker. Replacing the root with an omitted
-value removes its former standalone line so it does not leave a blank line that
-changes comment attachment. If the value shared a line with `---`, the marker
-retains its line terminator. Comments after block scalars are emitted outside the
-scalar's content indentation.
-
-A block collection can end in a block scalar, so its suffix has the same
-boundary requirements as the scalar itself. When removing a comment would let
-the final scalar consume retained suffix whitespace, the editor supplies a
-document end marker at that position. This also applies when the transaction
-introduces the block scalar. Detached suffix comments use an end marker to keep
-their blank separation outside scalar content. Unused blank lines between suffix
-markers can be removed when necessary to preserve a trailing attachment.
-
-Scalar termination is planned across nested collections before selecting rewrite
-regions. A descendant edit can require a root rewrite to preserve a detached
-root comment's boundary. Inside a collection, where document markers cannot
-provide that boundary, the emitter quotes the final scalar when necessary to
-keep blank separation outside its content. Explicit style requests still have
-to be representable. Nested flow collection suffix comments remain inside their
-closing delimiter so they keep their owner. An inline closing comment can move
-to the opening delimiter when later suffix comments need that enclosure. The
-planner can also add flow delimiters to a nested collection when its detached
-suffix would otherwise break an enclosing trailing comment's attachment.
-Indented root suffixes share the root's rewrite context when block descendants
-could claim their attachment. They are emitted at the root's indentation.
-
-Value setters retain the selected node's anchor and compatible style, with a
-fallback when that style cannot represent the replacement. Tags come from the
-new value. Lower-level `replace()` takes the fragment's style, tags, and anchor;
-`replace_preserving_style()` retains any existing anchor and compatible style.
-When the original has no anchor, the fragment's anchor is retained. Imported
-aliases continue to refer to their definitions even when an existing anchor
-changes the fragment's spelling.
-
-Existing aliases keep their target identity. Replacing a definition with a new
-anchor also rewrites retained aliases to use that name, including occurrences
-outside the definition's rewrite. Edits that remove a referenced anchor or make
-an alias resolve to a different definition fail. Cross-document operations and
-original UTF-16/32 byte encoding preservation are not supported. The editing API
-accepts one UTF-8 YAML document.
-
-Value setters serialize only their replacement subtree. Transactions currently
-clone the syntax, render changed regions, reparse the result, and deserialize the
-entire typed view. Parser, traversal, insertion, and output limits bound their
-work. This API favors validation and source preservation over incremental update
-performance.
-
-The `editable-model` fuzz target generates valid edit sequences and requires
-every transaction to succeed. It compares committed values and both root and
-nested comments with independent Rust models and checks alias target identity.
-Transactions consisting only of canceled comment, sequence-item, or mapping-entry
-insertions must also retain the exact source.
-It runs alongside the `editable` target, which exercises arbitrary input
-documents and rollback.
-The `editable-graph` target maintains an independent recursive tree and alias
-graph. It checks each modeled operation's draft and each committed batch against
-its own scalar values, ordered children, anchors, and target identities. Generated
-graphs include complex mapping keys, self references, and repeated anchor names.
-Leading comment insertion, replacement, and removal compose with graph changes;
-the model checks their direct owner, placement, text, and order after each step.
-Generated documents and replacement fragments also contain leading comments, so
-the model checks retained and imported comment ordering across replacements.
-The same model runs deterministic edit sequences in the integration tests.
-The pinned real-world corpus also exercises whole-document normalization and
-composed scalar replacements. An independent traversal compares ordered syntax,
-anchor and alias identities, and comment ownership before and after each case.
-
-`EditableDocument::normalized_yaml()` is an explicit whole-root rendering
-operation. It returns normalized output without changing the document, or an
-error if the rendering would change content, aliases, or comment attachments.
-
-## Migrating metadata wrappers
-
-`Spanned<'a, T>` is now `Spanned<T>` and contains only `value` and `span`. Remove
-its lifetime argument and any `#[serde(borrow)]` that was needed solely for that
-wrapper. `Spanned<T>` implements `DeserializeOwned` when `T` does.
-
-Use `Commented<'a, T>` to borrow comments, or
-`Spanned<Commented<'a, T>>` when both metadata sets are needed. The two wrappers
-compose in either order. Parent and child comment lists still overlap, and both
-wrappers serialize only their values. Comments retain their original source
-spans even without a `Spanned` wrapper.
-
-Style information is available in the editable syntax and the existing parser
-nodes. There is no `Styled<T>` wrapper. For preserved output, use `Editable<T>`
-and its explicit `to_yaml()` method.
+`EditableDocument::normalized_yaml()` renders the whole root without changing the
+document, subject to the same content, alias, and comment checks. Transactions
+clone the draft, render changed regions, reparse the result, and deserialize the
+entire typed view. Parser, traversal, insertion, and output limits bound this work.
