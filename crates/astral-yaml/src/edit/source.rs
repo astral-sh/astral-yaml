@@ -4,7 +4,7 @@
 
 use super::{
     EditableDocument, Node,
-    draft::Draft,
+    draft::map_locations,
     view::{Emission, Syntax},
 };
 use crate::{NodeId, ParseOptions, Span};
@@ -53,13 +53,208 @@ impl<'a> From<&'a Source> for Syntax<'a, Span> {
 }
 
 impl Source {
-    pub(super) fn emission<'a>(&'a self, draft: &'a Draft) -> Emission<'a, Span> {
+    pub(super) fn emission<'a>(
+        &'a self,
+        syntax: Syntax<'a, Option<Span>>,
+    ) -> Emission<'a, Option<Span>> {
         Emission {
-            nodes: &draft.nodes,
-            root: draft.root,
+            nodes: syntax.nodes,
+            root: syntax.root,
             source: &self.text,
             options: self.options,
             end_marker: self.end_marker,
+        }
+    }
+}
+
+/// A boundary insertion changes coordinates, not syntax. The empty document
+/// root has an explicit affinity when a new line separates it from a marker.
+struct Insertion {
+    at: usize,
+    length: usize,
+    move_empty_root: bool,
+}
+
+#[derive(Default)]
+struct Locations {
+    insertions: Vec<Insertion>,
+}
+
+impl Locations {
+    fn span(&self, span: Span, root: bool) -> Span {
+        self.after(span, 0, root)
+    }
+
+    fn after(&self, mut span: Span, generation: usize, root: bool) -> Span {
+        for insertion in &self.insertions[generation..] {
+            if span.end() > insertion.at
+                || (root
+                    && insertion.move_empty_root
+                    && span.is_empty()
+                    && span.start() == insertion.at)
+            {
+                if span.start() >= insertion.at {
+                    span.start += insertion.length;
+                }
+                span.end += insertion.length;
+            }
+        }
+        span
+    }
+}
+
+/// Generated markers already include the insertion that created them. Only
+/// subsequent insertions contribute to their final coordinates.
+struct Marker {
+    span: Span,
+    generation: usize,
+}
+
+/// Builds document framing and a single mapping from old to framed coordinates.
+pub(super) struct Frame<'a> {
+    original: &'a Source,
+    text: String,
+    locations: Locations,
+    start: Option<Marker>,
+    ends: Vec<Marker>,
+}
+
+/// Read-only rendering syntax. It has no mutation operations or commit method.
+pub(super) struct Prepared {
+    pub(super) source: Source,
+    nodes: Vec<Node<Option<Span>>>,
+    root: NodeId,
+}
+
+impl Prepared {
+    pub(super) fn syntax(&self) -> Syntax<'_, Option<Span>> {
+        Syntax {
+            nodes: &self.nodes,
+            root: self.root,
+        }
+    }
+}
+
+impl<'a> Frame<'a> {
+    pub(super) fn new(original: &'a Source) -> Self {
+        Self {
+            original,
+            text: original.text.clone(),
+            locations: Locations::default(),
+            start: original.start_marker.map(|span| Marker {
+                span,
+                generation: 0,
+            }),
+            ends: original
+                .end_marker
+                .iter()
+                .chain(&original.extra_end_markers)
+                .map(|&span| Marker {
+                    span,
+                    generation: 0,
+                })
+                .collect(),
+        }
+    }
+
+    fn insert(&mut self, at: usize, text: &str, move_empty_root: bool) {
+        self.text.insert_str(at, text);
+        self.locations.insertions.push(Insertion {
+            at,
+            length: text.len(),
+            move_empty_root,
+        });
+    }
+
+    pub(super) fn end_markers(&mut self, mut insertions: Vec<usize>) {
+        // Descending order retains the coordinates used by the boundary plan.
+        insertions.sort_unstable();
+        while let Some(at) = insertions.pop() {
+            let mut count = 1;
+            while insertions.last() == Some(&at) {
+                insertions.pop();
+                count += 1;
+            }
+            let separator = if at > 0 && !self.text[..at].ends_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            self.insert(at, &format!("{separator}{}", "...\n".repeat(count)), false);
+            self.ends.extend((0..count).map(|index| {
+                let start = at + separator.len() + index * "...\n".len();
+                Marker {
+                    span: Span {
+                        start,
+                        end: start + 3,
+                    },
+                    generation: self.locations.insertions.len(),
+                }
+            }));
+        }
+    }
+
+    pub(super) fn separate_root(&mut self, at: usize) {
+        self.insert(at, "\n", true);
+    }
+
+    pub(super) fn start_marker(&mut self, at: usize) {
+        self.insert(at, "---\n", false);
+        self.start = Some(Marker {
+            span: Span {
+                start: at,
+                end: at + 3,
+            },
+            generation: self.locations.insertions.len(),
+        });
+    }
+
+    pub(super) fn finish(self, syntax: Syntax<'_, Option<Span>>) -> Prepared {
+        let mut source_nodes: Vec<_> = self
+            .original
+            .nodes
+            .iter()
+            .cloned()
+            .map(|node| map_locations(node, |span| self.locations.span(span, false)))
+            .collect();
+        let root = self.original.root;
+        source_nodes[root.0].span = self.locations.span(self.original.nodes[root.0].span, true);
+
+        let mut nodes: Vec<_> = syntax
+            .nodes
+            .iter()
+            .cloned()
+            .map(|node| {
+                map_locations(node, |span| {
+                    span.map(|span| self.locations.span(span, false))
+                })
+            })
+            .collect();
+        nodes[syntax.root.0].span = syntax.nodes[syntax.root.0]
+            .span
+            .map(|span| self.locations.span(span, true));
+
+        let mut ends: Vec<_> = self
+            .ends
+            .into_iter()
+            .map(|marker| self.locations.after(marker.span, marker.generation, false))
+            .collect();
+        ends.sort_unstable_by_key(|span| span.start());
+        let source = Source {
+            text: self.text,
+            nodes: source_nodes,
+            root,
+            options: self.original.options,
+            start_marker: self
+                .start
+                .map(|marker| self.locations.after(marker.span, marker.generation, false)),
+            end_marker: ends.first().copied(),
+            extra_end_markers: ends.into_iter().skip(1).collect(),
+        };
+        Prepared {
+            source,
+            nodes,
+            root: syntax.root,
         }
     }
 }

@@ -23,12 +23,16 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
     };
     let source_index = Source::from(&document);
     let output = editor
-        .plan(&source_index, &planned)
+        .plan(&source_index, (&planned).into())
         .render(&Layout::new(&planned))
         .unwrap();
     let error = editor
         .candidate
-        .commit(&output, document.options)
+        .commit(
+            &output,
+            document.options,
+            document.nodes[document.root.0].span,
+        )
         .unwrap_err();
     insta::assert_snapshot!(
         format!("{}\nCommit: {}", edit_diff(source, &output), error.message),
@@ -67,10 +71,10 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     editor.rewrites.extend([first, last]);
     let syntax = Layout::new(&editor.candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, &editor.candidate, &syntax);
+    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(document.root, document.nodes[document.root.0].span)]
@@ -84,10 +88,10 @@ fn empty_transactions_do_not_require_rewrite_work() {
     editor.work.set(0);
     let syntax = Layout::new(&editor.candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, &editor.candidate, &syntax);
+    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         []
@@ -116,10 +120,10 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     let region = document.nodes[document.root.0].span;
     let syntax = Layout::new(&editor.candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, &editor.candidate, &syntax);
+    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
@@ -128,7 +132,7 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     editor.work.set(0);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .root_comments(Some(region), &layout)
             .unwrap_err()
             .message,
@@ -341,10 +345,10 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
         .unwrap();
     let syntax = Layout::new(&editor.candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, &editor.candidate, &syntax);
+    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(
@@ -391,10 +395,10 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     editor.replace(&value, "new").unwrap();
     let syntax = Layout::new(&editor.candidate);
     let source_index = Source::from(&document);
-    let layout = RootLayout::new(&source_index, &editor.candidate, &syntax);
+    let layout = RootLayout::new(&source_index, (&editor.candidate).into(), &syntax);
     assert_eq!(
         editor
-            .plan(&source_index, &editor.candidate)
+            .plan(&source_index, (&editor.candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap(),
         [(

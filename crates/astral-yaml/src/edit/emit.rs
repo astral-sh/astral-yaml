@@ -108,9 +108,10 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     let line_start = region.start() - prefix.len();
     let comment_ended_prefix = region.is_empty()
         && root_comments.iter().any(|comment| {
-            comment.span.into().is_some_and(|span| {
-                !span.is_empty() && span.start() >= line_start && span.end() <= region.start()
-            })
+            comment
+                .span
+                .into()
+                .is_some_and(|span| span.start() >= line_start && span.end() <= region.start())
         });
     if comment_ended_prefix || (own_line && !prefix.bytes().all(|byte| byte == b' ')) {
         // A retained comment needs a terminating break before any inserted
@@ -511,8 +512,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         comments.iter().filter(move |comment| {
             id != self.root
                 || comment.span.into().is_none_or(|span| {
-                    span.is_empty()
-                        || (span.start() >= self.region.start() && span.end() <= self.region.end())
+                    span.start() >= self.region.start() && span.end() <= self.region.end()
                 })
         })
     }
@@ -663,11 +663,10 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
             .is_some_and(|comment| {
                 id != self.document.root
                     || comment.span.into().is_some_and(|span| {
-                        !span.is_empty()
-                            && self.document.nodes[id.0]
-                                .span
-                                .into()
-                                .is_some_and(|node| span.end() <= node.end())
+                        self.document.nodes[id.0]
+                            .span
+                            .into()
+                            .is_some_and(|node| span.end() <= node.end())
                     })
             })
         {
@@ -1022,7 +1021,7 @@ pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> 
 
 /// Whether block presentation provides a header for an inline content comment.
 /// Collection headers need a tag or anchor; block scalars have their indicator.
-pub(super) fn has_inline_header(node: &super::Node, flow: bool) -> bool {
+pub(super) fn has_inline_header<Location>(node: &super::Node<Location>, flow: bool) -> bool {
     !flow
         && (matches!(
             node.kind,

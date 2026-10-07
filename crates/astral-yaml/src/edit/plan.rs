@@ -2,19 +2,18 @@
 //! replacement text; it cannot publish a document or alter the semantic draft.
 
 use super::{
-    NodeKind,
-    draft::Draft,
-    emit,
+    NodeKind, emit,
     framing::{RootComments, RootLayout},
     layout::Layout,
     source::Source,
+    view::Syntax,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{cell::Cell, collections::HashSet};
 
 pub(super) struct Plan<'a> {
     pub(super) original: &'a Source,
-    pub(super) candidate: &'a Draft,
+    pub(super) candidate: Syntax<'a, Option<Span>>,
     pub(super) parents: &'a [Option<NodeId>],
     pub(super) rewrites: &'a HashSet<NodeId>,
     pub(super) root_comments_changed: bool,

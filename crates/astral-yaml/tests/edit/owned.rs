@@ -95,6 +95,65 @@ fn alias_edges_distinguish_recursive_and_shadowed_definitions() {
 }
 
 #[test]
+fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
+    let source = indoc! {"
+        existing: # keep
+        items: []
+    "};
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let entries = editor.mapping_entries(&editor.root())?;
+            let existing = &entries[0].1;
+            let items = &entries[1].1;
+            let empty_origin = editor.node(existing)?.span();
+            editor.replace(existing, "new")?;
+            editor.insert_item(items, 0, "'' # imported")?;
+            editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
+            let item = &editor.sequence_items(items)?[0];
+            editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
+
+            let replacement = editor.node(existing)?;
+            let item = editor.node(item)?;
+            insta::assert_snapshot!(formatdoc! {"
+            original empty value: {:?}
+            replacement origin: {:?}
+            retained comment: {:?}
+            generated value: {:?}
+            inserted comment: {:?}
+            imported comment: {:?}
+        ",
+            empty_origin.and_then(|span| span.slice(source)),
+            replacement.span().and_then(|span| span.slice(source)),
+            replacement.comments()[0].span().and_then(|span| span.slice(source)),
+            item.span(),
+            item.comments()[0].span(),
+            item.comments()[1].span(),
+        }, @r##"
+        original empty value: Some("")
+        replacement origin: Some("")
+        retained comment: Some("# keep")
+        generated value: None
+        inserted comment: None
+        imported comment: None
+        "##);
+            Ok(())
+        })
+        .unwrap();
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,4 @@
+    -existing: # keep
+    -items: []
+    +existing: new # keep
+    +items:
+    +  # inserted
+    +  - '' # imported
+    ");
+}
+
+#[test]
 fn construction_rejects_invalid_documents_and_limits() {
     for source in [
         "[",

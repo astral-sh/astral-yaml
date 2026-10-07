@@ -1,5 +1,28 @@
 use super::{EditableDocument, NodeKind, correspondence, region, render};
+use crate::edit::{draft::Draft, source::Source};
 use astral_yaml_dev::indoc;
+
+/// Exercise emission without constructing a fictitious committed document.
+fn render_draft(original: &EditableDocument, draft: &Draft) -> String {
+    let source = Source::from(original);
+    let region = region(original, original.root, false);
+    let rendered = render(
+        source.emission(draft.into()),
+        draft.root,
+        region,
+        super::indent(&original.source, region.start()),
+        false,
+    )
+    .unwrap();
+    let output = format!(
+        "{}{}{}",
+        &original.source[..rendered.span.start()],
+        rendered.text,
+        &original.source[rendered.span.end()..]
+    );
+    draft.commit(&output, original.options, region).unwrap();
+    output
+}
 
 #[test]
 fn emission_accepts_syntax_without_source_locations() {
@@ -320,15 +343,22 @@ fn rendering_obeys_work_and_output_budgets() {
         let mut document = EditableDocument::parse(source).unwrap();
         document.options.max_nodes = nodes;
         document.options.max_input_bytes = bytes;
-        let error = render(
-            &document,
-            document.root,
-            region(&document, document.root, false),
-            0,
-            false,
-        )
-        .unwrap_err();
-        assert_eq!(error.message, expected);
+        let source = Source::from(&document);
+        let draft = Draft::from(&document);
+        let region = region(&document, document.root, false);
+        // Both committed syntax and drafts obey the same rendering limits.
+        for result in [
+            render(&document, document.root, region, 0, false),
+            render(
+                source.emission((&draft).into()),
+                draft.root,
+                region,
+                0,
+                false,
+            ),
+        ] {
+            assert_eq!(result.unwrap_err().message, expected);
+        }
     }
 }
 
@@ -425,21 +455,24 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
 fn normalization_rejects_reassigned_comments() {
     let mut document = EditableDocument::parse(indoc! {r"
         a: one
+        # trailing
         b: two
     "})
     .unwrap();
+    let mut comment = document
+        .nodes
+        .iter_mut()
+        .find_map(|node| node.comments.pop())
+        .unwrap();
+    comment.placement = crate::comments::CommentPlacement::Trailing;
+    comment.position = super::CommentPosition::After;
     let value = document
         .nodes
         .iter_mut()
         .find(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "one"))
         .unwrap();
     // This attachment would become a leading comment on the next field.
-    value.comments.push(crate::edit::Comment {
-        text: " trailing".to_owned(),
-        placement: crate::comments::CommentPlacement::Trailing,
-        position: super::CommentPosition::After,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
+    value.comments.push(comment);
     assert_eq!(
         document.normalized_yaml().unwrap_err().message,
         "emission changed comment ownership or placement"
@@ -449,13 +482,8 @@ fn normalization_rejects_reassigned_comments() {
 #[test]
 fn normalization_ignores_comments_on_unreachable_nodes() {
     let mut document = EditableDocument::parse("value").unwrap();
-    let mut removed = document.nodes[document.root.0].clone();
-    removed.comments.push(crate::edit::Comment {
-        text: " removed".to_owned(),
-        placement: crate::comments::CommentPlacement::Inline,
-        position: super::CommentPosition::After,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
+    let fragment = EditableDocument::parse("removed # comment").unwrap();
+    let removed = fragment.nodes[fragment.root.0].clone();
     // Replaced nodes may remain in the arena without belonging to the document.
     document.nodes.push(removed);
     assert_eq!(document.normalized_yaml().unwrap(), "value");
@@ -572,6 +600,9 @@ fn normalized_syntax_preserves_values_and_comments() {
         let document = EditableDocument::parse(source).unwrap();
         assert_eq!(document.to_yaml(), source);
         let output = document.normalized_yaml().expect(source);
+        // Entering the draft phase changes the location type, not the syntax
+        // or its rendering. Check this across the normalization corpus.
+        assert_eq!(render_draft(&document, &Draft::from(&document)), output);
         assert_eq!(
             astral_yaml_dev::benchmarks::documents::<Value>(&output),
             astral_yaml_dev::benchmarks::documents::<Value>(source),
@@ -1014,16 +1045,17 @@ fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
         "old \t \n",
         "[old] \t\n",
     ] {
-        let mut candidate = EditableDocument::parse(source).unwrap();
+        let original = EditableDocument::parse(source).unwrap();
+        let mut candidate = Draft::from(&original);
         candidate.nodes[candidate.root.0]
             .comments
             .push(super::Comment {
                 text: " added".to_owned(),
                 placement: crate::comments::CommentPlacement::Trailing,
                 position: super::CommentPosition::After,
-                span: crate::Span::new(0, 0).unwrap(),
+                span: None,
             });
-        outputs.push(candidate.normalized_yaml().unwrap());
+        outputs.push(render_draft(&original, &candidate));
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
@@ -1094,7 +1126,8 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
 fn omitted_roots_own_their_line_when_comments_are_emitted() {
     let mut outputs = Vec::new();
     for source in ["---\nold\n...\n", "--- old\n...\n"] {
-        let mut candidate = EditableDocument::parse(source).unwrap();
+        let original = EditableDocument::parse(source).unwrap();
+        let mut candidate = Draft::from(&original);
         let root = &mut candidate.nodes[candidate.root.0];
         root.kind = NodeKind::Scalar {
             value: String::new(),
@@ -1104,9 +1137,9 @@ fn omitted_roots_own_their_line_when_comments_are_emitted() {
             text: " added".to_owned(),
             placement: crate::comments::CommentPlacement::Leading,
             position: super::CommentPosition::Before,
-            span: crate::Span::new(0, 0).unwrap(),
+            span: None,
         });
-        outputs.push(candidate.normalized_yaml().unwrap());
+        outputs.push(render_draft(&original, &candidate));
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
@@ -1132,7 +1165,8 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
             crate::comments::CommentPlacement::Trailing,
             crate::comments::CommentPlacement::Detached,
         ] {
-            let mut candidate = EditableDocument::parse(source).unwrap();
+            let original = EditableDocument::parse(source).unwrap();
+            let mut candidate = Draft::from(&original);
             let mut children = Vec::new();
             super::children(&candidate.nodes[candidate.root.0].kind, &mut children);
             let inner = children[1];
@@ -1140,11 +1174,11 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
                 text: " added".to_owned(),
                 placement,
                 position: super::CommentPosition::After,
-                span: crate::Span::new(0, 0).unwrap(),
+                span: None,
             });
             diffs.push(astral_yaml_dev::edit_diff(
                 source,
-                &candidate.normalized_yaml().unwrap(),
+                &render_draft(&original, &candidate),
             ));
         }
     }

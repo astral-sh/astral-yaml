@@ -1,13 +1,13 @@
 //! Mutable syntax has no source text. Its locations describe provenance in the
 //! original document; they are not spans of the draft's eventual output.
 
-use super::{EditableDocument, Node, NodeKind, emit, view::Syntax};
+use super::{Comment, EditableDocument, Node, NodeKind, emit, view::Syntax};
 use crate::{Error, NodeId, ParseOptions, Span};
 use std::collections::HashSet;
 
 #[derive(Clone, Debug)]
 pub(super) struct Draft {
-    pub(super) nodes: Vec<Node>,
+    pub(super) nodes: Vec<Node<Option<Span>>>,
     pub(super) root: NodeId,
     pub(super) requested_styles: HashSet<NodeId>,
 }
@@ -15,14 +15,19 @@ pub(super) struct Draft {
 impl From<&EditableDocument> for Draft {
     fn from(document: &EditableDocument) -> Self {
         Self {
-            nodes: document.nodes.clone(),
+            nodes: document
+                .nodes
+                .iter()
+                .cloned()
+                .map(|node| map_locations(node, Some))
+                .collect(),
             root: document.root,
             requested_styles: HashSet::new(),
         }
     }
 }
 
-impl<'a> From<&'a Draft> for Syntax<'a, Span> {
+impl<'a> From<&'a Draft> for Syntax<'a, Option<Span>> {
     fn from(draft: &'a Draft) -> Self {
         Self {
             nodes: &draft.nodes,
@@ -37,9 +42,10 @@ impl Draft {
         &self,
         output: &str,
         options: ParseOptions,
+        diagnostic_span: Span,
     ) -> Result<EditableDocument, Error> {
         let error = |message| Error {
-            span: self.nodes[self.root.0].span,
+            span: diagnostic_span,
             message,
         };
         let parsed = EditableDocument::parse_with_options(output, options)?;
@@ -71,5 +77,28 @@ pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {
             entries.is_empty() || a == b
         }
         _ => false,
+    }
+}
+
+/// Change provenance without changing any syntax or node identity.
+pub(super) fn map_locations<Location, Target>(
+    node: Node<Location>,
+    map: impl Fn(Location) -> Target,
+) -> Node<Target> {
+    Node {
+        span: map(node.span),
+        kind: node.kind,
+        anchor: node.anchor,
+        tag: node.tag,
+        comments: node
+            .comments
+            .into_iter()
+            .map(|comment| Comment {
+                span: map(comment.span),
+                text: comment.text,
+                placement: comment.placement,
+                position: comment.position,
+            })
+            .collect(),
     }
 }

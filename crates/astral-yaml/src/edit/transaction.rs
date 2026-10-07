@@ -1,6 +1,11 @@
 use super::{
-    Comment, CommentPosition, EditableDocument, Node, NodeKind, draft::Draft, emit, layout::Layout,
-    plan::Plan, source::Source,
+    Comment, CommentPosition, EditableDocument, Node, NodeKind,
+    draft::{Draft, map_locations},
+    emit,
+    layout::Layout,
+    plan::Plan,
+    source::Source,
+    view::Syntax,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::{
@@ -22,7 +27,8 @@ pub struct Handle {
 }
 
 /// Mutable candidate syntax. Obtain handles by navigating from [`Self::root`].
-/// Node spans describe the original source; inserted syntax has empty spans.
+/// Node and comment locations refer to their original occurrences, even after
+/// replacement. Inserted syntax has no source location (`None`).
 #[derive(Debug)]
 pub struct Editor<'a> {
     original: &'a EditableDocument,
@@ -150,7 +156,7 @@ impl<'a> Editor<'a> {
     ///
     /// # Errors
     /// Rejects foreign/deleted handles and exhausted work budgets.
-    pub fn node(&self, handle: &Handle) -> Result<&Node, Error> {
+    pub fn node(&self, handle: &Handle) -> Result<&Node<Option<Span>>, Error> {
         Ok(&self.candidate.nodes[self.id(handle)?.0])
     }
 
@@ -228,12 +234,9 @@ impl<'a> Editor<'a> {
         self.charge(document.nodes.len())?;
         let offset = self.candidate.nodes.len();
         let root = NodeId(document.root.0 + offset);
-        for mut node in document.nodes {
+        for node in document.nodes {
+            let mut node = map_locations(node, |_| None);
             remap(&mut node, |id| NodeId(id.0 + offset));
-            node.span = Span { start: 0, end: 0 };
-            for comment in &mut node.comments {
-                comment.span = node.span;
-            }
             self.candidate.nodes.push(node);
             self.alive.push(true);
             self.parents.push(None);
@@ -338,7 +341,7 @@ impl<'a> Editor<'a> {
                 && editor.candidate.nodes[id.0]
                     .comments
                     .iter()
-                    .all(|c| !c.span.is_empty())
+                    .all(|c| c.span.is_some())
             {
                 editor.mark(id);
             } else {
@@ -537,7 +540,7 @@ impl<'a> Editor<'a> {
                     } else {
                         CommentPosition::After
                     },
-                    span: Span { start: 0, end: 0 },
+                    span: None,
                 },
             );
             editor.mark_parent(id);
@@ -597,11 +600,12 @@ impl<'a> Editor<'a> {
         self.charge(1)
     }
 
-    fn comment_change(&mut self, id: NodeId, span: Span) {
+    fn comment_change(&mut self, id: NodeId, span: Option<Span>) {
         let root_span = self.original.nodes[self.original.root.0].span;
         if id == self.original.root
-            && !span.is_empty()
-            && (span.start() < root_span.start() || span.end() > root_span.end())
+            && span.is_some_and(|span| {
+                span.start() < root_span.start() || span.end() > root_span.end()
+            })
         {
             self.root_comments_changed = true;
         } else {
@@ -614,18 +618,25 @@ impl<'a> Editor<'a> {
             return Err(error);
         }
         let syntax = Layout::new(&self.candidate);
-        let mut source = Source::from(self.original);
-        let mut planned = self.candidate.clone();
-        if !self.rewrites.is_empty() || self.root_comments_changed {
-            if let Some(framed) = super::framing::prepare(&source, &mut planned, &syntax) {
-                source = framed;
-            }
-        }
-        let output = self.plan(&source, &planned).render(&syntax)?;
-        self.candidate.commit(&output, self.original.options)
+        let original = Source::from(self.original);
+        let framed = if self.rewrites.is_empty() && !self.root_comments_changed {
+            None
+        } else {
+            super::framing::prepare(&original, (&self.candidate).into(), &syntax)
+        };
+        let (source, planned) = framed.as_ref().map_or_else(
+            || (&original, (&self.candidate).into()),
+            |framed| (&framed.source, framed.syntax()),
+        );
+        let output = self.plan(source, planned).render(&syntax)?;
+        self.candidate.commit(
+            &output,
+            self.original.options,
+            self.original.nodes[self.original.root.0].span,
+        )
     }
 
-    fn plan<'b>(&'b self, source: &'b Source, candidate: &'b Draft) -> Plan<'b> {
+    fn plan<'b>(&'b self, source: &'b Source, candidate: Syntax<'b, Option<Span>>) -> Plan<'b> {
         Plan {
             original: source,
             candidate,
@@ -637,7 +648,7 @@ impl<'a> Editor<'a> {
     }
 }
 
-fn remap(node: &mut Node, map: impl Fn(NodeId) -> NodeId) {
+fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
     for comment in &mut node.comments {
         if let CommentPosition::BeforeChild(child) = &mut comment.position {
             *child = map(*child);
@@ -661,7 +672,7 @@ fn remap(node: &mut Node, map: impl Fn(NodeId) -> NodeId) {
 }
 
 /// A removed child leaves its preceding gap before the next surviving child.
-fn retarget_comments(node: &mut Node, removed: NodeId, following: Option<NodeId>) {
+fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: Option<NodeId>) {
     for comment in &mut node.comments {
         if comment.position == CommentPosition::BeforeChild(removed) {
             comment.position =
@@ -673,7 +684,10 @@ fn retarget_comments(node: &mut Node, removed: NodeId, following: Option<NodeId>
 /// Merge the retained and imported comments at their structural positions.
 /// Each list keeps its own order; retained comments precede imports at a shared
 /// boundary. Collection gaps retain their ordinal position in the replacement.
-fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
+fn merged_comments(
+    old: &Node<Option<Span>>,
+    replacement: &Node<Option<Span>>,
+) -> Vec<Comment<Option<Span>>> {
     #[derive(PartialEq, Eq, PartialOrd, Ord)]
     enum Boundary {
         InlineBefore,
@@ -712,7 +726,7 @@ fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
         .enumerate()
         .map(|(index, child)| (child, index))
         .collect();
-    let boundary = |comment: &Comment| match comment.position {
+    let boundary = |comment: &Comment<Option<Span>>| match comment.position {
         CommentPosition::Before => match comment.placement {
             CommentPlacement::Inline => Boundary::InlineBefore,
             CommentPlacement::Detached => Boundary::DetachedBefore,
@@ -745,7 +759,7 @@ fn merged_comments(old: &Node, replacement: &Node) -> Vec<Comment> {
     merged
 }
 
-fn inline_node(node: &Node) -> bool {
+fn inline_node(node: &Node<Option<Span>>) -> bool {
     // Comments between properties and content need the parent's header and
     // continuation indentation, even when the content itself fits on one line.
     node.comments
