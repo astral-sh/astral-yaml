@@ -648,7 +648,7 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     @@ -1,3 +1,5 @@
     -outer:
     -  key: old
-    +outer: {key: old
+    +outer: {key: old,
     +  ⏎
     +  # detached
     +  }
@@ -661,7 +661,7 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     -  key: |+
     -    old
     -
-    +outer: {key: "old\n\n"
+    +outer: {key: "old\n\n",
     +  ⏎
     +  # detached
     +  }
@@ -673,7 +673,7 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
      outer:
     -  inner:
     -    key: old
-    +  inner: {key: old
+    +  inner: {key: old,
     +    ⏎
     +    # detached
     +    }

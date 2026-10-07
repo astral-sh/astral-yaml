@@ -377,7 +377,7 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
     @@ -1,3 +1,5 @@
     -outer:
     -  value: old
-    +outer: {value: old
+    +outer: {value: old,
     +  ⏎
     +  # detached
     +  }
@@ -390,7 +390,7 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
     -outer:
     -  value: |-
     -    old
-    +outer: {value: "old"
+    +outer: {value: "old",
     +  ⏎
     +  # detached
     +  }
