@@ -1,5 +1,6 @@
 //! Nested scalar termination and comment separation are layout dependencies.
 
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use std::fmt::Write;
 
 use astral_yaml::{
@@ -7,7 +8,6 @@ use astral_yaml::{
     comments::CommentPlacement,
     edit::{EditableDocument, Editor, Handle, NodeKind},
 };
-use astral_yaml_dev::edit_diff;
 
 fn first_leaf(editor: &Editor<'_>) -> Handle {
     let mut handle = editor.root();
@@ -26,22 +26,60 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     // Blank separation belongs outside scalar content:
     // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "outer:\n  key: old\n\n# detached\n",
-            "outer:\n  key: old\n\n...\n# detached\n",
-            "outer:\n  key: old\n\n  # detached\n",
-            "outer:\n  key: old\n\n    # detached\nnext: retained\n",
-            "outer:\n  key: old\n  # trailing\n\n# detached\n",
-            "- - old\n\n  # detached\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| editor.replace(&first_leaf(editor), "|+\n  new\n\n"))
-                .unwrap();
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for source in [
+        indoc! {r"
+            outer:
+              key: old
+
+            # detached
+        "},
+        indoc! {r"
+            outer:
+              key: old
+
+            ...
+            # detached
+        "},
+        indoc! {r"
+            outer:
+              key: old
+
+              # detached
+        "},
+        indoc! {r"
+            outer:
+              key: old
+
+                # detached
+            next: retained
+        "},
+        indoc! {r"
+            outer:
+              key: old
+              # trailing
+
+            # detached
+        "},
+        indoc! {r"
+            - - old
+
+              # detached
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                editor.replace(
+                    &first_leaf(editor),
+                    indoc! {r"
+                        |+
+                          new
+
+                    "},
+                )
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
@@ -112,105 +150,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     +  - "new\n\n"
     +  ⏎
        # detached
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍
-    -  key: old␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-    +...␍
-     ␍
-     # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍
-    -  key: old␍
-    -␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-     ...␍
-    +␍
-     # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     outer:␍
-    -  key: old␍
-    -␍
-    +  key: "new\n\n"␍
-    +  ␍
-       # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-     outer:␍
-    -  key: old␍
-    -␍
-    -    # detached␍
-    +  key: "new\n\n"␍
-    +  ␍
-    +  # detached␍
-     next: retained␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍
-    -  key: old␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-       # trailing␍
-     ␍
-     # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -- - old␍
-    -␍
-    +-␍
-    +  - "new\n\n"␍
-    +  ␍
-       # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍-  key: old␍+  key: |2+␍+    new␍+    ␍+...␍ ␍ # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍-  key: old␍-␍+  key: |2+␍+    new␍+    ␍ ...␍+␍ # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     outer:␍-  key: old␍-␍+  key: "new\n\n"␍+  ␍   # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-     outer:␍-  key: old␍-␍-    # detached␍+  key: "new\n\n"␍+  ␍+  # detached␍ next: retained␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍-  key: old␍+  key: |2+␍+    new␍+    ␍   # trailing␍ ␍ # detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -- - old␍-␍+-␍+  - "new\n\n"␍+  ␍   # detached␍
     "#);
 }
 
@@ -218,22 +157,24 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn explicit_block_style_requests_still_require_representable_separation() {
     let mut outcomes = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
-            for indent in ["", "  "] {
-                let source = format!("outer:\n  key: \"new\\n\\n\"\n\n{indent}# detached\n")
-                    .replace('\n', newline);
-                let mut document = EditableDocument::parse(&source).unwrap();
-                let result =
-                    document.edit(|editor| editor.set_scalar_style(&first_leaf(editor), style));
-                outcomes.push(match result {
-                    Ok(()) => edit_diff(&source, document.source()),
-                    Err(error) => {
-                        assert_eq!(document.source(), source);
-                        error.message.to_owned()
-                    }
-                });
-            }
+    for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
+        for indent in ["", "  "] {
+            let source = formatdoc! {r#"
+                outer:
+                  key: "new\n\n"
+
+                {indent}# detached
+            "#};
+            let mut document = EditableDocument::parse(&source).unwrap();
+            let result =
+                document.edit(|editor| editor.set_scalar_style(&first_leaf(editor), style));
+            outcomes.push(match result {
+                Ok(()) => edit_diff(&source, document.source()),
+                Err(error) => {
+                    assert_eq!(document.source(), source);
+                    error.message.to_owned()
+                }
+            });
         }
     }
     insta::assert_snapshot!(outcomes.join("\n"), @r#"
@@ -261,44 +202,6 @@ fn explicit_block_style_requests_still_require_representable_separation() {
     +...
      ⏎
      # detached
-
-    requested style is not representable in this context
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍
-    -  key: "new\n\n"␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-    +...␍
-     ␍
-     # detached␍
-
-    requested style is not representable in this context
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍
-    -  key: "new\n\n"␍
-    +  key: >2+␍
-    +    new␍
-    +    ␍
-    +...␍
-     ␍
-     # detached␍
-
-    requested style is not representable in this context
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍-  key: "new\n\n"␍+  key: |2+␍+    new␍+    ␍+...␍ ␍ # detached␍
-
-    requested style is not representable in this context
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍-  key: "new\n\n"␍+  key: >2+␍+    new␍+    ␍+...␍ ␍ # detached␍
 
     requested style is not representable in this context
     "#);
@@ -332,45 +235,67 @@ fn comments(document: &EditableDocument) -> Vec<(Vec<usize>, String, CommentPlac
 
 #[test]
 fn scalar_layouts_preserve_values_and_comment_owners_at_each_depth() {
-    for newline in ["\n", "\r\n", "\r"] {
-        for depth in 1..=4 {
-            let mut body = String::new();
-            for n in 0..depth {
-                write!(
-                    body,
-                    "{}key{n}:{}",
-                    "  ".repeat(n),
-                    if n + 1 == depth { " old" } else { "\n" }
-                )
-                .unwrap();
-            }
-            for gap in ["\n", "\n\n", "\n \n", "\n\t\n"] {
-                for indent in 0..=depth {
-                    for ending in ["", "\n", "\n\n", "\n...\n", "\n\n... # end\n"] {
-                        let source = format!("{body}{gap}{}# comment{ending}", "  ".repeat(indent))
-                            .replace('\n', newline);
-                        for fragment in ["|+\n  new\n\n", ">+\n  new\n\n"] {
-                            let mut document = EditableDocument::parse(&source).unwrap();
-                            let expected_comments = comments(&document);
-                            document
-                                .edit(|editor| editor.replace(&first_leaf(editor), fragment))
-                                .unwrap_or_else(|error| {
-                                    panic!("{source:?}, {fragment:?}: {error}")
-                                });
-                            assert_eq!(comments(&document), expected_comments);
-                            let mut id = document.root();
-                            for _ in 0..depth {
-                                let NodeKind::Mapping { entries, .. } =
-                                    document.node(id).unwrap().kind()
-                                else {
-                                    panic!("expected mapping")
-                                };
-                                id = entries[0].1;
-                            }
-                            assert!(
-                                matches!(document.node(id).unwrap().kind(), NodeKind::Scalar { value, .. } if value == "new\n\n")
-                            );
+    for depth in 1..=4 {
+        let mut body = String::new();
+        for n in 0..depth {
+            write!(
+                body,
+                "{}key{n}:{}",
+                "  ".repeat(n),
+                if n + 1 == depth { " old" } else { "\n" }
+            )
+            .unwrap();
+        }
+        for gap in ["\n", "\n\n", "\n \n", "\n\t\n"] {
+            for indent in 0..=depth {
+                for ending in [
+                    "",
+                    "\n",
+                    "\n\n",
+                    indoc! {r"
+
+                        ...
+                    "},
+                    indoc! {r"
+
+
+                        ... # end
+                    "},
+                ] {
+                    let source = format!("{body}{gap}{}# comment{ending}", "  ".repeat(indent));
+                    for fragment in [
+                        indoc! {r"
+                            |+
+                              new
+
+                        "},
+                        indoc! {r"
+                            >+
+                              new
+
+                        "},
+                    ] {
+                        let mut document = EditableDocument::parse(&source).unwrap();
+                        let expected_comments = comments(&document);
+                        document
+                            .edit(|editor| editor.replace(&first_leaf(editor), fragment))
+                            .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
+                        assert_eq!(comments(&document), expected_comments);
+                        let mut id = document.root();
+                        for _ in 0..depth {
+                            let NodeKind::Mapping { entries, .. } =
+                                document.node(id).unwrap().kind()
+                            else {
+                                panic!("expected mapping")
+                            };
+                            id = entries[0].1;
                         }
+                        assert!(
+                            matches!(document.node(id).unwrap().kind(), NodeKind::Scalar { value, .. } if value == indoc! {r"
+                                new
+
+                            "})
+                        );
                     }
                 }
             }
@@ -413,8 +338,22 @@ impl Operation {
         let inner = editor.mapping_entries(&root)?[0].1.clone();
         let entries = editor.mapping_entries(&inner)?;
         match self {
-            Self::Scalar => editor.replace(&entries[0].1, "|+\n  new\n\n"),
-            Self::Sequence => editor.replace(&entries[0].1, "- |+\n    new\n\n"),
+            Self::Scalar => editor.replace(
+                &entries[0].1,
+                indoc! {r"
+                    |+
+                      new
+
+                "},
+            ),
+            Self::Sequence => editor.replace(
+                &entries[0].1,
+                indoc! {r"
+                    - |+
+                        new
+
+                "},
+            ),
             Self::Plain => editor.replace(&entries[0].1, "old"),
             Self::RootComment | Self::InnerComment => {
                 let owner = if matches!(self, Self::RootComment) {
@@ -467,7 +406,10 @@ impl Model {
                 self.value = if matches!(operation, Operation::Plain) {
                     "old"
                 } else {
-                    "new\n\n"
+                    indoc! {r"
+                        new
+
+                    "}
                 };
                 self.sequence = matches!(operation, Operation::Sequence);
             }
@@ -529,93 +471,125 @@ impl Model {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn nested_layout_edits_match_an_independent_model_after_each_commit() {
-    for newline in ["\n", "\r\n", "\r"] {
-        for (source, root, inner) in [
-            ("outer:\n  key: old\n", None, None),
-            (
-                "outer: {key: old}\n\n   # root\n",
-                Some((" root", CommentPlacement::Detached)),
-                None,
-            ),
-            (
-                "outer: {key: old} # inline\n",
-                None,
-                Some((" inline", CommentPlacement::Inline)),
-            ),
-            (
-                "outer:\n  key: old\n# trailing\n",
-                Some((" trailing", CommentPlacement::Trailing)),
-                None,
-            ),
-            (
-                "outer:\n  key: old\n# trailing\n\n",
-                Some((" trailing", CommentPlacement::Trailing)),
-                None,
-            ),
-            (
-                "outer:\n  key: old\n\n# root\n",
-                Some((" root", CommentPlacement::Detached)),
-                None,
-            ),
-            (
-                "outer:\n  key: old\n\n  # inner\n",
-                None,
-                Some((" inner", CommentPlacement::Detached)),
-            ),
-            (
-                "outer:\n  key: old\n  # trailing\n",
-                None,
-                Some((" trailing", CommentPlacement::Trailing)),
-            ),
-        ] {
-            let source = source.replace('\n', newline);
-            let original = EditableDocument::parse(&source).unwrap();
-            let initial = Model {
-                value: "old",
-                sequence: false,
-                siblings: 0,
-                comments: [root, inner].map(|comment| {
-                    comment
-                        .into_iter()
-                        .map(|(text, placement)| (text.to_owned(), placement))
-                        .collect()
-                }),
+    for (source, root, inner) in [
+        (
+            indoc! {r"
+                outer:
+                  key: old
+            "},
+            None,
+            None,
+        ),
+        (
+            indoc! {r"
+                outer: {key: old}
+
+                   # root
+            "},
+            Some((" root", CommentPlacement::Detached)),
+            None,
+        ),
+        (
+            indoc! {r"
+                outer: {key: old} # inline
+            "},
+            None,
+            Some((" inline", CommentPlacement::Inline)),
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: old
+                # trailing
+            "},
+            Some((" trailing", CommentPlacement::Trailing)),
+            None,
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: old
+                # trailing
+
+            "},
+            Some((" trailing", CommentPlacement::Trailing)),
+            None,
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: old
+
+                # root
+            "},
+            Some((" root", CommentPlacement::Detached)),
+            None,
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: old
+
+                  # inner
+            "},
+            None,
+            Some((" inner", CommentPlacement::Detached)),
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: old
+                  # trailing
+            "},
+            None,
+            Some((" trailing", CommentPlacement::Trailing)),
+        ),
+    ] {
+        let original = EditableDocument::parse(source).unwrap();
+        let initial = Model {
+            value: "old",
+            sequence: false,
+            siblings: 0,
+            comments: [root, inner].map(|comment| {
+                comment
+                    .into_iter()
+                    .map(|(text, placement)| (text.to_owned(), placement))
+                    .collect()
+            }),
+        };
+        // A nested block-style request cannot enclose a detached suffix
+        // while an enclosing trailing attachment requires adjacency.
+        let operations =
+            if root.is_some_and(|(_, placement)| placement == CommentPlacement::Trailing) {
+                &Operation::ALL[..10]
+            } else {
+                &Operation::ALL[..]
             };
-            // A nested block-style request cannot enclose a detached suffix
-            // while an enclosing trailing attachment requires adjacency.
-            let operations =
-                if root.is_some_and(|(_, placement)| placement == CommentPlacement::Trailing) {
-                    &Operation::ALL[..10]
-                } else {
-                    &Operation::ALL[..]
-                };
-            for &first in operations {
-                for &second in operations {
-                    for &third in operations {
-                        let sequence = [first, second, third];
-                        let mut model = initial.clone();
-                        let mut separate = original.clone();
-                        for operation in sequence {
-                            model.apply(operation);
-                            separate
-                                .edit(|editor| operation.apply(editor))
-                                .unwrap_or_else(|error| {
-                                    panic!("{source:?}, {sequence:?}: {error}")
-                                });
-                            model.check(&separate);
-                        }
-                        let mut combined = original.clone();
-                        combined
-                            .edit(|editor| {
-                                for operation in sequence {
-                                    operation.apply(editor)?;
-                                }
-                                Ok(())
-                            })
+        for &first in operations {
+            for &second in operations {
+                for &third in operations {
+                    let sequence = [first, second, third];
+                    let mut model = initial.clone();
+                    let mut separate = original.clone();
+                    for operation in sequence {
+                        model.apply(operation);
+                        separate
+                            .edit(|editor| operation.apply(editor))
                             .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
-                        model.check(&combined);
+                        model.check(&separate);
                     }
+                    let mut combined = original.clone();
+                    combined
+                        .edit(|editor| {
+                            for operation in sequence {
+                                operation.apply(editor)?;
+                            }
+                            Ok(())
+                        })
+                        .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
+                    model.check(&combined);
                 }
             }
         }
@@ -626,28 +600,47 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for (source, depth) in [
-            ("outer:\n  key: old\n# trailing\n", 1),
-            ("outer:\n  key: |+\n    old\n\n# trailing\n", 1),
-            (
-                "outer:\n  inner:\n    key: old\n  # trailing\nnext: retained\n",
-                2,
-            ),
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| {
-                    let mut owner = editor.root();
-                    for _ in 0..depth {
-                        owner = editor.mapping_entries(&owner)?[0].1.clone();
-                    }
-                    editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
-                })
-                .unwrap();
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for (source, depth) in [
+        (
+            indoc! {r"
+                outer:
+                  key: old
+                # trailing
+            "},
+            1,
+        ),
+        (
+            indoc! {r"
+                outer:
+                  key: |+
+                    old
+
+                # trailing
+            "},
+            1,
+        ),
+        (
+            indoc! {r"
+                outer:
+                  inner:
+                    key: old
+                  # trailing
+                next: retained
+            "},
+            2,
+        ),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let mut owner = editor.root();
+                for _ in 0..depth {
+                    owner = editor.mapping_entries(&owner)?[0].1.clone();
+                }
+                editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml
@@ -686,64 +679,16 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     +    }
        # trailing
      next: retained
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    -outer:␍
-    -  key: old␍
-    +outer: {key: old␍
-    +  ␍
-    +  # detached␍
-    +  }␍
-     # trailing␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-    -outer:␍
-    -  key: |+␍
-    -    old␍
-    -␍
-    +outer: {key: "old\n\n"␍
-    +  ␍
-    +  # detached␍
-    +  }␍
-     # trailing␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍
-    -  inner:␍
-    -    key: old␍
-    +  inner: {key: old␍
-    +    ␍
-    +    # detached␍
-    +    }␍
-       # trailing␍
-     next: retained␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    -outer:␍-  key: old␍+outer: {key: old␍+  ␍+  # detached␍+  }␍ # trailing␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-    -outer:␍-  key: |+␍-    old␍-␍+outer: {key: "old\n\n"␍+  ␍+  # detached␍+  }␍ # trailing␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-     outer:␍-  inner:␍-    key: old␍+  inner: {key: old␍+    ␍+    # detached␍+    }␍   # trailing␍ next: retained␍
     "#);
 }
 
 #[test]
 fn required_collection_boundaries_do_not_override_explicit_styles() {
-    let source = "outer:\n  key: old\n# trailing\n";
+    let source = indoc! {r"
+        outer:
+          key: old
+        # trailing
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     let error = document
         .edit(|editor| {
@@ -759,17 +704,27 @@ fn required_collection_boundaries_do_not_override_explicit_styles() {
 #[test]
 fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        let source = "outer:\n  key: old\n# trailing\n\n".replace('\n', newline);
-        let mut document = EditableDocument::parse(&source).unwrap();
-        document
-            .edit(|editor| {
-                editor.remove_comment(&editor.root(), 0)?;
-                editor.replace(&first_leaf(editor), "|+\n  new\n\n")
-            })
-            .unwrap();
-        diffs.push(edit_diff(&source, document.source()));
-    }
+    let source = indoc! {r"
+        outer:
+          key: old
+        # trailing
+
+    "};
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            editor.remove_comment(&editor.root(), 0)?;
+            editor.replace(
+                &first_leaf(editor),
+                indoc! {r"
+                    |+
+                      new
+
+                "},
+            )
+        })
+        .unwrap();
+    diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -783,24 +738,6 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
     +...
     +
      ⏎
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍
-    -  key: old␍
-    -# trailing␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-    +...␍
-    +␍
-     ␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,7 @@
-     outer:␍-  key: old␍-# trailing␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ␍
     ");
 }
 
@@ -808,39 +745,47 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "{outer: {key: old}} # inline\n\n   # root\n",
-            "outer: {key: old}\n\n   # root\n",
-            "[{key: old}]\n\n   # root\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            let expected_comments = comments(&document);
-            document
-                .edit(|editor| {
-                    let mut pending = vec![editor.root()];
-                    while let Some(handle) = pending.pop() {
-                        match editor.node(&handle)?.kind() {
-                            NodeKind::Mapping { .. } => {
-                                pending.extend(
-                                    editor.mapping_entries(&handle)?.into_iter().map(|(_, v)| v),
-                                );
-                            }
-                            NodeKind::Sequence { .. } => {
-                                pending.extend(editor.sequence_items(&handle)?);
-                            }
-                            _ => continue,
+    for source in [
+        indoc! {r"
+            {outer: {key: old}} # inline
+
+               # root
+        "},
+        indoc! {r"
+            outer: {key: old}
+
+               # root
+        "},
+        indoc! {r"
+            [{key: old}]
+
+               # root
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        let expected_comments = comments(&document);
+        document
+            .edit(|editor| {
+                let mut pending = vec![editor.root()];
+                while let Some(handle) = pending.pop() {
+                    match editor.node(&handle)?.kind() {
+                        NodeKind::Mapping { .. } => {
+                            pending.extend(
+                                editor.mapping_entries(&handle)?.into_iter().map(|(_, v)| v),
+                            );
                         }
-                        editor
-                            .set_collection_style(&handle, astral_yaml::CollectionStyle::Block)?;
+                        NodeKind::Sequence { .. } => {
+                            pending.extend(editor.sequence_items(&handle)?);
+                        }
+                        _ => continue,
                     }
-                    Ok(())
-                })
-                .unwrap();
-            assert_eq!(comments(&document), expected_comments);
-            diffs.push(edit_diff(&source, document.source()));
-        }
+                    editor.set_collection_style(&handle, astral_yaml::CollectionStyle::Block)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(comments(&document), expected_comments);
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -873,52 +818,6 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
      ⏎
     -   # root
     +# root
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    -{outer: {key: old}} # inline␍
-    +--- # inline␍
-    +outer:␍
-    +  key: old␍
-     ␍
-    -   # root␍
-    +# root␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -outer: {key: old}␍
-    +outer:␍
-    +  key: old␍
-     ␍
-    -   # root␍
-    +# root␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -[{key: old}]␍
-    +-␍
-    +  key: old␍
-     ␍
-    -   # root␍
-    +# root␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    -{outer: {key: old}} # inline␍+--- # inline␍+outer:␍+  key: old␍ ␍-   # root␍+# root␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -outer: {key: old}␍+outer:␍+  key: old␍ ␍-   # root␍+# root␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -[{key: old}]␍+-␍+  key: old␍ ␍-   # root␍+# root␍
     ");
 }
 
@@ -926,29 +825,57 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn retained_end_markers_bound_removed_suffix_comments() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "---\n{outer: {key: old}} # inline\n...\n\n# detached\n",
-            "{outer: {key: old}} # inline\n# trailing\n\n",
-            "{outer: {key: old}} # inline\n# trailing\n...\n",
-            "{outer: {key: old}}\n... # inline\n# trailing\n",
-            "{outer: {key: old}}\n...\n\n# detached\n...\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| {
-                    let root = editor.root();
-                    let inner = editor.mapping_entries(&root)?[0].1.clone();
-                    let leaf = editor.mapping_entries(&inner)?[0].1.clone();
-                    editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
-                    editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
-                    editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
-                    editor.replace(&leaf, "|+\n  new\n\n")
-                })
-                .unwrap();
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for source in [
+        indoc! {r"
+            ---
+            {outer: {key: old}} # inline
+            ...
+
+            # detached
+        "},
+        indoc! {r"
+            {outer: {key: old}} # inline
+            # trailing
+
+        "},
+        indoc! {r"
+            {outer: {key: old}} # inline
+            # trailing
+            ...
+        "},
+        indoc! {r"
+            {outer: {key: old}}
+            ... # inline
+            # trailing
+        "},
+        indoc! {r"
+            {outer: {key: old}}
+            ...
+
+            # detached
+            ...
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                let inner = editor.mapping_entries(&root)?[0].1.clone();
+                let leaf = editor.mapping_entries(&inner)?[0].1.clone();
+                editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
+                editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
+                editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
+                editor.replace(
+                    &leaf,
+                    indoc! {r"
+                        |+
+                          new
+
+                    "},
+                )
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -1016,96 +943,101 @@ fn retained_end_markers_bound_removed_suffix_comments() {
      ⏎
     -# detached
      ...
+    ");
+}
 
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-    ----␍
-    -{outer: {key: old}} # inline␍
-    +--- # inline␍
-    +outer:␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-     ...␍
-     ␍
-    -# detached␍
+#[test]
+fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            old
+            # remove
+            # tail
+        "},
+        indoc! {r"
+            outer:
+              key: old
+            # remove
+            # tail
+        "},
+        indoc! {r"
+            - - old
+            # remove
+            # tail
+        "},
+        indoc! {r"
+            outer:
+              key: old
+            # remove
+            ... # boundary
+            # tail
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let root = editor.root();
+                editor.remove_comment(&root, 0)?;
+                editor.replace(
+                    &first_leaf(editor),
+                    indoc! {r"
+                    |+
+                      new
 
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,8 @@
-    -{outer: {key: old}} # inline␍
-    -# trailing␍
-    +--- # inline␍
-    +outer:␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-    +...␍
-    +␍
-     ␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,8 @@
-    -{outer: {key: old}} # inline␍
-    -# trailing␍
-    +--- # inline␍
-    +outer:␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-    +...␍
-    +␍
-     ...␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    -{outer: {key: old}}␍
-    +outer:␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-     ... # inline␍
-    -# trailing␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-    -{outer: {key: old}}␍
-    +outer:␍
-    +  key: |2+␍
-    +    new␍
-    +    ␍
-     ...␍
-     ␍
-    -# detached␍
-     ...␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,7 @@
-    ----␍-{outer: {key: old}} # inline␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍ ...␍ ␍-# detached␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,8 @@
-    -{outer: {key: old}} # inline␍-# trailing␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,8 @@
-    -{outer: {key: old}} # inline␍-# trailing␍+--- # inline␍+outer:␍+  key: |2+␍+    new␍+    ␍+...␍+␍ ...␍
-
+                "},
+                )
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,5 @@
-    -{outer: {key: old}}␍+outer:␍+  key: |2+␍+    new␍+    ␍ ... # inline␍-# trailing␍
+    -old
+    -# remove
+    +|2+
+    +  new
+    +  ⏎
+    +...
+     # tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,6 @@
+     outer:
+    -  key: old
+    -# remove
+    +  key: |2+
+    +    new
+    +    ⏎
+    +...
+     # tail
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,6 @@
+    -- - old
+    -# remove
+    +-
+    +  - |2+
+    +    new
+    +    ⏎
+    +...
+     # tail
 
     --- before.yaml
     +++ after.yaml
     @@ -1,5 +1,7 @@
-    -{outer: {key: old}}␍+outer:␍+  key: |2+␍+    new␍+    ␍ ...␍ ␍-# detached␍ ...␍
+     outer:
+    -  key: old
+    -# remove
+    +  key: |2+
+    +    new
+    +    ⏎
+    +...
+     ... # boundary
+     # tail
     ");
 }

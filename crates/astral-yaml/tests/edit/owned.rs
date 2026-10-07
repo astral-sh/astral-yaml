@@ -4,7 +4,7 @@ use astral_yaml::{
     comments::{CommentIndex, CommentPlacement},
     edit::{EditableDocument, NodeKind},
 };
-use astral_yaml_dev::{edit_diff, indoc};
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
 #[test]
 fn owned_document_retains_syntax_and_direct_comments() {
@@ -177,7 +177,11 @@ fn normalization_keeps_limits_on_the_original_input_and_locates_errors_in_lf() {
 
 #[test]
 fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
-    let source = "# config\r\ntimeout : 30   # seconds\r\nother:    'untouched'\r\n";
+    let source = indoc! {r"
+        # config
+        timeout : 30   # seconds
+        other:    'untouched'
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -189,10 +193,10 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
-     # config␍
-    -timeout : 30   # seconds␍
-    +timeout : 600   # seconds␍
-     other:    'untouched'␍
+     # config
+    -timeout : 30   # seconds
+    +timeout : 600   # seconds
+     other:    'untouched'
     ");
     let before = document.to_yaml();
     document
@@ -206,17 +210,21 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,3 @@
-     # config␍
-    -timeout : 600   # seconds␍
-    -other:    'untouched'␍
-    +timeout : 1000   # seconds␍
-    +other:    'updated'␍
+     # config
+    -timeout : 600   # seconds
+    -other:    'untouched'
+    +timeout : 1000   # seconds
+    +other:    'updated'
     ");
 }
 
 #[test]
 fn structural_edits_preserve_comments_and_accept_complex_keys() {
-    let source = "# config\na: 1 # remove\nb: [2, 3] # keep\n";
+    let source = indoc! {r"
+        # config
+        a: 1 # remove
+        b: [2, 3] # keep
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -244,7 +252,10 @@ fn structural_edits_preserve_comments_and_accept_complex_keys() {
 #[test]
 fn style_changes_preserve_meaning_and_reject_impossible_requests() {
     use astral_yaml::{CollectionStyle, ScalarStyle};
-    let source = "text: 'hello'\nitems: [1, 2]\n";
+    let source = indoc! {r"
+        text: 'hello'
+        items: [1, 2]
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -367,7 +378,11 @@ fn aliases_cannot_be_dangled_or_silently_rebound() {
 
 #[test]
 fn comment_edits_keep_document_markers_and_source_outside_the_node() {
-    let source = "%YAML 1.2 # version\n--- # marker\n42 # number\n";
+    let source = indoc! {r"
+        %YAML 1.2 # version
+        --- # marker
+        42 # number
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -386,7 +401,10 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
     +--- ⏎
      42 # number
     ");
-    let source = "a: 1\nb: 2\n";
+    let source = indoc! {r"
+        a: 1
+        b: 2
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -454,7 +472,14 @@ fn invalid_operations_roll_back() {
                     let value = e.mapping_entries(&root)?.remove(0).1;
                     e.insert_comment(&value, 0, " note", CommentPlacement::Inline)
                 }
-                17 => e.insert_comment(&root, 0, "bad\ncomment", CommentPlacement::Leading),
+                17 => e.insert_comment(
+                    &root,
+                    0,
+                    indoc! {r"
+                        bad
+                        comment"},
+                    CommentPlacement::Leading,
+                ),
                 18 => {
                     e.replace(&root, "[1]")?;
                     let old = e.sequence_items(&root)?.remove(0);
@@ -480,8 +505,18 @@ fn invalid_operations_roll_back() {
 fn local_collection_edits_leave_siblings_untouched() {
     let mut diffs = Vec::new();
     for source in [
-        "a:  'untouched'\nb: [1, 2]\nc : true\n",
-        "a:  'untouched'\nb:\n  - 1\n  - 2\nc : true\n",
+        indoc! {r"
+            a:  'untouched'
+            b: [1, 2]
+            c : true
+        "},
+        indoc! {r"
+            a:  'untouched'
+            b:
+              - 1
+              - 2
+            c : true
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -510,7 +545,10 @@ fn local_collection_edits_leave_siblings_untouched() {
     +  - 3
      c : true
     ");
-    let source = "- a: 1\n  b: 2\n";
+    let source = indoc! {r"
+        - a: 1
+          b: 2
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -570,10 +608,11 @@ fn scalar_styles_can_be_changed() {
         document
             .edit(|e| e.set_scalar_style(&e.root(), style))
             .unwrap();
-        diffs.push(format!(
-            "{style:?}\n{}",
+        diffs.push(formatdoc! {r"
+            {style:?}
+            {}",
             edit_diff("'hello'", document.source())
-        ));
+        });
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     Plain
@@ -633,7 +672,11 @@ fn empty_collections_remain_in_flow_style() {
 fn scalar_style_changes_retain_header_comments() {
     use astral_yaml::ScalarStyle;
 
-    let source = "value: | # header\n  hello\nother: true\n";
+    let source = indoc! {r"
+        value: | # header
+          hello
+        other: true
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -712,7 +755,10 @@ fn poisoned_transactions_reject_subsequent_mutations() {
 
 #[test]
 fn fragment_comments_and_nested_comment_updates_are_retained() {
-    let source = "a: 1 # old\nb: 2 # remove\n";
+    let source = indoc! {r"
+        a: 1 # old
+        b: 2 # remove
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -732,7 +778,10 @@ fn fragment_comments_and_nested_comment_updates_are_retained() {
     +b: 2
     +c: 3 # imported
     ");
-    let source = "--- # marker\na: 1\n";
+    let source = indoc! {r"
+        --- # marker
+        a: 1
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|e| {
@@ -755,11 +804,18 @@ fn fragment_comments_and_nested_comment_updates_are_retained() {
 #[test]
 fn changes_preserve_terminators_and_discard_removed_style_requests() {
     use astral_yaml::{CollectionStyle, ScalarStyle};
-    let mut document = EditableDocument::parse("|\n  hello\n").unwrap();
+    let mut document = EditableDocument::parse(indoc! {r"
+        |
+          hello
+    "})
+    .unwrap();
     document
         .edit(|e| e.replace(&e.root(), "'updated'"))
         .unwrap();
-    insta::assert_snapshot!(edit_diff("|\n  hello\n", document.source()), @"
+    insta::assert_snapshot!(edit_diff(indoc! {r"
+        |
+          hello
+    "}, document.source()), @"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1 @@
@@ -814,7 +870,10 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
 
 #[test]
 fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
-    let source = "a: 1\nb: 2\n";
+    let source = indoc! {r"
+        a: 1
+        b: 2
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     assert!(
         document
@@ -916,5 +975,48 @@ fn replacing_implicit_nulls_adds_required_separation() {
     \ No newline at end of file
     +{a: 42}
     \ No newline at end of file
+    ");
+}
+
+#[test]
+fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
+    let source = indoc! {r"
+        # retained
+        key: old # inline
+        other: retained
+    "};
+    let fragment = indoc! {r"
+        |-
+          first
+          second
+    "};
+    let mut document = EditableDocument::parse(&source.replace('\n', "\r\n")).unwrap();
+    document.edit(|_| Ok(())).unwrap();
+    assert_eq!(document.to_yaml(), source);
+
+    let result = document.edit(|editor| {
+        let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+        editor.replace(&value, &fragment.replace('\n', "\r"))?;
+        editor.replace(&editor.root(), "[")
+    });
+    assert!(result.is_err());
+    assert_eq!(document.source(), source);
+
+    document
+        .edit(|editor| {
+            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+            editor.replace(&value, &fragment.replace('\n', "\r"))
+        })
+        .unwrap();
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,5 @@
+     # retained
+    -key: old # inline
+    +key: |2- # inline
+    +  first
+    +  second
+     other: retained
     ");
 }

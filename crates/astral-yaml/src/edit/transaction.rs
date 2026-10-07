@@ -225,7 +225,7 @@ impl<'a> Editor<'a> {
                     NodeKind::Mapping { entries, style: CollectionStyle::Block } if !entries.is_empty());
                 let start = self.original.nodes[id.0].span.start();
                 let prefix = self.original.source[..start]
-                    .rsplit(['\n', '\r'])
+                    .rsplit('\n')
                     .next()
                     .unwrap_or("");
                 if (!block || prefix.bytes().all(|byte| byte == b' '))
@@ -258,16 +258,13 @@ impl<'a> Editor<'a> {
                         ..
                     }
                 );
-                return !emit::simple_key(
-                    node,
-                    emit::newline(source),
-                    *style == CollectionStyle::Flow,
-                ) || (plain
-                    && source[separator..].strip_prefix(':').is_some_and(|suffix| {
-                        suffix.starts_with(|c: char| {
-                            !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
-                        })
-                    }));
+                return !emit::simple_key(node, *style == CollectionStyle::Flow)
+                    || (plain
+                        && source[separator..].strip_prefix(':').is_some_and(|suffix| {
+                            suffix.starts_with(|c: char| {
+                                !c.is_ascii_whitespace() && !matches!(c, ',' | ']' | '}')
+                            })
+                        }));
             }
             if value != id {
                 continue;

@@ -5,6 +5,7 @@ use astral_yaml::{
     comments::CommentPlacement,
     edit::{EditableDocument, Editor},
 };
+use astral_yaml_dev::indoc;
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
@@ -59,28 +60,82 @@ impl Operation {
             Self::AppendDetached => {
                 editor.insert_comment(&root, count, " detached", CommentPlacement::Detached)
             }
-            Self::SetTailSequence => editor.replace(&root, "- |+\n    new\n\n"),
-            Self::SetTailMapping => editor.replace(&root, "key: |+\n  new\n\n"),
-            Self::SetSequence => editor.replace(&root, "- new\n"),
+            Self::SetTailSequence => editor.replace(
+                &root,
+                indoc! {r"
+                    - |+
+                        new
+
+                "},
+            ),
+            Self::SetTailMapping => editor.replace(
+                &root,
+                indoc! {r"
+                    key: |+
+                      new
+
+                "},
+            ),
+            Self::SetSequence => editor.replace(
+                &root,
+                indoc! {r"
+                    - new
+                "},
+            ),
             Self::SetScalar => editor.replace(&root, "value"),
-            Self::SetMapping => editor.replace(&root, "key: new\n"),
+            Self::SetMapping => editor.replace(
+                &root,
+                indoc! {r"
+                    key: new
+                "},
+            ),
             Self::SetFlowSequence => editor.replace(&root, "[new]"),
-            Self::SetLiteral => editor.replace(&root, "|+\n  new\n\n"),
-            Self::SetEmpty => editor.replace(&root, "---\n"),
+            Self::SetLiteral => editor.replace(
+                &root,
+                indoc! {r"
+                    |+
+                      new
+
+                "},
+            ),
+            Self::SetEmpty => editor.replace(
+                &root,
+                indoc! {r"
+                    ---
+                "},
+            ),
             _ => Ok(()),
         }
     }
 
     fn content(self) -> Option<&'static str> {
         match self {
-            Self::SetTailSequence => Some("- |+\n    new\n\n"),
-            Self::SetTailMapping => Some("key: |+\n  new\n\n"),
-            Self::SetSequence => Some("- new\n"),
+            Self::SetTailSequence => Some(indoc! {r"
+                - |+
+                    new
+
+            "}),
+            Self::SetTailMapping => Some(indoc! {r"
+                key: |+
+                  new
+
+            "}),
+            Self::SetSequence => Some(indoc! {r"
+                - new
+            "}),
             Self::SetScalar => Some("value"),
-            Self::SetMapping => Some("key: new\n"),
+            Self::SetMapping => Some(indoc! {r"
+                key: new
+            "}),
             Self::SetFlowSequence => Some("[new]"),
-            Self::SetLiteral => Some("|+\n  new\n\n"),
-            Self::SetEmpty => Some("---\n"),
+            Self::SetLiteral => Some(indoc! {r"
+                |+
+                  new
+
+            "}),
+            Self::SetEmpty => Some(indoc! {r"
+                ---
+            "}),
             _ => None,
         }
     }
@@ -153,69 +208,164 @@ fn framing_comment_edits_compose_with_content_edits() {
         SetEmpty,
     ];
 
-    for newline in ["\n", "\r\n", "\r"] {
-        for &(source, initial) in root_cases() {
-            let source = source.replace('\n', newline);
-            let original = EditableDocument::parse(&source).unwrap();
-            for first in operations {
-                for second in operations {
-                    for third in operations {
-                        let sequence = [first, second, third];
-                        check_root_sequence(&original, &source, initial, sequence);
-                    }
+    for &(source, initial) in root_cases() {
+        let original = EditableDocument::parse(source).unwrap();
+        for first in operations {
+            for second in operations {
+                for third in operations {
+                    let sequence = [first, second, third];
+                    check_root_sequence(&original, source, initial, sequence);
                 }
             }
         }
     }
 }
 
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn root_cases() -> &'static [(&'static str, &'static [(&'static str, CommentPlacement)])] {
     use CommentPlacement::{Inline, Leading, Trailing};
     &[
         ("old", &[]),
         ("---", &[]),
         (
-            "# child\n[ # open\n  old\n] # close\n",
+            indoc! {r"
+                # child
+                [ # open
+                  old
+                ] # close
+            "},
             &[(" open", Inline), (" close", Inline)],
         ),
         (
-            "# child\n{ # open\n  key: old\n} # close\n",
+            indoc! {r"
+                # child
+                { # open
+                  key: old
+                } # close
+            "},
             &[(" open", Inline), (" close", Inline)],
         ),
         (
-            "# prefix\nold\n# tail\n",
+            indoc! {r"
+                # prefix
+                old
+                # tail
+            "},
             &[(" prefix", Leading), (" tail", Trailing)],
         ),
-        ("old # inline\n", &[(" inline", Inline)]),
         (
-            "[ # open\n  old\n] # close\n",
+            indoc! {r"
+                old # inline
+            "},
+            &[(" inline", Inline)],
+        ),
+        (
+            indoc! {r"
+                [ # open
+                  old
+                ] # close
+            "},
             &[(" open", Inline), (" close", Inline)],
         ),
         (
-            "&a # property\n[ # open\n  old\n] # close\n",
+            indoc! {r"
+                &a # property
+                [ # open
+                  old
+                ] # close
+            "},
             &[(" property", Inline), (" open", Inline), (" close", Inline)],
         ),
-        ("old\n...\n# tail\n", &[(" tail", Trailing)]),
+        (
+            indoc! {r"
+                old
+                ...
+                # tail
+            "},
+            &[(" tail", Trailing)],
+        ),
         ("\u{feff}old # inline", &[(" inline", Inline)]),
         (
-            "# prefix\n---\nold\n... # end\n# tail\n",
+            indoc! {r"
+                # prefix
+                ---
+                old
+                ... # end
+                # tail
+            "},
             &[(" prefix", Leading), (" end", Inline), (" tail", Trailing)],
         ),
-        ("---\n...\n", &[]),
-        ("# prefix\n--- old\n\n...\n", &[(" prefix", Leading)]),
-        ("# prefix\n--- |-\n  old\n\n...\n", &[(" prefix", Leading)]),
         (
-            "---\n# prefix\nold\n...\n# tail\n",
-            &[(" prefix", Leading), (" tail", Trailing)],
-        ),
-        ("---\nold # inline\n...\n", &[(" inline", Inline)]),
-        ("---\nold\n# tail\n...\n", &[(" tail", Trailing)]),
-        (
-            "# prefix\n---\n&root [*root]\n...\n# tail\n",
-            &[(" prefix", Leading), (" tail", Trailing)],
+            indoc! {r"
+                ---
+                ...
+            "},
+            &[],
         ),
         (
-            "# prefix\n---\n- old\n...\n# tail\n",
+            indoc! {r"
+                # prefix
+                --- old
+
+                ...
+            "},
+            &[(" prefix", Leading)],
+        ),
+        (
+            indoc! {r"
+                # prefix
+                --- |-
+                  old
+
+                ...
+            "},
+            &[(" prefix", Leading)],
+        ),
+        (
+            indoc! {r"
+                ---
+                # prefix
+                old
+                ...
+                # tail
+            "},
+            &[(" prefix", Leading), (" tail", Trailing)],
+        ),
+        (
+            indoc! {r"
+                ---
+                old # inline
+                ...
+            "},
+            &[(" inline", Inline)],
+        ),
+        (
+            indoc! {r"
+                ---
+                old
+                # tail
+                ...
+            "},
+            &[(" tail", Trailing)],
+        ),
+        (
+            indoc! {r"
+                # prefix
+                ---
+                &root [*root]
+                ...
+                # tail
+            "},
+            &[(" prefix", Leading), (" tail", Trailing)],
+        ),
+        (
+            indoc! {r"
+                # prefix
+                ---
+                - old
+                ...
+                # tail
+            "},
             &[(" prefix", Leading), (" tail", Trailing)],
         ),
     ]
@@ -242,38 +392,35 @@ fn longer_root_edits_match_the_independent_model() {
         SetTailSequence,
         SetTailMapping,
     ];
-    for newline in ["\n", "\r\n", "\r"] {
-        for &(source, initial) in root_cases() {
-            let source = source.replace('\n', newline);
-            let original = EditableDocument::parse(&source).unwrap();
-            for seed in 1..=128u64 {
-                let mut state = seed;
-                let mut sequence = [SetScalar; 48];
-                let mut planned: Vec<_> = initial
-                    .iter()
-                    .map(|(text, placement)| (text.to_string(), *placement))
-                    .collect();
-                for operation in &mut sequence {
-                    // Deterministic sampling makes failures reproducible without
-                    // a random-number dependency or exponentially many cases.
-                    state ^= state << 13;
-                    state ^= state >> 7;
-                    state ^= state << 17;
-                    let index = state % u64::try_from(operations.len()).unwrap();
-                    *operation = operations[usize::try_from(index).unwrap()];
-                    // A trailing suffix cannot follow detached suffix comments:
-                    // markers do not reset its adjacency to the document body.
-                    if matches!(operation, AppendTrailing)
-                        && planned
-                            .iter()
-                            .any(|(_, placement)| *placement == CommentPlacement::Detached)
-                    {
-                        *operation = AppendInline;
-                    }
-                    operation.model(&mut planned);
+    for &(source, initial) in root_cases() {
+        let original = EditableDocument::parse(source).unwrap();
+        for seed in 1..=128u64 {
+            let mut state = seed;
+            let mut sequence = [SetScalar; 48];
+            let mut planned: Vec<_> = initial
+                .iter()
+                .map(|(text, placement)| (text.to_string(), *placement))
+                .collect();
+            for operation in &mut sequence {
+                // Deterministic sampling makes failures reproducible without
+                // a random-number dependency or exponentially many cases.
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let index = state % u64::try_from(operations.len()).unwrap();
+                *operation = operations[usize::try_from(index).unwrap()];
+                // A trailing suffix cannot follow detached suffix comments:
+                // markers do not reset its adjacency to the document body.
+                if matches!(operation, AppendTrailing)
+                    && planned
+                        .iter()
+                        .any(|(_, placement)| *placement == CommentPlacement::Detached)
+                {
+                    *operation = AppendInline;
                 }
-                check_root_sequence(&original, &source, initial, sequence);
+                operation.model(&mut planned);
             }
+            check_root_sequence(&original, source, initial, sequence);
         }
     }
 }
@@ -494,67 +641,79 @@ fn nested_edits_match_an_independent_collection_model() {
         FlowMapping,
     ];
     let sources = [
-        "- items: [a, b]\n  mapping: {key: value}\n- &stable sentinel # keep\n- *stable\n",
-        "[{items: [a, b], mapping: {key: value}}, &stable sentinel, *stable] # keep\n",
-        "- items:\n  - a\n  - b\n  mapping:\n    key: value\n- &stable sentinel\n- *stable # keep\n",
+        indoc! {r"
+            - items: [a, b]
+              mapping: {key: value}
+            - &stable sentinel # keep
+            - *stable
+        "},
+        indoc! {r"
+            [{items: [a, b], mapping: {key: value}}, &stable sentinel, *stable] # keep
+        "},
+        indoc! {r"
+            - items:
+              - a
+              - b
+              mapping:
+                key: value
+            - &stable sentinel
+            - *stable # keep
+        "},
     ];
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in sources {
-            let source = source.replace('\n', newline);
-            let original = EditableDocument::parse(&source).unwrap();
-            for first in operations {
-                for second in operations {
-                    for third in operations {
-                        let sequence = [first, second, third];
-                        let mut items = vec![
-                            Content::Scalar("a".to_owned()),
-                            Content::Scalar("b".to_owned()),
-                        ];
-                        let mut mapping = vec![(
-                            Content::Scalar("key".to_owned()),
-                            Content::Scalar("value".to_owned()),
-                        )];
-                        for operation in sequence {
-                            operation.model(&mut items, &mut mapping);
-                        }
-                        let expected = Content::Sequence(vec![
-                            Content::Mapping(vec![
-                                (
-                                    Content::Scalar("items".to_owned()),
-                                    Content::Sequence(items),
-                                ),
-                                (
-                                    Content::Scalar("mapping".to_owned()),
-                                    Content::Mapping(mapping),
-                                ),
-                            ]),
-                            Content::Scalar("sentinel".to_owned()),
-                            Content::Alias("stable".to_owned()),
-                        ]);
-                        for combined in [false, true] {
-                            let mut document = original.clone();
-                            let result = if combined {
-                                document.edit(|editor| {
-                                    for operation in sequence {
-                                        operation.apply(editor)?;
-                                    }
-                                    Ok(())
-                                })
-                            } else {
-                                sequence.into_iter().try_for_each(|operation| {
-                                    document.edit(|editor| operation.apply(editor))
-                                })
-                            };
-                            result.unwrap_or_else(|error| {
-                                panic!("{source:?}, {sequence:?}, combined={combined}: {error}")
-                            });
-                            assert_eq!(
-                                content(&document, document.root()),
-                                expected,
-                                "{source:?}, {sequence:?}"
-                            );
-                            check_retained_occurrences(&original, &document);
-                        }
+    for source in sources {
+        let original = EditableDocument::parse(source).unwrap();
+        for first in operations {
+            for second in operations {
+                for third in operations {
+                    let sequence = [first, second, third];
+                    let mut items = vec![
+                        Content::Scalar("a".to_owned()),
+                        Content::Scalar("b".to_owned()),
+                    ];
+                    let mut mapping = vec![(
+                        Content::Scalar("key".to_owned()),
+                        Content::Scalar("value".to_owned()),
+                    )];
+                    for operation in sequence {
+                        operation.model(&mut items, &mut mapping);
+                    }
+                    let expected = Content::Sequence(vec![
+                        Content::Mapping(vec![
+                            (
+                                Content::Scalar("items".to_owned()),
+                                Content::Sequence(items),
+                            ),
+                            (
+                                Content::Scalar("mapping".to_owned()),
+                                Content::Mapping(mapping),
+                            ),
+                        ]),
+                        Content::Scalar("sentinel".to_owned()),
+                        Content::Alias("stable".to_owned()),
+                    ]);
+                    for combined in [false, true] {
+                        let mut document = original.clone();
+                        let result = if combined {
+                            document.edit(|editor| {
+                                for operation in sequence {
+                                    operation.apply(editor)?;
+                                }
+                                Ok(())
+                            })
+                        } else {
+                            sequence.into_iter().try_for_each(|operation| {
+                                document.edit(|editor| operation.apply(editor))
+                            })
+                        };
+                        result.unwrap_or_else(|error| {
+                            panic!("{source:?}, {sequence:?}, combined={combined}: {error}")
+                        });
+                        assert_eq!(
+                            content(&document, document.root()),
+                            expected,
+                            "{source:?}, {sequence:?}"
+                        );
+                        check_retained_occurrences(&original, &document);
                     }
                 }
             }
@@ -600,32 +759,35 @@ fn check_retained_occurrences(original: &EditableDocument, document: &EditableDo
 #[test]
 fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
     use CommentPlacement::{Detached, Inline, Trailing};
-    for newline in ["\n", "\r\n", "\r"] {
-        let source = "# child\n[ # open\n  old\n] # close\n".replace('\n', newline);
-        let mut document = EditableDocument::parse(&source).unwrap();
-        let mut expected = vec![(" open".to_owned(), Inline), (" close".to_owned(), Inline)];
-        for (index, placement) in [Inline, Inline, Trailing, Inline, Detached]
-            .into_iter()
-            .enumerate()
-        {
-            let text = format!(" added {index}");
-            document
-                .edit(|editor| {
-                    let root = editor.root();
-                    let count = editor.node(&root)?.comments().len();
-                    editor.insert_comment(&root, count, &text, placement)
-                })
-                .unwrap();
-            expected.push((text, placement));
-            assert_eq!(comments(&document), expected);
-        }
+    let source = indoc! {r"
+        # child
+        [ # open
+          old
+        ] # close
+    "};
+    let mut document = EditableDocument::parse(source).unwrap();
+    let mut expected = vec![(" open".to_owned(), Inline), (" close".to_owned(), Inline)];
+    for (index, placement) in [Inline, Inline, Trailing, Inline, Detached]
+        .into_iter()
+        .enumerate()
+    {
+        let text = format!(" added {index}");
         document
-            .edit(|editor| editor.replace(&editor.root(), "'false'"))
+            .edit(|editor| {
+                let root = editor.root();
+                let count = editor.node(&root)?.comments().len();
+                editor.insert_comment(&root, count, &text, placement)
+            })
             .unwrap();
+        expected.push((text, placement));
         assert_eq!(comments(&document), expected);
-        assert_eq!(
-            content(&document, document.root()),
-            Content::Scalar("false".to_owned())
-        );
     }
+    document
+        .edit(|editor| editor.replace(&editor.root(), "'false'"))
+        .unwrap();
+    assert_eq!(comments(&document), expected);
+    assert_eq!(
+        content(&document, document.root()),
+        Content::Scalar("false".to_owned())
+    );
 }

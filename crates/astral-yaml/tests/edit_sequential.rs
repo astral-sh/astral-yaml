@@ -1,11 +1,14 @@
 //! Transaction semantics for successive edits to the same syntax.
 
 use astral_yaml::{ScalarStyle, edit::EditableDocument};
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
 fn sequential_replacements_emit_the_final_candidate() {
-    let source = "value: 1 # keep\nother : 'untouched'\n";
+    let source = indoc! {r"
+        value: 1 # keep
+        other : 'untouched'
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     let result = document
         .edit(|e| {
@@ -34,7 +37,10 @@ fn sequential_replacements_emit_the_final_candidate() {
 fn removed_subtrees_discard_pending_rewrites_and_style_requests() {
     let mut diffs = Vec::new();
     for remove in [false, true] {
-        let source = "items: [old, keep]\nother: retained\n";
+        let source = indoc! {r"
+            items: [old, keep]
+            other: retained
+        "};
         let mut document = EditableDocument::parse(source).unwrap();
         document
             .edit(|e| {
@@ -87,6 +93,7 @@ fn inserted_nodes_can_be_edited_and_removed_before_commit() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn replacement_keeps_compatible_styles_and_anchor_identity() {
     let mut diffs = Vec::new();
     for (source, replacement) in [
@@ -95,9 +102,25 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
         ("'old'", "\"it's new\""),
         ("'old'", "\"line\\nbreak\""),
         ("\"old\"", "60"),
-        ("|-\n  old\n", "\"new\\ntext\""),
-        ("- old\n", "[new, values]"),
-        ("old: 1\n", "{new: 2}"),
+        (
+            indoc! {r"
+                |-
+                  old
+            "},
+            "\"new\\ntext\"",
+        ),
+        (
+            indoc! {r"
+                - old
+            "},
+            "[new, values]",
+        ),
+        (
+            indoc! {r"
+                old: 1
+            "},
+            "{new: 2}",
+        ),
         ("[]", "42"),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();

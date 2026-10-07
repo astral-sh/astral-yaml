@@ -4,7 +4,7 @@ use astral_yaml::{
     CollectionStyle,
     edit::{EditableDocument, Editor, Handle, NodeKind},
 };
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, indoc};
 
 fn collection(editor: &Editor<'_>, nested: bool) -> Handle {
     if nested {
@@ -18,35 +18,67 @@ fn collection(editor: &Editor<'_>, nested: bool) -> Handle {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn flow_delimiter_comments_survive_collection_edits() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for (source, nested) in [
-            ("[ # open\n  old\n] # close\n", false),
-            ("{ # open\n  key: old\n} # close\n", false),
-            ("outer: [ # open\n  old\n  ] # close\n", true),
-            ("outer: { # open\n  key: old\n  } # close\n", true),
-            ("&a [ # open\n  *a\n] # close\n", false),
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| {
-                    let target = collection(editor, nested);
-                    match editor.node(&target)?.kind() {
-                        NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                        _ => editor.insert_entry(&target, 1, "added", "new"),
-                    }
-                })
-                .unwrap();
-            let committed = document.to_yaml();
-            document
-                .edit(|editor| {
-                    let target = collection(editor, nested);
-                    editor.set_collection_style(&target, CollectionStyle::Flow)
-                })
-                .unwrap();
-            assert_eq!(document.source(), committed);
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for (source, nested) in [
+        (
+            indoc! {r"
+                [ # open
+                  old
+                ] # close
+            "},
+            false,
+        ),
+        (
+            indoc! {r"
+                { # open
+                  key: old
+                } # close
+            "},
+            false,
+        ),
+        (
+            indoc! {r"
+                outer: [ # open
+                  old
+                  ] # close
+            "},
+            true,
+        ),
+        (
+            indoc! {r"
+                outer: { # open
+                  key: old
+                  } # close
+            "},
+            true,
+        ),
+        (
+            indoc! {r"
+                &a [ # open
+                  *a
+                ] # close
+            "},
+            false,
+        ),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let target = collection(editor, nested);
+                match editor.node(&target)?.kind() {
+                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
+                    _ => editor.insert_entry(&target, 1, "added", "new"),
+                }
+            })
+            .unwrap();
+        let committed = document.to_yaml();
+        document
+            .edit(|editor| {
+                let target = collection(editor, nested);
+                editor.set_collection_style(&target, CollectionStyle::Flow)
+            })
+            .unwrap();
+        assert_eq!(document.source(), committed);
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -88,97 +120,45 @@ fn flow_delimiter_comments_survive_collection_edits() {
     -  *a
     -] # close
     +  *a, new] # close
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     [ # open␍
-    -  old␍
-    -] # close␍
-    +  old, new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     { # open␍
-    -  key: old␍
-    -} # close␍
-    +  key: old, added: new} # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: [ # open␍
-    -  old␍
-    -  ] # close␍
-    +  old, new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: { # open␍
-    -  key: old␍
-    -  } # close␍
-    +  key: old, added: new} # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     &a [ # open␍
-    -  *a␍
-    -] # close␍
-    +  *a, new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     [ # open␍-  old␍-] # close␍+  old, new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     { # open␍-  key: old␍-} # close␍+  key: old, added: new} # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: [ # open␍-  old␍-  ] # close␍+  old, new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: { # open␍-  key: old␍-  } # close␍+  key: old, added: new} # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     &a [ # open␍-  *a␍-] # close␍+  *a, new] # close␍
     ");
 }
 
 #[test]
 fn shrinking_collections_retain_their_comment_boundaries() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "outer: [ # open\n  old\n  ] # close\n",
-            "outer: { # open\n  key: old\n  } # close\n",
-            "outer:\n# leading\n  {key: old}\n",
-            "outer:\n# detached\n  key: old\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| {
-                    let target = collection(editor, true);
-                    match editor.node(&target)?.kind() {
-                        NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
-                        _ => editor.remove_entry(&target, 0),
-                    }
-                })
-                .unwrap();
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for source in [
+        indoc! {r"
+            outer: [ # open
+              old
+              ] # close
+        "},
+        indoc! {r"
+            outer: { # open
+              key: old
+              } # close
+        "},
+        indoc! {r"
+            outer:
+            # leading
+              {key: old}
+        "},
+        indoc! {r"
+            outer:
+            # detached
+              key: old
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let target = collection(editor, true);
+                match editor.node(&target)?.kind() {
+                    NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
+                    _ => editor.remove_entry(&target, 0),
+                }
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -212,64 +192,15 @@ fn shrinking_collections_retain_their_comment_boundaries() {
     +  # detached
     +
     +  {}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: [ # open␍
-    -  old␍
-       ] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: { # open␍
-    -  key: old␍
-       } # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1 @@
-    -outer:␍
-    -# leading␍
-    -  {key: old}␍
-    +outer: {}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍
-    -# detached␍
-    -  key: old␍
-    +  # detached␍
-    +␍
-    +  {}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: [ # open␍-  old␍   ] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: { # open␍-  key: old␍   } # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1 @@
-    -outer:␍-# leading␍-  {key: old}␍+outer: {}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍-# detached␍-  key: old␍+  # detached␍+␍+  {}␍
     ");
 }
 
 #[test]
 fn rewrite_context_is_selected_after_all_mutations() {
-    let source = "outer:   [old]\nuntouched:    keep\n";
+    let source = indoc! {r"
+        outer:   [old]
+        untouched:    keep
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -294,17 +225,26 @@ fn rewrite_context_is_selected_after_all_mutations() {
 #[test]
 fn retained_opening_comments_merge_with_fragment_prefixes() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        let source = "[ # open\n  old\n] # close\n".replace('\n', newline);
-        let mut document = EditableDocument::parse(&source).unwrap();
-        document
-            .edit(|editor| {
-                editor.replace(&editor.root(), "# detached\n\n[new]\n")?;
-                editor.replace_comment(&editor.root(), 1, " updated")
-            })
-            .unwrap();
-        diffs.push(edit_diff(&source, document.source()));
-    }
+    let source = indoc! {r"
+        [ # open
+          old
+        ] # close
+    "};
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            editor.replace(
+                &editor.root(),
+                indoc! {r"
+                    # detached
+
+                    [new]
+                "},
+            )?;
+            editor.replace_comment(&editor.root(), 1, " updated")
+        })
+        .unwrap();
+    diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
@@ -316,21 +256,5 @@ fn retained_opening_comments_merge_with_fragment_prefixes() {
     +
     +[ # updated
     +  new] # close
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -[ # open␍
-    -  old␍
-    -] # close␍
-    +# detached␍
-    +␍
-    +[ # updated␍
-    +  new] # close␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    -[ # open␍-  old␍-] # close␍+# detached␍+␍+[ # updated␍+  new] # close␍
     ");
 }

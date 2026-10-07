@@ -1,5 +1,5 @@
 use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
@@ -7,12 +7,36 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
     let mut diffs = Vec::new();
     for source in [
-        "items:\n- x\nother : kept\n",
-        "outer:\n  items:\n  - x\n  other : kept\noutside : untouched\n",
-        "- items:\n  - x\n  other : kept\n",
-        "&mapping\nitems:\n- x\nother : kept\n",
-        "items:\r\n- x\r\n",
-        "items:\n- x",
+        indoc! {r"
+            items:
+            - x
+            other : kept
+        "},
+        indoc! {r"
+            outer:
+              items:
+              - x
+              other : kept
+            outside : untouched
+        "},
+        indoc! {r"
+            - items:
+              - x
+              other : kept
+        "},
+        indoc! {r"
+            &mapping
+            items:
+            - x
+            other : kept
+        "},
+        indoc! {r"
+            items:
+            - x
+        "},
+        indoc! {r"
+            items:
+            - x"},
     ] {
         for remove in [true, false] {
             let mut document = EditableDocument::parse(source).unwrap();
@@ -121,16 +145,16 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1 @@
-    -items:␍
-    -- x␍
-    +items: []␍
+    -items:
+    -- x
+    +items: []
 
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1 @@
-    -items:␍
-    -- x␍
-    +items: [x]␍
+    -items:
+    -- x
+    +items: [x]
 
     --- before.yaml
     +++ after.yaml
@@ -156,7 +180,15 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
 fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
     let mut diffs = Vec::new();
-    for source in ["a: b\n: c\n", "a: b\r\n: c\r\n", "a: b\r: c\r", "a: b\n: c"] {
+    for source in [
+        indoc! {r"
+            a: b
+            : c
+        "},
+        indoc! {r"
+            a: b
+            : c"},
+    ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
             .edit(|editor| {
@@ -177,18 +209,6 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,2 @@
-     a: b␍
-    -: c␍
-    +next: c␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-     a: b␍-: c␍+next: c␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
      a: b
     -: c
     \ No newline at end of file
@@ -202,9 +222,16 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite() {
     // Implicit flow pairs: https://yaml.org/spec/1.2.2/#741-flow-sequences
     let mut diffs = Vec::new();
     for source in [
-        "[[[a]: b]: c]\n",
-        "outer: [[[a]: b]: c]\noutside : untouched\n",
-        "[[[[a]: b]: c]: d]\n",
+        indoc! {r"
+            [[[a]: b]: c]
+        "},
+        indoc! {r"
+            outer: [[[a]: b]: c]
+            outside : untouched
+        "},
+        indoc! {r"
+            [[[[a]: b]: c]: d]
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -260,13 +287,29 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     // Explicit entries: https://yaml.org/spec/1.2.2/#832-block-mappings
     let mut diffs = Vec::new();
     for source in [
-        "{key}\n",
-        "{? key}\n",
-        "? key\n",
-        "?\n",
-        "? key # note\n",
-        "{key # a colon in a comment: \n}\n",
-        "key:  # note\nother : 'untouched'\n",
+        indoc! {r"
+            {key}
+        "},
+        indoc! {r"
+            {? key}
+        "},
+        indoc! {r"
+            ? key
+        "},
+        indoc! {r"
+            ?
+        "},
+        indoc! {r"
+            ? key # note
+        "},
+        indoc! {"
+            {key # a colon in a comment:\x20
+            }
+        "},
+        indoc! {r"
+            key:  # note
+            other : 'untouched'
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -330,13 +373,49 @@ fn mapping_scalar_key_replacement_preserves_required_separation() {
     // JSON-like keys: https://yaml.org/spec/1.2.2/#742-flow-mappings
     let mut diffs = Vec::new();
     for (source, replacement) in [
-        ("{\"key\":\"value\"}\n", "next"),
-        ("{\"key\":42}\n", "next"),
-        ("{\"key\":{}}\n", "next"),
-        ("{\"key\" :\"value\"}\n", "next"),
-        ("key  :  value # note\nother : 'untouched'\n", "next"),
-        ("{\"key\":}\n", "next"),
-        ("{\"key\":\"value\"}\n", "'next'"),
+        (
+            indoc! {r#"
+                {"key":"value"}
+            "#},
+            "next",
+        ),
+        (
+            indoc! {r#"
+                {"key":42}
+            "#},
+            "next",
+        ),
+        (
+            indoc! {r#"
+                {"key":{}}
+            "#},
+            "next",
+        ),
+        (
+            indoc! {r#"
+                {"key" :"value"}
+            "#},
+            "next",
+        ),
+        (
+            indoc! {r"
+                key  :  value # note
+                other : 'untouched'
+            "},
+            "next",
+        ),
+        (
+            indoc! {r#"
+                {"key":}
+            "#},
+            "next",
+        ),
+        (
+            indoc! {r#"
+                {"key":"value"}
+            "#},
+            "'next'",
+        ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -396,7 +475,9 @@ fn mapping_scalar_key_replacement_preserves_required_separation() {
 #[test]
 fn mapping_scalar_key_replacement_can_require_explicit_notation() {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let source = "key: value\n";
+    let source = indoc! {r"
+        key: value
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     let replacement = format!("\"{}\"", "\\u0001".repeat(103));
     document
@@ -417,7 +498,10 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
 
 #[test]
 fn mapping_scalar_key_style_changes_preserve_required_separation() {
-    let source = "outer: {\"key\":\"value\"}\nother : 'untouched'\n";
+    let source = indoc! {r#"
+        outer: {"key":"value"}
+        other : 'untouched'
+    "#};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -437,17 +521,47 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn explicit_keys_accept_block_style_requests() {
     let mut diffs = Vec::new();
     for source in [
-        "? |2-\n  key\n: value\n",
-        "? >2-\n  key\n: value\n",
-        "? - a\n  - b\n: value\n",
-        "? k: v\n: value\n",
-        "? [a, b]\n: value\n",
-        "? {k: v}\n: value\n",
-        "outer:\n  ? [a, b]\n  : value\n",
-        "? |2-\n  key\n: [value]\n",
+        indoc! {r"
+            ? |2-
+              key
+            : value
+        "},
+        indoc! {r"
+            ? >2-
+              key
+            : value
+        "},
+        indoc! {r"
+            ? - a
+              - b
+            : value
+        "},
+        indoc! {r"
+            ? k: v
+            : value
+        "},
+        indoc! {r"
+            ? [a, b]
+            : value
+        "},
+        indoc! {r"
+            ? {k: v}
+            : value
+        "},
+        indoc! {r"
+            outer:
+              ? [a, b]
+              : value
+        "},
+        indoc! {r"
+            ? |2-
+              key
+            : [value]
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -548,7 +662,18 @@ fn explicit_keys_accept_block_style_requests() {
 #[test]
 fn implicit_block_keys_keep_their_own_scalar_context() {
     let mut diffs = Vec::new();
-    for source in ["old: value\n", "{old: value}\n", "outer:\n  old: value\n"] {
+    for source in [
+        indoc! {r"
+            old: value
+        "},
+        indoc! {r"
+            {old: value}
+        "},
+        indoc! {r"
+            outer:
+              old: value
+        "},
+    ] {
         for key in ["'---'", "'...'", "'a,b'", "'a[b]'"] {
             let mut document = EditableDocument::parse(source).unwrap();
             document

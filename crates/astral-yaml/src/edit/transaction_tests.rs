@@ -1,5 +1,5 @@
 use crate::CollectionStyle;
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, indoc};
 
 use super::{EditableDocument, Editor, Layout, NodeKind, RootLayout, Span, same_style};
 
@@ -45,7 +45,10 @@ fn empty_transactions_do_not_require_rewrite_work() {
 
 #[test]
 fn outer_comment_plans_obey_work_and_output_limits() {
-    let source = "        # old\nvalue\n";
+    let source = indoc! {r"
+                # old
+        value
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document.options.max_input_bytes = source.len();
     let mut editor = Editor::new(&document);
@@ -106,29 +109,49 @@ fn requested_style_comparison_checks_kind_and_collection_contents() {
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn collection_rewrites_include_their_comment_context() {
     let mut diffs = Vec::new();
-    for newline in ["\n", "\r\n", "\r"] {
-        for source in [
-            "outer:\n# detached\n  key: old\n",
-            "outer:\n  # detached\n    key: old\n",
-            "outer:\n# leading\n  {key: old}\n",
-            "outer:\n# leading\n  [old]\n",
-            "outer:\n  [old] # inline\n",
-            "outer:\n# detached\n  - old\n",
-        ] {
-            let source = source.replace('\n', newline);
-            let mut document = EditableDocument::parse(&source).unwrap();
-            document
-                .edit(|editor| {
-                    let target = editor.mapping_entries(&editor.root())?[0].1.clone();
-                    editor.set_collection_style(&target, CollectionStyle::Flow)?;
-                    match editor.node(&target)?.kind() {
-                        NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                        _ => editor.insert_entry(&target, 1, "added", "new"),
-                    }
-                })
-                .unwrap();
-            diffs.push(edit_diff(&source, document.source()));
-        }
+    for source in [
+        indoc! {r"
+            outer:
+            # detached
+              key: old
+        "},
+        indoc! {r"
+            outer:
+              # detached
+                key: old
+        "},
+        indoc! {r"
+            outer:
+            # leading
+              {key: old}
+        "},
+        indoc! {r"
+            outer:
+            # leading
+              [old]
+        "},
+        indoc! {r"
+            outer:
+              [old] # inline
+        "},
+        indoc! {r"
+            outer:
+            # detached
+              - old
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let target = editor.mapping_entries(&editor.root())?[0].1.clone();
+                editor.set_collection_style(&target, CollectionStyle::Flow)?;
+                match editor.node(&target)?.kind() {
+                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
+                    _ => editor.insert_entry(&target, 1, "added", "new"),
+                }
+            })
+            .unwrap();
+        diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -186,92 +209,6 @@ fn collection_rewrites_include_their_comment_context() {
     +  # detached
     +
     +  [old, new]
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍
-    -# detached␍
-    -  key: old␍
-    +  # detached␍
-    +␍
-    +  {key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍
-       # detached␍
-    -    key: old␍
-    +␍
-    +  {key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer:␍
-    -# leading␍
-    -  {key: old}␍
-    +outer: {␍
-    +  # leading␍
-    +  key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer:␍
-    -# leading␍
-    -  [old]␍
-    +outer: [␍
-    +  # leading␍
-    +  old, new]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1 @@
-    -outer:␍
-    -  [old] # inline␍
-    +outer: [old, new] # inline␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍
-    -# detached␍
-    -  - old␍
-    +  # detached␍
-    +␍
-    +  [old, new]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍-# detached␍-  key: old␍+  # detached␍+␍+  {key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍   # detached␍-    key: old␍+␍+  {key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer:␍-# leading␍-  {key: old}␍+outer: {␍+  # leading␍+  key: old, added: new}␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer:␍-# leading␍-  [old]␍+outer: [␍+  # leading␍+  old, new]␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1 @@
-    -outer:␍-  [old] # inline␍+outer: [old, new] # inline␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     outer:␍-# detached␍-  - old␍+  # detached␍+␍+  [old, new]␍
     ");
 }
 
@@ -328,11 +265,26 @@ fn patch_application_checks_intervals_utf8_and_complete_output_size() {
 
 #[test]
 fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
-    let document = EditableDocument::parse("outer:\n  value: old\n\n# detached\n").unwrap();
+    let document = EditableDocument::parse(indoc! {r"
+        outer:
+          value: old
+
+        # detached
+    "})
+    .unwrap();
     let mut editor = Editor::new(&document);
     let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
     let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
-    editor.replace(&value, "|+\n  new\n\n").unwrap();
+    editor
+        .replace(
+            &value,
+            indoc! {r"
+                |+
+                  new
+
+            "},
+        )
+        .unwrap();
     let syntax = Layout::new(&editor.candidate);
     let layout = RootLayout::new(&document, &editor.candidate, &syntax);
     assert_eq!(
@@ -346,7 +298,12 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
 
 #[test]
 fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
-    let document = EditableDocument::parse("outer:\n  value: old\n# trailing\n").unwrap();
+    let document = EditableDocument::parse(indoc! {r"
+        outer:
+          value: old
+        # trailing
+    "})
+    .unwrap();
     let mut editor = Editor::new(&document);
     let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
     editor
@@ -364,7 +321,12 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
 
 #[test]
 fn indented_root_suffixes_share_the_body_rewrite_context() {
-    let document = EditableDocument::parse("outer: {value: old}\n\n   # root\n").unwrap();
+    let document = EditableDocument::parse(indoc! {r"
+        outer: {value: old}
+
+           # root
+    "})
+    .unwrap();
     let mut editor = Editor::new(&document);
     let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
     let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();

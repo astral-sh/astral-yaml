@@ -93,7 +93,7 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
         trailing_block_scalar: false,
     };
     let prefix = document.source[..region.start()]
-        .rsplit(['\r', '\n'])
+        .rsplit('\n')
         .next()
         .unwrap_or("");
     let own_line = id == document.root
@@ -1016,7 +1016,7 @@ pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> 
         .anchor
         .as_ref()
         .map_or(0, |anchor| anchor.chars().count() + 2);
-    !text.contains(['\r', '\n']) && text.chars().count() + tag + anchor <= 1024
+    !text.contains('\n') && text.chars().count() + tag + anchor <= 1024
 }
 
 /// Whether block presentation provides a header for an inline content comment.

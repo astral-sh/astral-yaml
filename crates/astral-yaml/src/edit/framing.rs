@@ -93,31 +93,28 @@ pub(super) fn prepare(
     }
 
     let mut framed = original.clone();
-    let newline = emit::newline(&original.source);
-    insert_end_markers(&mut framed, candidate, insertions, newline);
+    insert_end_markers(&mut framed, candidate, insertions);
     if root_line {
-        framed.source.insert_str(root_start, newline);
-        shift_spans(&mut framed, root_start, newline.len());
-        shift_spans(candidate, root_start, newline.len());
+        framed.source.insert(root_start, '\n');
+        shift_spans(&mut framed, root_start, 1);
+        shift_spans(candidate, root_start, 1);
         // Empty roots have no token to move automatically with their suffix.
         for document in [&mut framed, &mut *candidate] {
             let span = &mut document.nodes[document.root.0].span;
             if span.is_empty() && span.start() == root_start {
-                span.start += newline.len();
-                span.end += newline.len();
+                span.start += 1;
+                span.end += 1;
             }
         }
     }
     if start {
         // Prefix comments and blank lines keep their relation to the boundary.
-        let at = original.source[..root_start]
-            .rfind(['\r', '\n'])
-            .map_or_else(
-                || usize::from(original.source.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
-                |index| index + 1,
-            );
-        let marker = format!("---{newline}");
-        framed.source.insert_str(at, &marker);
+        let at = original.source[..root_start].rfind('\n').map_or_else(
+            || usize::from(original.source.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
+            |index| index + 1,
+        );
+        let marker = "---\n";
+        framed.source.insert_str(at, marker);
         shift_spans(&mut framed, at, marker.len());
         shift_spans(candidate, at, marker.len());
         framed.start_marker = Some(Span {
@@ -138,7 +135,6 @@ fn insert_end_markers(
     framed: &mut EditableDocument,
     candidate: &mut EditableDocument,
     mut insertions: Vec<usize>,
-    newline: &str,
 ) {
     // Work backwards so every requested location still uses original source
     // coordinates. Existing markers and comments move with each insertion.
@@ -149,17 +145,17 @@ fn insert_end_markers(
             insertions.pop();
             count += 1;
         }
-        let separator = if at > 0 && !framed.source[..at].ends_with(['\r', '\n']) {
-            newline
+        let separator = if at > 0 && !framed.source[..at].ends_with('\n') {
+            "\n"
         } else {
             ""
         };
-        let text = format!("{separator}{}", format!("...{newline}").repeat(count));
+        let text = format!("{separator}{}", "...\n".repeat(count));
         framed.source.insert_str(at, &text);
         shift_spans(framed, at, text.len());
         shift_spans(candidate, at, text.len());
         let added = (0..count).map(|index| {
-            let start = at + separator.len() + index * (3 + newline.len());
+            let start = at + separator.len() + index * "...\n".len();
             Span {
                 start,
                 end: start + 3,
@@ -214,14 +210,7 @@ impl RootComments {
     ) -> Result<Self, Error> {
         let comments = &candidate.nodes[candidate.root.0].comments;
         let Some(region) = region else {
-            // No body rewrite means its existing layout remains authoritative.
-            // Text-only framing edits must not relocate unchanged body comments.
-            let mut plan = Self {
-                rendered: comments.clone(),
-                ..Self::default()
-            };
-            plan.changed_comments(original, None);
-            return Ok(plan);
+            return Ok(Self::retained_body(original, comments));
         };
         let mut following = vec![None; comments.len()];
         let mut next = None;
@@ -279,7 +268,7 @@ impl RootComments {
                     .trailing_end
                     .is_some_and(|end| !blank_between(&original.source, end, anchor.at))
             {
-                anchor.before.push_str(emit::newline(&original.source));
+                anchor.before.push('\n');
             }
             bytes = bytes
                 .checked_add(anchor.before.len() + 1 + comment.text.len() + anchor.after.len())
@@ -318,6 +307,25 @@ impl RootComments {
         Ok(plan)
     }
 
+    fn retained_body(original: &EditableDocument, comments: &[Comment]) -> Self {
+        // No body rewrite means its existing layout remains authoritative.
+        // Text-only framing edits must not relocate unchanged body comments.
+        let mut plan = Self {
+            rendered: comments.to_vec(),
+            // Descendant rewrites can introduce an end marker even when
+            // the root body stays in place. Its retained trailing comments
+            // still require adjacency through the final suffix patches.
+            trailing_end: comments
+                .iter()
+                .filter(|comment| comment.placement == CommentPlacement::Trailing)
+                .map(|comment| comment.span.start())
+                .max(),
+            ..Self::default()
+        };
+        plan.changed_comments(original, None);
+        plan
+    }
+
     /// Whitespace between the body and suffix markers still determines comment
     /// attachment. Discard orphan blank lines before a trailing comment, while
     /// leaving bytes already owned by a rendered or removed region to its patch.
@@ -335,13 +343,8 @@ impl RootComments {
         covered.sort_by_key(|span| (span.start(), span.end()));
         while at < end {
             let line_end = line_end(source, at);
-            let next = line_end
-                + if source[line_end..].starts_with("\r\n") {
-                    2
-                } else {
-                    usize::from(line_end < source.len())
-                };
-            let whole_line = at == 0 || source[..at].ends_with(['\r', '\n']);
+            let next = line_end + usize::from(line_end < source.len());
+            let whole_line = at == 0 || source[..at].ends_with('\n');
             let index = covered.partition_point(|span| span.end() <= at);
             let owned = covered.get(index).is_some_and(|span| span.start() < next);
             if whole_line
@@ -375,12 +378,10 @@ impl RootComments {
         let after = self.trailing_end.unwrap_or(0).max(marker.end());
         if !blank_between(&original.source, after, comment.span.start()) {
             let start = original.source[..comment.span.start()]
-                .rfind(['\r', '\n'])
+                .rfind('\n')
                 .map_or(0, |index| index + 1);
-            self.patches.push((
-                Span { start, end: start },
-                emit::newline(&original.source).to_owned(),
-            ));
+            self.patches
+                .push((Span { start, end: start }, "\n".to_owned()));
         }
     }
 
@@ -626,7 +627,7 @@ fn end_slots(
             } else {
                 let at = if following[index].is_some() {
                     original.source[..next]
-                        .rfind(['\r', '\n'])
+                        .rfind('\n')
                         .map_or(0, |index| index + 1)
                 } else {
                     original.source.len()
@@ -662,7 +663,7 @@ fn occupied_markers(original: &EditableDocument, root: &super::Node, body: Span)
             }
             let index = markers.partition_point(|marker| marker.end() <= comment.span.start());
             let marker = markers.get(index.checked_sub(1)?)?;
-            (!original.source[marker.end()..comment.span.start()].contains(['\r', '\n']))
+            (!original.source[marker.end()..comment.span.start()].contains('\n'))
                 .then_some(marker.start())
         })
         .collect()
@@ -799,7 +800,7 @@ impl RootLayout {
             // A block scalar's span can already end at the following line's
             // start; that line belongs to the suffix and must stay outside.
             .then(|| {
-                if original.source[..end].ends_with(['\r', '\n']) {
+                if original.source[..end].ends_with('\n') {
                     end
                 } else {
                     line_end(&original.source, end)
@@ -884,7 +885,7 @@ fn comment_anchor(
     let breaks = outer_comment_breaks(comment, anchor, before)?;
     let separator = format!(
         "{}{}",
-        emit::newline(&original.source).repeat(breaks),
+        "\n".repeat(breaks),
         " ".repeat(emit::indent(&original.source, anchor.span.start()))
     );
     Some(if before {
@@ -910,7 +911,6 @@ fn marker_anchor(
     region: Span,
     next: Option<&Comment>,
 ) -> Option<Anchor> {
-    let newline = emit::newline(&original.source);
     match comment.placement {
         CommentPlacement::Leading => {
             let marker = original.start_marker?;
@@ -929,7 +929,7 @@ fn marker_anchor(
             Some(Anchor {
                 at: marker.start(),
                 before: String::new(),
-                after: newline.to_owned(),
+                after: "\n".to_owned(),
             })
         }
         CommentPlacement::Trailing | CommentPlacement::Detached
@@ -940,9 +940,9 @@ fn marker_anchor(
                 next.placement == CommentPlacement::Inline && next.span.start() >= layout.body.end()
             }) {
                 let at = original.source[..next.span.start()]
-                    .rfind(['\r', '\n'])
+                    .rfind('\n')
                     .map_or(0, |index| index + 1);
-                return Some(before_marker(at, comment.placement, newline));
+                return Some(before_marker(at, comment.placement));
             }
             let slot = layout.inline.end.partition_point(|&inline| inline <= index);
             if let Some(slot) = layout.inline.slots.get(slot).filter(|slot| {
@@ -951,7 +951,7 @@ fn marker_anchor(
                 })
             }) {
                 let marker = slot.marker()?;
-                return Some(before_marker(marker.start(), comment.placement, newline));
+                return Some(before_marker(marker.start(), comment.placement));
             }
             let marker = original
                 .end_marker
@@ -961,7 +961,7 @@ fn marker_anchor(
             let at = line_end(&original.source, marker.end());
             Some(Anchor {
                 at,
-                before: newline.repeat(if comment.placement == CommentPlacement::Detached {
+                before: "\n".repeat(if comment.placement == CommentPlacement::Detached {
                     2
                 } else {
                     1
@@ -992,33 +992,28 @@ fn marker_anchor(
     }
 }
 
-fn before_marker(at: usize, placement: CommentPlacement, newline: &str) -> Anchor {
+fn before_marker(at: usize, placement: CommentPlacement) -> Anchor {
     Anchor {
         at,
         before: if placement == CommentPlacement::Detached {
-            newline.to_owned()
+            "\n".to_owned()
         } else {
             String::new()
         },
-        after: newline.to_owned(),
+        after: "\n".to_owned(),
     }
 }
 
 fn line_end(source: &str, start: usize) -> usize {
     source[start..]
-        .find(['\r', '\n'])
+        .find('\n')
         .map_or(source.len(), |offset| start + offset)
 }
 
 fn blank_between(source: &str, before: usize, after: usize) -> bool {
     let mut end = line_end(source, before);
     while end < after {
-        let start = end
-            + if source[end..].starts_with("\r\n") {
-                2
-            } else {
-                1
-            };
+        let start = end + 1;
         end = line_end(source, start);
         if end < after
             && source[start..end]
@@ -1035,18 +1030,14 @@ fn removal_span(source: &str, span: Span) -> Span {
     // Removing a standalone comment includes its line break, so adjacent
     // leading/trailing comments do not become detached by an empty line.
     let start = source[..span.start()]
-        .rfind(['\r', '\n'])
+        .rfind('\n')
         .map_or(0, |index| index + 1);
     if source[start..span.start()]
         .bytes()
         .all(|byte| matches!(byte, b' ' | b'\t'))
     {
         let suffix = &source[span.end()..];
-        let terminator = if suffix.starts_with("\r\n") {
-            2
-        } else {
-            usize::from(suffix.starts_with(['\r', '\n']))
-        };
+        let terminator = usize::from(suffix.starts_with('\n'));
         Span {
             start,
             end: span.end() + terminator,

@@ -1,14 +1,16 @@
 use astral_yaml::{
     CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
-use astral_yaml_dev::edit_diff;
+use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
 #[test]
 fn emission_limits_roll_back_root_and_subtree_rewrites() {
     let quoted = format!("\"{}\"", "\\x01".repeat(8));
     for nested in [false, true] {
         let source = if nested {
-            format!("key: {quoted}\n")
+            formatdoc! {r"
+                key: {quoted}
+            "}
         } else {
             quoted.clone()
         };
@@ -41,11 +43,45 @@ fn emission_limits_roll_back_root_and_subtree_rewrites() {
 fn root_comments_retain_the_requested_order() {
     let mut diffs = Vec::new();
     for (source, placement) in [
-        ("# old\nvalue\n", CommentPlacement::Leading),
-        ("value\n# old\n", CommentPlacement::Trailing),
-        ("value\n\n# old\n", CommentPlacement::Detached),
-        ("# old\n--- value\n...\n", CommentPlacement::Leading),
-        ("value\n...\n\n# old\n", CommentPlacement::Detached),
+        (
+            indoc! {r"
+                # old
+                value
+            "},
+            CommentPlacement::Leading,
+        ),
+        (
+            indoc! {r"
+                value
+                # old
+            "},
+            CommentPlacement::Trailing,
+        ),
+        (
+            indoc! {r"
+                value
+
+                # old
+            "},
+            CommentPlacement::Detached,
+        ),
+        (
+            indoc! {r"
+                # old
+                --- value
+                ...
+            "},
+            CommentPlacement::Leading,
+        ),
+        (
+            indoc! {r"
+                value
+                ...
+
+                # old
+            "},
+            CommentPlacement::Detached,
+        ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -107,38 +143,41 @@ fn root_comments_retain_the_requested_order() {
 #[test]
 fn successive_root_comment_edits_keep_indices_and_attachments() {
     let mut diffs = Vec::new();
-    for (name, newline) in [("LF", "\n"), ("CRLF", "\r\n"), ("CR", "\r")] {
-        let source = format!("  # old{newline}value{newline}");
-        let mut document = EditableDocument::parse(&source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                editor.insert_comment(&root, 0, " discarded", CommentPlacement::Leading)?;
-                editor.replace_comment(&root, 1, " renamed")?;
-                editor.insert_comment(&root, 0, " first", CommentPlacement::Leading)?;
-                editor.remove_comment(&root, 1)?;
-                editor.insert_comment(&root, 2, " last", CommentPlacement::Leading)?;
-                editor.replace(&root, "changed")
-            })
-            .unwrap();
-        diffs.push(format!(
-            "{name}: initial edits\n{}",
-            edit_diff(&source, document.source())
-        ));
-        let before = document.to_yaml();
-        document
-            .edit(|editor| editor.remove_comment(&editor.root(), 2))
-            .unwrap();
-        document
-            .edit(|editor| editor.replace_comment(&editor.root(), 1, " final"))
-            .unwrap();
-        diffs.push(format!(
-            "{name}: subsequent edits\n{}",
-            edit_diff(&before, document.source())
-        ));
-    }
+    let source = formatdoc! {r"
+          # old
+        value
+    "};
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|editor| {
+            let root = editor.root();
+            editor.insert_comment(&root, 0, " discarded", CommentPlacement::Leading)?;
+            editor.replace_comment(&root, 1, " renamed")?;
+            editor.insert_comment(&root, 0, " first", CommentPlacement::Leading)?;
+            editor.remove_comment(&root, 1)?;
+            editor.insert_comment(&root, 2, " last", CommentPlacement::Leading)?;
+            editor.replace(&root, "changed")
+        })
+        .unwrap();
+    diffs.push(formatdoc! {r"
+        initial edits
+        {}",
+        edit_diff(&source, document.source())
+    });
+    let before = document.to_yaml();
+    document
+        .edit(|editor| editor.remove_comment(&editor.root(), 2))
+        .unwrap();
+    document
+        .edit(|editor| editor.replace_comment(&editor.root(), 1, " final"))
+        .unwrap();
+    diffs.push(formatdoc! {r"
+        subsequent edits
+        {}",
+        edit_diff(&before, document.source())
+    });
     insta::assert_snapshot!(diffs.join("\n"), @"
-    LF: initial edits
+    initial edits
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,4 @@
@@ -149,7 +188,7 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     +  # last
     +changed
 
-    LF: subsequent edits
+    subsequent edits
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,3 @@
@@ -158,63 +197,55 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     -  # last
     +  # final
      changed
-
-    CRLF: initial edits
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-    -  # old␍
-    -value␍
-    +  # first␍
-    +  # renamed␍
-    +  # last␍
-    +changed␍
-
-    CRLF: subsequent edits
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,3 @@
-       # first␍
-    -  # renamed␍
-    -  # last␍
-    +  # final␍
-     changed␍
-
-    CR: initial edits
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-    -  # old␍-value␍+  # first␍+  # renamed␍+  # last␍+changed␍
-
-    CR: subsequent edits
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,3 @@
-       # first␍-  # renamed␍-  # last␍+  # final␍ changed␍
     ");
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn block_roots_can_move_off_a_document_marker_line() {
     // Document prefixes and markers: https://yaml.org/spec/1.2.2/#92-documents
     let mut diffs = Vec::new();
     for source in [
-        "--- old\n",
-        "--- [old]\n",
+        indoc! {r"
+            --- old
+        "},
+        indoc! {r"
+            --- [old]
+        "},
         "---",
-        "%YAML 1.2\r\n--- old\r\n...\r\n",
+        indoc! {r"
+            %YAML 1.2
+            --- old
+            ...
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
-            .edit(|editor| editor.replace(&editor.root(), "- new\n- values\n"))
+            .edit(|editor| {
+                editor.replace(
+                    &editor.root(),
+                    indoc! {r"
+                        - new
+                        - values
+                    "},
+                )
+            })
             .unwrap();
         diffs.push(edit_diff(source, document.source()));
     }
     for source in [
-        "--- [old]\n",
-        "--- {old: value}\n",
-        "--- &anchor [old]\n",
-        "--- !!map {old: value}\n",
+        indoc! {r"
+            --- [old]
+        "},
+        indoc! {r"
+            --- {old: value}
+        "},
+        indoc! {r"
+            --- &anchor [old]
+        "},
+        indoc! {r"
+            --- !!map {old: value}
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -252,12 +283,12 @@ fn block_roots_can_move_off_a_document_marker_line() {
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,5 @@
-     %YAML 1.2␍
-    ---- old␍
-    +--- ␍
-    +- new␍
-    +- values␍
-     ...␍
+     %YAML 1.2
+    ---- old
+    +--- ⏎
+    +- new
+    +- values
+     ...
 
     --- before.yaml
     +++ after.yaml
@@ -293,7 +324,11 @@ fn block_roots_can_move_off_a_document_marker_line() {
 
 #[test]
 fn root_comment_placement_respects_the_document_prefix() {
-    let source = "%YAML 1.2\n--- value\n...\n";
+    let source = indoc! {r"
+        %YAML 1.2
+        --- value
+        ...
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(|editor| {
@@ -310,7 +345,9 @@ fn root_comment_placement_respects_the_document_prefix() {
      ...
     ");
 
-    let source = "value # inline\n";
+    let source = indoc! {r"
+        value # inline
+    "};
     let mut document = EditableDocument::parse(source).unwrap();
     // A leading comment cannot follow an inline comment in source order.
     let error = document
@@ -329,10 +366,36 @@ fn root_comment_placement_respects_the_document_prefix() {
 fn exact_scalar_style_requests_preserve_multiline_values() {
     let mut diffs = Vec::new();
     for (source, style) in [
-        ("'a\n\nb'\n", ScalarStyle::SingleQuoted),
-        ("a\n\nb\n", ScalarStyle::Plain),
-        ("|+\n\n", ScalarStyle::Literal),
-        (">+\n\n", ScalarStyle::Folded),
+        (
+            indoc! {r"
+                'a
+
+                b'
+            "},
+            ScalarStyle::SingleQuoted,
+        ),
+        (
+            indoc! {r"
+                a
+
+                b
+            "},
+            ScalarStyle::Plain,
+        ),
+        (
+            indoc! {r"
+                |+
+
+            "},
+            ScalarStyle::Literal,
+        ),
+        (
+            indoc! {r"
+                >+
+
+            "},
+            ScalarStyle::Folded,
+        ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -379,12 +442,28 @@ fn exact_scalar_style_requests_preserve_multiline_values() {
 fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     let mut diffs = Vec::new();
     for source in [
-        "'old'\n",
-        "'old'\n\n",
+        indoc! {r"
+            'old'
+        "},
+        indoc! {r"
+            'old'
+
+        "},
         "'old'\n  \n  ",
-        "'old' # keep\n\n",
-        "'old'\n\n...\n",
-        "%YAML 1.2 # directive\n--- 'old' # inline\n... # end\n",
+        indoc! {r"
+            'old' # keep
+
+        "},
+        indoc! {r"
+            'old'
+
+            ...
+        "},
+        indoc! {r"
+            %YAML 1.2 # directive
+            --- 'old' # inline
+            ... # end
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -453,7 +532,12 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
 fn nested_block_scalar_boundaries_stop_before_following_syntax() {
     let mut diffs = Vec::new();
     for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
-        let source = "outer:\n  value: old # keep\n\nnext: retained\n";
+        let source = indoc! {r"
+            outer:
+              value: old # keep
+
+            next: retained
+        "};
         let mut document = EditableDocument::parse(source).unwrap();
         document
             .edit(|editor| {
@@ -491,64 +575,79 @@ fn nested_block_scalar_boundaries_stop_before_following_syntax() {
 #[test]
 fn comment_transactions_match_an_ordered_list_model() {
     let mut state = 0x93ca_ee76_1963_7651u64;
-    for newline in ["\n", "\r\n", "\r"] {
-        for (source, placement) in [
-            ("# old\n--- value\n...\n", CommentPlacement::Leading),
-            ("value\n# old\n", CommentPlacement::Trailing),
-            ("value\n\n# old\n", CommentPlacement::Detached),
-        ] {
-            let mut document = EditableDocument::parse(&source.replace('\n', newline)).unwrap();
-            let mut model = vec![" old".to_owned()];
-            for round in 0..100 {
-                let before = document.to_yaml();
-                document
-                    .edit(|editor| {
-                        let root = editor.root();
-                        for step in 0..3 {
-                            state ^= state << 13;
-                            state ^= state >> 7;
-                            state ^= state << 17;
-                            let operation = state % 4;
-                            let text = format!(" comment {round}/{step}");
-                            if operation == 0 || model.is_empty() {
-                                let index =
-                                    usize::try_from(state % (model.len() as u64 + 1)).unwrap();
-                                editor.insert_comment(&root, index, &text, placement)?;
-                                model.insert(index, text);
-                            } else {
-                                let index = usize::try_from(state % model.len() as u64).unwrap();
-                                match operation {
-                                    1 => {
-                                        editor.remove_comment(&root, index)?;
-                                        model.remove(index);
-                                    }
-                                    2 => {
-                                        editor.replace_comment(&root, index, &text)?;
-                                        model[index] = text;
-                                    }
-                                    _ => editor.replace(&root, "updated")?,
+    for (source, placement) in [
+        (
+            indoc! {r"
+                # old
+                --- value
+                ...
+            "},
+            CommentPlacement::Leading,
+        ),
+        (
+            indoc! {r"
+                value
+                # old
+            "},
+            CommentPlacement::Trailing,
+        ),
+        (
+            indoc! {r"
+                value
+
+                # old
+            "},
+            CommentPlacement::Detached,
+        ),
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        let mut model = vec![" old".to_owned()];
+        for round in 0..100 {
+            let before = document.to_yaml();
+            document
+                .edit(|editor| {
+                    let root = editor.root();
+                    for step in 0..3 {
+                        state ^= state << 13;
+                        state ^= state >> 7;
+                        state ^= state << 17;
+                        let operation = state % 4;
+                        let text = format!(" comment {round}/{step}");
+                        if operation == 0 || model.is_empty() {
+                            let index = usize::try_from(state % (model.len() as u64 + 1)).unwrap();
+                            editor.insert_comment(&root, index, &text, placement)?;
+                            model.insert(index, text);
+                        } else {
+                            let index = usize::try_from(state % model.len() as u64).unwrap();
+                            match operation {
+                                1 => {
+                                    editor.remove_comment(&root, index)?;
+                                    model.remove(index);
                                 }
+                                2 => {
+                                    editor.replace_comment(&root, index, &text)?;
+                                    model[index] = text;
+                                }
+                                _ => editor.replace(&root, "updated")?,
                             }
                         }
-                        Ok(())
-                    })
-                    .unwrap_or_else(|error| {
-                        panic!("{before:?}, {placement:?}, {model:?}: {error}")
-                    });
-                let comments = document.node(document.root()).unwrap().comments();
-                assert_eq!(
-                    comments
-                        .iter()
-                        .map(astral_yaml::edit::Comment::text)
-                        .collect::<Vec<_>>(),
-                    model
-                );
-                assert!(
-                    comments
-                        .iter()
-                        .all(|comment| comment.placement() == placement)
-                );
-            }
+                    }
+                    Ok(())
+                })
+                .unwrap_or_else(|error| panic!("{before:?}, {placement:?}, {model:?}: {error}"));
+            let comments = document.node(document.root()).unwrap().comments();
+            assert_eq!(
+                comments
+                    .iter()
+                    .map(astral_yaml::edit::Comment::text)
+                    .collect::<Vec<_>>(),
+                model
+            );
+            assert!(
+                comments
+                    .iter()
+                    .all(|comment| comment.placement() == placement)
+            );
         }
     }
 }
@@ -559,10 +658,19 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     let mut diffs = Vec::new();
     for source in [
         "--- # marker",
-        "%YAML 1.2\r\n--- # marker",
-        "%YAML 1.2\r--- # marker",
+        indoc! {r"
+            %YAML 1.2
+            --- # marker"},
     ] {
-        for fragment in ["new", "[new]", "{key: new}", "|2-\n  new\n"] {
+        for fragment in [
+            "new",
+            "[new]",
+            "{key: new}",
+            indoc! {r"
+                |2-
+                  new
+            "},
+        ] {
             let mut document = EditableDocument::parse(source).unwrap();
             document
                 .edit(|editor| editor.replace(&editor.root(), fragment))
@@ -610,73 +718,42 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,3 @@
-     %YAML 1.2␍
+     %YAML 1.2
     ---- # marker
     \ No newline at end of file
-    +--- # marker␍
+    +--- # marker
     +new
     \ No newline at end of file
 
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,3 @@
-     %YAML 1.2␍
+     %YAML 1.2
     ---- # marker
     \ No newline at end of file
-    +--- # marker␍
+    +--- # marker
     +[new]
     \ No newline at end of file
 
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,3 @@
-     %YAML 1.2␍
+     %YAML 1.2
     ---- # marker
     \ No newline at end of file
-    +--- # marker␍
+    +--- # marker
     +{key: new}
     \ No newline at end of file
 
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,4 @@
-     %YAML 1.2␍
+     %YAML 1.2
     ---- # marker
     \ No newline at end of file
-    +--- # marker␍
-    +|2-␍
-    +  new␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     %YAML 1.2␍---- # marker
-    \ No newline at end of file
-    +--- # marker␍+new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     %YAML 1.2␍---- # marker
-    \ No newline at end of file
-    +--- # marker␍+[new]
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     %YAML 1.2␍---- # marker
-    \ No newline at end of file
-    +--- # marker␍+{key: new}
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-     %YAML 1.2␍---- # marker
-    \ No newline at end of file
-    +--- # marker␍+|2-␍+  new␍
+    +--- # marker
+    +|2-
+    +  new
     ");
 }
 
@@ -684,11 +761,25 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
 fn edits_preserve_comments_between_headers_properties_and_content() {
     let mut diffs = Vec::new();
     for source in [
-        "key: # header\n  &a # anchor\n  # before value\n  old\n",
-        "key: !!str # tag\n  &a # anchor\n  # before value\n  old\n",
-        "key: # header\n  # before anchor\n  &a # anchor\n  # before value\n  old\n",
-        "key: # header\r\n  &a # anchor\r\n  # before value\r\n  old\r\n",
-        "key: # header\r  &a # anchor\r  # before value\r  old\r",
+        indoc! {r"
+            key: # header
+              &a # anchor
+              # before value
+              old
+        "},
+        indoc! {r"
+            key: !!str # tag
+              &a # anchor
+              # before value
+              old
+        "},
+        indoc! {r"
+            key: # header
+              # before anchor
+              &a # anchor
+              # before value
+              old
+        "},
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
@@ -731,20 +822,5 @@ fn edits_preserve_comments_between_headers_properties_and_content() {
     -  old
     +    # before value
     +    new
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     key: # header␍
-       &a # anchor␍
-    -  # before value␍
-    -  old␍
-    +    # before value␍
-    +    new␍
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     key: # header␍   &a # anchor␍-  # before value␍-  old␍+    # before value␍+    new␍
     ");
 }
