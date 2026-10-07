@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use astral_yaml::{
     CollectionStyle, NodeId,
     comments::CommentPlacement,
-    edit::{EditableDocument, NodeKind},
+    edit::{EditableDocument, Editor, Handle, NodeKind},
 };
 use astral_yaml_dev::fixtures;
 
@@ -98,6 +98,104 @@ fn assert_projection(document: &EditableDocument, expected: &[Occurrence], fixtu
     }
 }
 
+fn handles(editor: &Editor<'_>) -> Vec<Handle> {
+    let mut order = Vec::new();
+    let mut pending = vec![editor.root()];
+    while let Some(handle) = pending.pop() {
+        match editor.node(&handle).unwrap().kind() {
+            NodeKind::Sequence { .. } => {
+                pending.extend(editor.sequence_items(&handle).unwrap().into_iter().rev());
+            }
+            NodeKind::Mapping { .. } => {
+                for (key, value) in editor.mapping_entries(&handle).unwrap().into_iter().rev() {
+                    pending.extend([value, key]);
+                }
+            }
+            _ => {}
+        }
+        order.push(handle);
+    }
+    order
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CommentEdit {
+    Replace,
+    Reinsert,
+    Remove,
+}
+
+#[test]
+fn corpus_comment_edits_preserve_the_expected_graph() {
+    let mut tested = 0;
+    for fixture in fixtures::manifest()
+        .into_iter()
+        .filter(fixtures::Fixture::valid_syntax)
+    {
+        let source = fixture.source();
+        if astral_yaml::parse(&source).unwrap().documents().len() != 1 {
+            continue;
+        }
+        let original = EditableDocument::parse(&source).unwrap();
+        let before = project(&original);
+        if before.iter().all(|node| node.comments.is_empty()) {
+            continue;
+        }
+        tested += 1;
+        for operation in [
+            CommentEdit::Replace,
+            CommentEdit::Reinsert,
+            CommentEdit::Remove,
+        ] {
+            for flow in [false, true] {
+                let mut document = EditableDocument::parse(&source).unwrap();
+                let mut expected = project(&document);
+                let context = format!("{} {operation:?} flow={flow}", fixture.file);
+                document
+                    .edit(|editor| {
+                        for (handle, node) in handles(editor).iter().zip(&mut expected) {
+                            for (index, (text, placement, _)) in
+                                node.comments.iter_mut().enumerate().rev()
+                            {
+                                *text = [" edited", "", "\tcomment: [#] é\u{2028}end"][index % 3]
+                                    .to_owned();
+                                match operation {
+                                    CommentEdit::Remove => editor.remove_comment(handle, index)?,
+                                    // Insertion cannot name a vacated collection gap.
+                                    CommentEdit::Reinsert
+                                        if *placement != CommentPlacement::Detached =>
+                                    {
+                                        editor.remove_comment(handle, index)?;
+                                        editor.insert_comment(handle, index, text, *placement)?;
+                                    }
+                                    _ => editor.replace_comment(handle, index, text)?,
+                                }
+                            }
+                            if matches!(operation, CommentEdit::Remove) {
+                                node.comments.clear();
+                            }
+                            if flow
+                                && matches!(
+                                    node.content,
+                                    Content::Sequence(_) | Content::Mapping(_)
+                                )
+                            {
+                                editor.set_collection_style(handle, CollectionStyle::Flow)?;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .unwrap_or_else(|error| panic!("{context}: {error}"));
+                assert_projection(&document, &expected, &context);
+                let normalized = document.normalized_yaml().unwrap();
+                let normalized = EditableDocument::parse(&normalized).unwrap();
+                assert_projection(&normalized, &expected, &context);
+            }
+        }
+    }
+    assert!(tested > 0, "the corpus must contain comments");
+}
+
 #[test]
 fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
     let mut tested = 0;
@@ -142,22 +240,12 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
         }
         document
             .edit(|editor| {
-                let mut pending = vec![editor.root()];
-                let mut scalars = Vec::new();
-                while let Some(handle) = pending.pop() {
-                    match editor.node(&handle)?.kind() {
-                        NodeKind::Scalar { .. } => scalars.push(handle),
-                        NodeKind::Sequence { .. } => {
-                            pending.extend(editor.sequence_items(&handle)?.into_iter().rev());
-                        }
-                        NodeKind::Mapping { .. } => {
-                            for (key, value) in editor.mapping_entries(&handle)?.into_iter().rev() {
-                                pending.extend([value, key]);
-                            }
-                        }
-                        NodeKind::Alias { .. } => {}
-                    }
-                }
+                let scalars: Vec<_> = handles(editor)
+                    .into_iter()
+                    .filter(|handle| {
+                        matches!(editor.node(handle).unwrap().kind(), NodeKind::Scalar { .. })
+                    })
+                    .collect();
                 for index in selected {
                     editor.replace_preserving_style(&scalars[index], "\"edited\"")?;
                 }
@@ -193,21 +281,10 @@ fn corpus_collection_layout_changes_preserve_the_expected_graph() {
             CollectionStyle::Flow,
         ] {
             let result = document.edit(|editor| {
-                let mut pending = vec![editor.root()];
-                while let Some(handle) = pending.pop() {
+                for handle in handles(editor) {
                     let empty = match editor.node(&handle)?.kind() {
-                        NodeKind::Sequence { items, .. } => {
-                            let empty = items.is_empty();
-                            pending.extend(editor.sequence_items(&handle)?);
-                            empty
-                        }
-                        NodeKind::Mapping { entries, .. } => {
-                            let empty = entries.is_empty();
-                            for (key, value) in editor.mapping_entries(&handle)? {
-                                pending.extend([key, value]);
-                            }
-                            empty
-                        }
+                        NodeKind::Sequence { items, .. } => items.is_empty(),
+                        NodeKind::Mapping { entries, .. } => entries.is_empty(),
                         _ => continue,
                     };
                     editor.set_collection_style(

@@ -42,10 +42,11 @@ development helpers.
 - `editable-model` checks valid edits against independent value and comment
   models, including nested collections, aliases, and canceled edits.
 - `editable-graph` checks drafts and commits against an independent recursive
-  tree and alias graph, including complex keys, repeated anchors, and all four
-  comment placements. It generates representable attachments and ends transaction
-  batches at explicit layout requests. Up to eight initial bytes seed the graph; byte zero also selects the
-  batch size. Each subsequent three-byte group selects an operation and position.
+  tree and alias graph, including tags, complex keys, repeated anchors, document
+  markers, and all four comment placements. It generates representable attachments
+  and ends transaction batches at explicit layout requests. Up to eight initial
+  bytes seed the graph; byte zero also selects framing and batch size. Each
+  subsequent three-byte group selects an operation and position.
   Inputs are bounded to 512 bytes and 32 operations.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte

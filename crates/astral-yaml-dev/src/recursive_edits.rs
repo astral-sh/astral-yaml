@@ -71,6 +71,7 @@ enum Kind {
 struct Tree {
     id: usize,
     anchor: Option<String>,
+    tag: Option<String>,
     comments: Vec<(String, CommentPlacement)>,
     kind: Kind,
 }
@@ -235,6 +236,10 @@ impl Tree {
             .anchor
             .as_ref()
             .map_or(body.clone(), |name| format!("&{name} {body}"));
+        let body = self
+            .tag
+            .as_ref()
+            .map_or(body.clone(), |tag| format!("!<{tag}> {body}"));
         if self.comments.is_empty() {
             body
         } else {
@@ -305,18 +310,21 @@ impl Builder {
             let recursive = Tree {
                 id: self.identity(),
                 anchor: None,
+                tag: None,
                 comments: Vec::new(),
                 kind: Kind::Alias(definition),
             };
             items.push(Tree {
                 id: definition,
                 anchor: Some("shared".to_owned()),
+                tag: None,
                 comments: Vec::new(),
                 kind: Kind::Sequence(vec![value, recursive]),
             });
             items.push(Tree {
                 id: self.identity(),
                 anchor: None,
+                tag: None,
                 comments: Vec::new(),
                 kind: Kind::Alias(definition),
             });
@@ -324,6 +332,7 @@ impl Builder {
         Tree {
             id: root,
             anchor: None,
+            tag: None,
             comments: Vec::new(),
             kind: Kind::Sequence(items),
         }
@@ -348,6 +357,7 @@ impl Builder {
             return Tree {
                 id,
                 anchor: None,
+                tag: None,
                 comments,
                 kind: Kind::Alias(ancestors[choice % ancestors.len()]),
             };
@@ -385,6 +395,7 @@ impl Builder {
         Tree {
             id,
             anchor,
+            tag: (choice % 5 == 0).then(|| "tag:example.com,2026:node".to_owned()),
             comments,
             kind,
         }
@@ -415,7 +426,7 @@ fn check<'a, Location: 'a>(
         assert!(ids.insert(expected.id, id).is_none());
         let actual = node(id);
         assert_eq!(actual.anchor(), expected.anchor.as_deref());
-        assert_eq!(actual.tag(), None);
+        assert_eq!(actual.tag(), expected.tag.as_deref());
         let comments: Vec<_> = actual
             .comments()
             .iter()
@@ -566,6 +577,7 @@ fn replace(
         replacement = Tree {
             id: builder.identity(),
             anchor: None,
+            tag: None,
             comments: Vec::new(),
             kind: Kind::Sequence(vec![child]),
         };
@@ -856,7 +868,14 @@ pub fn check_recursive_edits(data: &[u8]) {
         state: u64::from_le_bytes(seed),
     };
     let mut model = builder.document();
-    let mut document = EditableDocument::parse(&model.yaml()).unwrap();
+    let yaml = model.yaml();
+    let source = match (data[0] >> 4) % 4 {
+        0 => yaml,
+        1 => format!("--- {yaml}\n...\n"),
+        2 => format!("%YAML 1.2\n---\n{yaml}\n...\n"),
+        _ => format!("\u{feff}---\n{yaml}\n"),
+    };
+    let mut document = EditableDocument::parse(&source).unwrap();
     check(&model, document.root(), |id| document.node(id).unwrap());
     let batch = [1, 4, 16][usize::from(data[0] >> 6) % 3];
     for operations in data[1..]
