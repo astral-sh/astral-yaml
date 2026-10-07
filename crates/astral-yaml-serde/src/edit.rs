@@ -2,6 +2,7 @@
 
 use crate::{Error, to_string};
 use astral_yaml::{
+    Span,
     edit::{Editor as SyntaxEditor, Handle},
     schema::{ScalarType, classify},
 };
@@ -78,11 +79,12 @@ impl<'doc> Cursor<'_, 'doc> {
         }
     }
 
-    /// Inspects the candidate node. Spans refer to the original source.
+    /// Inspects the candidate node. Locations refer to original occurrences,
+    /// even after replacement. Inserted syntax has no source location (`None`).
     ///
     /// # Errors
     /// Returns an error if the transaction's work budget is exhausted.
-    pub fn node(&self) -> Result<&Node, Error> {
+    pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
         self.syntax
             .node(&self.handle)
             .map_err(|error| self.context(error.into()))
@@ -314,7 +316,7 @@ impl<'doc> Cursor<'_, 'doc> {
     }
 }
 
-fn string_key(node: &Node) -> Option<&str> {
+fn string_key<Location>(node: &Node<Location>) -> Option<&str> {
     let NodeKind::Scalar { value, style } = node.kind() else {
         return None;
     };
