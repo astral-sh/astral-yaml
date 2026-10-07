@@ -414,7 +414,7 @@ fn detached_suffix_comments_follow_inserted_root_content() {
 }
 
 #[test]
-fn generated_start_markers_precede_descendant_prefixes() {
+fn generated_start_markers_preserve_root_prefixes() {
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -444,25 +444,23 @@ fn generated_start_markers_precede_descendant_prefixes() {
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,4 @@
-    -# child
+     # child
     -[ # open
     -  old
     -] # close
     +--- # open
     +[ # close
-    +  # child
     +  old] # added
 
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,4 @@
-    -# child
+     # child
     -{ # open
     -  key: old
     -} # close
     +--- # open
     +{ # close
-    +  # child
     +  key: old} # added
     ");
 }

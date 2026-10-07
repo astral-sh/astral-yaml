@@ -420,7 +420,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     /// indicator, where they cannot attach to the enclosing header.
     fn slot_prefix(
         &mut self,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
         collection: NodeId,
         first: bool,
         context: Context,

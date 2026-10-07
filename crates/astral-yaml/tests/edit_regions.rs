@@ -145,6 +145,7 @@ fn shrinking_collections_retain_their_comment_boundaries() {
         indoc! {r"
             outer:
             # detached
+
               key: old
         "},
     ] {
@@ -177,20 +178,20 @@ fn shrinking_collections_retain_their_comment_boundaries() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1 @@
+    @@ -1,3 +1,2 @@
     -outer:
-    -# leading
+     # leading
     -  {key: old}
     +outer: {}
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,4 @@
+    @@ -1,4 +1,4 @@
      outer:
     -# detached
-    -  key: old
     +  # detached
-    +
+     ⏎
+    -  key: old
     +  {}
     ");
 }

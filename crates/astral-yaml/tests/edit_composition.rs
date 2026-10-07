@@ -229,8 +229,8 @@ fn root_cases() -> &'static [(&'static str, &'static [(&'static str, CommentPlac
         ("---", &[]),
         (
             indoc! {r"
-                # child
                 [ # open
+                  # child
                   old
                 ] # close
             "},
@@ -238,8 +238,8 @@ fn root_cases() -> &'static [(&'static str, &'static [(&'static str, CommentPlac
         ),
         (
             indoc! {r"
-                # child
                 { # open
+                  # child
                   key: old
                 } # close
             "},
@@ -762,8 +762,8 @@ fn check_retained_occurrences(original: &EditableDocument, document: &EditableDo
 fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
     use CommentPlacement::{Detached, Inline, Trailing};
     let source = indoc! {r"
-        # child
         [ # open
+          # child
           old
         ] # close
     "};

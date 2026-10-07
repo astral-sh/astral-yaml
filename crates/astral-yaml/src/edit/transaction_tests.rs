@@ -192,11 +192,13 @@ fn collection_rewrites_include_their_comment_context() {
         indoc! {r"
             outer:
             # detached
+
               key: old
         "},
         indoc! {r"
             outer:
               # detached
+
                 key: old
         "},
         indoc! {r"
@@ -216,6 +218,7 @@ fn collection_rewrites_include_their_comment_context() {
         indoc! {r"
             outer:
             # detached
+
               - old
         "},
     ] {
@@ -235,42 +238,38 @@ fn collection_rewrites_include_their_comment_context() {
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,4 @@
+    @@ -1,4 +1,4 @@
      outer:
     -# detached
-    -  key: old
     +  # detached
-    +
+     ⏎
+    -  key: old
     +  {key: old, added: new}
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,4 @@
+    @@ -1,4 +1,4 @@
      outer:
        # detached
+     ⏎
     -    key: old
-    +
     +  {key: old, added: new}
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,3 @@
+    @@ -1,3 +1,2 @@
     -outer:
-    -# leading
+     # leading
     -  {key: old}
-    +outer: {
-    +  # leading
-    +  key: old, added: new}
+    +outer: {key: old, added: new}
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,3 @@
+    @@ -1,3 +1,2 @@
     -outer:
-    -# leading
+     # leading
     -  [old]
-    +outer: [
-    +  # leading
-    +  old, new]
+    +outer: [old, new]
 
     --- before.yaml
     +++ after.yaml
@@ -281,12 +280,12 @@ fn collection_rewrites_include_their_comment_context() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,3 +1,4 @@
+    @@ -1,4 +1,4 @@
      outer:
     -# detached
-    -  - old
     +  # detached
-    +
+     ⏎
+    -  - old
     +  [old, new]
     ");
 }

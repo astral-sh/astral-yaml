@@ -47,13 +47,11 @@ pub(super) fn prepare(
 ) -> Option<Prepared> {
     let layout = RootLayout::new(original, candidate, syntax);
     let root = &candidate.nodes[candidate.root.0];
-    let collection = matches!(
-        layout.kind,
-        RootKind::FlowCollection | RootKind::BlockCollection { .. }
-    );
+    let needs_prefix_boundary =
+        matches!(layout.kind, RootKind::BlockCollection { header: false, .. });
     let start = original.start_marker.is_none()
         && (matches!(layout.kind, RootKind::Omitted)
-            || (collection
+            || (needs_prefix_boundary
                 && root
                     .comments
                     .iter()
