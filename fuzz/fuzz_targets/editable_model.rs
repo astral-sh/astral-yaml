@@ -13,6 +13,8 @@ use astral_yaml_serde::{
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
 
+const OPERATIONS: u8 = 22;
+
 #[derive(Debug, Deserialize, PartialEq)]
 struct Config {
     value: String,
@@ -76,7 +78,7 @@ fn apply(
 ) -> Result<(), Error> {
     let selector = usize::from(operation[1]);
     let key = ["null", "true", "01", "with: space", "two\nlines"][selector % 5];
-    match operation[0] % 19 {
+    match operation[0] % OPERATIONS {
         0 => {
             editor.root_mut().field("value")?.set(text)?;
             text.clone_into(&mut expected.value);
@@ -240,6 +242,23 @@ fn apply(
             nested(editor)?.field("value")?.set(text)?;
             text.clone_into(expected.nested.value_mut());
         }
+        19 => {
+            let mut root = editor.root_mut();
+            root.append_comment(" temporary", CommentPlacement::Inline)?;
+            root.remove_comment(comments.root.len())?;
+        }
+        20 => {
+            let index = selector % (expected.items.len() + 1);
+            let mut items = editor.root_mut().field("items")?;
+            items.reborrow().insert(index, text)?;
+            items.remove_item(index)?;
+        }
+        21 => {
+            // This key is outside the model's persistent key vocabulary.
+            let mut map = editor.root_mut().field("map")?;
+            map.reborrow().set_entry("__temporary__", text)?;
+            map.remove_field("__temporary__")?;
+        }
         _ => {}
     }
     Ok(())
@@ -346,6 +365,12 @@ fuzz_target!(|data: &[u8]| {
     let mut comments = Comments::default();
     let batch = [1, 4, 16][usize::from(controls >> 3) % 3];
     for operations in operations.chunks(batch * 2) {
+        let canceled = operations
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .all(|operation| matches!(operation[0] % OPERATIONS, 19..=21));
+        let unchanged_source = canceled.then(|| document.source().to_owned());
         document
             .edit(|editor| {
                 for operation in operations.as_chunks::<2>().0 {
@@ -355,5 +380,12 @@ fuzz_target!(|data: &[u8]| {
             })
             .unwrap();
         check(&document, &expected, &comments);
+        if let Some(source) = unchanged_source {
+            assert_eq!(
+                document.source(),
+                source,
+                "canceled edits must not rewrite source"
+            );
+        }
     }
 });

@@ -94,11 +94,15 @@ returns that value only after the transaction commits.
 Before commit, the editor emits and reparses the candidate, checks content,
 alias identity, requested styles, and comment ownership, placement, and order,
 then deserializes `T`.
-Mutations build a draft with no source text. Source planning reads that draft
-and the original document. Any coordinate changes needed for document framing
-belong to a separate rendering view; commit checks still use the unchanged draft.
-Rewrite regions are selected from the final candidate, so intermediate style
-changes do not force a larger rewrite when the final syntax fits in place.
+Mutations build a draft with no source text. Its arena owns node identity,
+parentage, deletion, and explicit style requests. When the callback finishes,
+the draft freezes into an immutable candidate. Source planning compares its
+final syntax and resolved layout with the original document. Any coordinate
+changes needed for document framing belong to a separate rendering view;
+commit checks still use the unchanged candidate.
+Temporary style changes, comments added and then removed, and insertions removed
+before commit do not force rewrites. Requesting an already-active style checks
+that constraint without requiring re-emission.
 Root comment changes are also planned from the final candidate. Changing only
 a framing comment's text retains the existing body layout.
 Any error leaves the original source and typed value intact. This includes
@@ -224,6 +228,8 @@ performance.
 The `editable-model` fuzz target generates valid edit sequences and requires
 every transaction to succeed. It compares committed values and both root and
 nested comments with independent Rust models and checks alias target identity.
+Transactions consisting only of canceled comment, sequence-item, or mapping-entry
+insertions must also retain the exact source.
 It runs alongside the `editable` target, which exercises arbitrary input
 documents and rollback.
 
