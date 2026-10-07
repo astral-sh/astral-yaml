@@ -71,7 +71,7 @@ enum Kind {
 struct Tree {
     id: usize,
     anchor: Option<String>,
-    leading: Vec<String>,
+    comments: Vec<(String, CommentPlacement)>,
     kind: Kind,
 }
 
@@ -235,11 +235,12 @@ impl Tree {
             .anchor
             .as_ref()
             .map_or(body.clone(), |name| format!("&{name} {body}"));
-        if self.leading.is_empty() {
+        if self.comments.is_empty() {
             body
         } else {
             let mut output = String::from("\n");
-            for text in &self.leading {
+            for (text, placement) in &self.comments {
+                assert_eq!(*placement, CommentPlacement::Leading);
                 output.push('#');
                 output.push_str(text);
                 output.push('\n');
@@ -304,26 +305,26 @@ impl Builder {
             let recursive = Tree {
                 id: self.identity(),
                 anchor: None,
-                leading: Vec::new(),
+                comments: Vec::new(),
                 kind: Kind::Alias(definition),
             };
             items.push(Tree {
                 id: definition,
                 anchor: Some("shared".to_owned()),
-                leading: Vec::new(),
+                comments: Vec::new(),
                 kind: Kind::Sequence(vec![value, recursive]),
             });
             items.push(Tree {
                 id: self.identity(),
                 anchor: None,
-                leading: Vec::new(),
+                comments: Vec::new(),
                 kind: Kind::Alias(definition),
             });
         }
         Tree {
             id: root,
             anchor: None,
-            leading: Vec::new(),
+            comments: Vec::new(),
             kind: Kind::Sequence(items),
         }
     }
@@ -339,15 +340,15 @@ impl Builder {
     fn tree(&mut self, depth: usize, ancestors: &[usize]) -> Tree {
         let id = self.identity();
         let choice = self.next();
-        let leading = (choice % 7 == 0)
-            .then(|| format!(" generated {id}"))
+        let comments = (choice % 7 == 0)
+            .then(|| (format!(" generated {id}"), CommentPlacement::Leading))
             .into_iter()
             .collect();
         if choice % 5 == 0 && !ancestors.is_empty() {
             return Tree {
                 id,
                 anchor: None,
-                leading,
+                comments,
                 kind: Kind::Alias(ancestors[choice % ancestors.len()]),
             };
         }
@@ -384,7 +385,7 @@ impl Builder {
         Tree {
             id,
             anchor,
-            leading,
+            comments,
             kind,
         }
     }
@@ -421,9 +422,9 @@ fn check<'a, Location: 'a>(
             .map(|comment| (comment.text(), comment.placement()))
             .collect();
         let expected_comments: Vec<_> = expected
-            .leading
+            .comments
             .iter()
-            .map(|text| (text.as_str(), CommentPlacement::Leading))
+            .map(|(text, placement)| (text.as_str(), *placement))
             .collect();
         assert_eq!(
             comments, expected_comments,
@@ -495,6 +496,16 @@ fn check_draft(model: &Tree, root: NodeId, editor: &Editor<'_>) {
 }
 
 fn set_layout(model: &Tree, editor: &mut Editor<'_>, style: CollectionStyle) {
+    // Flow delimiters can host suffix comments that have no block spelling.
+    if style == CollectionStyle::Block
+        && model.nodes().iter().any(|node| {
+            node.comments
+                .iter()
+                .any(|(_, placement)| *placement != CommentPlacement::Leading)
+        })
+    {
+        return;
+    }
     for path in model.paths() {
         let kind = &model.at(&path).kind;
         let empty = match kind {
@@ -541,6 +552,33 @@ fn replace(
     let path = &paths[selector % paths.len()];
     let old = model.at(path);
     let mut replacement = builder.tree(selector % 3, &[]);
+    // Nested scalar suffixes have no attachment boundary. Keep an enclosing
+    // collection when the replaced occurrence owns full-line suffixes.
+    if !path.is_empty()
+        && old.comments.iter().any(|(_, placement)| {
+            matches!(
+                placement,
+                CommentPlacement::Trailing | CommentPlacement::Detached
+            )
+        })
+    {
+        let child = replacement;
+        replacement = Tree {
+            id: builder.identity(),
+            anchor: None,
+            comments: Vec::new(),
+            kind: Kind::Sequence(vec![child]),
+        };
+    }
+    // Merging a fragment prefix with retained property comments depends on
+    // source headers; keep those replacement fragments free of root comments.
+    if old
+        .comments
+        .iter()
+        .any(|(_, placement)| *placement != CommentPlacement::Leading)
+    {
+        replacement.comments.clear();
+    }
     let yaml = replacement.yaml();
     let handle = handle(editor, path);
     if preserve {
@@ -557,9 +595,9 @@ fn replace(
         editor.replace(&handle, &replacement.yaml()).unwrap();
     }
     replacement.remap_root(replacement.id, old.id);
-    let mut leading = old.leading.clone();
-    leading.append(&mut replacement.leading);
-    replacement.leading = leading;
+    let mut comments = old.comments.clone();
+    comments.append(&mut replacement.comments);
+    replacement.comments = comments;
     *model.at_mut(path) = replacement;
 }
 
@@ -571,7 +609,7 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
             matches!(
                 operation,
                 Operation::InsertComment | Operation::CancelComment
-            ) || !model.at(path).leading.is_empty()
+            ) || !model.at(path).comments.is_empty()
         })
         .collect();
     if paths.is_empty() {
@@ -579,24 +617,76 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
     }
     let path = &paths[selector % paths.len()];
     let owner = handle(editor, path);
-    let comments = &mut model.at_mut(path).leading;
+    let children = match &model.at(path).kind {
+        Kind::Sequence(items) => Some(items.len()),
+        Kind::Mapping(entries) => Some(entries.len()),
+        _ => None,
+    };
+    let comments = &mut model.at_mut(path).comments;
     let text = format!(" comment {selector}");
     match operation {
         Operation::InsertComment | Operation::CancelComment => {
-            let index = selector % (comments.len() + 1);
+            let mut placement = [
+                CommentPlacement::Leading,
+                CommentPlacement::Inline,
+                CommentPlacement::Trailing,
+                CommentPlacement::Detached,
+            ][selector % 4];
+            if !path.is_empty()
+                && ((children.is_none()
+                    && matches!(
+                        placement,
+                        CommentPlacement::Trailing | CommentPlacement::Detached
+                    ))
+                    || (children == Some(0) && placement == CommentPlacement::Trailing))
+            {
+                placement = CommentPlacement::Leading;
+            }
+            if placement == CommentPlacement::Inline
+                && comments.iter().any(|(_, existing)| *existing == placement)
+            {
+                placement = CommentPlacement::Leading;
+            }
+            let closing_inline = (placement == CommentPlacement::Inline && selector & 4 != 0)
+                || (comments
+                    .last()
+                    .is_some_and(|(_, placement)| *placement == CommentPlacement::Inline)
+                    && comments.iter().any(|(_, placement)| {
+                        matches!(
+                            placement,
+                            CommentPlacement::Trailing | CommentPlacement::Detached
+                        )
+                    }));
+            let rank = |placement| match placement {
+                CommentPlacement::Leading => 0,
+                CommentPlacement::Inline if closing_inline => 4,
+                CommentPlacement::Inline => 1,
+                CommentPlacement::Trailing => 2,
+                CommentPlacement::Detached => 3,
+            };
+            let first = comments.partition_point(|(_, existing)| rank(*existing) < rank(placement));
+            let end = comments.partition_point(|(_, existing)| rank(*existing) <= rank(placement));
+            let index = first + selector % (end - first + 1);
             editor
-                .insert_comment(&owner, index, &text, CommentPlacement::Leading)
+                .insert_comment(&owner, index, &text, placement)
                 .unwrap();
             if operation == Operation::CancelComment {
                 editor.remove_comment(&owner, index).unwrap();
             } else {
-                comments.insert(index, text);
+                comments.insert(index, (text, placement));
             }
         }
         Operation::ReplaceComment => {
             let index = selector % comments.len();
-            editor.replace_comment(&owner, index, &text).unwrap();
-            comments[index] = text;
+            if selector & 4 == 0 {
+                editor.replace_comment(&owner, index, &text).unwrap();
+            } else {
+                editor.remove_comment(&owner, index).unwrap();
+                editor
+                    .insert_comment(&owner, index, &text, comments[index].1)
+                    .unwrap();
+            }
+            comments[index].0 = text;
         }
         Operation::RemoveComment => {
             let index = selector % comments.len();
@@ -637,6 +727,16 @@ fn sequence_edit(
             })
             .collect();
         if indices.is_empty() {
+            return;
+        }
+        if items.len() == 1
+            && !path.is_empty()
+            && model
+                .at(path)
+                .comments
+                .iter()
+                .any(|(_, placement)| *placement == CommentPlacement::Trailing)
+        {
             return;
         }
         let index = indices[selector % indices.len()];
@@ -702,6 +802,16 @@ fn mapping_edit(
         if indices.is_empty() {
             return;
         }
+        if entries.len() == 1
+            && !path.is_empty()
+            && model
+                .at(path)
+                .comments
+                .iter()
+                .any(|(_, placement)| *placement == CommentPlacement::Trailing)
+        {
+            return;
+        }
         let index = indices[selector % indices.len()];
         editor.remove_entry(&parent, index).unwrap();
         let Kind::Mapping(entries) = &mut model.at_mut(path).kind else {
@@ -754,6 +864,16 @@ pub fn check_recursive_edits(data: &[u8]) {
         .take(32)
         .collect::<Vec<_>>()
         .chunks(batch)
+        // Commit explicit styles before subsequent edits can require a different
+        // presentation. The model generates successful edits, not style errors.
+        .flat_map(|batch| {
+            batch.split_inclusive(|op| {
+                matches!(
+                    Operation::from_byte(op[0]),
+                    Operation::Flow | Operation::Block
+                )
+            })
+        })
     {
         let root = document.root();
         let unchanged = operations
