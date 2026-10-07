@@ -10,7 +10,6 @@ use serde::Serialize;
 use std::fmt::Write;
 
 #[cfg(test)]
-#[path = "edit_tests.rs"]
 mod tests;
 
 pub use astral_yaml::{

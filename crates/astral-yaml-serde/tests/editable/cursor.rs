@@ -1,5 +1,6 @@
 //! Value edits preserve YAML types: <https://yaml.org/spec/1.2.2/#103-core-schema>.
 
+use super::support::edit;
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{
     Editable,
@@ -333,16 +334,13 @@ fn optional_lookup_and_removal_distinguish_absence() {
         first: 1 # removed
         second: 2 # retained
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let mut root = e.root_mut();
-            assert!(root.reborrow().get("absent")?.is_none());
-            assert!(!root.remove_field("absent")?);
-            assert!(root.remove_field("first")?);
-            root.reborrow().get("second")?.unwrap().set(3)
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |e| {
+        let mut root = e.root_mut();
+        assert!(root.reborrow().get("absent")?.is_none());
+        assert!(!root.remove_field("absent")?);
+        assert!(root.remove_field("first")?);
+        root.reborrow().get("second")?.unwrap().set(3)
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -358,23 +356,20 @@ fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
     let source = indoc! {r"
         items: [old]
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let mut items = e.root_mut().field("items")?;
-            items
-                .reborrow()
-                .insert(0, "first")?
-                .set_scalar_style(ScalarStyle::SingleQuoted)?;
-            items.remove_item(1)?;
-            items
-                .reborrow()
-                .push(json!({"value": "old"}))?
-                .field("value")?
-                .set("new")?;
-            items.set_collection_style(CollectionStyle::Block)
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |e| {
+        let mut items = e.root_mut().field("items")?;
+        items
+            .reborrow()
+            .insert(0, "first")?
+            .set_scalar_style(ScalarStyle::SingleQuoted)?;
+        items.remove_item(1)?;
+        items
+            .reborrow()
+            .push(json!({"value": "old"}))?
+            .field("value")?
+            .set("new")?;
+        items.set_collection_style(CollectionStyle::Block)
+    });
     assert_eq!(
         document.value(),
         &json!({"items": ["first", {"value": "new"}]})
@@ -396,18 +391,15 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
         first: 'old' # keep
         last: true
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            e.root_mut().set_entry("first", "it's new")?;
-            e.root_mut().set_entry("added", ["initial"])?;
-            e.root_mut()
-                .set_entry("added", ["one"])?
-                .push("two")?
-                .append_comment(" added", CommentPlacement::Inline)?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |e| {
+        e.root_mut().set_entry("first", "it's new")?;
+        e.root_mut().set_entry("added", ["initial"])?;
+        e.root_mut()
+            .set_entry("added", ["one"])?
+            .push("two")?
+            .append_comment(" added", CommentPlacement::Inline)?;
+        Ok(())
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     --- before.yaml
     +++ after.yaml
@@ -426,17 +418,14 @@ fn styles_and_comments_can_be_changed_explicitly() {
         first: old # original
         last: retained
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let mut first = e.root_mut().field("first")?;
-            first.set("new")?;
-            first.set_scalar_style(ScalarStyle::SingleQuoted)?;
-            first.replace_comment(0, " updated")?;
-            first.append_comment(" description", CommentPlacement::Leading)?;
-            first.remove_comment(0)
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |e| {
+        let mut first = e.root_mut().field("first")?;
+        first.set("new")?;
+        first.set_scalar_style(ScalarStyle::SingleQuoted)?;
+        first.replace_comment(0, " updated")?;
+        first.append_comment(" description", CommentPlacement::Leading)?;
+        first.remove_comment(0)
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
     --- before.yaml
     +++ after.yaml
@@ -481,13 +470,10 @@ fn aliases_are_not_followed_and_definitions_keep_their_anchor() {
         definition: &value 'old'
         copy: *value
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            assert!(e.root_mut().field("copy")?.field("nested").is_err());
-            e.root_mut().field("definition")?.set("new")
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |e| {
+        assert!(e.root_mut().field("copy")?.field("nested").is_err());
+        e.root_mut().field("definition")?.set("new")
+    });
     assert_eq!(
         document.value(),
         &json!({"definition": "new", "copy": "new"})

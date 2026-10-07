@@ -1,3 +1,4 @@
+use super::support::edit;
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{
     Editable, Tagged,
@@ -23,23 +24,20 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
     "};
     let mut diffs = Vec::new();
     for operation in 0..3 {
-        let mut document = Editable::<Config>::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                match operation {
-                    0 => {
-                        editor.root_mut().set_entry("enabled", true)?;
-                    }
-                    1 => {
-                        editor.root_mut().remove_field("other")?;
-                    }
-                    _ => editor
-                        .root_mut()
-                        .set_collection_style(CollectionStyle::Flow)?,
+        let document = edit::<Config>(source, |editor| {
+            match operation {
+                0 => {
+                    editor.root_mut().set_entry("enabled", true)?;
                 }
-                Ok(())
-            })
-            .unwrap();
+                1 => {
+                    editor.root_mut().remove_field("other")?;
+                }
+                _ => editor
+                    .root_mut()
+                    .set_collection_style(CollectionStyle::Flow)?,
+            }
+            Ok(())
+        });
         assert_eq!(document.value().plain, "");
         assert_eq!(document.value().tagged.value, "");
         assert_eq!(document.value().tagged.tag, "!custom");
@@ -91,13 +89,10 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
           | # header
             content
     "};
-    let mut document = Editable::<Config>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.root_mut().set_entry("enabled", true)?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<Config>(source, |editor| {
+        editor.root_mut().set_entry("enabled", true)?;
+        Ok(())
+    });
     assert_eq!(
         document.value().text,
         indoc! {r"
@@ -220,14 +215,11 @@ fn value_setters_can_request_multiline_scalar_styles() {
             'old'
 
         "};
-        let mut document = Editable::<String>::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut root = editor.root_mut();
-                root.set(value)?;
-                root.set_scalar_style(style)
-            })
-            .unwrap();
+        let document = edit::<String>(source, |editor| {
+            let mut root = editor.root_mut();
+            root.set(value)?;
+            root.set_scalar_style(style)
+        });
         assert_eq!(document.value(), value);
         diffs.push(edit_diff(source, document.source()));
     }
@@ -295,10 +287,7 @@ fn typed_root_setters_distinguish_strings_from_document_markers() {
                 ---
                 text"},
         ] {
-            let mut document = Editable::<String>::parse(source).unwrap();
-            document
-                .edit(|editor| editor.root_mut().set(value))
-                .unwrap();
+            let document = edit::<String>(source, |editor| editor.root_mut().set(value));
             assert_eq!(document.value(), value);
             if source
                 == indoc! {r"
@@ -376,10 +365,8 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
           # before content
           old
     "};
-    let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
-    document
-        .edit(|editor| editor.root_mut().field("key")?.set("new"))
-        .unwrap();
+    let document =
+        edit::<serde_json::Value>(source, |editor| editor.root_mut().field("key")?.set("new"));
     assert_eq!(document.value()["key"], "new");
     diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -404,10 +391,7 @@ fn typed_setters_terminate_an_empty_roots_header_comment() {
         serde_json::json!(["new"]),
         serde_json::json!({"key": "new"}),
     ] {
-        let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
-        document
-            .edit(|editor| editor.root_mut().set(&value))
-            .unwrap();
+        let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(&value));
         assert_eq!(document.value(), &value);
         diffs.push(edit_diff(source, document.source()));
     }
@@ -456,10 +440,7 @@ fn typed_setters_fill_empty_documents_without_consuming_markers() {
             ---
             ... # end
         "};
-        let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
-        document
-            .edit(|editor| editor.root_mut().set(&value))
-            .unwrap();
+        let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(&value));
         assert_eq!(document.value(), &value);
         diffs.push(edit_diff(source, document.source()));
     }
@@ -637,16 +618,13 @@ fn typed_collection_edits_preserve_root_property_comments() {
             !!seq [old] # inline
         "},
     ] {
-        let mut document = Editable::<Vec<String>>::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                editor
-                    .root_mut()
-                    .set_collection_style(CollectionStyle::Block)?;
-                editor.root_mut().push("new")?;
-                Ok(())
-            })
-            .unwrap();
+        let document = edit::<Vec<String>>(source, |editor| {
+            editor
+                .root_mut()
+                .set_collection_style(CollectionStyle::Block)?;
+            editor.root_mut().push("new")?;
+            Ok(())
+        });
         assert_eq!(document.value(), &["old", "new"]);
         diffs.push(edit_diff(source, document.source()));
     }
@@ -724,13 +702,10 @@ fn typed_insertions_keep_flow_delimiter_comments() {
           old
         ] # close
     "};
-    let mut document = Editable::<Vec<String>>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.root_mut().push("new")?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<Vec<String>>(source, |editor| {
+        editor.root_mut().push("new")?;
+        Ok(())
+    });
     assert_eq!(document.value(), &["old", "new"]);
     diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
@@ -767,15 +742,12 @@ fn typed_collection_edits_retain_outside_comments() {
             unknown: keep
         "},
     ] {
-        let mut document = Editable::<Config>::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut outer = editor.root_mut().field("outer")?;
-                outer.set_collection_style(CollectionStyle::Flow)?;
-                outer.reborrow().set_entry("added", "new")?;
-                Ok(())
-            })
-            .unwrap();
+        let document = edit::<Config>(source, |editor| {
+            let mut outer = editor.root_mut().field("outer")?;
+            outer.set_collection_style(CollectionStyle::Flow)?;
+            outer.reborrow().set_entry("added", "new")?;
+            Ok(())
+        });
         assert_eq!(
             document.value().outer,
             std::collections::BTreeMap::from([
@@ -818,15 +790,12 @@ fn typed_collection_edits_use_document_comment_boundaries() {
         ] # close
         ...
     "};
-    let mut document = Editable::<Vec<String>>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let mut root = editor.root_mut();
-            root.set_collection_style(CollectionStyle::Block)?;
-            root.push("new")?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<Vec<String>>(source, |editor| {
+        let mut root = editor.root_mut();
+        root.set_collection_style(CollectionStyle::Block)?;
+        root.push("new")?;
+        Ok(())
+    });
     assert_eq!(document.value(), &["old", "new"]);
     diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
@@ -886,10 +855,9 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
           old
         # tail
     "};
-    let mut document = Editable::<String>::parse(source).unwrap();
-    document
-        .edit(|editor| editor.root_mut().set_scalar_style(ScalarStyle::Literal))
-        .unwrap();
+    let document = edit::<String>(source, |editor| {
+        editor.root_mut().set_scalar_style(ScalarStyle::Literal)
+    });
     assert_eq!(document.value(), "old");
     diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @"

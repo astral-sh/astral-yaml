@@ -2,18 +2,15 @@ use crate::{Error, edit::Editor, from_str};
 use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
 use serde::de::DeserializeOwned;
 
-/// A read-only typed view paired with authoritative, editable YAML syntax.
+/// An owned YAML document and read-only typed view, available with `editable`.
 ///
-/// Edits operate on syntax, preserving unknown fields, ordering, comments, and
-/// compatible styles. After a successful edit, the typed value is deserialized
-/// again. Syntax or deserialization failures leave both members unchanged.
-/// Physical CR and CRLF line endings normalize to LF when loading the document.
-/// Source spans and diagnostics refer to this normalized source. Other unchanged
-/// source is emitted exactly; rewritten collections may normalize whitespace.
-/// Use [`Self::to_yaml`] for output, rather than Serde serialization.
+/// Transactions retain unknown fields, comments, and compatible styles, then
+/// deserialize a fresh `T`. Any failure leaves the source and value unchanged.
+/// `T` needs neither `Serialize` nor `Clone`.
 ///
-/// The source and typed value are owned. No `Serialize` or `Clone` implementation
-/// is required for `T`.
+/// Physical CR and CRLF line endings normalize to LF on load. Spans and errors
+/// use this source. Unchanged regions retain their text; rewrites may normalize
+/// whitespace. Use [`Self::to_yaml`] to retain syntax in the output.
 ///
 /// ```
 /// use astral_yaml_serde::Editable;

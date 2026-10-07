@@ -1,5 +1,6 @@
 //! Typed transactions checked against ordinary Rust values, not emitter comparisons.
 
+use super::support::edit;
 use astral_yaml_dev::indoc;
 use astral_yaml_serde::{
     Editable, Error,
@@ -346,15 +347,12 @@ fn typed_comment_insertions_share_the_root_header_plan() {
     let source = indoc! {r"
         old # first
     "};
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let mut root = editor.root_mut();
-            root.append_comment(" second", CommentPlacement::Inline)?;
-            root.append_comment(" third", CommentPlacement::Inline)?;
-            root.set(["new"])
-        })
-        .unwrap();
+    let document = edit::<Value>(source, |editor| {
+        let mut root = editor.root_mut();
+        root.append_comment(" second", CommentPlacement::Inline)?;
+        root.append_comment(" third", CommentPlacement::Inline)?;
+        root.set(["new"])
+    });
     assert_eq!(document.value(), &json!(["new"]));
     diffs.push(edit_diff(source, document.source()));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
