@@ -20,13 +20,16 @@ pub struct EditableDocument {
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
 /// including when the occurrence is an alias.
+///
+/// `Location` separates syntax from its source provenance. Committed nodes use
+/// [`Span`]; unfinished syntax can use a location type that represents absence.
 #[derive(Clone, Debug)]
-pub struct Node {
-    pub(crate) span: Span,
+pub struct Node<Location = Span> {
+    pub(crate) span: Location,
     pub(crate) kind: NodeKind,
     pub(crate) anchor: Option<String>,
     pub(crate) tag: Option<String>,
-    pub(crate) comments: Vec<Comment>,
+    pub(crate) comments: Vec<Comment<Location>>,
 }
 
 /// Syntax content. Mapping entries retain their order and arbitrary key nodes.
@@ -52,10 +55,10 @@ pub enum NodeKind {
 
 /// A comment with its direct owner retained by the containing node.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Comment {
+pub struct Comment<Location = Span> {
     pub(crate) text: String,
     pub(crate) placement: CommentPlacement,
-    pub(crate) span: Span,
+    pub(crate) span: Location,
 }
 
 impl EditableDocument {
@@ -172,16 +175,19 @@ fn lf_source(source: &str) -> Cow<'_, str> {
     Cow::Owned(normalized)
 }
 
-impl Node {
+impl<Location> Node<Location> {
     /// The node's syntax content.
     #[must_use]
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }
 
-    /// The node's range in the current committed source.
+    /// The node's source location. Committed nodes return their current span.
     #[must_use]
-    pub fn span(&self) -> Span {
+    pub fn span(&self) -> Location
+    where
+        Location: Copy,
+    {
         self.span
     }
 
@@ -199,12 +205,12 @@ impl Node {
 
     /// Comments directly owned by this occurrence, in source order.
     #[must_use]
-    pub fn comments(&self) -> &[Comment] {
+    pub fn comments(&self) -> &[Comment<Location>] {
         &self.comments
     }
 }
 
-impl Comment {
+impl<Location> Comment<Location> {
     /// Comment text, excluding the `#` character and line break.
     #[must_use]
     pub fn text(&self) -> &str {
@@ -217,9 +223,12 @@ impl Comment {
         self.placement
     }
 
-    /// Comment range in the current committed source.
+    /// The comment's source location. Committed comments return their current span.
     #[must_use]
-    pub fn span(&self) -> Span {
+    pub fn span(&self) -> Location
+    where
+        Location: Copy,
+    {
         self.span
     }
 }
