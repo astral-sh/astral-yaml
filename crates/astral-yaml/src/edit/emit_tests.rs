@@ -1156,7 +1156,7 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     @@ -1 +1,4 @@
     -outer: [old] # inline
     +outer: [ # inline
-    +  old
+    +  old,
     +  # added
     +  ]
 
@@ -1165,7 +1165,7 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     @@ -1 +1,5 @@
     -outer: [old] # inline
     +outer: [ # inline
-    +  old
+    +  old,
     +  ⏎
     +  # added
     +  ]
@@ -1175,7 +1175,7 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     @@ -1 +1,4 @@
     -outer: {key: old} # inline
     +outer: { # inline
-    +  key: old
+    +  key: old,
     +  # added
     +  }
 
@@ -1184,7 +1184,7 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     @@ -1 +1,5 @@
     -outer: {key: old} # inline
     +outer: { # inline
-    +  key: old
+    +  key: old,
     +  ⏎
     +  # added
     +  }

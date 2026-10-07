@@ -593,6 +593,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
         id: NodeId,
         comments: &mut Comments<Location>,
         indent: usize,
+        mut needs_separator: bool,
     ) -> Result<(), Error> {
         while comments
             .remaining
@@ -615,6 +616,13 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
             else {
                 break;
             };
+            // Close the last entry before emitting a collection-owned suffix.
+            // In particular, an omitted value otherwise starts at the closing
+            // delimiter and captures the intervening comments as its prefix.
+            if needs_separator {
+                self.push(",")?;
+                needs_separator = false;
+            }
             self.comment(&comment, indent)?;
         }
         self.push(delimiter)
@@ -706,7 +714,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
                     )?;
                 }
                 if is_flow {
-                    self.flow_end("}", id, &mut comments, indent + 2)?;
+                    self.flow_end("}", id, &mut comments, indent + 2, !entries.is_empty())?;
                 }
             }
         }
@@ -742,7 +750,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
                     depth + 1,
                 )?;
             }
-            self.flow_end("]", id, comments, indent + 2)?;
+            self.flow_end("]", id, comments, indent + 2, !items.is_empty())?;
         } else {
             let node = &self.document.nodes[id.0];
             if node.anchor.is_some() || node.tag.is_some() {

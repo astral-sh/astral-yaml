@@ -5,6 +5,86 @@ use astral_yaml_dev::edit_diff;
 use astral_yaml_dev::{formatdoc, indoc};
 
 #[test]
+fn omitted_final_values_keep_collection_suffix_comments() {
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            outer: {empty:,
+              # trailing
+              }
+        "},
+        indoc! {r"
+            outer: {? : ,
+
+              # detached
+              }
+        "},
+        indoc! {r"
+            [{empty: ,
+              # trailing
+              }]
+        "},
+        indoc! {r"
+            outer: {empty:
+              # value
+              ,
+              # collection
+              }
+        "},
+    ] {
+        let document = EditableDocument::parse(source).unwrap();
+        let output = document.normalized_yaml().unwrap();
+        assert_eq!(
+            EditableDocument::parse(&output)
+                .unwrap()
+                .normalized_yaml()
+                .unwrap(),
+            output
+        );
+        diffs.push(edit_diff(source, &output));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -outer: {empty:,
+    +outer: {empty: ,
+       # trailing
+       }
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -outer: {? : ,
+    -
+    +outer: {: ,
+    +  ⏎
+       # detached
+       }
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+     [{empty: ,
+    -  # trailing
+    -  }]
+    +    # trailing
+    +    }]
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,5 @@
+    -outer: {empty:
+    +outer: {
+       # value
+    -  ,
+    +  empty: ,
+       # collection
+       }
+    ");
+}
+
+#[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn normalization_keeps_flow_suffixes_inside_their_owner() {
     let mut diffs = Vec::new();
@@ -52,12 +132,20 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
         diffs.push(edit_diff(source, &output));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    -outer: {key: old
+    +outer: {key: old,
+       # trailing
+       }
 
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,4 @@
-     outer: [old
+    -outer: [old
     -
+    +outer: [old,
     +  ⏎
        # detached
        ]
@@ -65,16 +153,25 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
     --- before.yaml
     +++ after.yaml
     @@ -1,5 +1,5 @@
-     [one, {key: old
+    -[one, {key: old
     -  # trailing
     -
     -  # detached
     -  }]
+    +[one, {key: old,
     +    # trailing
     +    ⏎
     +    # detached
     +    }]
 
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+     outer: [ # opening
+    -  old
+    +  old,
+       # trailing
+       ] # closing
 
     --- before.yaml
     +++ after.yaml
@@ -94,6 +191,7 @@ fn flow_comment_layouts_normalize_idempotently() {
     for (open, body, close) in [
         ("[", "one", "]"),
         ("{", "key: value", "}"),
+        ("{", "key: ,", "}"),
         ("[", "", "]"),
         ("{", "", "}"),
     ] {
