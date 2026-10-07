@@ -1,34 +1,9 @@
-use super::{
-    Comment, CommentPosition, EditableDocument, NodeKind,
-    layout::Layout,
-    view::{Emission, Syntax},
-};
+use super::{Comment, CommentPosition, EditableDocument, NodeKind, layout::Layout, view::Syntax};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::fmt::Write;
 
 #[cfg(test)]
 mod tests;
-
-/// A rewritten region includes descendant comments, but leaves the root's outer
-/// comments in their original source positions unless explicitly requested.
-pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, outer: bool) -> Span {
-    let document = document.into();
-    let root = &document.nodes[id.0];
-    let mut start = root.span.start();
-    let mut end = root.span.end();
-    let mut pending = vec![id];
-    while let Some(current) = pending.pop() {
-        let node = &document.nodes[current.0];
-        if current != id || outer {
-            for comment in &node.comments {
-                start = start.min(comment.span.start());
-                end = end.max(comment.span.end());
-            }
-        }
-        children(&node.kind, &mut pending);
-    }
-    Span::new(start, end).expect("ordered source ranges")
-}
 
 pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
     match kind {
@@ -42,108 +17,65 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
     }
 }
 
-pub(super) fn indent(source: &str, at: usize) -> usize {
-    source[..at]
-        .rsplit('\n')
-        .next()
-        .unwrap_or("")
-        .bytes()
-        .take_while(|&byte| byte == b' ')
-        .count()
-}
-
+/// Emit syntax in an explicit placement. Source ownership and splicing belong
+/// to the boundary planner; the emitter cannot read or extend a source range.
 pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    document: impl Into<Emission<'a, Location>>,
+    document: Syntax<'a, Location>,
+    options: crate::ParseOptions,
     id: NodeId,
-    region: Span,
-    indent: usize,
-    flow: bool,
-) -> Result<Rendered, Error> {
-    let document = document.into();
-    render_with_comments(
-        document,
-        id,
-        region,
-        Context::value(indent, flow, if id == document.root { 0 } else { indent }),
-        &document.nodes[id.0].comments,
-        &Layout::new(Syntax {
-            nodes: document.nodes,
-            root: document.root,
-        }),
-    )
-}
-
-/// Renders a region after the transaction has planned any outer comment patches.
-pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    document: impl Into<Emission<'a, Location>>,
-    id: NodeId,
-    region: Span,
-    context: Context,
-    root_comments: &'a [Comment<Location>],
+    placement: &super::splice::Placement<'a, Location>,
     layout: &Layout,
-) -> Result<Rendered, Error> {
-    let document = document.into();
-    let indent = context.indent;
-    let flow = context.in_flow();
+) -> Result<Fragment, Error> {
     let mut emitter = Emitter {
         document,
+        options,
         layout,
         root: id,
-        root_comments,
-        region,
+        root_comments: placement.comments,
+        region: placement.diagnostic_span,
+        at_column_zero: placement.at_column_zero,
         output: String::new(),
-        work: document.options.max_nodes,
+        work: options.max_nodes,
         pending_indent: None,
         trailing_block_scalar: false,
     };
-    let prefix = document.source[..region.start()]
-        .rsplit('\n')
-        .next()
-        .unwrap_or("");
-    let own_line = id == document.root
-        && (block_collection(&document.nodes[id.0].kind, flow)
-            || emitter
-                .visible_comments(id)
-                .any(|comment| comment.placement == CommentPlacement::Leading));
-    let line_start = region.start() - prefix.len();
-    let comment_ended_prefix = region.is_empty()
-        && root_comments.iter().any(|comment| {
-            comment
-                .span
-                .into()
-                .is_some_and(|span| span.start() >= line_start && span.end() <= region.start())
-        });
-    if comment_ended_prefix || (own_line && !prefix.bytes().all(|byte| byte == b' ')) {
-        // A retained comment needs a terminating break before any inserted
-        // syntax. Block collections and leading comments also need their own
-        // line after a document marker.
-        emitter.line(indent)?;
-    } else if region.is_empty()
-        && matches!(
-            document.source.as_bytes()[..region.start()].last(),
-            Some(b':' | b'-' | b'?')
-        )
-    {
+    match placement.before {
+        super::splice::Separator::None => {}
+        super::splice::Separator::Space => emitter.push(" ")?,
+        super::splice::Separator::Line(indent) => emitter.line(indent)?,
+    }
+    emitter.node(id, placement.context, "", 0)?;
+    if placement.comment_follows {
         emitter.push(" ")?;
     }
-    emitter.node(id, context, "", 0)?;
-    if region.is_empty() && document.source.as_bytes().get(region.end()) == Some(&b'#') {
-        emitter.push(" ")?;
-    }
-    emitter.finish()
+    Ok(Fragment {
+        text: emitter.output,
+        ending: if emitter.trailing_block_scalar {
+            Ending::BlockScalar
+        } else if emitter.pending_indent.is_some() {
+            Ending::Comment
+        } else {
+            Ending::Token
+        },
+    })
 }
 
-/// Complete replacement text and the source separators it owns.
-#[derive(Debug)]
-pub(super) struct Rendered {
+/// The final lexical boundary of generated syntax, independent of source.
+pub(super) enum Ending {
+    Token,
+    Comment,
+    BlockScalar,
+}
+
+pub(super) struct Fragment {
     pub(super) text: String,
-    pub(super) span: Span,
+    pub(super) ending: Ending,
 }
 
 #[derive(Clone, Copy)]
 pub(super) struct Context {
     /// Indentation for continuation lines and comments.
-    indent: usize,
+    pub(super) indent: usize,
     position: Position,
 }
 
@@ -195,7 +127,7 @@ impl Context {
         }
     }
 
-    fn in_flow(self) -> bool {
+    pub(super) fn in_flow(self) -> bool {
         matches!(
             self.position,
             Position::Flow | Position::ImplicitKey { flow: true }
@@ -206,11 +138,11 @@ impl Context {
 /// Comments are consumed in source order as the node's syntax is emitted.
 /// Passing the cursor through field headers, properties, and content makes
 /// interleaved inline/leading comments independent of the number of properties.
-struct Comments<Location> {
-    remaining: std::vec::IntoIter<Comment<Location>>,
+struct Comments<'a, Location> {
+    remaining: std::slice::Iter<'a, Comment<Location>>,
 }
 
-impl<Location> Comments<Location> {
+impl<'a, Location> Comments<'a, Location> {
     fn at_opening(&self) -> bool {
         self.remaining
             .as_slice()
@@ -225,7 +157,7 @@ impl<Location> Comments<Location> {
             .is_some_and(|comment| comment.placement == placement)
     }
 
-    fn take(&mut self, placement: CommentPlacement) -> Option<Comment<Location>> {
+    fn take(&mut self, placement: CommentPlacement) -> Option<&'a Comment<Location>> {
         self.next_is(placement)
             .then(|| self.remaining.next().expect("next comment"))
     }
@@ -239,7 +171,7 @@ impl<Location> Comments<Location> {
         })
     }
 
-    fn take_header(&mut self) -> Option<Comment<Location>> {
+    fn take_header(&mut self) -> Option<&'a Comment<Location>> {
         self.remaining
             .as_slice()
             .first()
@@ -296,18 +228,14 @@ enum ScalarPosition {
     FlowKey,
 }
 
-/// Erasing a root can remove its entire line or leave a document marker behind.
-enum ErasedRootLine {
-    Standalone { start: usize },
-    Shared,
-}
-
 struct Emitter<'a, 'layout, Location> {
-    document: Emission<'a, Location>,
+    document: Syntax<'a, Location>,
+    options: crate::ParseOptions,
     layout: &'layout Layout,
     root: NodeId,
     root_comments: &'a [Comment<Location>],
     region: Span,
+    at_column_zero: bool,
     output: String,
     work: usize,
     // A comment terminator is materialized only when following syntax needs it.
@@ -315,83 +243,11 @@ struct Emitter<'a, 'layout, Location> {
     trailing_block_scalar: bool,
 }
 
-impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
+impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: self.region,
             message,
-        }
-    }
-
-    fn finish(mut self) -> Result<Rendered, Error> {
-        let source = self.document.source;
-        let mut span = self.region;
-        if self.trailing_block_scalar {
-            // Blank lines immediately following a block scalar belong to its
-            // content. The emitted value supplies all of them itself.
-            span.end = following_line_breaks(source, span.end());
-        } else if let Some(line) = self.erased_root_line() {
-            // An omitted root has no token to occupy its former line. Leaving
-            // that line behind would turn adjacent leading comments into
-            // detached comments, or indent a following document marker.
-            span.end = following_line_breaks(source, span.end());
-            match line {
-                ErasedRootLine::Standalone { start } => span.start = start,
-                ErasedRootLine::Shared => {
-                    // A retained marker still needs its line terminator. The
-                    // root's original span may already include that break,
-                    // as it does for a block scalar.
-                    if source[self.region.start()..span.end()].contains('\n') {
-                        self.line(0)?;
-                    }
-                }
-            }
-        }
-        let suffix = &source[span.end()..];
-        let trimmed = suffix.trim_start_matches([' ', '\t']);
-        let suffix_has_break = trimmed.starts_with('\n');
-        if self.pending_indent.is_some() && suffix_has_break {
-            // Share the retained terminator, but not the old line's trailing
-            // spaces: they would become part of the emitted comment's text.
-            span.end += suffix.len() - trimmed.len();
-        }
-        let needs_break = self.pending_indent.take().is_some()
-            || self
-                .document
-                .end_marker
-                .is_some_and(|marker| marker.start() == span.end())
-            || (!span.is_empty() && source[..span.end()].ends_with('\n'));
-        if needs_break
-            && !self.output.is_empty()
-            && !self.output.ends_with('\n')
-            && !suffix_has_break
-        {
-            self.push("\n")?;
-        }
-        Ok(Rendered {
-            text: self.output,
-            span,
-        })
-    }
-
-    fn erased_root_line(&self) -> Option<ErasedRootLine> {
-        if self.root != self.document.root
-            || self.region.is_empty()
-            || !omitted(&self.document.nodes[self.root.0])
-        {
-            return None;
-        }
-        let prefix = self.document.source[..self.region.start()]
-            .rsplit('\n')
-            .next()
-            .unwrap_or("")
-            .trim_start_matches('\u{feff}');
-        if prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
-            Some(ErasedRootLine::Standalone {
-                start: self.region.start() - prefix.len(),
-            })
-        } else {
-            Some(ErasedRootLine::Shared)
         }
     }
 
@@ -403,7 +259,6 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         }
         if text.len()
             > self
-                .document
                 .options
                 .max_input_bytes
                 .saturating_sub(self.output.len())
@@ -434,7 +289,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         Ok(())
     }
 
-    fn inline(&mut self, comments: &mut Comments<Location>) -> Result<bool, Error> {
+    fn inline(&mut self, comments: &mut Comments<'_, Location>) -> Result<bool, Error> {
         let Some(comment) = comments.take(CommentPlacement::Inline) else {
             return Ok(false);
         };
@@ -449,7 +304,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
 
     fn property_comment(
         &mut self,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
         indent: usize,
         collection: Option<CollectionStyle>,
     ) -> Result<(), Error> {
@@ -478,7 +333,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         &mut self,
         delimiter: &str,
         id: NodeId,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
         indent: usize,
     ) -> Result<(), Error> {
         self.push(delimiter)?;
@@ -503,31 +358,22 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         Ok(())
     }
 
-    fn visible_comments(&self, id: NodeId) -> impl Iterator<Item = &Comment<Location>> {
+    fn node_comments(&self, id: NodeId) -> Comments<'a, Location> {
         let comments = if id == self.root {
             self.root_comments
         } else {
             &self.document.nodes[id.0].comments
         };
-        comments.iter().filter(move |comment| {
-            id != self.root
-                || comment.span.into().is_none_or(|span| {
-                    span.start() >= self.region.start() && span.end() <= self.region.end()
-                })
-        })
-    }
-
-    fn node_comments(&self, id: NodeId) -> Comments<Location> {
         Comments {
-            remaining: self
-                .visible_comments(id)
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter(),
+            remaining: comments.iter(),
         }
     }
 
-    fn before(&mut self, comments: &mut Comments<Location>, indent: usize) -> Result<(), Error> {
+    fn before(
+        &mut self,
+        comments: &mut Comments<'_, Location>,
+        indent: usize,
+    ) -> Result<(), Error> {
         // Leading comments need their own line, including after flow delimiters.
         if comments.next_is(CommentPlacement::Leading) && !self.output.is_empty() {
             self.line(indent)?;
@@ -540,7 +386,11 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         Ok(())
     }
 
-    fn prefix(&mut self, comments: &mut Comments<Location>, indent: usize) -> Result<(), Error> {
+    fn prefix(
+        &mut self,
+        comments: &mut Comments<'_, Location>,
+        indent: usize,
+    ) -> Result<(), Error> {
         self.before(comments, indent)?;
         while comments
             .remaining
@@ -587,7 +437,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
 
     fn between(
         &mut self,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
         child: NodeId,
         indent: usize,
     ) -> Result<(), Error> {
@@ -616,13 +466,13 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
 
     fn after(
         &mut self,
-        comments: Comments<Location>,
+        comments: Comments<'_, Location>,
         indent: usize,
         suffix: &str,
     ) -> Result<(), Error> {
         self.push(suffix)?;
         for comment in comments.remaining {
-            self.comment(&comment, indent)?;
+            self.comment(comment, indent)?;
         }
         Ok(())
     }
@@ -652,7 +502,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         &mut self,
         delimiter: &str,
         id: NodeId,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
         indent: usize,
         mut needs_separator: bool,
     ) -> Result<(), Error> {
@@ -683,7 +533,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
                 self.push(",")?;
                 needs_separator = false;
             }
-            self.comment(&comment, indent)?;
+            self.comment(comment, indent)?;
         }
         self.push(delimiter)
     }
@@ -705,7 +555,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         context: Context,
         suffix: &str,
         depth: usize,
-        mut comments: Comments<Location>,
+        mut comments: Comments<'_, Location>,
     ) -> Result<(), Error> {
         let context = if self.layout.flow(id) {
             Context::flow(context.indent)
@@ -714,7 +564,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         };
         let indent = context.indent;
         let flow = context.in_flow();
-        if depth >= self.document.options.max_depth || self.work == 0 {
+        if depth >= self.options.max_depth || self.work == 0 {
             return Err(self.error("emission resource limit exceeded"));
         }
         self.work -= 1;
@@ -802,7 +652,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         id: NodeId,
         context: Context,
         depth: usize,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
         let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
@@ -871,7 +721,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         id: NodeId,
         indent: usize,
         flow: bool,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
         let collection = collection_style(&node.kind, flow);
@@ -904,7 +754,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         value: &str,
         style: ScalarStyle,
         context: Context,
-        comments: &mut Comments<Location>,
+        comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
         let indent = context.scalar_indent(style);
         let position = match context.position {
@@ -933,11 +783,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         if let Some(index) = self.output.rfind('\n') {
             return self.output[index + 1..].is_empty();
         }
-        let prefix = self.document.source[..self.region.start()]
-            .rsplit('\n')
-            .next()
-            .unwrap_or("");
-        prefix.trim_start_matches('\u{feff}').is_empty() && self.output.is_empty()
+        self.at_column_zero && self.output.is_empty()
     }
 
     fn value(
@@ -946,7 +792,7 @@ impl<Location: Copy + Into<Option<Span>>> Emitter<'_, '_, Location> {
         context: Context,
         suffix: &str,
         depth: usize,
-        mut comments: Comments<Location>,
+        mut comments: Comments<'_, Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
         let flow = context.in_flow();
@@ -982,18 +828,6 @@ pub(super) fn omitted<Location>(node: &super::Node<Location>) -> bool {
     node.anchor.is_none()
         && node.tag.is_none()
         && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
-}
-
-/// Consume complete whitespace-only lines, retaining the indentation of any
-/// following syntax. Both a block scalar and an erased root own these breaks.
-fn following_line_breaks(source: &str, start: usize) -> usize {
-    let suffix = &source[start..];
-    match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
-        Some(index) => suffix[..index]
-            .rfind('\n')
-            .map_or(start, |offset| start + offset + 1),
-        None => source.len(),
-    }
 }
 
 pub(super) fn simple_key<Location>(node: &super::Node<Location>, flow: bool) -> bool {

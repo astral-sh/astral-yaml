@@ -6,6 +6,7 @@ mod framing;
 mod layout;
 mod plan;
 mod source;
+mod splice;
 mod transaction;
 mod view;
 
@@ -254,12 +255,19 @@ impl EditableDocument {
     /// Returns an error if emission exceeds resource limits or cannot preserve
     /// scalar text, alias identity, or comment ownership and placement.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
-        let region = emit::region(self, self.root, false);
-        let indent = emit::indent(&self.source, region.start());
-        let rendered = emit::render(self, self.root, region, indent, false)?;
-        let mut output = self.source[..rendered.span.start()].to_owned();
-        output.push_str(&rendered.text);
-        output.push_str(&self.source[rendered.span.end()..]);
+        let region = splice::region(self, self.root, false);
+        let indent = splice::indent(&self.source, region.start());
+        let rendered = splice::render(self, self.root, region, indent, false)?;
+        let output = splice::PatchSet::new(
+            &self.source,
+            vec![(rendered.span, rendered.text)],
+            self.options.max_input_bytes,
+        )
+        .map_err(|message| Error {
+            span: region,
+            message,
+        })?
+        .apply();
         let parsed = Self::parse_with_options(&output, self.options)?;
         let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
             span: region,

@@ -1,9 +1,9 @@
 use crate::CollectionStyle;
 use crate::edit::{
     draft::{Candidate, same_style},
-    emit,
     framing::RootLayout,
     plan::{Changes, Plan},
+    splice,
     view::Syntax,
 };
 use astral_yaml_dev::{edit_diff, indoc};
@@ -95,7 +95,10 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
-            .unwrap(),
+            .unwrap()
+            .iter()
+            .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
+            .collect::<Vec<_>>(),
         [(document.root, document.nodes[document.root.0].span)]
     );
 }
@@ -109,11 +112,11 @@ fn empty_transactions_do_not_require_rewrite_work() {
     let syntax = Layout::new(&candidate);
     let source_index = Source::from(&document);
     let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
-    assert_eq!(
+    assert!(
         plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
-            .unwrap(),
-        []
+            .unwrap()
+            .is_empty()
     );
 }
 
@@ -289,57 +292,6 @@ fn collection_rewrites_include_their_comment_context() {
 }
 
 #[test]
-fn patch_application_checks_intervals_utf8_and_complete_output_size() {
-    let mut results = Vec::new();
-    for (patches, limit) in [
-        (vec![], 4),
-        (vec![(0, 2, "X")], 4),
-        (vec![(2, 2, "1"), (2, 2, "2")], 6),
-        (vec![(2, 4, "X"), (3, 4, "Y")], 10),
-        (vec![(2, 5, "X")], 10),
-        (vec![(0, 1, "X")], 10),
-        (vec![(2, 2, "123")], 4),
-        (vec![(0, 2, "123")], 4),
-    ] {
-        let patches = patches
-            .into_iter()
-            .map(|(start, end, replacement)| {
-                (Span::new(start, end).unwrap(), replacement.to_owned())
-            })
-            .collect();
-        results.push(crate::edit::plan::apply_patches("éab", patches, limit));
-    }
-    insta::assert_debug_snapshot!(results, @r#"
-    [
-        Ok(
-            "éab",
-        ),
-        Ok(
-            "Xab",
-        ),
-        Ok(
-            "é12ab",
-        ),
-        Err(
-            "overlapping or invalid source patches",
-        ),
-        Err(
-            "overlapping or invalid source patches",
-        ),
-        Err(
-            "overlapping or invalid source patches",
-        ),
-        Err(
-            "emitted YAML exceeds input byte limit",
-        ),
-        Err(
-            "emitted YAML exceeds input byte limit",
-        ),
-    ]
-    "#);
-}
-
-#[test]
 fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
     let document = EditableDocument::parse(indoc! {r"
         outer:
@@ -368,8 +320,14 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
-            .unwrap(),
-        [(document.root, emit::region(&document, document.root, true))]
+            .unwrap()
+            .iter()
+            .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
+            .collect::<Vec<_>>(),
+        [(
+            document.root,
+            splice::region(&document, document.root, true)
+        )]
     );
 }
 
@@ -460,8 +418,14 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     assert_eq!(
         plan(&source_index, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
-            .unwrap(),
-        [(document.root, emit::region(&document, document.root, true))]
+            .unwrap()
+            .iter()
+            .map(|rewrite| (rewrite.id, rewrite.boundary.body()))
+            .collect::<Vec<_>>(),
+        [(
+            document.root,
+            splice::region(&document, document.root, true)
+        )]
     );
     editor.finish().unwrap();
 }

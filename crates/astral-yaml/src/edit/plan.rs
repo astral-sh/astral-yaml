@@ -8,6 +8,7 @@ use super::{
     framing::{RootComments, RootLayout},
     layout::Layout,
     source::Source,
+    splice::{self, Boundary, PatchSet},
     view::Syntax,
 };
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
@@ -19,6 +20,13 @@ pub(super) struct Plan<'a> {
     pub(super) parents: &'a [Option<NodeId>],
     pub(super) changes: Changes,
     pub(super) work: &'a Cell<usize>,
+}
+
+/// A selected subtree and the exact source reservation used to check overlap.
+/// Rendering consumes this same boundary rather than deriving another range.
+pub(super) struct Rewrite<'a> {
+    pub(super) id: NodeId,
+    pub(super) boundary: Boundary<'a>,
 }
 
 /// Differences between the original syntax and the final intended tree. This
@@ -269,11 +277,35 @@ impl Plan<'_> {
         false
     }
 
+    fn body_region(&self, id: NodeId, layout: &RootLayout) -> Span {
+        let mut region = splice::region(self.original, id, false);
+        if id == self.candidate.root && emit::has_inline_header(&self.candidate.nodes[id.0], false)
+        {
+            // A root's inline comment must move with its content
+            // when the emitted layout puts it on a header. Framing
+            // comments on other lines remain outside the rewrite.
+            for comment in &self.original.nodes[id.0].comments {
+                if comment.placement == CommentPlacement::Inline
+                    && comment.span.start() >= region.end()
+                    && self.original.text[region.end()..comment.span.start()]
+                        .bytes()
+                        .all(|byte| matches!(byte, b' ' | b'\t'))
+                {
+                    region.end = comment.span.end();
+                }
+            }
+        }
+        if id == self.candidate.root {
+            region = super::framing::root_region(self.original, layout, region);
+        }
+        region
+    }
+
     pub(super) fn rewrite_regions(
         &self,
         layout: &RootLayout,
         syntax: &Layout,
-    ) -> Result<Vec<(NodeId, Span)>, Error> {
+    ) -> Result<Vec<Rewrite<'_>>, Error> {
         let mut ids: Vec<_> = self.changes.roots.iter().copied().collect();
         if (!ids.is_empty() && layout.needs_suffix_context())
             || (layout.needs_scalar_boundary(self.candidate)
@@ -305,30 +337,10 @@ impl Plan<'_> {
                     true
                 })
                 .collect();
-            let mut regions: Vec<_> = ids
+            let regions: Vec<_> = ids
                 .iter()
                 .map(|&id| {
-                    let mut region = emit::region(self.original, id, false);
-                    if id == self.candidate.root
-                        && emit::has_inline_header(&self.candidate.nodes[id.0], false)
-                    {
-                        // A root's inline comment must move with its content
-                        // when the emitted layout puts it on a header. Framing
-                        // comments on other lines remain outside the rewrite.
-                        for comment in &self.original.nodes[id.0].comments {
-                            if comment.placement == CommentPlacement::Inline
-                                && comment.span.start() >= region.end()
-                                && self.original.text[region.end()..comment.span.start()]
-                                    .bytes()
-                                    .all(|byte| matches!(byte, b' ' | b'\t'))
-                            {
-                                region.end = comment.span.end();
-                            }
-                        }
-                    }
-                    if id == self.candidate.root {
-                        region = super::framing::root_region(self.original, layout, region);
-                    }
+                    let region = self.body_region(id, layout);
                     (id, region)
                 })
                 .collect();
@@ -361,14 +373,25 @@ impl Plan<'_> {
             if expanded {
                 continue;
             }
-            regions.sort_by_key(|(_, span)| span.start());
-            let Some(pair) = regions
-                .windows(2)
-                .find(|pair| pair[0].1.end() > pair[1].1.start())
-            else {
-                return Ok(regions);
+            let mut rewrites: Vec<_> = regions
+                .into_iter()
+                .map(|(id, span)| Rewrite {
+                    id,
+                    boundary: Boundary::new(
+                        &self.original.text,
+                        span,
+                        id == self.candidate.root && emit::omitted(&self.candidate.nodes[id.0]),
+                        self.original.end_marker,
+                    ),
+                })
+                .collect();
+            rewrites.sort_by_key(|rewrite| rewrite.boundary.reserved().start());
+            let Some(pair) = rewrites.windows(2).find(|pair| {
+                pair[0].boundary.reserved().end() > pair[1].boundary.reserved().start()
+            }) else {
+                return Ok(rewrites);
             };
-            let (left, right) = (pair[0].0, pair[1].0);
+            let (left, right) = (pair[0].id, pair[1].id);
             let mut parent = left;
             while !self.ancestor(parent, right) {
                 parent = self.parents[parent.0].expect("common document root");
@@ -392,9 +415,11 @@ impl Plan<'_> {
     pub(super) fn render(self, syntax: &Layout) -> Result<String, Error> {
         let layout = RootLayout::new(self.original, self.candidate, syntax);
         let regions = self.rewrite_regions(&layout, syntax)?;
-        let root_region = regions.iter().find(|&&(id, _)| id == self.candidate.root);
+        let root_region = regions
+            .iter()
+            .find(|rewrite| rewrite.id == self.candidate.root);
         let mut root_comments = if root_region.is_some() || self.changes.root_comments {
-            let region = root_region.map(|&(_, region)| region);
+            let region = root_region.map(|rewrite| rewrite.boundary.body());
             Some(self.root_comments(region, &layout)?)
         } else {
             None
@@ -402,9 +427,11 @@ impl Plan<'_> {
         let mut patches = root_comments
             .as_mut()
             .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
-        for &(id, region) in &regions {
+        for rewrite in &regions {
+            let id = rewrite.id;
+            let region = rewrite.boundary.body();
             let flow = self.flow_context(id);
-            let indent = emit::indent(&self.original.text, region.start());
+            let indent = splice::indent(&self.original.text, region.start());
             let context = if self.parents[id.0].is_some_and(|parent| {
                 matches!(
                     &self.candidate.nodes[parent.0].kind,
@@ -421,19 +448,19 @@ impl Plan<'_> {
             };
             let rendered = if id == self.candidate.root {
                 let comments = root_comments.as_ref().expect("root comment plan");
-                emit::render_with_comments(
+                splice::render_with_comments(
                     self.original.emission(self.candidate),
                     id,
-                    region,
+                    &rewrite.boundary,
                     context,
                     &comments.rendered,
                     syntax,
                 )?
             } else {
-                emit::render_with_comments(
+                splice::render_with_comments(
                     self.original.emission(self.candidate),
                     id,
-                    region,
+                    &rewrite.boundary,
                     context,
                     &self.candidate.nodes[id.0].comments,
                     syntax,
@@ -445,17 +472,13 @@ impl Plan<'_> {
             patches.append(&mut comments.after_body);
             comments.finish_suffix(self.original, &mut patches);
         }
-        // Prefix insertions at a replacement's start precede that replacement.
-        // Suffix insertions at an empty root's position follow its syntax.
-        // Stable sorting retains candidate order for insertions at the same point.
-        patches.sort_by_key(|(span, _)| (span.start(), span.end()));
-        let source = apply_patches(
+        PatchSet::new(
             &self.original.text,
             patches,
             self.original.options.max_input_bytes,
         )
-        .map_err(|message| self.error(message))?;
-        Ok(source)
+        .map(PatchSet::apply)
+        .map_err(|message| self.error(message))
     }
 
     fn flow_context(&self, mut id: NodeId) -> bool {
@@ -475,40 +498,4 @@ impl Plan<'_> {
         }
         false
     }
-}
-
-/// Apply ordered, disjoint byte patches. Validate each span's UTF-8 boundaries
-/// before slicing, and include the retained suffix in the output limit.
-pub(super) fn apply_patches(
-    source: &str,
-    patches: Vec<(Span, String)>,
-    limit: usize,
-) -> Result<String, &'static str> {
-    let mut output = String::new();
-    let mut position = 0;
-    for (span, replacement) in patches {
-        let prefix = source
-            .get(position..span.start())
-            .ok_or("overlapping or invalid source patches")?;
-        source
-            .get(span.start()..span.end())
-            .ok_or("overlapping or invalid source patches")?;
-        output
-            .len()
-            .checked_add(prefix.len())
-            .and_then(|size| size.checked_add(replacement.len()))
-            .filter(|&size| size <= limit)
-            .ok_or("emitted YAML exceeds input byte limit")?;
-        output.push_str(prefix);
-        output.push_str(&replacement);
-        position = span.end();
-    }
-    let suffix = &source[position..];
-    output
-        .len()
-        .checked_add(suffix.len())
-        .filter(|&size| size <= limit)
-        .ok_or("emitted YAML exceeds input byte limit")?;
-    output.push_str(suffix);
-    Ok(output)
 }

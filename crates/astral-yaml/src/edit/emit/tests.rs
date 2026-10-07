@@ -1,4 +1,5 @@
-use super::{EditableDocument, NodeKind, correspondence, region, render};
+use super::{EditableDocument, NodeKind, correspondence};
+use crate::edit::splice::{indent, region, render};
 use crate::edit::{draft::Draft, source::Source};
 use astral_yaml_dev::indoc;
 
@@ -12,7 +13,7 @@ fn render_draft(original: &EditableDocument, draft: Draft) -> String {
         source.emission(syntax),
         original.root,
         region,
-        super::indent(&original.source, region.start()),
+        indent(&original.source, region.start()),
         false,
     )
     .unwrap();
@@ -1099,7 +1100,7 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
             &candidate,
             candidate.root,
             region,
-            super::indent(source, region.start()),
+            indent(source, region.start()),
             false,
         )
         .unwrap();
