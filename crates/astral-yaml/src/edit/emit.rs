@@ -1,4 +1,7 @@
-use super::{Comment, CommentPosition, EditableDocument, NodeKind};
+use super::{
+    Comment, CommentPosition, EditableDocument, NodeKind,
+    view::{Emission, Syntax},
+};
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::fmt::Write;
 
@@ -48,13 +51,14 @@ pub(super) fn indent(source: &str, at: usize) -> usize {
         .count()
 }
 
-pub(super) fn render(
-    document: &EditableDocument,
+pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
+    document: impl Into<Emission<'a, Location>>,
     id: NodeId,
     region: Span,
     indent: usize,
     flow: bool,
 ) -> Result<Rendered, Error> {
+    let document = document.into();
     let mut emitter = Emitter {
         document,
         root: id,
@@ -143,11 +147,11 @@ impl Context {
 /// Comments are consumed in source order as the node's syntax is emitted.
 /// Passing the cursor through field headers, properties, and content makes
 /// interleaved inline/leading comments independent of the number of properties.
-struct Comments {
-    remaining: std::vec::IntoIter<Comment>,
+struct Comments<Location> {
+    remaining: std::vec::IntoIter<Comment<Location>>,
 }
 
-impl Comments {
+impl<Location> Comments<Location> {
     fn at_opening(&self) -> bool {
         self.remaining
             .as_slice()
@@ -162,7 +166,7 @@ impl Comments {
             .is_some_and(|comment| comment.placement == placement)
     }
 
-    fn take(&mut self, placement: CommentPlacement) -> Option<Comment> {
+    fn take(&mut self, placement: CommentPlacement) -> Option<Comment<Location>> {
         self.next_is(placement)
             .then(|| self.remaining.next().expect("next comment"))
     }
@@ -176,7 +180,7 @@ impl Comments {
         })
     }
 
-    fn take_header(&mut self) -> Option<Comment> {
+    fn take_header(&mut self) -> Option<Comment<Location>> {
         self.remaining
             .as_slice()
             .first()
@@ -239,8 +243,8 @@ enum ErasedRootLine {
     Shared,
 }
 
-struct Emitter<'a> {
-    document: &'a EditableDocument,
+struct Emitter<'a, Location> {
+    document: Emission<'a, Location>,
     root: NodeId,
     region: Span,
     output: String,
@@ -250,7 +254,7 @@ struct Emitter<'a> {
     trailing_block_scalar: bool,
 }
 
-impl Emitter<'_> {
+impl<Location: Copy + Into<Option<Span>>> Emitter<'_, Location> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: self.region,
@@ -259,7 +263,7 @@ impl Emitter<'_> {
     }
 
     fn finish(mut self) -> Result<Rendered, Error> {
-        let source = &self.document.source;
+        let source = self.document.source;
         let mut span = self.region;
         if self.trailing_block_scalar {
             // Blank lines immediately following a block scalar belong to its
@@ -369,7 +373,7 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn inline(&mut self, comments: &mut Comments) -> Result<bool, Error> {
+    fn inline(&mut self, comments: &mut Comments<Location>) -> Result<bool, Error> {
         let Some(comment) = comments.take(CommentPlacement::Inline) else {
             return Ok(false);
         };
@@ -384,7 +388,7 @@ impl Emitter<'_> {
 
     fn property_comment(
         &mut self,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
         indent: usize,
         collection: Option<CollectionStyle>,
     ) -> Result<(), Error> {
@@ -413,7 +417,7 @@ impl Emitter<'_> {
         &mut self,
         delimiter: &str,
         id: NodeId,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
         indent: usize,
     ) -> Result<(), Error> {
         self.push(delimiter)?;
@@ -438,19 +442,21 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn visible_comments(&self, id: NodeId) -> impl Iterator<Item = &Comment> {
+    fn visible_comments(&self, id: NodeId) -> impl Iterator<Item = &Comment<Location>> {
         self.document.nodes[id.0]
             .comments
             .iter()
             .filter(move |comment| {
                 id != self.root
-                    || comment.span.is_empty()
-                    || (comment.span.start() >= self.region.start()
-                        && comment.span.end() <= self.region.end())
+                    || comment.span.into().is_none_or(|span| {
+                        span.is_empty()
+                            || (span.start() >= self.region.start()
+                                && span.end() <= self.region.end())
+                    })
             })
     }
 
-    fn node_comments(&self, id: NodeId) -> Comments {
+    fn node_comments(&self, id: NodeId) -> Comments<Location> {
         Comments {
             remaining: self
                 .visible_comments(id)
@@ -460,7 +466,7 @@ impl Emitter<'_> {
         }
     }
 
-    fn before(&mut self, comments: &mut Comments, indent: usize) -> Result<(), Error> {
+    fn before(&mut self, comments: &mut Comments<Location>, indent: usize) -> Result<(), Error> {
         // Leading comments need their own line, including after flow delimiters.
         if comments.next_is(CommentPlacement::Leading) && !self.output.is_empty() {
             self.line(indent)?;
@@ -473,7 +479,7 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn prefix(&mut self, comments: &mut Comments, indent: usize) -> Result<(), Error> {
+    fn prefix(&mut self, comments: &mut Comments<Location>, indent: usize) -> Result<(), Error> {
         self.before(comments, indent)?;
         while comments
             .remaining
@@ -500,7 +506,7 @@ impl Emitter<'_> {
 
     fn between(
         &mut self,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
         child: NodeId,
         indent: usize,
     ) -> Result<(), Error> {
@@ -527,7 +533,12 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn after(&mut self, comments: Comments, indent: usize, suffix: &str) -> Result<(), Error> {
+    fn after(
+        &mut self,
+        comments: Comments<Location>,
+        indent: usize,
+        suffix: &str,
+    ) -> Result<(), Error> {
         self.push(suffix)?;
         for comment in comments.remaining {
             self.comment(&comment, indent)?;
@@ -535,7 +546,7 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    fn comment(&mut self, comment: &Comment, indent: usize) -> Result<(), Error> {
+    fn comment(&mut self, comment: &Comment<Location>, indent: usize) -> Result<(), Error> {
         if comment.placement == CommentPlacement::Inline
             && self.pending_indent.is_none()
             && !self.output.ends_with('\n')
@@ -560,7 +571,7 @@ impl Emitter<'_> {
         &mut self,
         delimiter: &str,
         id: NodeId,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
         indent: usize,
     ) -> Result<(), Error> {
         while comments
@@ -569,8 +580,13 @@ impl Emitter<'_> {
             .first()
             .is_some_and(|comment| {
                 id != self.document.root
-                    || (!comment.span.is_empty()
-                        && comment.span.end() <= self.document.nodes[id.0].span.end())
+                    || comment.span.into().is_some_and(|span| {
+                        !span.is_empty()
+                            && self.document.nodes[id.0]
+                                .span
+                                .into()
+                                .is_some_and(|node| span.end() <= node.end())
+                    })
             })
         {
             let Some(comment) = comments
@@ -601,7 +617,7 @@ impl Emitter<'_> {
         context: Context,
         suffix: &str,
         depth: usize,
-        mut comments: Comments,
+        mut comments: Comments<Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
         let flow = context.in_flow();
@@ -682,7 +698,7 @@ impl Emitter<'_> {
         id: NodeId,
         context: Context,
         depth: usize,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
         let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
@@ -754,7 +770,7 @@ impl Emitter<'_> {
         id: NodeId,
         indent: usize,
         flow: bool,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.0];
         let collection = collection_style(&node.kind, flow);
@@ -787,7 +803,7 @@ impl Emitter<'_> {
         value: &str,
         style: ScalarStyle,
         context: Context,
-        comments: &mut Comments,
+        comments: &mut Comments<Location>,
     ) -> Result<(), Error> {
         let indent = context.scalar_indent(style);
         let position = match context.position {
@@ -854,7 +870,7 @@ impl Emitter<'_> {
         context: Context,
         suffix: &str,
         depth: usize,
-        mut comments: Comments,
+        mut comments: Comments<Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
         let flow = context.in_flow();
@@ -879,7 +895,7 @@ impl Emitter<'_> {
 }
 
 /// An empty plain scalar without properties has no syntax token of its own.
-pub(super) fn omitted(node: &super::Node) -> bool {
+pub(super) fn omitted<Location>(node: &super::Node<Location>) -> bool {
     node.anchor.is_none()
         && node.tag.is_none()
         && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
@@ -1073,10 +1089,11 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
 
 /// Match syntax by traversal, not arena offsets, and verify alias identity after
 /// matching the definitions. Aliases are never expanded by this comparison.
-pub(super) fn correspondence(
-    expected: &EditableDocument,
+pub(super) fn correspondence<'a, Location: 'a>(
+    expected: impl Into<Syntax<'a, Location>>,
     actual: &EditableDocument,
 ) -> Option<Vec<Option<NodeId>>> {
+    let expected = expected.into();
     let mut pending = vec![(expected.root, actual.root)];
     let mut correspondence = vec![None; expected.nodes.len()];
     let mut aliases = Vec::new();
@@ -1120,11 +1137,12 @@ pub(super) fn correspondence(
         .then_some(correspondence)
 }
 
-pub(super) fn comments_preserved(
-    expected: &EditableDocument,
+pub(super) fn comments_preserved<'a, Location: 'a>(
+    expected: impl Into<Syntax<'a, Location>>,
     actual: &EditableDocument,
     correspondence: &[Option<NodeId>],
 ) -> bool {
+    let expected = expected.into();
     correspondence.iter().enumerate().all(|(id, target)| {
         let Some(target) = target else {
             return true;
@@ -1167,7 +1185,7 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
     first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
-fn scalar_type(node: &super::Node) -> crate::schema::ScalarType {
+fn scalar_type<Location>(node: &super::Node<Location>) -> crate::schema::ScalarType {
     use crate::schema::{ScalarType, classify};
     match node.tag.as_deref() {
         Some("!" | "tag:yaml.org,2002:str") => return ScalarType::String,

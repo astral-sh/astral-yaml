@@ -1,6 +1,7 @@
 //! Owned YAML syntax for source-preserving editing.
 
 mod emit;
+mod view;
 
 use std::borrow::Cow;
 

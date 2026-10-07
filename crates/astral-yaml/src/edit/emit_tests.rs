@@ -2,6 +2,72 @@ use super::{EditableDocument, NodeKind, correspondence, region, render};
 use astral_yaml_dev::indoc;
 
 #[test]
+fn emission_accepts_syntax_without_source_locations() {
+    use crate::edit::{
+        Comment, CommentPosition, Node,
+        view::{Emission, Syntax},
+    };
+    use crate::{NodeId, ScalarStyle, comments::CommentPlacement};
+
+    let source = indoc! {"
+        --- old
+        ...
+    "};
+    let original = EditableDocument::parse(source).unwrap();
+    let nodes = vec![Node {
+        span: None,
+        kind: NodeKind::Scalar {
+            value: "new".to_owned(),
+            style: ScalarStyle::SingleQuoted,
+        },
+        anchor: None,
+        tag: None,
+        comments: vec![Comment {
+            span: None,
+            text: " generated".to_owned(),
+            placement: CommentPlacement::Inline,
+            position: CommentPosition::After,
+        }],
+    }];
+    let input = Emission::<Option<crate::Span>> {
+        nodes: &nodes,
+        root: NodeId(0),
+        source,
+        options: original.options,
+        end_marker: original.end_marker,
+    };
+    let rendered = render(
+        input,
+        input.root,
+        original.nodes[original.root.0].span,
+        0,
+        false,
+    )
+    .unwrap();
+    let output = format!(
+        "{}{}{}",
+        &source[..rendered.span.start()],
+        rendered.text,
+        &source[rendered.span.end()..],
+    );
+    let parsed = EditableDocument::parse(&output).unwrap();
+    let syntax = Syntax {
+        nodes: &nodes,
+        root: input.root,
+    };
+    let matched = correspondence(syntax, &parsed).unwrap();
+    assert!(super::comments_preserved(syntax, &parsed, &matched));
+    insta::assert_snapshot!(astral_yaml_dev::edit_diff(source, &output), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    ---- old
+    +--- 'new' # generated
+     ...
+    ");
+}
+
+#[test]
 fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
     for (left, right, expected) in [
         ("text", "'text'", true),
