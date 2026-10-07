@@ -47,8 +47,9 @@ pub enum NodeKind {
         entries: Vec<(NodeId, NodeId)>,
         style: CollectionStyle,
     },
+    /// An edge to its anchored definition. The spelling comes from the target's
+    /// anchor, so a name cannot disagree with the referenced node.
     Alias {
-        name: String,
         target: NodeId,
     },
 }
@@ -107,10 +108,7 @@ impl EditableDocument {
                             .collect(),
                         style: *style,
                     },
-                    crate::NodeKind::Alias { name, target } => NodeKind::Alias {
-                        name: (*name).to_owned(),
-                        target: *target,
-                    },
+                    crate::NodeKind::Alias { target, .. } => NodeKind::Alias { target: *target },
                 };
                 Node {
                     span: node.span,

@@ -55,6 +55,46 @@ fn owned_document_retains_syntax_and_direct_comments() {
 }
 
 #[test]
+fn alias_edges_distinguish_recursive_and_shadowed_definitions() {
+    // Alias nodes refer to the most recent preceding definition of an anchor:
+    // https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
+    let source = indoc! {r"
+        - &item [first, *item]
+        - *item
+        - &item second
+        - *item
+    "};
+    let document = EditableDocument::parse(source).unwrap();
+    let NodeKind::Sequence { items, .. } = document.node(document.root()).unwrap().kind() else {
+        panic!("sequence")
+    };
+    let NodeKind::Sequence { items: first, .. } = document.node(items[0]).unwrap().kind() else {
+        panic!("sequence")
+    };
+    let targets: Vec<_> = [first[1], items[1], items[3]]
+        .into_iter()
+        .map(|id| {
+            let NodeKind::Alias { target } = document.node(id).unwrap().kind() else {
+                panic!("alias")
+            };
+            document
+                .node(*target)
+                .unwrap()
+                .span()
+                .slice(source)
+                .unwrap()
+        })
+        .collect();
+    insta::assert_debug_snapshot!(targets, @r#"
+    [
+        "&item [first, *item]",
+        "&item [first, *item]",
+        "&item second",
+    ]
+    "#);
+}
+
+#[test]
 fn construction_rejects_invalid_documents_and_limits() {
     for source in [
         "[",
