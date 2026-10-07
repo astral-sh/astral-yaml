@@ -457,11 +457,13 @@ impl InlineLayout {
                 }
             })
             .collect::<Vec<_>>();
-        let mut moved: HashSet<_> = start
-            .iter()
-            .chain(&end)
-            .filter_map(|&index| root.comments[index].span.map(Span::start))
-            .collect();
+        let mut moved = removed_inline_comments(original, root, body);
+        moved.extend(
+            start
+                .iter()
+                .chain(&end)
+                .filter_map(|&index| root.comments[index].span.map(Span::start)),
+        );
         if shared_headers {
             // Reassign body headers together: a retained closing comment must
             // not remain outside the rewrite when it becomes an opening one.
@@ -494,6 +496,31 @@ impl InlineLayout {
             moved,
         }
     }
+}
+
+/// Removed inline body comments belong to the rewrite too. Otherwise emission
+/// adds a terminator before the separate removal patch, leaving a blank line
+/// in front of retained suffixes.
+fn removed_inline_comments(
+    original: &Source,
+    root: &super::Node<Option<Span>>,
+    body: Span,
+) -> HashSet<usize> {
+    let retained: HashSet<_> = root
+        .comments
+        .iter()
+        .filter_map(|comment| comment.span)
+        .collect();
+    original.nodes[original.root.0]
+        .comments
+        .iter()
+        .filter_map(|comment| {
+            (comment.placement == CommentPlacement::Inline
+                && contains(body, comment.span)
+                && !retained.contains(&comment.span))
+            .then_some(comment.span.start())
+        })
+        .collect()
 }
 
 /// Allocate suffix headers between fixed neighbors, preserving candidate order.

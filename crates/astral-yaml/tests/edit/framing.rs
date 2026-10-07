@@ -1086,3 +1086,58 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
     +# changed
     ");
 }
+
+#[test]
+fn replaced_inline_comments_reuse_the_root_line_terminator() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let mut diffs = Vec::new();
+    for source in [
+        indoc! {r"
+            [] # old
+            # trailing
+        "},
+        indoc! {r"
+            value # old
+            # trailing
+
+            # detached
+        "},
+        indoc! {r"
+            --- &root {key: value} # old
+            # trailing
+            ...
+        "},
+    ] {
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            editor.remove_comment(&root, 0)?;
+            editor.insert_comment(&root, 0, " new", CommentPlacement::Inline)
+        }));
+    }
+    insta::assert_snapshot!(diffs.join("\n"), @"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,2 @@
+    -[] # old
+    +[] # new
+     # trailing
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,4 +1,4 @@
+    -value # old
+    +value # new
+     # trailing
+     ⏎
+     # detached
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,3 +1,3 @@
+    ---- &root {key: value} # old
+    +--- &root {key: value} # new
+     # trailing
+     ...
+    ");
+}
