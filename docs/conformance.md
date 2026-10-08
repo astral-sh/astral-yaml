@@ -34,11 +34,10 @@ offsets. `Source::original_span` maps them back to the original encoded bytes.
 
 ## Tests
 
-All 402 cases in the pinned [YAML Test Suite](../fixtures/yaml-test-suite/README.md)
-pass: 308 valid inputs and 94 invalid inputs, with no exclusions. Tests compare
-events, require rejection of invalid inputs, and check spans for every UTF-8
-prefix. Of the 279 cases with JSON expectations, the Serde tests compare 263
-constructed values and check that the other 16 are rejected for non-core tags.
+The pinned [YAML Test Suite](../fixtures/yaml-test-suite/README.md) runs without
+exclusions. Tests compare events, require rejection of invalid inputs, and check
+spans for every UTF-8 prefix. Serde tests compare constructed values with the
+suite's JSON expectations and check rejection of unsupported tags.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for test commands.
 
 ## Parsing details

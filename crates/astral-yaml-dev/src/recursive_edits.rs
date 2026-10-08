@@ -883,7 +883,7 @@ pub fn check_recursive_edits(data: &[u8]) {
         return;
     }
     // The operation bytes also seed the initial graph, so fuzzing can explore
-    // more than the 256 shapes selected by the batch-control byte alone.
+    // more shapes than the batch-control byte alone can select.
     let mut seed = [0; 8];
     let length = data.len().min(seed.len());
     seed[..length].copy_from_slice(&data[..length]);

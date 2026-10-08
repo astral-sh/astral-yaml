@@ -19,7 +19,7 @@ vulnerability reporting.
 
 ## Usage
 
-There are two primary interfaces:
+The primary interfaces are:
 
 - `astral-yaml` provides a low-level stream of syntax nodes with byte ranges,
   comment states, scalar styles, tags, and anchors. Aliases are not expanded.
@@ -104,19 +104,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks.
 
 ## Performance
 
-The [deserialization benchmarks](benchmarks/README.md#implementation-comparison-2026-09-30)
-compare Astral with `deser-yaml` 0.9.1, `yaml_serde` 0.10.7, and serde-saphyr 1.3.0:
-
-| Workload | Astral | `deser-yaml` | `yaml_serde` | serde-saphyr |
-| --- | ---: | ---: | ---: | ---: |
-| uv CI workflow | 26.69 µs | 70.93 µs | 136.85 µs | 189.65 µs |
-| Kubernetes Guestbook | 12.47 µs | 35.68 µs | 54.56 µs | 101.80 µs |
-| OpenAPI Petstore | 14.81 µs | 44.89 µs | 69.25 µs | 114.30 µs |
-| 128 services (typed) | 107.95 µs | 229.60 µs | — | 887.05 µs |
-
-The fixture workloads deserialize into dynamic values. `deser-yaml` uses its own
-value type, which retains additional formatting information. The service
-workload uses the same structs for each implementation. These are medians of six
-run medians on an Apple M5 Max with Rust 1.98.1, including parsing and output
-destruction. See [benchmarks](benchmarks/README.md) for settings and more
-results.
+See [benchmarks](benchmarks/README.md) for workloads, comparison settings, and
+commands. Pull requests include CodSpeed performance reports.

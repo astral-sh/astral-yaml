@@ -1,11 +1,8 @@
 # Real-world corpus
 
-The corpus contains 632 distinct, unmodified files from 33 repositories across
-23 categories. Inputs include Kubernetes resources, Compose applications,
-Argo workflows, Istio and Envoy configurations, Prometheus and OpenTelemetry
-configurations, Ansible tasks, OpenAPI documents, CloudFormation templates,
-Windows package manifests, Spack configurations, Spring applications,
-Home Assistant services, encrypted SOPS examples, and CI workflows.
+The corpus contains unmodified application and infrastructure configurations,
+including Kubernetes resources, Compose applications, CI workflows, and OpenAPI
+documents.
 
 `manifest.json` records each file's repository, revision, original path, size,
 SHA-256, category, and license. Revisions are full commit IDs. License files and
@@ -52,22 +49,20 @@ cargo insta test -p astral-yaml --test real_world --review
 Parser tests also check LF/CRLF/CR equivalence. Serde tests roundtrip values and
 check that root `Commented` values collect every comment in each constructible
 single-document fixture. Other assertions check shell content, YAML styles, and
-comments. Benchmarks use the original three fixtures so results remain comparable.
+comments. Benchmark inputs stay fixed as the corpus changes.
 
 ## Syntax and construction cases
 
 The manifest records syntax rejections separately from construction errors.
 These inputs stay unmodified and remain covered by snapshots and assertions.
-Of the 632 inputs, 629 have accepted syntax. Forty require application tag
-handling and one has duplicate mapping keys. Default value construction rejects
-those 41 inputs with the recorded `serde_error`.
+Default value construction rejects application tags and duplicate mapping keys.
+The manifest records these failures in `serde_error`.
 
 `sentry-compose.yaml` is a syntax rejection. The closing bracket in
-`seaweedfs.healthcheck.test` is at the mapping key's indentation
-(line 302), rather than inside the flow continuation. YAML 1.2.2 productions
-63, 65, 79, 137, and 138 require greater indentation in this context. The
-inline [rejection snapshot](../../crates/astral-yaml/tests/real_world/fixtures/sentry_compose.rs)
-records the diagnostic, byte range, and source line. The fixture is unmodified.
+`seaweedfs.healthcheck.test` is at the mapping key's indentation rather than
+inside the flow continuation. YAML 1.2.2 requires greater indentation here. The
+[rejection snapshot](../../crates/astral-yaml/tests/real_world/fixtures/sentry_compose.rs)
+records the diagnostic, byte range, and source line.
 
 Argo Workflows' `examples/resource-flags.yaml` has the same indentation error.
 Google APIs' `google/cloud/functions/v2/cloudfunctions_v2.yaml` has a quoted

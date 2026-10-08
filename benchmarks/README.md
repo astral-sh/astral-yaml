@@ -24,8 +24,8 @@ cargo bench -p astral-yaml-dev --bench yaml --locked -- --test
 
 ## Workloads
 
-Each workload processes all documents in one of the three fixed
-[fixtures](../fixtures/real-world/README.md):
+Fixture workloads process every document in the fixed
+[inputs](../fixtures/real-world/README.md):
 
 | Benchmark | Operation |
 | --- | --- |
@@ -95,30 +95,3 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --
 
 Outside the CodSpeed runner, this checks that benchmarks execute but does not
 collect performance measurements. Use `cargo bench` for local wall-clock timings.
-
-## Implementation comparison (2026-09-30)
-
-These measurements use `deser-yaml` 0.9.1, `yaml_serde` 0.10.7, and
-serde-saphyr 1.3.0, with Astral's source at `d00cbaf`. They ran on macOS 26.7
-with an Apple M5 Max (18 cores, 128 GiB RAM), Rust 1.98.1, and the workspace
-release profile. CPU placement and frequency were not controlled.
-
-The table shows the median of six run medians. Divan used 64 iterations per
-sample, a minimum of one second per workload, and a maximum of 1.2 seconds. Runs
-alternated between ascending and descending benchmark order. Times include
-parsing, construction, and destruction. The three fixture rows use dynamic
-values with the representation difference described above. The service row uses
-the same structs with native derives for Serde and Deser.
-
-| Workload | Bytes | Astral | `deser-yaml` | `yaml_serde` | serde-saphyr |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| uv CI workflow | 11,602 | 26.685 µs | 70.925 µs | 136.850 µs | 189.650 µs |
-| Kubernetes Guestbook | 3,366 | 12.470 µs | 35.680 µs | 54.555 µs | 101.800 µs |
-| OpenAPI Petstore | 5,479 | 14.805 µs | 44.885 µs | 69.250 µs | 114.300 µs |
-| 128 services (typed) | 26,686 | 107.950 µs | 229.600 µs | — | 887.050 µs |
-
-To repeat one round, use `--sort name`. Use `--sortr name` to reverse it:
-
-```sh
-cargo bench -p astral-yaml-dev --features compare --bench compare --locked -- --sample-size 64 --min-time 1 --max-time 1.2 --sort name
-```

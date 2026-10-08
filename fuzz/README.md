@@ -6,11 +6,11 @@ With `uv` and `rustup` on `PATH`, run:
 cargo xtask fuzz
 ```
 
-The command seeds all seven corpora, installs nightly if missing, and adds its
+The command seeds the corpora, installs nightly if missing, and adds its
 `rust-src` and `llvm-tools-preview` components. It runs cargo-fuzz through
 `uv run --only-dev --locked`, using the project's pinned development tools.
-The `parse`, `serde`, `decode`, `typed`, `editable`, `editable-model`, and `editable-graph` targets
-run sequentially for 60 seconds each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
+Targets run sequentially for 60 seconds each, with a 2-second input timeout,
+64 KiB input limit, and 2 GiB RSS limit.
 Setup or fuzzing failures stop the command. Missing `uv` is an error.
 
 Extra arguments are passed to cargo-fuzz after the same setup:
@@ -43,14 +43,14 @@ development helpers.
   models, including nested collections, aliases, and canceled edits.
 - `editable-graph` checks drafts and commits against an independent recursive
   tree and alias graph, including tags, complex keys, repeated anchors, document
-  markers, and all four comment placements. It generates representable
+  markers, and comment placements. It generates representable
   attachments and ends transaction batches at explicit layout requests. Up to
   eight initial bytes seed the graph. Byte zero also selects framing and batch
   size. Each subsequent three-byte group selects an operation and position.
   Inputs are bounded to 512 bytes and 32 operations.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first
-  byte selects one of 29 types. The rest is YAML.
+  byte selects the type. The rest is YAML.
 
 The typed target wraps each type in `Spanned<Commented<'a, T>>` and checks its source range,
 descendant comments, comment order, and borrowed text. It also checks nested
@@ -93,7 +93,7 @@ done
 uv run --script scripts/fuzz-coverage.py
 ```
 
-The script reports coverage for the two YAML crates separately for each target
+The script reports coverage for the YAML crates separately for each target
 and writes `fuzz/coverage/summary.json`. It uses cargo-fuzz's default coverage
 build directory and the host target. Each report pairs a binary with its
 profile. Combining profiles from optimized harnesses can mix incompatible
