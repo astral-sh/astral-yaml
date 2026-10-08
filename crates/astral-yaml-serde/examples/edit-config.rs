@@ -1,4 +1,4 @@
-//! Run with `cargo run -p astral-yaml-serde --example edit-config`.
+//! Run with `cargo run -p astral-yaml-serde --features editable --example edit-config`.
 use astral_yaml_serde::{
     Editable,
     edit::{CollectionStyle, CommentPlacement},

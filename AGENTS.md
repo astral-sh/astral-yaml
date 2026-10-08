@@ -17,6 +17,7 @@
 
 - Documentation and comments should describe behavior and usage. Avoid prose
   semicolons, test and corpus counts, dated validation records, and benchmark logs.
+  Prefer complete examples to API inventories in guides.
 
 - Tests should use snapshots (via insta) where appropriate, instead of a bunch
   of asserts for expected state/structure. Snapshots must be inline. Do not use
