@@ -1,5 +1,8 @@
 //! Owned YAML syntax for source-preserving editing.
 
+mod emit;
+mod view;
+
 use std::borrow::Cow;
 
 use crate::{
@@ -16,6 +19,7 @@ pub struct EditableDocument {
     pub(crate) nodes: Vec<Node>,
     pub(crate) root: NodeId,
     pub(crate) options: ParseOptions,
+    pub(crate) end_marker: Option<Span>,
 }
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
@@ -59,7 +63,68 @@ pub enum NodeKind {
 pub struct Comment<Location = Span> {
     pub(crate) text: String,
     pub(crate) placement: CommentPlacement,
+    pub(crate) position: CommentPosition,
     pub(crate) span: Location,
+}
+
+/// Source position and attachment are distinct: comments between a node's
+/// properties and content can be attached as trailing comments to that node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CommentPosition {
+    Before,
+    Header,
+    /// An inline comment after a flow collection's opening delimiter.
+    Opening,
+    /// A collection-owned comment before an item or mapping key.
+    BeforeChild(NodeId),
+    After,
+}
+
+impl CommentPosition {
+    fn for_comment(
+        stream: &crate::Stream<'_>,
+        owner: NodeId,
+        attached: &crate::comments::AttachedComment<'_>,
+        content_start: usize,
+    ) -> Self {
+        let node = &stream.nodes()[owner.0];
+        let at = attached.comment.span.start();
+        if at < node.span.start() {
+            CommentPosition::Before
+        } else if at < content_start {
+            CommentPosition::Header
+        } else if attached.placement == CommentPlacement::Inline
+            && at < node.span.end()
+            && matches!(
+                node.kind,
+                crate::NodeKind::Sequence {
+                    style: CollectionStyle::Flow,
+                    ..
+                } | crate::NodeKind::Mapping {
+                    style: CollectionStyle::Flow,
+                    ..
+                }
+            )
+        {
+            CommentPosition::Opening
+        } else if attached.placement == CommentPlacement::Detached {
+            let following = match &node.kind {
+                crate::NodeKind::Sequence { items, .. } => {
+                    let index = items.partition_point(|id| stream.nodes()[id.0].span.start() <= at);
+                    items.get(index).copied()
+                }
+                crate::NodeKind::Mapping { entries, .. } => {
+                    let index = entries
+                        .partition_point(|entry| stream.nodes()[entry.key.0].span.start() <= at);
+                    entries.get(index).map(|entry| entry.key)
+                }
+                _ => None,
+            };
+            following.map_or(CommentPosition::After, CommentPosition::BeforeChild)
+        } else {
+            CommentPosition::After
+        }
+    }
 }
 
 impl EditableDocument {
@@ -119,10 +184,24 @@ impl EditableDocument {
                 }
             })
             .collect();
+        let mut content_starts = vec![None; nodes.len()];
         for (owner, attached) in CommentIndex::new(&stream, 0)?.direct() {
+            let node = &stream.nodes()[owner.0];
+            let content_start = *content_starts[owner.0].get_or_insert_with(|| {
+                let properties_end = node
+                    .anchor
+                    .iter()
+                    .chain(node.tag.iter())
+                    .map(|property| property.span.end())
+                    .max()
+                    .unwrap_or(node.span.start());
+                crate::comments::skip_trivia(&source, properties_end).min(node.span.end())
+            });
+            let position = CommentPosition::for_comment(&stream, owner, attached, content_start);
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
+                position,
                 span: attached.comment.span,
             });
         }
@@ -130,8 +209,42 @@ impl EditableDocument {
             nodes,
             root: document.root,
             options,
+            end_marker: document.end_marker,
             source: source.into_owned(),
         })
+    }
+
+    /// Returns the document's current source with LF line endings.
+    #[must_use]
+    pub fn to_yaml(&self) -> String {
+        self.source.clone()
+    }
+
+    /// Emits the document with normalized whitespace, preserving comments and
+    /// compatible presentation styles. Source outside the root region is retained.
+    ///
+    /// # Errors
+    /// Returns an error if emission exceeds resource limits or cannot preserve
+    /// scalar text, alias identity, or comment ownership and placement.
+    pub fn normalized_yaml(&self) -> Result<String, Error> {
+        let region = emit::region(self, self.root, false);
+        let indent = emit::indent(&self.source, region.start());
+        let rendered = emit::render(self, self.root, region, indent, false)?;
+        let mut output = self.source[..rendered.span.start()].to_owned();
+        output.push_str(&rendered.text);
+        output.push_str(&self.source[rendered.span.end()..]);
+        let parsed = Self::parse_with_options(&output, self.options)?;
+        let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
+            span: region,
+            message: "emission changed YAML content or alias identity",
+        })?;
+        if !emit::comments_preserved(self, &parsed, &correspondence) {
+            return Err(Error {
+                span: region,
+                message: "emission changed comment ownership or placement",
+            });
+        }
+        Ok(output)
     }
 
     /// The current committed UTF-8 source, with LF line endings.

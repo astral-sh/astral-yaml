@@ -21,10 +21,12 @@ indoc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr = { workspace = true, optional = true }
+similar.workspace = true
 yaml_serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 divan.workspace = true
+insta.workspace = true
 
 [[bench]]
 name = "yaml"
