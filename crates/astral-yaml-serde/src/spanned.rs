@@ -22,7 +22,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 /// An alias has the span of its `*name` occurrence; wrapped children within an
 /// aliased collection have spans in the anchor's definition. Implicit nulls can
 /// have empty spans. Use [`astral_yaml::Source::original_span`] to map a span back
-/// to encoded input bytes.
+/// to encoded input bytes. In an editable document, spans refer to its
+/// LF-normalized source.
 ///
 /// Serialization emits only the value. Mutating the value does not update its
 /// metadata. Equality and hashing include the value and span.

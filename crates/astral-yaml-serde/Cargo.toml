@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+editable = ["astral-yaml/editable"]
+
 [dependencies]
 astral-yaml.workspace = true
 memchr.workspace = true
