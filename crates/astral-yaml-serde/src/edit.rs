@@ -15,7 +15,7 @@ mod tests;
 pub use astral_yaml::{
     CollectionStyle, ScalarStyle,
     comments::CommentPlacement,
-    edit::{Node, NodeKind},
+    edit::{CommentPosition, Node, NodeKind},
 };
 
 /// A transaction's value-based editor. Obtain a cursor with [`Self::root_mut`].
