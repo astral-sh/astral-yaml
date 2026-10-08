@@ -30,6 +30,23 @@ impl Default for ParseOptions {
     }
 }
 
+impl ParseOptions {
+    pub(crate) fn check_input(self, bytes: usize) -> Result<()> {
+        let error = |message| Error {
+            span: Span { start: 0, end: 0 },
+            message,
+        };
+
+        if !(1..=128).contains(&self.max_depth) {
+            return Err(error("max_depth must be between 1 and 128"));
+        }
+        if bytes > self.max_input_bytes {
+            return Err(error("input byte limit exceeded"));
+        }
+        Ok(())
+    }
+}
+
 /// Parses a UTF-8 YAML stream with the default resource limits.
 ///
 /// # Errors
@@ -43,18 +60,7 @@ pub fn parse(source: &str) -> Result<Stream<'_>> {
 /// # Errors
 /// Returns a located error for invalid syntax, invalid options, or an exceeded limit.
 pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<'_>> {
-    let error = |message| Error {
-        span: Span { start: 0, end: 0 },
-        message,
-    };
-
-    if !(1..=128).contains(&options.max_depth) {
-        return Err(error("max_depth must be between 1 and 128"));
-    }
-
-    if source.len() > options.max_input_bytes {
-        return Err(error("input byte limit exceeded"));
-    }
+    options.check_input(source.len())?;
 
     let stream = Parser {
         source,

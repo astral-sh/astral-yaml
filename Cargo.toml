@@ -27,6 +27,7 @@ deser = { version = "=0.9.1", features = ["derive"] }
 deser-value = "=0.9.1"
 deser-yaml = "=0.9.1"
 divan = { package = "codspeed-divan-compat", version = "5.0.2" }
+indoc = "2.0.7"
 insta = "1.48.0"
 memchr = "2.8.3"
 serde = { version = "1.0", features = ["derive"] }

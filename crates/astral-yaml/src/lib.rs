@@ -2,7 +2,11 @@
 //!
 //! Parsed streams use an arena so aliases do not expand or create recursively
 //! owned values. Scalar resolution is separate from syntax parsing.
+//! Enable the `editable` feature for owned, source-preserving editing.
 
+pub mod comments;
+#[cfg(feature = "editable")]
+pub mod edit;
 mod error;
 mod model;
 mod parser;
