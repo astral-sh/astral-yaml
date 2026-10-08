@@ -3,8 +3,8 @@
 use crate::{CollectionStyle, Comment, Error, NodeId, NodeKind, Span, Stream};
 use std::{cell::Cell, collections::HashMap, ops::Range};
 
-/// A comment's position relative to its direct syntax owner.
-/// Ancestor wrappers retain this placement when collecting descendant comments.
+/// A comment's placement relative to the node that owns it.
+/// Collecting the comment through an ancestor does not change its placement.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommentPlacement {
     /// Immediately precedes its node, field, or sequence item, without a blank line.
@@ -26,7 +26,7 @@ pub struct AttachedComment<'a> {
     pub placement: CommentPlacement,
 }
 
-/// Direct comment owners and subtree views for one document.
+/// An index of comments and the nodes that own them within a document.
 #[derive(Debug, Default)]
 pub struct CommentIndex<'de> {
     ranges: HashMap<NodeId, Range<usize>>,
@@ -35,18 +35,20 @@ pub struct CommentIndex<'de> {
 }
 
 impl<'de> CommentIndex<'de> {
-    /// Attaches comments using a bounded amount of work.
+    /// Assign comments in `stream.documents()[document]` to their owning nodes.
+    /// Use [`Self::with_budget`] to control or share the work limit.
     ///
     /// # Errors
-    /// Returns an error for an invalid document index or exhausted work budget.
+    /// Returns an error if `document` is out of bounds or the work limit is exceeded.
     pub fn new(stream: &Stream<'de>, document: usize) -> Result<Self, Error> {
         Self::with_budget(stream, document, &Cell::new(1_000_000))
     }
 
-    /// Builds an index, charging syntax visits and source lines to `budget`.
+    /// Build a comment index, charging source lines, node visits, and comment
+    /// assignments to `budget`.
     ///
     /// # Errors
-    /// Returns an error for an invalid document index or exhausted work budget.
+    /// Returns an error if `document` is out of bounds or `budget` is exhausted.
     pub fn with_budget(
         stream: &Stream<'de>,
         document: usize,
@@ -163,7 +165,8 @@ impl<'de> CommentIndex<'de> {
         })
     }
 
-    /// Comments owned by a node and its syntax descendants, grouped by owner.
+    /// Return comments owned by `id` and its descendants, grouped by owner.
+    /// This grouping does not preserve source order across different owners.
     #[must_use]
     pub fn subtree(&self, id: NodeId) -> &[AttachedComment<'de>] {
         self.ranges
@@ -171,7 +174,7 @@ impl<'de> CommentIndex<'de> {
             .map_or(&[], |range| &self.comments[range.clone()])
     }
 
-    /// Each comment exactly once, paired with its direct syntax owner.
+    /// Iterate over comments and their owning node IDs, visiting each comment once.
     pub fn direct(&self) -> impl Iterator<Item = (NodeId, &AttachedComment<'de>)> {
         self.owners.iter().copied().zip(&self.comments)
     }

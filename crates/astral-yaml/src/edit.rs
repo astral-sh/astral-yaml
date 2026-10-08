@@ -21,18 +21,21 @@ use crate::{
     parse_with_options,
 };
 
-/// An owned source document with LF line endings. Node IDs and spans refer only
-/// to this document's current, normalized view.
+/// An owned YAML document, including its source and comments.
+///
+/// Use [`Self::edit`] to change the document. Successful edits update its source,
+/// node IDs, and spans together. Failed edits leave it unchanged. IDs and spans
+/// belong to the document state that produced them.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
     source: source::Source,
 }
 
-/// An owned syntax node. Properties and comments belong to the occurrence,
-/// including when the occurrence is an alias.
+/// An owned YAML node.
 ///
-/// Committed nodes use [`Span`] for `Location`. During an edit, nodes use
-/// `Option<Span>` because inserted syntax has no original source range.
+/// For an alias, comments and source ranges describe the `*name` expression.
+/// Committed nodes use [`Span`] for `Location`. Nodes returned by [`Editor`] use
+/// `Option<Span>` because inserted nodes have no original source range.
 #[derive(Clone, Debug)]
 pub struct Node<Location = Span> {
     pub(crate) span: Location,
@@ -42,7 +45,8 @@ pub struct Node<Location = Span> {
     pub(crate) comments: Vec<Comment<Location>>,
 }
 
-/// Syntax content. Mapping entries retain their order and arbitrary key nodes.
+/// The contents of a [`Node`]. Mapping entries are ordered, and their keys can
+/// be any kind of YAML node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeKind {
     Scalar {
@@ -57,14 +61,14 @@ pub enum NodeKind {
         entries: Vec<(NodeId, NodeId)>,
         style: CollectionStyle,
     },
-    /// An edge to its anchored definition. The spelling comes from the target's
-    /// anchor, so a name cannot disagree with the referenced node.
+    /// An alias to the node that defines its anchor.
+    /// The alias name comes from that node's anchor.
     Alias {
         target: NodeId,
     },
 }
 
-/// A comment with its direct owner retained by the containing node.
+/// A comment attached to a [`Node`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Comment<Location = Span> {
     pub(crate) text: String,
@@ -73,12 +77,15 @@ pub struct Comment<Location = Span> {
     pub(crate) span: Location,
 }
 
-/// A comment's position within its owner.
+/// Where a comment appears within its node's syntax.
 ///
-/// This differs from [`CommentPlacement`]. For example, a comment between a node's
-/// properties and content can have trailing placement. Emission may move headers
-/// while preserving placement, but detached comments stay before their named child.
-/// Committed syntax identifies children by node ID. Edits use transaction handles.
+/// This is separate from [`CommentPlacement`]. A comment between a node's
+/// properties and content can still have trailing placement. Rendering may move
+/// these headers, but detached comments stay before their named child.
+///
+/// [`Comment::position`] identifies children by [`NodeId`].
+/// [`Editor::comment_position`] uses [`Handle`] so a position can be reused in
+/// an edit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommentPosition<Child = NodeId> {
     /// Before the node's properties and content.
@@ -156,21 +163,24 @@ impl CommentPosition {
 }
 
 impl EditableDocument {
-    /// Retains exactly one YAML document, normalizing CR and CRLF line endings
-    /// to LF. All source spans and diagnostics refer to the normalized source.
+    /// Parse `source` as an editable YAML document.
+    ///
+    /// CR and CRLF line endings are converted to LF. Spans and error locations refer
+    /// to this normalized source.
     ///
     /// # Errors
-    /// Returns a syntax, document-count, or resource-limit error.
+    /// Returns an error if `source` is invalid YAML, does not contain exactly one
+    /// document, or exceeds a resource limit.
     pub fn parse(source: &str) -> Result<Self, Error> {
         Self::parse_with_options(source, ParseOptions::default())
     }
 
-    /// Retains one document using explicit parser limits and LF line endings.
-    /// The input byte limit applies before normalization. Source spans and
-    /// diagnostics refer to the normalized source.
+    /// Like [`Self::parse`], but use the given parser limits.
+    /// The input byte limit applies before line endings are normalized.
     ///
     /// # Errors
-    /// Returns a syntax, document-count, or resource-limit error.
+    /// Returns an error if the options are invalid, `source` is invalid YAML or does
+    /// not contain exactly one document, or a resource limit is exceeded.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
         options.check_input(source.len())?;
         let source = lf_source(source);
@@ -246,24 +256,26 @@ impl EditableDocument {
         })
     }
 
-    /// Clones the committed source with LF line endings.
+    /// Return a copy of the YAML source.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.source.text.clone()
     }
 
-    /// Consumes the document and returns its committed source without cloning it.
+    /// Consume the document and return its YAML source without copying it.
     #[must_use]
     pub fn into_yaml(self) -> String {
         self.source.text
     }
 
-    /// Emits the document with normalized whitespace, preserving comments and
-    /// compatible presentation styles. Source outside the root region is retained.
+    /// Render the document with normalized whitespace, without modifying it.
+    ///
+    /// Comments and compatible styles are preserved. Source outside the root node's
+    /// rewrite region is copied unchanged.
     ///
     /// # Errors
-    /// Returns an error if emission exceeds resource limits or cannot preserve
-    /// scalar text, alias identity, or comment ownership and placement.
+    /// Returns an error if rendering exceeds a resource limit or changes scalar
+    /// content, alias targets, or comment ownership, placement, or order.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = splice::region(self, self.source.root, false);
         let indent = splice::indent(&self.source.text, region.start());
@@ -292,25 +304,25 @@ impl EditableDocument {
         Ok(output)
     }
 
-    /// The current committed UTF-8 source, with LF line endings.
+    /// Return the YAML source, with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source.text
     }
 
-    /// The root of this document's current syntax view.
+    /// Return the root node's ID.
     #[must_use]
     pub fn root(&self) -> NodeId {
         self.source.root
     }
 
-    /// Looks up a node in the current syntax view.
+    /// Return the node with the given ID, or `None` if the ID is out of bounds.
     #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.source.nodes.get(id.0)
     }
 
-    /// Parser limits used to construct this document and check its edits.
+    /// Return the parser limits used to load this document and check its edits.
     #[must_use]
     pub fn options(&self) -> ParseOptions {
         self.source.options
@@ -332,13 +344,16 @@ fn lf_source(source: &str) -> Cow<'_, str> {
 }
 
 impl<Location> Node<Location> {
-    /// The node's syntax content.
+    /// Return the node's contents.
     #[must_use]
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }
 
-    /// The node's source location. Committed nodes return their current span.
+    /// Return the node's source range.
+    ///
+    /// During an edit, this is the original range, even after replacement. Newly
+    /// inserted nodes have no source range. The committed document has fresh ranges.
     #[must_use]
     pub fn span(&self) -> Location
     where
@@ -347,19 +362,20 @@ impl<Location> Node<Location> {
         self.span
     }
 
-    /// The anchor defined by this node, if any.
+    /// Return the node's anchor name, if any.
     #[must_use]
     pub fn anchor(&self) -> Option<&str> {
         self.anchor.as_deref()
     }
 
-    /// The expanded YAML tag, if any.
+    /// Return the node's expanded YAML tag, if any.
     #[must_use]
     pub fn tag(&self) -> Option<&str> {
         self.tag.as_deref()
     }
 
-    /// Comments directly owned by this occurrence, in source order.
+    /// Return this node's own comments in their current order, excluding its descendants'
+    /// comments.
     #[must_use]
     pub fn comments(&self) -> &[Comment<Location>] {
         &self.comments
@@ -367,26 +383,29 @@ impl<Location> Node<Location> {
 }
 
 impl<Location> Comment<Location> {
-    /// Comment text, excluding the `#` character and line break.
+    /// Return the comment text, excluding `#` and the line break.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Placement relative to its directly owning node.
+    /// Return the comment's placement relative to the node that owns it.
     #[must_use]
     pub fn placement(&self) -> CommentPlacement {
         self.placement
     }
 
-    /// The comment's structural boundary. For reinsertion during an edit, use
-    /// [`Editor::comment_position`] to obtain transaction-bound child handles.
+    /// Return the comment's position within its node.
+    /// Use [`Editor::comment_position`] to capture a position for reinsertion during
+    /// an edit.
     #[must_use]
     pub fn position(&self) -> CommentPosition {
         self.position
     }
 
-    /// The comment's source location. Committed comments return their current span.
+    /// Return the comment's source range.
+    /// During an edit, retained comments keep their original ranges and new comments
+    /// have no range. The committed document has fresh ranges.
     #[must_use]
     pub fn span(&self) -> Location
     where

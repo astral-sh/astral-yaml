@@ -1,7 +1,7 @@
 use astral_yaml::Span;
 use std::fmt;
 
-/// A serialization or deserialization failure, optionally located in the input.
+/// A YAML error, optionally associated with a source span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
     pub message: String,

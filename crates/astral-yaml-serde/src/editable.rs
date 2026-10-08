@@ -2,15 +2,15 @@ use crate::{Error, edit::Editor, from_str};
 use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
 use serde::de::DeserializeOwned;
 
-/// An owned YAML document and read-only typed view, available with `editable`.
+/// A YAML document and its deserialized value, kept in sync by edits.
 ///
-/// Transactions retain unknown fields, comments, and compatible styles, then
-/// deserialize a fresh `T`. Any failure leaves the source and value unchanged.
-/// `T` needs neither `Serialize` nor `Clone`.
+/// Edits preserve comments, unknown fields, and compatible styles. The edited
+/// document must still deserialize as `T`, or the changes are discarded.
+/// `T` must implement [`DeserializeOwned`], but need not implement `Serialize`
+/// or `Clone`.
 ///
-/// Physical CR and CRLF line endings normalize to LF on load. Spans and errors use this
-/// source. Unchanged regions retain their text. Rewrites may normalize whitespace. Use
-/// [`Self::to_yaml`] to retain syntax in the output.
+/// Loading converts CR and CRLF line endings to LF. Spans refer to that source.
+/// Unchanged regions keep their text, but rewritten regions may change whitespace.
 ///
 /// ```
 /// use astral_yaml_serde::Editable;
@@ -32,24 +32,30 @@ pub struct Editable<T> {
 }
 
 impl<T: DeserializeOwned> Editable<T> {
-    /// Normalizes physical line endings to LF, then owns one UTF-8 YAML document
-    /// and deserializes its typed view. Spans and errors use the normalized source.
+    /// Parse `source` as a YAML document and deserialize its value as `T`.
+    ///
+    /// CR and CRLF line endings are converted to LF. Spans and error locations refer
+    /// to this normalized source.
     ///
     /// # Errors
-    /// Returns a syntax, type, document-count, or resource-limit error.
+    /// Returns an error if `source` is invalid YAML, does not contain exactly one
+    /// document, cannot be deserialized as `T`, or exceeds a resource limit.
     pub fn parse(source: &str) -> Result<Self, Error> {
         let syntax = EditableDocument::parse(source)?;
         let value = from_str(syntax.source())?;
         Ok(Self { value, syntax })
     }
 
-    /// Edits Rust values and presentation, committing after deserializing a fresh `T`.
-    /// Returns the callback's result only after commit. Failed mutations poison
-    /// the transaction even when the callback catches their errors.
+    /// Edit the document and return the callback's result.
+    ///
+    /// Changes are committed only if the output is valid YAML and deserializes as
+    /// `T`. Any failure leaves the source and value unchanged. A failed mutation
+    /// prevents commit even if the callback handles its error.
     ///
     /// # Errors
-    /// Returns an edit, syntax, type, or resource-limit error. The original typed
-    /// value and source remain unchanged, including on duplicate-key errors.
+    /// Propagates callback and mutation errors. Also returns an error if the output
+    /// cannot preserve the requested edits, cannot deserialize as `T`, contains
+    /// duplicate keys, or exceeds a resource limit.
     pub fn edit<R>(
         &mut self,
         edit: impl FnOnce(&mut Editor<'_, '_>) -> Result<R, Error>,
@@ -67,11 +73,12 @@ impl<T: DeserializeOwned> Editable<T> {
         Ok(result)
     }
 
-    /// Edits syntax handles and raw YAML fragments with the same typed commit
-    /// checks as [`Self::edit`]. Use this for arbitrary mapping keys and aliases.
+    /// Edit the document using YAML fragments and node handles.
+    /// Use this for arbitrary mapping keys or aliases. The output is checked and
+    /// deserialized as `T`, as with [`Self::edit`].
     ///
     /// # Errors
-    /// Returns callback, syntax, or deserialization errors without committing.
+    /// Returns callback, edit, or deserialization errors without changing the document.
     pub fn edit_syntax<R>(
         &mut self,
         edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, astral_yaml::Error>,
@@ -81,37 +88,37 @@ impl<T: DeserializeOwned> Editable<T> {
 }
 
 impl<T> Editable<T> {
-    /// Returns the typed value from the last successful parse or edit.
+    /// Return the value from the last successful parse or edit.
     #[must_use]
     pub fn value(&self) -> &T {
         &self.value
     }
 
-    /// The current committed syntax and source.
+    /// Return the document's syntax and source.
     #[must_use]
     pub fn syntax(&self) -> &EditableDocument {
         &self.syntax
     }
 
-    /// Borrows the current committed source with LF line endings.
+    /// Return the YAML source, with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
         self.syntax.source()
     }
 
-    /// Clones the committed source with LF line endings.
+    /// Return a copy of the YAML source.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.syntax.to_yaml()
     }
 
-    /// Consumes the document and returns its source without cloning it.
+    /// Consume the document and return its YAML source without copying it.
     #[must_use]
     pub fn into_yaml(self) -> String {
         self.syntax.into_yaml()
     }
 
-    /// Discards the syntax representation and returns the typed value.
+    /// Consume the document and return its deserialized value.
     #[must_use]
     pub fn into_inner(self) -> T {
         self.value

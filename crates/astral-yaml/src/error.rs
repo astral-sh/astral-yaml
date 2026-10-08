@@ -1,7 +1,7 @@
 use crate::Span;
 use std::fmt;
 
-/// A syntax or resource-limit error at a source range.
+/// An error and its source span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
     pub span: Span,

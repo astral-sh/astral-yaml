@@ -1,4 +1,4 @@
-//! Header and termination requirements shared by framing and subtree emission.
+//! Choose headers and separators needed to preserve comments during rendering.
 
 use super::{CommentPosition, NodeKind, emit, view::Syntax};
 use crate::{CollectionStyle, NodeId, ScalarStyle, comments::CommentPlacement};
@@ -10,10 +10,11 @@ enum Tail {
     Detached(NodeId),
 }
 
-/// Resolve headers and comment separation before choosing rewrite regions.
-/// Block collections need a header for each inline comment. Their final scalar
-/// or detached comment can also require separation from an enclosing comment.
-/// Preserve the candidate's content and requested styles.
+/// Formatting decisions needed before selecting rewrite regions.
+///
+/// A block collection may need flow delimiters to keep its comments attached.
+/// A final scalar or detached comment may also need separation from an enclosing
+/// comment. These decisions must preserve the edited values and requested styles.
 pub(super) struct Layout {
     tails: Vec<Tail>,
     quoted: Vec<bool>,
@@ -118,8 +119,9 @@ impl Layout {
         layout
     }
 
-    /// Multiline syntax needs its enclosing block indentation when the old
-    /// token shares a line with a field or compact collection indicator.
+    /// Return whether the content style needs multiline indentation.
+    /// A node that shared a line with a field or item indicator then needs an
+    /// enclosing rewrite.
     pub(super) fn multiline(&self, id: NodeId, kind: &NodeKind) -> bool {
         match kind {
             NodeKind::Scalar { value, style } => match self.scalar_style(id, *style) {
@@ -142,8 +144,8 @@ impl Layout {
         self.flow[id.0]
     }
 
-    /// The document marker owns its entire line's comments. Keep a root with
-    /// descendant inline comments off that line when rewriting its syntax.
+    /// Return whether the root must start on a separate line from the document marker.
+    /// Otherwise its descendants' inline comments could attach to that marker.
     pub(super) fn separate_root(&self) -> bool {
         self.descendant_inline
     }

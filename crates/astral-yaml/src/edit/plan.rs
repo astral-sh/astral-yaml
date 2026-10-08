@@ -1,4 +1,4 @@
-//! Plan source rewrites from the immutable candidate and original source index.
+//! Choose source regions to rewrite by comparing the original and edited syntax.
 
 use super::{
     Comment, Node, NodeKind,
@@ -22,14 +22,14 @@ pub(super) struct Plan<'a> {
     pub(super) work: &'a Cell<usize>,
 }
 
-/// A subtree and its source boundary, shared by overlap checks and rendering.
+/// A subtree and the source range reserved for its replacement.
 pub(super) struct Rewrite<'a> {
     pub(super) id: NodeId,
     pub(super) boundary: Boundary<'a>,
     context: emit::Context,
 }
 
-/// Differences from the final candidate. Canceled edits produce no rewrites.
+/// Changes between the original and final syntax, excluding canceled edits.
 pub(super) struct Changes {
     roots: HashSet<NodeId>,
     root_comments: bool,
@@ -90,8 +90,8 @@ fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
         })
 }
 
-/// Edit existing comments outside the root without rewriting its body.
-/// New comments need a body layout to determine their positions.
+/// Return whether only existing comments outside the node's span have changed.
+/// New comments require a layout decision and cannot use this shortcut.
 fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
     let body = |span: Span| span.start() >= old.span.start() && span.end() <= old.span.end();
     if new.comments.iter().any(|comment| comment.span.is_none()) {

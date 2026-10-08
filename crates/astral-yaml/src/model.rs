@@ -74,7 +74,7 @@ pub enum CollectionStyle {
     Flow,
 }
 
-/// A decoded scalar and the range of its lexical representation.
+/// A decoded scalar and its source range.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scalar<'a> {
     pub value: Cow<'a, str>,
@@ -82,7 +82,7 @@ pub struct Scalar<'a> {
     pub span: Span,
 }
 
-/// An anchor name or expanded tag, with its lexical range.
+/// An anchor name or expanded tag, with its source range.
 /// Percent escapes in tag URIs retain their original spelling.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Property<'a> {

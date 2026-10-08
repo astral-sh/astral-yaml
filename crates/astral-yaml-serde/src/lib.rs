@@ -1,5 +1,5 @@
-//! Serde support for YAML 1.2, with source-located errors and bounded alias expansion.
-//! Enable `editable` for source-preserving editing with a typed view.
+//! Serialize and deserialize YAML 1.2 with Serde.
+//! Enable `editable` for YAML editing.
 
 mod commented;
 mod comments;

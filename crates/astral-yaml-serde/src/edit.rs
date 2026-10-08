@@ -1,4 +1,4 @@
-//! Value-based editing inside an [`Editable`](crate::Editable) transaction.
+//! Edit YAML using Rust values inside an [`Editable`](crate::Editable) transaction.
 
 use crate::{Error, to_string};
 use astral_yaml::{
@@ -18,8 +18,10 @@ pub use astral_yaml::{
     edit::{CommentPosition, Node, NodeKind},
 };
 
-/// A transaction's value-based editor. Obtain a cursor with [`Self::root_mut`].
-/// Raw YAML fragments are accepted only by the lower-level [`Self::syntax_mut`] API.
+/// An editor for an [`Editable`](crate::Editable) transaction.
+///
+/// Start at [`Self::root_mut`] to edit Rust values. Use [`Self::syntax_mut`] for
+/// YAML fragments, aliases, or mapping keys that are not strings.
 #[derive(Debug)]
 pub struct Editor<'a, 'doc> {
     syntax: &'a mut SyntaxEditor<'doc>,
@@ -38,7 +40,7 @@ impl<'a, 'doc> Editor<'a, 'doc> {
         self.failure.map_or(Ok(()), Err)
     }
 
-    /// Selects the candidate document's root.
+    /// Return a cursor at the document's root.
     pub fn root_mut(&mut self) -> Cursor<'_, 'doc> {
         let handle = self.syntax.root();
         Cursor {
@@ -49,16 +51,19 @@ impl<'a, 'doc> Editor<'a, 'doc> {
         }
     }
 
-    /// Accesses syntax handles, arbitrary YAML keys, and raw-fragment operations.
+    /// Return the syntax editor for this transaction.
     pub fn syntax_mut(&mut self) -> &mut SyntaxEditor<'doc> {
         self.syntax
     }
 }
 
-/// A mutable position in a transaction's syntax.
+/// A position in the YAML document being edited.
 ///
-/// Navigation consumes the cursor. Use [`Self::reborrow`] to keep the parent
-/// cursor for later edits. Navigation does not follow aliases.
+/// Navigation consumes the cursor. Use [`Self::reborrow`] when you need to return
+/// to the same position later. Navigation does not follow aliases.
+///
+/// Methods returning `Result` enforce the document's resource limits. A failed mutation
+/// prevents the transaction from committing, even if its error is handled.
 #[derive(Debug)]
 pub struct Cursor<'a, 'doc> {
     syntax: &'a mut SyntaxEditor<'doc>,
@@ -68,8 +73,7 @@ pub struct Cursor<'a, 'doc> {
 }
 
 impl<'doc> Cursor<'_, 'doc> {
-    /// Borrows this position temporarily, for navigating or inserting while
-    /// retaining the parent cursor.
+    /// Borrow this position for an edit without consuming the original cursor.
     pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
         Cursor {
             syntax: self.syntax,
@@ -79,11 +83,12 @@ impl<'doc> Cursor<'_, 'doc> {
         }
     }
 
-    /// Inspects the candidate node. Locations refer to original occurrences,
-    /// even after replacement. Inserted syntax has no source location (`None`).
+    /// Return the selected node, including pending edits.
+    /// Its span refers to the original source, even after replacement. Inserted nodes
+    /// have no source span.
     ///
     /// # Errors
-    /// Returns an error if the transaction's work budget is exhausted.
+    /// Returns an error if the transaction's work limit is exceeded.
     pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
         self.syntax
             .node(&self.handle)
@@ -127,11 +132,14 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(found)
     }
 
-    /// Selects a decoded string key, returning `None` when it is absent.
-    /// Application-tagged keys do not match their scalar text.
+    /// Select the value at string key `name`, or return `None` if it is absent.
+    ///
+    /// Keys are compared after decoding. For example, `'name'` matches `name`, but
+    /// `!custom name` does not. Numeric and boolean keys do not match their string
+    /// spellings.
     ///
     /// # Errors
-    /// Rejects non-mappings, ambiguous keys, and exhausted work budgets.
+    /// Returns an error if the node is not a mapping or more than one key matches.
     pub fn get(mut self, name: &str) -> Result<Option<Self>, Error> {
         let found = self
             .field_index(name)
@@ -145,21 +153,21 @@ impl<'doc> Cursor<'_, 'doc> {
         }
     }
 
-    /// Selects a required string key. Periods, slashes, and brackets in `name`
-    /// are literal characters, not path separators.
+    /// Like [`Self::get`], but require the key to exist.
+    /// Characters such as `.` and `/` in `name` are literal, not path separators.
     ///
     /// # Errors
-    /// Rejects missing or ambiguous keys, non-mappings, and exhausted budgets.
+    /// Returns an error if the node is not a mapping, or the key is missing or ambiguous.
     pub fn field(self, name: &str) -> Result<Self, Error> {
         let path = format!("{}[{name:?}]", self.path);
         self.get(name)?
             .ok_or_else(|| Error::new(format!("{path}: missing mapping key")))
     }
 
-    /// Selects a sequence item at its current index.
+    /// Select the sequence item at `index`, accounting for earlier edits.
     ///
     /// # Errors
-    /// Rejects non-sequences, out-of-range indices, and exhausted budgets.
+    /// Returns an error if the node is not a sequence or `index` is out of bounds.
     pub fn item(mut self, index: usize) -> Result<Self, Error> {
         let items = self
             .syntax
@@ -173,13 +181,14 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(self)
     }
 
-    /// Replaces this node with a serialized Rust value, removing its descendants.
+    /// Replace the selected node with a serialized Rust value.
     ///
-    /// Strings remain strings. The replacement keeps the node's anchor, outer
-    /// comments, and compatible style. Tags come from the new value.
+    /// The replacement keeps the node's anchor, outer comments, and compatible style.
+    /// Tags come from `value`. Strings are serialized as strings, so `set("false")`
+    /// and `set(false)` produce different YAML values.
     ///
     /// # Errors
-    /// Serialization and mutation failures poison the transaction, even if caught.
+    /// Returns an error if `value` cannot be serialized or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
         self.mutate(|cursor| {
             let yaml = to_string(&value)?;
@@ -190,11 +199,12 @@ impl<'doc> Cursor<'_, 'doc> {
         })
     }
 
-    /// Replaces an existing string-keyed value in place, or appends a missing
-    /// entry. Selects the value so its style and comments can be edited.
+    /// Set the value at string key `name` and return a cursor to it.
+    /// If the key is absent, append a new entry to the mapping.
     ///
     /// # Errors
-    /// Rejects ambiguous keys, non-mappings, serialization errors, and limits.
+    /// Returns an error if the node is not a mapping, the key is ambiguous, or
+    /// `value` cannot be serialized.
     pub fn set_entry(mut self, name: &str, value: impl Serialize) -> Result<Self, Error> {
         let handle = self.mutate(|cursor| {
             let yaml = to_string(&value)?;
@@ -219,11 +229,11 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(self)
     }
 
-    /// Removes a string-keyed entry and its comments. Returns `false` without
-    /// changing the mapping if the key is absent.
+    /// Remove the entry at string key `name`, including its comments.
+    /// Return whether an entry was removed.
     ///
     /// # Errors
-    /// Rejects non-mappings, ambiguous keys, and exhausted budgets.
+    /// Returns an error if the node is not a mapping or the key is ambiguous.
     pub fn remove_field(&mut self, name: &str) -> Result<bool, Error> {
         self.mutate(|cursor| {
             if let Some((index, _)) = cursor.field_index(name)? {
@@ -235,20 +245,22 @@ impl<'doc> Cursor<'_, 'doc> {
         })
     }
 
-    /// Appends a serialized value and selects the inserted item.
+    /// Append `value` to the sequence and return a cursor to the new item.
     ///
     /// # Errors
-    /// Rejects non-sequences, serialization errors, and resource limits.
+    /// Returns an error if the node is not a sequence or `value` cannot be serialized.
     pub fn push(mut self, value: impl Serialize) -> Result<Self, Error> {
         let index =
             self.mutate(|cursor| Ok(cursor.syntax.sequence_items(&cursor.handle)?.len()))?;
         self.insert(index, value)
     }
 
-    /// Inserts a serialized value before `index` and selects it. `len` appends.
+    /// Insert `value` before `index` and return a cursor to the new item.
+    /// An index equal to the sequence's length appends the item.
     ///
     /// # Errors
-    /// Rejects non-sequences, invalid indices, serialization errors, and limits.
+    /// Returns an error if the node is not a sequence, `index` exceeds its length,
+    /// or `value` cannot be serialized.
     pub fn insert(mut self, index: usize, value: impl Serialize) -> Result<Self, Error> {
         let handle = self.mutate(|cursor| {
             let yaml = to_string(&value)?;
@@ -260,36 +272,42 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(self)
     }
 
-    /// Removes an item and its owned comments. Subsequent indices reflect removal.
+    /// Remove the item at `index`, including its comments.
+    /// Later items shift down by one index.
     ///
     /// # Errors
-    /// Rejects non-sequences, invalid indices, and resource limits.
+    /// Returns an error if the node is not a sequence or `index` is out of bounds.
     pub fn remove_item(&mut self, index: usize) -> Result<(), Error> {
         self.mutate(|cursor| Ok(cursor.syntax.remove_item(&cursor.handle, index)?))
     }
 
-    /// Requests an exact scalar style. Commit rejects an incompatible request.
+    /// Request a style for the selected scalar.
+    /// The transaction fails if that style cannot represent the scalar's text in its
+    /// surrounding YAML.
     ///
     /// # Errors
-    /// Rejects non-scalars, type-changing styles, and resource limits.
+    /// Returns an error if the node is not a scalar or the style changes its YAML type.
     pub fn set_scalar_style(&mut self, style: ScalarStyle) -> Result<(), Error> {
         self.mutate(|cursor| Ok(cursor.syntax.set_scalar_style(&cursor.handle, style)?))
     }
 
-    /// Requests block or flow syntax. Empty collections remain in flow style.
+    /// Request block or flow style for the selected collection.
+    /// Empty collections always use flow style.
     ///
     /// # Errors
-    /// Rejects non-collections and exhausted resource limits.
+    /// Returns an error if the node is not a collection.
     pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
         self.mutate(|cursor| Ok(cursor.syntax.set_collection_style(&cursor.handle, style)?))
     }
 
-    /// Appends an owned comment without `#` or a line break. Include a leading
-    /// space in `text` when the emitted comment should start with `# `.
+    /// Append a comment to the selected node.
+    /// `text` is everything after `#`, including any leading space.
+    ///
+    /// The transaction fails if the placement cannot be represented without changing
+    /// which node owns a comment.
     ///
     /// # Errors
-    /// Rejects invalid text and resource limits. Commit rejects placements that
-    /// cannot preserve the node's attachments.
+    /// Returns an error if `text` contains a line break or an editing limit is exceeded.
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
         self.mutate(|cursor| {
             let index = cursor.syntax.node(&cursor.handle)?.comments().len();
@@ -300,18 +318,18 @@ impl<'doc> Cursor<'_, 'doc> {
         })
     }
 
-    /// Replaces a directly owned comment's text, retaining its placement.
+    /// Replace the text of the node's comment at `index`, keeping its placement.
     ///
     /// # Errors
-    /// Rejects invalid indices, multiline text, and resource limits.
+    /// Returns an error if `index` is out of bounds or `text` contains a line break.
     pub fn replace_comment(&mut self, index: usize, text: &str) -> Result<(), Error> {
         self.mutate(|cursor| Ok(cursor.syntax.replace_comment(&cursor.handle, index, text)?))
     }
 
-    /// Removes a directly owned comment.
+    /// Remove the node's comment at `index`.
     ///
     /// # Errors
-    /// Rejects invalid indices and exhausted resource limits.
+    /// Returns an error if `index` is out of bounds.
     pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
         self.mutate(|cursor| Ok(cursor.syntax.remove_comment(&cursor.handle, index)?))
     }

@@ -12,15 +12,15 @@ type Result<T> = std::result::Result<T, Error>;
 
 const MAX_DEPTH: usize = 63;
 
-/// Serializes a value as a YAML 1.2 document in flow style.
+/// Serialize `value` as a YAML 1.2 document in flow style.
 ///
-/// Strings are quoted to preserve their type under core-schema resolution.
-/// Enums use a name for unit variants and a single-entry mapping otherwise.
+/// Strings are quoted to preserve their type. Unit enum variants use their name,
+/// and variants with data use a mapping with the variant name as its key.
 ///
 /// # Errors
-/// Returns an error for a tag/content mismatch, duplicate mapping keys, an
-/// exceeded resource limit, or a `Serialize` implementation that violates the
-/// map protocol.
+/// Propagates errors from `Serialize`. Also returns an error if a tag conflicts
+/// with its value, a mapping repeats a key, keys and values are not paired,
+/// or a resource limit is exceeded.
 #[inline]
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {

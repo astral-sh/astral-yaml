@@ -13,27 +13,23 @@ pub(crate) const NAME: &str = "$astral_yaml::Tagged";
 
 /// A deserialized value with its explicit YAML tag.
 ///
-/// The tag is expanded: `!Text` stays `!Text`, while `!!str` becomes
-/// `tag:yaml.org,2002:str`. Percent escapes retain their original spelling. Untagged
-/// input is rejected. Application tags are consumed by the wrapper. Core tags still
-/// determine the payload's type and must match its content.
+/// Tag handles are expanded, so `!!str` becomes `tag:yaml.org,2002:str`, while
+/// `!Text` stays `!Text`. Percent escapes keep their original spelling.
+/// Untagged input is an error. Capturing a core tag does not disable its type
+/// check on the value.
 ///
-/// The tag is owned, so this wrapper implements `DeserializeOwned` when `T`
-/// does. The payload can also borrow from the input. Use
-/// [`crate::Spanned`] and [`crate::Commented`] around this wrapper to retain
-/// source spans and comments.
-/// Serialization with this crate emits the tag and payload as one YAML node.
-/// Explicit core tags must match the emitted content. For example, `!!int`
-/// permits the string payload `"42"`, but `!!map` requires a mapping payload.
-/// Deserialization requires this crate's deserializer.
+/// This crate's serializer emits the tag and value together. Core tags must match the
+/// emitted YAML. For example, `!!int` allows a string value of `"42"`, but `!!map`
+/// requires a mapping. Use `Tagged<Option<T>>` to capture a `!!null` tag before
+/// the option deserializes as `None`.
 ///
-/// `Option<T>` resolves `!!null` as `None`. To capture that tag, put this wrapper
-/// outside the option: `Tagged<Option<T>>`.
+/// The tag is owned, so `Tagged<T>` implements `DeserializeOwned` when `T` does.
+/// The value can still borrow from the input. Wrap this type in [`crate::Spanned`]
+/// or [`crate::Commented`] to retain its source span or comments.
 ///
-/// This wrapper must reach the YAML deserializer directly. Serde's buffering for
-/// derived untagged enums and flattened fields happens before their payload
-/// types are visited, so a wrapper inside such a buffer cannot opt into tags.
-/// Use [`crate::with::yaml_tag`] to interpret local tags as enum variant names.
+/// Deserialization requires this crate's deserializer. A wrapper inside Serde's
+/// `untagged` or `flatten` buffer cannot opt into tags. Use
+/// [`crate::with::yaml_tag`] to interpret local tags as enum variant names.
 ///
 /// ```
 /// use astral_yaml_serde::{Tagged, from_str, to_string};
@@ -54,7 +50,7 @@ pub struct Tagged<T> {
 }
 
 impl<T> Tagged<T> {
-    /// Returns the payload, discarding its tag.
+    /// Return the value, discarding its tag.
     #[must_use]
     pub fn into_inner(self) -> T {
         self.value

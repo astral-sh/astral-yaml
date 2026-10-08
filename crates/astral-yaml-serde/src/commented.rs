@@ -13,24 +13,24 @@ use std::{
 // The private newtype protocol requests (value, comments) from the deserializer.
 pub(crate) const NAME: &str = "$astral_yaml::Commented";
 
-/// A deserialized value with its borrowed comments.
+/// A deserialized value with comments borrowed from the YAML source.
 ///
-/// Can wrap a field, mapping key, collection element, or whole document.
+/// Includes the node's own comments and those of its syntax descendants, in source
+/// order. Each comment appears once per wrapper, so nested wrappers can contain
+/// some of the same comments. Placement is relative to the node that owns the
+/// comment, even when it is collected by a parent wrapper.
 ///
-/// Serialization emits only the value. Mutating the value does not update its
-/// comments. Equality and hashing include the value and comments.
+/// An alias uses the comments at its `*name` expression. Wrapped children of an
+/// aliased collection use comments from the anchor's definition. Comments can
+/// fall outside their node's span.
 ///
-/// Comments include the node's own comments and those of all syntax descendants,
-/// in source order, once per wrapper. Parent and child lists overlap.
-/// Alias wrappers contain comments at the alias occurrence. Wrapped children of
-/// aliased collections retain comments from the anchor's definition. Comment
-/// placement is relative to the direct owner. Comments can lie outside
-/// the node's span. Comment text borrows the input even when `T` is owned.
+/// Serialization emits only the value. Changing the value does not update the
+/// comments. Equality and hashing include both. Comment text borrows the source
+/// even when `T` is owned.
 ///
-/// Deserialization requires this crate's deserializer. Serde's buffering for
-/// `#[serde(untagged)]` and `#[serde(flatten)]` discards source
-/// metadata: wrap the containing enum or struct instead of fields decoded from that
-/// buffer.
+/// Deserialization requires this crate's deserializer. Serde's `untagged` and
+/// `flatten` buffers discard comments. Wrap the containing enum or struct when
+/// you need its comments, rather than a field deserialized from a buffer.
 ///
 /// ```
 /// use astral_yaml_serde::{Commented, from_str};
@@ -48,7 +48,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Commented";
 /// assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
-/// A wrapper cannot outlive the source of its comments:
+///
+/// `Commented` cannot outlive the source of its comments:
 ///
 /// ```compile_fail
 /// use astral_yaml_serde::{Commented, from_str};
@@ -75,7 +76,7 @@ pub struct Commented<'a, T> {
 }
 
 impl<T> Commented<'_, T> {
-    /// Returns the value, discarding its metadata.
+    /// Return the value, discarding its comments.
     #[must_use]
     pub fn into_inner(self) -> T {
         self.value
