@@ -9,15 +9,16 @@ fields. If a plain scalar resolves as a number, boolean, or null, the buffer
 loses its text and cannot deserialize it into a string. Quote the scalar or use
 `!!str` to preserve it as a string in these contexts.
 
-`Spanned`, `Commented`, and `Tagged` require direct access to the YAML deserializer; Serde's
-intermediate buffers cannot retain their metadata. For spans or comments, wrap the
-containing enum or struct instead of a field decoded from the buffer.
+`Spanned`, `Commented`, and `Tagged` require direct access to the YAML
+deserializer. Serde's intermediate buffers cannot retain their metadata. For
+spans or comments, wrap the containing enum or struct instead of a field decoded
+from the buffer.
 
 ## Mapping keys
 
 Mapping-key comparison uses 128-bit integer magnitudes and 64-bit floats,
 independently of the destination key type. Comparison includes application tags.
-Application-tagged scalar keys are compared by their tag and scalar text; the
+Application-tagged scalar keys are compared by their tag and scalar text. The
 adapter cannot infer a custom tag's canonical form. Applications that assign
 additional equivalences to these keys must check them when constructing values.
 

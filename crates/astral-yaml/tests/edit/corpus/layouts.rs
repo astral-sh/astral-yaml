@@ -181,8 +181,8 @@ impl Case {
             "{source}"
         );
 
-        // Property headers give these block layouts a known spelling; no flow
-        // delimiter is needed for a comment. Verify that witness independently.
+        // Property headers give these block layouts a known spelling. No flow delimiter
+        // is needed for a comment. Verify that witness independently.
         let block = !matches!(self.kind, Kind::Scalar)
             && self.properties != 0
             && self.mask < 1 << self.properties.count_ones();

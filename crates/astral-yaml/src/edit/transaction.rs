@@ -10,17 +10,24 @@ use std::sync::Arc;
 #[cfg(test)]
 mod tests;
 
-/// A node reference belonging to one edit transaction. Handles can be cloned,
-/// but cannot be used in another transaction or after their node is deleted.
+/// A reference to a node within an edit transaction.
+///
+/// Handles can be cloned. A handle becomes invalid when its node is deleted or
+/// the transaction ends, and cannot be used in another transaction.
 #[derive(Clone, Debug)]
 pub struct Handle {
     transaction: Arc<()>,
     id: NodeId,
 }
 
-/// Mutable candidate syntax. Obtain handles by navigating from [`Self::root`].
-/// Node and comment locations refer to their original occurrences, even after
-/// replacement. Inserted syntax has no source location (`None`).
+/// An editor for a pending transaction.
+///
+/// Obtain handles by navigating from [`Self::root`]. Reads include earlier edits
+/// in the same transaction, but spans still refer to the original source.
+/// Inserted nodes and comments have no source span.
+///
+/// Methods returning `Result` enforce the document's resource limits and reject handles
+/// from other transactions or deleted nodes.
 #[derive(Debug)]
 pub struct Editor<'a> {
     original: &'a EditableDocument,
@@ -30,12 +37,15 @@ pub struct Editor<'a> {
 }
 
 impl EditableDocument {
-    /// Applies syntax edits atomically. Failed mutation operations poison the transaction,
-    /// even if the callback catches their errors.
+    /// Edit the document and return the callback's result.
+    ///
+    /// The output is parsed and checked against the requested changes before it
+    /// replaces the document. Any failure leaves the document unchanged. A failed
+    /// mutation prevents commit even if the callback handles its error.
     ///
     /// # Errors
-    /// Returns an error for invalid edits, invalid emitted syntax, altered alias
-    /// identity, or exhausted resource limits. The document remains unchanged.
+    /// Returns an error if the callback fails, an edit is invalid or cannot be
+    /// represented in YAML, or a resource limit is exceeded.
     pub fn edit<R>(
         &mut self,
         edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
@@ -43,11 +53,11 @@ impl EditableDocument {
         self.try_edit(edit)
     }
 
-    /// Applies a transaction whose callback uses an application-defined error.
-    /// The callback's result is returned only after a successful commit.
+    /// Like [`Self::edit`], but allow the callback to return an application error.
+    /// The callback's result is returned only after the changes are committed.
     ///
     /// # Errors
-    /// Returns callback or edit errors, leaving the document unchanged.
+    /// Propagates callback and edit errors, leaving the document unchanged.
     pub fn try_edit<R, E: From<Error>>(
         &mut self,
         edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
@@ -109,24 +119,24 @@ impl<'a> Editor<'a> {
         result
     }
 
-    /// The root of this transaction's candidate document.
+    /// Return a handle to the document's root.
     #[must_use]
     pub fn root(&self) -> Handle {
         self.handle(self.draft.root())
     }
 
-    /// Inspects a live node in this transaction.
+    /// Return the node for `handle`, including pending edits.
     ///
     /// # Errors
-    /// Rejects foreign/deleted handles and exhausted work budgets.
+    /// Returns an error if `handle` is invalid or the work limit is exceeded.
     pub fn node(&self, handle: &Handle) -> Result<&Node<Option<Span>>, Error> {
         Ok(self.draft.node(self.id(handle)?))
     }
 
-    /// Returns sequence-item handles in source order.
+    /// Return handles to the sequence items at `handle`, in their current order.
     ///
     /// # Errors
-    /// Rejects invalid handles, non-sequences, and exhausted work budgets.
+    /// Returns an error if `handle` is invalid or does not refer to a sequence.
     pub fn sequence_items(&self, handle: &Handle) -> Result<Vec<Handle>, Error> {
         let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
             return Err(self.error("expected a sequence"));
@@ -135,10 +145,11 @@ impl<'a> Editor<'a> {
         Ok(items.iter().map(|&id| self.handle(id)).collect())
     }
 
-    /// Returns mapping key/value handles in source order, including complex keys.
+    /// Return handles to the mapping keys and values at `handle`, in their current order.
+    /// Keys can be any kind of YAML node.
     ///
     /// # Errors
-    /// Rejects invalid handles, non-mappings, and exhausted work budgets.
+    /// Returns an error if `handle` is invalid or does not refer to a mapping.
     pub fn mapping_entries(&self, handle: &Handle) -> Result<Vec<(Handle, Handle)>, Error> {
         let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
             return Err(self.error("expected a mapping"));
@@ -150,27 +161,28 @@ impl<'a> Editor<'a> {
             .collect())
     }
 
-    /// Replaces a node with a parsed single-node YAML fragment, retaining its
-    /// outer comment attachments. Its handle remains valid; handles to its old
-    /// descendants expire. Later operations see the replacement's content.
-    /// Existing aliases to the node use its new anchor. Commit rejects a missing
-    /// anchor or shadowing that would change an alias's target identity.
+    /// Replace `handle`'s node with the parsed `yaml`, keeping its outer comments.
+    ///
+    /// The handle continues to refer to the replacement, but handles to its old
+    /// descendants become invalid. Existing aliases use the replacement's anchor.
+    /// Commit fails if an alias loses its anchor or would refer to a different node.
     ///
     /// # Errors
-    /// Rejects invalid fragments, handles, or limits.
+    /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
+    /// single document within the resource limits.
     pub fn replace(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
         self.replace_impl(handle, yaml, false)
     }
 
-    /// Replaces a node from a YAML fragment, retaining any existing anchor, outer comments,
-    /// and compatible scalar or collection style. The fragment supplies tags.
-    /// Its anchor is used when the original node has none. Aliases in the fragment
-    /// retain their target identity when an existing anchor takes its place.
-    /// Unlike an explicit style request, the retained style may fall back when
-    /// the new content cannot use it.
+    /// Like [`Self::replace`], but keep the node's anchor and compatible style.
+    ///
+    /// The fragment supplies tags and, if the old node has no anchor, its anchor.
+    /// Aliases within the fragment are updated to refer to the retained anchor.
+    /// A style that cannot represent the new value is replaced with a suitable one.
     ///
     /// # Errors
-    /// Rejects invalid fragments, handles, or limits.
+    /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
+    /// single document within the resource limits.
     pub fn replace_preserving_style(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
         self.replace_impl(handle, yaml, true)
     }
@@ -179,10 +191,12 @@ impl<'a> Editor<'a> {
         self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
     }
 
-    /// Inserts a parsed item before `index`; `len` appends.
+    /// Parse `yaml` and insert it into `sequence` before `index`.
+    /// An index equal to the sequence's length appends the item.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, fragments, node kinds, or limits.
+    /// Returns an error if `sequence` is invalid or not a sequence, `index` exceeds
+    /// its length, or `yaml` cannot be parsed as a single document.
     pub fn insert_item(
         &mut self,
         sequence: &Handle,
@@ -192,18 +206,21 @@ impl<'a> Editor<'a> {
         self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))
     }
 
-    /// Removes an item and comments owned by its subtree.
+    /// Remove the item at `index` from `sequence`, including its descendants' comments.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, node kinds, or limits.
+    /// Returns an error if `sequence` is invalid or not a sequence, or `index` is
+    /// out of bounds.
     pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(sequence, |draft, id| draft.remove_item(id, index))
     }
 
-    /// Inserts an ordered mapping entry from two single-node YAML fragments.
+    /// Parse `key` and `value` and insert an entry into `mapping` before `index`.
+    /// An index equal to the mapping's length appends the entry.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, fragments, node kinds, or limits.
+    /// Returns an error if `mapping` is invalid or not a mapping, `index` exceeds
+    /// its length, or either fragment cannot be parsed as a single document.
     pub fn insert_entry(
         &mut self,
         mapping: &Handle,
@@ -216,28 +233,32 @@ impl<'a> Editor<'a> {
         })
     }
 
-    /// Removes an entry and comments owned by its key/value subtrees.
+    /// Remove the entry at `index` from `mapping`, including its key, value, and
+    /// their descendants' comments.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, node kinds, or limits.
+    /// Returns an error if `mapping` is invalid or not a mapping, or `index` is
+    /// out of bounds.
     pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(mapping, |draft, id| draft.remove_entry(id, index))
     }
 
-    /// Requests a scalar style. Commit rejects styles that change the scalar's
-    /// implicit type or cannot represent its text in the surrounding context.
+    /// Request a style for the scalar at `handle`.
+    /// The transaction fails if that style cannot represent the scalar's text in its
+    /// surrounding YAML.
     ///
     /// # Errors
-    /// Rejects invalid handles, non-scalars, or exhausted work budgets.
+    /// Returns an error if `handle` is invalid, the node is not a scalar, or the style
+    /// changes its YAML type.
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
         self.mutate(handle, |draft, id| draft.set_scalar_style(id, style))
     }
 
-    /// Requests block or flow collection syntax. An empty collection is emitted
-    /// in flow style regardless of the requested preference.
+    /// Request block or flow style for the collection at `handle`.
+    /// Empty collections always use flow style.
     ///
     /// # Errors
-    /// Rejects invalid handles, non-collections, or exhausted work budgets.
+    /// Returns an error if `handle` is invalid or the node is not a collection.
     pub fn set_collection_style(
         &mut self,
         handle: &Handle,
@@ -246,15 +267,17 @@ impl<'a> Editor<'a> {
         self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
     }
 
-    /// Inserts comment text (without `#` or a line break) at an owner-local index.
-    /// Inline comments require distinct syntax headers in the emitted layout.
-    /// Leading comments precede the node. Detached comments use the next existing
-    /// collection gap, or follow the node; other placements follow the node.
-    /// Use [`Self::insert_comment_at`] to select or retain a structural position.
+    /// Insert a comment at `index` in the node's own comment list.
+    /// `text` is everything after `#`, including any leading space.
+    ///
+    /// Leading comments go before the node. A detached comment uses the next
+    /// collection gap already recorded in the comment list, or goes after the node
+    /// if there is none. Other placements go after the node.
+    /// Use [`Self::insert_comment_at`] to choose a specific position.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, multiline text, or resource limits.
-    /// Commit rejects placements that cannot preserve the node's attachments.
+    /// Returns an error if `handle` or `index` is invalid, or `text` contains a line
+    /// break. Commit fails if the placement cannot preserve comment ownership.
     pub fn insert_comment(
         &mut self,
         handle: &Handle,
@@ -267,11 +290,12 @@ impl<'a> Editor<'a> {
         })
     }
 
-    /// Returns an owned comment's structural position for reuse within this
-    /// transaction. Child boundaries retain occurrence identity through edits.
+    /// Return the position of the node's comment at `index`.
+    /// Capture this before removing a comment to reinsert it at the same header or
+    /// collection gap with [`Self::insert_comment_at`].
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, or exhausted work budgets.
+    /// Returns an error if `handle` or `index` is invalid.
     pub fn comment_position(
         &self,
         handle: &Handle,
@@ -285,14 +309,15 @@ impl<'a> Editor<'a> {
         comment.position().try_map(|child| Ok(self.handle(child)))
     }
 
-    /// Inserts a comment at an explicit structural position and owner-local
-    /// index. For detached comments, `BeforeChild` accepts a sequence item or
-    /// mapping key owned by `handle`. Capture a position with [`Self::comment_position`]
-    /// before removing a comment to preserve a header or collection gap.
+    /// Insert a comment at `index` in the node's list and at `position` in its syntax.
+    ///
+    /// [`CommentPosition::BeforeChild`] requires detached placement and a sequence
+    /// item or mapping key belonging to the node at `handle`.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, child boundaries, multiline text, or
-    /// resource limits. Commit rejects unrepresentable attachments.
+    /// Returns an error if a handle, index, or child position is invalid, or `text`
+    /// contains a line break. Commit fails if the position or placement cannot
+    /// preserve comment ownership.
     pub fn insert_comment_at(
         &mut self,
         handle: &Handle,
@@ -307,10 +332,10 @@ impl<'a> Editor<'a> {
         })
     }
 
-    /// Replaces an owned comment's text, keeping its placement.
+    /// Replace the text of the node's comment at `index`, keeping its placement.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, multiline text, or resource limits.
+    /// Returns an error if `handle` or `index` is invalid, or `text` contains a line break.
     pub fn replace_comment(
         &mut self,
         handle: &Handle,
@@ -320,10 +345,10 @@ impl<'a> Editor<'a> {
         self.mutate(handle, |draft, id| draft.replace_comment(id, index, text))
     }
 
-    /// Removes a directly owned comment.
+    /// Remove the node's comment at `index`.
     ///
     /// # Errors
-    /// Rejects invalid handles, indices, or resource limits.
+    /// Returns an error if `handle` or `index` is invalid.
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
         self.mutate(handle, |draft, id| draft.remove_comment(id, index))
     }

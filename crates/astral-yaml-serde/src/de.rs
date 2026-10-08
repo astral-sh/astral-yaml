@@ -18,26 +18,30 @@ fn is_core_tag(tag: &str) -> bool {
     tag == "!" || YamlType::from_tag(tag).is_some()
 }
 
-/// Deserializes exactly one YAML document using YAML 1.2 core-schema resolution.
+/// Deserialize `source` as a YAML 1.2 document using the core schema.
 ///
-/// Plain and quoted scalars without escapes can be borrowed from the input.
-/// Aliases are visited with depth and work budgets, including cyclic aliases.
-/// Non-core YAML tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
-/// Explicit core tags must be compatible with the destination type. Integer
-/// tags also allow floating-point destinations. Strings, characters, scalar
-/// bytes, and enum names require string tags, but accept untagged scalar text.
+/// Plain and quoted scalars can borrow from the source when they need no escape
+/// decoding or line folding. Alias expansion is bounded by depth and work limits,
+/// including for cyclic aliases.
+///
+/// Application tags require [`crate::Tagged`] or [`crate::with::yaml_tag`].
+/// Core tags must match the destination type, although integer tags also allow
+/// floating-point destinations. Strings, characters, scalar bytes, and enum names
+/// accept untagged scalar text, but require a string tag when explicitly tagged.
 ///
 /// # Errors
-/// Returns a located syntax, type, or resource-limit error.
+/// Returns an error if `source` is invalid YAML, does not contain exactly one
+/// document, cannot be deserialized as `T`, or exceeds a resource limit.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
     let stream = astral_yaml::parse(source)?;
     from_stream(&stream)
 }
 
-/// Deserializes a previously parsed, single-document stream.
+/// Deserialize a parsed stream containing exactly one document.
 ///
 /// # Errors
-/// Returns a type error, a document-count error, or a resource-limit error.
+/// Returns an error if the stream does not contain exactly one document,
+/// the value cannot be deserialized as `T`, or a resource limit is exceeded.
 pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> {
     if stream.documents().len() != 1 {
         return Err(Error::at("expected exactly one document", stream.span()));
@@ -46,10 +50,11 @@ pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> 
     from_document(stream, 0)
 }
 
-/// Deserializes a document by its zero-based index in a parsed stream.
+/// Deserialize the document at zero-based `index` in `stream`.
 ///
 /// # Errors
-/// Returns an error for an invalid index, a type mismatch, or an exceeded limit.
+/// Returns an error if `index` is out of bounds, the value cannot be deserialized
+/// as `T`, or a resource limit is exceeded.
 pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usize) -> Result<T> {
     let doc = stream
         .documents()
@@ -111,7 +116,7 @@ enum TagState {
     Unconsumed,
     // Core tags still determine the payload's type after capture.
     ConsumedCore,
-    // Application tags are metadata; resolve the payload without its tag.
+    // Application tags are metadata. Resolve the payload without its tag.
     ConsumedApplication,
 }
 

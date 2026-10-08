@@ -1,6 +1,6 @@
-//! Root comments share source positions with document markers and directives.
-//! Plan their final positions separately from the root's syntax, so deleting a
-//! comment does not delete the framing boundary that can host its replacement.
+//! Place root comments around document markers and directives.
+//! Plan markers separately so removing a comment cannot remove a marker needed
+//! by another comment.
 
 use super::{
     Comment, CommentPosition, emit,
@@ -16,29 +16,29 @@ use std::collections::{HashMap, HashSet};
 pub(super) struct RootComments {
     pub(super) rendered: Vec<Comment<Option<Span>>>,
     pub(super) patches: Vec<(Span, String)>,
-    /// At an empty root's insertion point, suffix comments follow its syntax.
+    /// Patches inserted after an empty root's replacement at the same source offset.
     pub(super) after_body: Vec<(Span, String)>,
-    /// Trailing attachments require adjacency through document suffix markers.
+    /// End of the root's trailing comments, for removing intervening blank lines.
     trailing_end: Option<usize>,
     leading_start: Option<usize>,
 }
 
-/// A source boundary with explicit separation on either side of a comment.
+/// A comment insertion point and the text needed on either side.
 struct Anchor {
     at: usize,
     before: String,
     after: String,
 }
 
-/// A retained comment whose source location has been established by the planner.
+/// A retained comment with a known source span.
 #[derive(Clone, Copy)]
 struct LocatedComment<'a> {
     comment: &'a Comment<Option<Span>>,
     span: Span,
 }
 
-/// Add document boundaries required by the root layout, relocating source
-/// coordinates while retaining node identities.
+/// Insert document markers required by the edited root and adjust source spans.
+/// Return `None` if no new framing is needed.
 pub(super) fn prepare(
     original: &Source,
     candidate: Syntax<'_, Option<Span>>,
@@ -249,8 +249,8 @@ impl RootComments {
         plan
     }
 
-    /// Leading and trailing comments require adjacency through document markers.
-    /// Reclaim blank lines outside rewrites when a comment crosses a marker.
+    /// Remove blank lines between the root and its leading or trailing comments.
+    /// Skip regions already covered by other patches.
     pub(super) fn finish_separation(&self, original: &Source, patches: &mut Vec<(Span, String)>) {
         let root = original.nodes[original.root.0].span;
         if let Some(start) = self.leading_start {
@@ -295,9 +295,9 @@ impl RootComments {
         }
     }
 
-    /// A rewritten body owns its separation from the end marker. If an outer
-    /// detached comment relied on that separation, give it a blank line on the
-    /// retained side of the marker instead.
+    /// Keep a detached comment separated from a rewritten body.
+    /// If rewriting would consume its blank line before the end marker, add one on
+    /// the retained side of the marker.
     fn retain_suffix_separation(&mut self, original: &Source, marker: Span) {
         let Some(span) = self.rendered.iter().find_map(|comment| {
             comment.span.filter(|span| {
@@ -316,8 +316,8 @@ impl RootComments {
         }
     }
 
-    /// Compare final comment identities with the original source. Intermediate
-    /// replacements and removals do not create independent, overlapping patches.
+    /// Create patches for comments that changed or disappeared outside `region`.
+    /// Compare the final comments to the original source, regardless of intervening edits.
     fn changed_comments(&mut self, original: &Source, region: Option<Span>) {
         let retained: HashMap<_, _> = self
             .rendered
@@ -342,7 +342,7 @@ impl RootComments {
     }
 }
 
-/// Root syntax determines which body comments need an explicit boundary.
+/// Root syntax that determines whether comments need a document marker.
 #[derive(Clone, Copy)]
 enum RootKind {
     Token,
@@ -380,8 +380,8 @@ impl RootKind {
     }
 }
 
-/// Inline comments need syntax on their line. Reserve the root's own headers
-/// first, then assign overflow to document markers in owner-local order.
+/// Headers used by the root's inline comments.
+/// Use the root's own headers first, then document markers, preserving comment order.
 struct InlineLayout {
     start: Option<usize>,
     end: Vec<usize>,
@@ -451,8 +451,8 @@ impl InlineLayout {
                         && comment.position == CommentPosition::After)
             })
             .unwrap_or(root.comments.len());
-        // An existing opening-delimiter comment remains at that delimiter;
-        // properties before it therefore cannot host later inline comments.
+        // An existing opening-delimiter comment remains at that delimiter. Properties
+        // before it therefore cannot host later inline comments.
         let mut available = if matches!(kind, RootKind::FlowCollection)
             && body_comments
                 .first()
@@ -514,9 +514,8 @@ impl InlineLayout {
     }
 }
 
-/// Removed inline body comments belong to the rewrite too. Otherwise emission
-/// adds a terminator before the separate removal patch, leaving a blank line
-/// in front of retained suffixes.
+/// Include removed inline comments in the body rewrite.
+/// A separate removal patch would leave an extra blank line before retained comments.
 fn removed_inline_comments(
     original: &Source,
     root: &super::Node<Option<Span>>,
@@ -539,8 +538,8 @@ fn removed_inline_comments(
         .collect()
 }
 
-/// Allocate suffix headers between fixed neighbors, preserving candidate order.
-/// Missing headers are inserted before the next fixed line, or at EOF.
+/// Assign end markers to suffix comments in their edited order.
+/// Insert missing markers before the next retained comment, or at EOF.
 fn end_slots(
     original: &Source,
     root: &super::Node<Option<Span>>,
@@ -597,8 +596,8 @@ fn end_slots(
     slots
 }
 
-/// Match fixed inline comments to their preceding marker once. Searching the
-/// ordered marker list avoids scanning every comment for every document suffix.
+/// Find document markers that already have an inline comment.
+/// Search the ordered marker list to avoid rescanning comments for each marker.
 fn occupied_markers(
     original: &Source,
     root: &super::Node<Option<Span>>,
@@ -721,10 +720,10 @@ impl RootLayout {
         !self.indented_suffixes.is_empty()
     }
 
-    /// A removed suffix comment can expose retained whitespace to the final
-    /// scalar, even when the same transaction introduces that scalar. Preserve
-    /// the boundary using the candidate's layout, not the original scalar style.
-    /// Comments past an existing end marker cannot expose scalar content.
+    /// Find where an end marker is needed after removing a suffix comment.
+    /// Its whitespace must not become block-scalar content. Use the final layout
+    /// because the same edit can introduce the block scalar. An existing end marker
+    /// bounds the search.
     fn removed_scalar_boundary(
         &self,
         original: &Source,
@@ -750,9 +749,9 @@ impl RootLayout {
                 (end..boundary).contains(&comment.span.start())
                     && !retained.contains(&comment.span.start())
             })
-            // Keep any closing inline header on the body side of the marker.
-            // A block scalar's span can already end at the following line's
-            // start; that line belongs to the suffix and must stay outside.
+            // Keep any closing inline header on the body side of the marker. A block
+            // scalar's span can already end at the following line's start. That line
+            // belongs to the suffix and must stay outside.
             .then(|| {
                 if original.text[..end].ends_with('\n') {
                     end
@@ -762,8 +761,8 @@ impl RootLayout {
             })
     }
 
-    /// Comments already in the framing retain their source anchors. Comments
-    /// within the body may depend on syntax removed by the final candidate.
+    /// Return the original span if a comment can stay in place after the edit.
+    /// Comments tied to replaced syntax may need to be rendered with the new body.
     fn fixed<Location: Copy + Into<Option<Span>>>(
         &self,
         comment: &Comment<Location>,
@@ -787,8 +786,8 @@ impl RootLayout {
                     && (comment.placement != CommentPlacement::Leading
                         || self.inline.end.is_empty())
             }
-            // Indented comments can become block-scalar text; rendering them
-            // together supplies the indentation boundary after the scalar.
+            // Indented comments can become block-scalar text. Rendering them together
+            // supplies the indentation boundary after the scalar.
             RootKind::BlockScalar => false,
             RootKind::FlowCollection => comment.placement != CommentPlacement::Leading,
             RootKind::BlockCollection {
@@ -1005,10 +1004,8 @@ fn removal_span(source: &str, span: Span) -> Span {
         span
     }
 }
-/// Choose separation only when inserting beside a retained outer comment
-/// preserves both attachments. Otherwise emission places the new comment next
-/// to the rewritten content. Inline and leading/trailing comments must remain
-/// adjacent to their syntax; detached comments require blank separation.
+/// Return the line breaks needed to insert `comment` beside `anchor`.
+/// Return `None` if it must be rendered with the node instead to preserve placement.
 fn outer_comment_breaks(
     comment: &Comment<Option<Span>>,
     anchor: &Comment<Option<Span>>,

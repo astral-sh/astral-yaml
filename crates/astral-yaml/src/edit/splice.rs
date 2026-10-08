@@ -1,6 +1,7 @@
-//! Source boundaries are reserved before emission. Syntax output describes its
-//! ending; it cannot choose which source bytes to replace. Patch construction
-//! checks all ranges and the complete output size before allocating the result.
+//! Replace source regions with rendered YAML.
+//!
+//! Reserve each region before rendering so its whitespace cannot overlap another
+//! replacement. [`PatchSet`] checks ranges and output size before assembling the result.
 
 use super::{
     Comment,
@@ -14,8 +15,8 @@ use std::borrow::Cow;
 #[cfg(test)]
 mod tests;
 
-/// A rewritten region includes descendant comments, but leaves the root's outer
-/// comments in their original source positions unless explicitly requested.
+/// Return the source range covering `id` and its descendants' comments.
+/// Set `outer` to include comments outside `id`'s own span.
 pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, outer: bool) -> Span {
     let document = document.into();
     let root = &document.nodes[id.0];
@@ -51,8 +52,7 @@ pub(super) enum Separator {
     Line(usize),
 }
 
-/// Everything the emitter needs to join a node to its retained prefix. These
-/// are formatting instructions, not permission to inspect or consume source.
+/// Formatting needed to join a rendered node to the surrounding source.
 pub(super) struct Placement<'a, Location> {
     pub(super) comments: &'a [Comment<Location>],
     pub(super) context: Context,
@@ -67,9 +67,10 @@ enum RootLine {
     Shared,
 }
 
-/// A subtree owns its body and may consume adjacent whitespace to terminate
-/// its final scalar or comment. Reserve that entire interval before checking
-/// overlap, even when the emitted syntax ultimately needs only its body.
+/// The source range a replacement is allowed to consume.
+///
+/// This includes adjacent whitespace needed to end a scalar or comment. Reserve
+/// it before checking overlap, even if rendering later leaves some of it unused.
 pub(super) struct Boundary<'a> {
     source: &'a str,
     body: Span,
@@ -164,8 +165,8 @@ impl<'a> Boundary<'a> {
         }
     }
 
-    /// Resolve the reserved whitespace using the actual lexical ending. No
-    /// replacement can escape the interval used for overlap planning.
+    /// Finish the fragment's line break and choose its replacement range.
+    /// The range must stay within the whitespace reserved before rendering.
     fn complete(&self, mut fragment: Fragment, limit: usize) -> Result<Replacement, Error> {
         let mut span = self.body;
         match fragment.ending {
@@ -221,7 +222,7 @@ impl<'a> Boundary<'a> {
     }
 }
 
-/// Complete replacement text and its source interval, ready for patch checking.
+/// Rendered text and the source range it replaces.
 #[derive(Debug)]
 pub(super) struct Replacement {
     pub(super) text: String,
@@ -294,8 +295,8 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     boundary.complete(fragment, document.options.max_input_bytes)
 }
 
-/// Consume complete whitespace-only lines, retaining the indentation of any
-/// following syntax. Block scalars and erased roots can own these breaks.
+/// Skip whitespace through the last line break before the next token.
+/// Leave that token's indentation untouched. At EOF, consume all remaining whitespace.
 fn following_line_breaks(source: &str, start: usize) -> usize {
     let suffix = &source[start..];
     match suffix.bytes().position(|byte| !byte.is_ascii_whitespace()) {
@@ -306,9 +307,10 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
     }
 }
 
-/// Validated borrowed/owned segments. Construction proves source ordering,
-/// disjoint UTF-8 intervals, and the exact final size. Application cannot fail
-/// or slice source at unchecked offsets.
+/// Source replacements ready to apply.
+///
+/// Construction checks for overlapping ranges, invalid UTF-8 boundaries, and
+/// excessive output size. Applying the patches only concatenates the checked segments.
 pub(super) struct PatchSet<'a> {
     segments: Vec<Cow<'a, str>>,
     length: usize,

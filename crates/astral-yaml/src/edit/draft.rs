@@ -1,5 +1,5 @@
-//! A mutable tree owns node identity, membership, and style requests. Freezing it
-//! ends mutation and supplies the intended syntax for planning and verification.
+//! Mutable syntax for an edit transaction.
+//! [`Draft::freeze`] ends mutation and produces the syntax used to check the output.
 
 use super::{Comment, CommentPosition, EditableDocument, Node, NodeKind, emit, view::Syntax};
 use crate::{
@@ -46,7 +46,7 @@ pub(super) struct Draft {
     introduced_bytes: usize,
 }
 
-/// The final intended syntax. Planning can borrow it, but cannot mutate it.
+/// The intended result of a transaction, used to check the rendered YAML.
 #[derive(Debug)]
 pub(super) struct Candidate {
     nodes: Vec<Node<Option<Span>>>,
@@ -170,8 +170,9 @@ impl Draft {
         }
     }
 
-    /// Assign final identities before attaching a parsed fragment. A replacement
-    /// root reuses its destination directly, including self-referential aliases.
+    /// Attach `document` to the draft and return its root ID.
+    /// A replacement keeps the destination ID, so aliases to the fragment's root
+    /// can be remapped before its nodes are inserted.
     fn attach(
         &mut self,
         document: EditableDocument,
@@ -214,8 +215,8 @@ impl Draft {
         root
     }
 
-    /// Collect and charge the whole removal before changing membership. A failed
-    /// budget check must not leave half a subtree retired.
+    /// Collect all nodes to remove before retiring any of them.
+    /// Charge the traversal here so a budget error cannot leave a partially removed subtree.
     fn removal(&self, roots: impl IntoIterator<Item = NodeId>) -> Result<Vec<NodeId>, Error> {
         let mut pending: Vec<_> = roots.into_iter().collect();
         let mut removed = Vec::new();
@@ -237,8 +238,8 @@ impl Draft {
         let parent = self.parent(id);
         let document = self.fragment(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
-        // Attaching resets the root's style request and membership. Retire its
-        // previous descendants afterwards; they cannot refer to imported slots.
+        // Attaching resets the root's style request and membership. Retire its previous
+        // descendants afterwards. They cannot refer to imported slots.
         self.attach(document, parent, Some((id, preserve)));
         self.retire(
             removed
@@ -455,9 +456,8 @@ impl Draft {
         Ok(())
     }
 
-    /// Planning only receives a graph whose live aliases have live, anchored
-    /// targets. A transaction may temporarily remove a definition while also
-    /// removing its aliases, so this check belongs at the end of mutation.
+    /// Finish mutation and check that each remaining alias has a live, anchored target.
+    /// This check runs after all edits so an anchor can be removed before its aliases.
     pub(super) fn freeze(self) -> Result<Candidate, Error> {
         for slot in self.slots.iter().filter(|slot| slot.membership.is_some()) {
             if let NodeKind::Alias { target } = slot.node.kind {
@@ -515,7 +515,9 @@ impl Candidate {
         &self.work
     }
 
-    /// Only reparsed output that agrees with the frozen candidate can commit.
+    /// Parse `output` and check it against this transaction's intended result.
+    /// Return the parsed document only if content, aliases, requested styles, and
+    /// comments are preserved.
     pub(super) fn commit(&self, output: &str) -> Result<EditableDocument, Error> {
         let error = |message| Error {
             span: self.diagnostic_span,
@@ -602,7 +604,8 @@ fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
     }
 }
 
-/// A removed child leaves its preceding gap before the next surviving child.
+/// Move `BeforeChild(removed)` comments to `following`, or to the collection's
+/// end if there is no following child.
 fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: Option<NodeId>) {
     for comment in &mut node.comments {
         if comment.position == CommentPosition::BeforeChild(removed) {
@@ -612,9 +615,9 @@ fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: 
     }
 }
 
-/// Merge the retained and imported comments at their structural positions.
-/// Each list keeps its own order; retained comments precede imports at a shared
-/// boundary. Collection gaps retain their ordinal position in the replacement.
+/// Merge retained and imported comments by position, keeping each list's order.
+/// Retained comments come first at a shared position. Collection gaps are matched
+/// by child index in the replacement.
 fn merged_comments(
     old: &Node<Option<Span>>,
     replacement: &Node<Option<Span>>,
@@ -703,7 +706,7 @@ pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {
     }
 }
 
-/// Change provenance without changing any syntax or node identity.
+/// Map node and comment locations without changing the syntax or node IDs.
 pub(super) fn map_locations<Location, Target>(
     node: Node<Location>,
     map: impl Fn(Location) -> Target,

@@ -17,8 +17,8 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
     }
 }
 
-/// Emit syntax in an explicit placement. Source ownership and splicing belong
-/// to the boundary planner; the emitter cannot read or extend a source range.
+/// Render `id` using the supplied placement.
+/// Source ranges are selected by the splice planner before this function runs.
 pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     document: Syntax<'a, Location>,
     options: crate::ParseOptions,
@@ -60,7 +60,7 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     })
 }
 
-/// The final lexical boundary of generated syntax, independent of source.
+/// How a fragment ends, used when joining it to retained source.
 pub(super) enum Ending {
     Token,
     Comment,
@@ -114,8 +114,9 @@ impl Context {
         }
     }
 
-    /// Block scalar content and suffix comments use the parent's indentation,
-    /// even when properties or leading comments move the header farther in.
+    /// Return the scalar's content indentation.
+    /// Block content stays relative to the parent even when properties or comments
+    /// push its header farther in.
     fn scalar_indent(self, style: ScalarStyle) -> usize {
         match self.position {
             Position::Block { parent_indent }
@@ -135,9 +136,9 @@ impl Context {
     }
 }
 
-/// Comments are consumed in source order as the node's syntax is emitted.
-/// Passing the cursor through field headers, properties, and content makes
-/// interleaved inline/leading comments independent of the number of properties.
+/// A cursor over the node's comments.
+/// Pass it through the node's indicators, properties, and content to keep
+/// interleaved leading and inline comments in order.
 struct Comments<'a, Location> {
     remaining: std::slice::Iter<'a, Comment<Location>>,
 }
@@ -219,8 +220,9 @@ impl<'a, Location> Comments<'a, Location> {
     }
 }
 
-/// Block collections can place inline comments on the enclosing indicator and
-/// their properties. A remaining inline comment needs a flow delimiter.
+/// Return whether a block collection has enough headers for its inline comments.
+/// Comments can use the enclosing indicator, tag, and anchor. Any remaining
+/// inline comment requires a flow delimiter.
 pub(super) fn block_headers_cover_comments<Location>(
     node: &super::Node<Location>,
     prefix_before_slot: bool,
@@ -451,9 +453,8 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         Ok(())
     }
 
-    /// A block collection's property header owns the space before its first
-    /// field or dash. Keep the first child's leading comments after that slot's
-    /// indicator, where they cannot attach to the enclosing header.
+    /// Keep the first child's leading comments after its field or item indicator.
+    /// Otherwise they can attach to the enclosing collection's property header.
     fn slot_prefix(
         &mut self,
         comments: &mut Comments<'_, Location>,
@@ -532,8 +533,8 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         Ok(())
     }
 
-    /// Full-line suffixes need the collection's enclosing delimiters to retain
-    /// their owner. An inline closing comment still follows the delimiter.
+    /// Close a flow collection, keeping full-line suffix comments inside its delimiters.
+    /// An inline comment on the closing delimiter stays outside.
     fn flow_end(
         &mut self,
         delimiter: &str,
@@ -859,15 +860,15 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     }
 }
 
-/// An empty plain scalar without properties has no syntax token of its own.
+/// Return whether the node is an empty plain scalar with no tag or anchor.
 pub(super) fn omitted<Location>(node: &super::Node<Location>) -> bool {
     node.anchor.is_none()
         && node.tag.is_none()
         && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
 }
 
-/// The spelling emitted in a mapping-key position. Only quoted keys can share
-/// an adjacent value indicator with an unseparated value.
+/// The notation used to render a mapping key.
+/// A quoted key allows the value to follow `:` without separation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum KeyForm {
     Explicit,
@@ -905,8 +906,8 @@ pub(super) fn key_form<Location>(node: &super::Node<Location>, flow: bool) -> Ke
     }
 }
 
-/// Whether block presentation provides a header for an inline content comment.
-/// Collection headers need a tag or anchor; block scalars have their indicator.
+/// Return whether a block collection or scalar provides an inline-comment header.
+/// Collections need a tag or anchor. Block scalars use their indicator.
 pub(super) fn has_inline_header<Location>(node: &super::Node<Location>, flow: bool) -> bool {
     !flow
         && (matches!(
@@ -1093,8 +1094,8 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
     if matches { candidate } else { quoted(value) }
 }
 
-/// Match syntax by traversal, not arena offsets, and verify alias identity after
-/// matching the definitions. Aliases are never expanded by this comparison.
+/// Match nodes by traversal order and check that aliases reach matching targets.
+/// Node IDs can differ between trees. Alias targets are compared without expansion.
 pub(super) fn correspondence<'a, Location: 'a>(
     expected: impl Into<Syntax<'a, Location>>,
     actual: &EditableDocument,
@@ -1188,8 +1189,8 @@ pub(super) fn comments_preserved<'a, Location: 'a>(
     })
 }
 
-/// A detached prefix and the gap before the first child describe the same
-/// boundary, even when collection delimiters or properties move around it.
+/// Treat a detached prefix and a gap before the first child as the same position,
+/// even if properties or delimiters have moved around the comment.
 fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosition {
     if !matches!(position, CommentPosition::Before | CommentPosition::Header) {
         return position;

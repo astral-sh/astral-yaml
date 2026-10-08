@@ -1,10 +1,9 @@
-//! Borrowed inputs for syntax comparison and emission. Neither view claims that
-//! the syntax has been parsed from the source used as the rendering context.
+//! Borrowed syntax used to compare trees and render replacements.
 
 use super::{EditableDocument, Node};
 use crate::{NodeId, ParseOptions, Span};
 
-/// The tree's meaning and presentation, independent of source text.
+/// A borrowed syntax tree, independent of its source text.
 #[derive(Clone, Copy)]
 pub(super) struct Syntax<'a, Location> {
     pub(super) nodes: &'a [Node<Location>],
@@ -21,8 +20,8 @@ impl<'a> From<&'a EditableDocument> for Syntax<'a, Span> {
     }
 }
 
-/// Syntax to emit and the source into which it will be spliced. Locations refer
-/// to this source; generated syntax has no source location.
+/// Syntax and source text used to render a replacement.
+/// Node and comment spans refer to this source. Generated syntax has no span.
 #[derive(Clone, Copy)]
 pub(super) struct Emission<'a, Location> {
     pub(super) nodes: &'a [Node<Location>],

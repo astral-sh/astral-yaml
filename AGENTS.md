@@ -15,8 +15,12 @@
 - All Rust should be written in a reader-friendly manner, meaning it should not be golfed or overly dense.
   Changes should preserve logical separations between functions and critical sections using whitespace.
 
-- Tests should use snapshots (via insta) where appropriate, instead of a bunch of
-  asserts for expected state/structure. Snapshots must be inline; do not use
+- Documentation and comments should describe behavior and usage. Avoid prose
+  semicolons, test and corpus counts, dated validation records, and benchmark logs.
+  Prefer complete examples to API inventories in guides.
+
+- Tests should use snapshots (via insta) where appropriate, instead of a bunch
+  of asserts for expected state/structure. Snapshots must be inline. Do not use
   sidecar `.snap` files. Avoid assertions that duplicate snapshot expectations.
 
 - Tests should be table-driven where appropriate, rather than defining several nearly-identical test functions.

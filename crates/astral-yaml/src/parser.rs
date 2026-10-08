@@ -515,7 +515,8 @@ impl<'a> Parser<'a> {
                         return Err(self.error("invalid YAML version directive"));
                     }
 
-                    // New minor versions use the 1.2 grammar; 1.1 schema behavior is not enabled.
+                    // New minor versions use the 1.2 grammar. 1.1 schema behavior is
+                    // not enabled.
                     version = true;
                 }
                 "TAG" => {
@@ -797,8 +798,8 @@ impl<'a> Parser<'a> {
         let mut i = start;
         let mut quote = None;
         let mut level = 0usize;
-        // Quotes only start a quoted scalar at a node boundary; elsewhere
-        // they are ordinary characters in a plain scalar.
+        // Quotes only start a quoted scalar at a node boundary. Elsewhere they are
+        // ordinary characters in a plain scalar.
         let mut plain = false;
         let mut json_node = false;
 

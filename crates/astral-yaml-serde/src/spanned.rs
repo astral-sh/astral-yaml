@@ -13,25 +13,22 @@ use std::{
 // deserializer. Offsets come from the parser, not YAML fields.
 pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 
-/// A deserialized value with its source span.
+/// A deserialized value and its source [`Span`].
 ///
-/// Can wrap a field, mapping key, collection element, or whole document.
+/// The span uses byte offsets in the decoded UTF-8 source. It includes the node's
+/// quotes, delimiters, tags, and anchors. An omitted value can have an empty span.
+/// Use [`astral_yaml::Source::original_span`] to map it to encoded input bytes.
+/// For editable documents, offsets refer to the LF-normalized source.
 ///
-/// The span is a half-open byte range in the decoded UTF-8 source. It covers the
-/// entire YAML node, including quotes, collection delimiters, tags, and anchors.
-/// An alias has the span of its `*name` occurrence; wrapped children within an
-/// aliased collection have spans in the anchor's definition. Implicit nulls can
-/// have empty spans. Use [`astral_yaml::Source::original_span`] to map a span back
-/// to encoded input bytes. In an editable document, spans refer to its
-/// LF-normalized source.
+/// An alias uses the span of its `*name` expression. Wrapped children of an
+/// aliased collection use spans from the anchor's definition.
 ///
-/// Serialization emits only the value. Mutating the value does not update its
-/// metadata. Equality and hashing include the value and span.
+/// Serialization emits only the value. Changing the value does not update the
+/// span. Equality and hashing include both.
 ///
-/// Deserialization requires this crate's deserializer. Serde's buffering for
-/// `#[serde(untagged)]` and `#[serde(flatten)]` discards source
-/// metadata: wrap the containing enum or struct instead of fields decoded from that
-/// buffer.
+/// Deserialization requires this crate's deserializer. Serde's `untagged` and
+/// `flatten` buffers discard spans. Wrap the containing enum or struct when
+/// you need its span, rather than a field deserialized from a buffer.
 ///
 /// ```
 /// use astral_yaml_serde::{Spanned, from_str};
@@ -48,7 +45,7 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 /// assert_eq!(config.timeout.span.slice(source), Some("30"));
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
-/// Owned payloads implement `DeserializeOwned`:
+/// `Spanned<T>` implements `DeserializeOwned` when `T` does:
 ///
 /// ```
 /// use astral_yaml_serde::Spanned;
@@ -64,7 +61,7 @@ pub struct Spanned<T> {
 }
 
 impl<T> Spanned<T> {
-    /// Returns the value, discarding its metadata.
+    /// Return the value, discarding its span.
     #[must_use]
     pub fn into_inner(self) -> T {
         self.value

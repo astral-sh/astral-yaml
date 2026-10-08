@@ -4,7 +4,7 @@ use crate::Value;
 use serde::Deserialize;
 use std::{collections::BTreeMap, fmt::Write};
 
-/// Historical benchmark inputs, kept fixed as the test corpus grows.
+/// Fixed benchmark inputs, independent of changes to the test corpus.
 pub const FIXTURES: &[(&str, &str)] = &[
     (
         "uv-ci",

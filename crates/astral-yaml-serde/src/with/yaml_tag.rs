@@ -25,27 +25,27 @@
 //! # Ok::<(), astral_yaml_serde::Error>(())
 //! ```
 //!
-//! Unit variants use an empty tagged node. Untagged variants retain their usual
-//! representation. Deserialization also accepts ordinary enum names and
-//! singleton mappings. Core tags such as `!!str` retain their usual meaning;
-//! other global tags are rejected. Use [`crate::Tagged`] to capture tags as data.
+//! Unit variants serialize as empty tagged nodes. Untagged variants keep their
+//! usual representation. Deserialization also accepts ordinary enum names and
+//! singleton mappings. Core tags such as `!!str` keep their usual meaning, and
+//! other global tags are rejected. Use [`crate::Tagged`] to capture a tag as data.
 //!
-//! The adapter applies to this value through options and newtype wrappers, not
-//! to collection elements or fields inside its payload. Mixed tagged/untagged
-//! enums work by buffering local tags as singleton mappings. Other field
-//! adapters that require direct access to this crate's deserializer, including
-//! [`crate::Spanned`] and [`crate::Tagged`], cannot recover metadata from that
-//! buffer. YAML tag handling requires this crate's serializer and deserializer.
+//! The adapter works through options and newtype wrappers. Nested fields and
+//! collection elements need their own opt-in. Mixed tagged/untagged enums buffer
+//! local tags as singleton mappings, which means [`crate::Spanned`] and
+//! [`crate::Tagged`] cannot recover metadata inside that buffer.
+//!
+//! YAML tag handling requires this crate's serializer and deserializer.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
 use std::{fmt, marker::PhantomData};
 
 pub(crate) const NAME: &str = "$astral_yaml::with::yaml_tag";
 
-/// Serializes the annotated value with YAML tags for enum variants.
+/// Serialize the annotated value, using YAML tags for enum variants.
 ///
 /// # Errors
-/// Returns the serializer's error for invalid tags, payloads, or resource limits.
+/// Propagates errors from the serializer.
 pub fn serialize<T: Serialize + ?Sized, S: Serializer>(
     value: &T,
     serializer: S,
@@ -53,10 +53,10 @@ pub fn serialize<T: Serialize + ?Sized, S: Serializer>(
     serializer.serialize_newtype_struct(NAME, value)
 }
 
-/// Deserializes the annotated value, accepting local YAML tags as enum names.
+/// Deserialize the annotated value, accepting local YAML tags as enum names.
 ///
 /// # Errors
-/// Returns the deserializer's error for invalid tags, payloads, or resource limits.
+/// Propagates errors from the deserializer.
 pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<T, D::Error> {

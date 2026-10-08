@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use serde_json::Value;
 
-// JSON cannot represent YAML's non-core tags; the deserializer rejects them.
+// JSON cannot represent YAML's non-core tags. The deserializer rejects them.
 const CASES_WITH_NON_CORE_TAGS: &[&str] = &[
     "2XXW", "565N", "5TYM", "6CK3", "6WLZ", "7FWL", "9WXW", "C4HZ", "CC74", "CUP7", "J7PZ", "M5C3",
     "P76L", "UGM3", "Z67P", "Z9M4",

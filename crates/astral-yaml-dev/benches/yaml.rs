@@ -39,7 +39,7 @@ mod astral {
 
     use super::Fields;
 
-    // Drop outputs inside each measured closure; Divan defers dropping returned values.
+    // Drop outputs inside each measured closure. Divan defers dropping returned values.
     #[divan::bench(args = FIXTURES.iter().map(|&(name, _)| name))]
     fn parse(bencher: Bencher, name: &str) {
         let source = fixture(name);

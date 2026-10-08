@@ -1,5 +1,5 @@
-//! Source text and its syntax index. Framing relocates coordinates without
-//! changing the frozen candidate or constructing a committed document.
+//! Track source ranges as document markers and line breaks are inserted.
+//! The original and edited syntax use the same offset mapping.
 
 use super::{
     Node,
@@ -8,8 +8,9 @@ use super::{
 };
 use crate::{NodeId, ParseOptions, Span};
 
-/// Index content separately from properties, which can start on another line
-/// or follow a field indicator with different indentation.
+/// Return each node's content range, excluding tags, anchors, and intervening trivia.
+/// These ranges are separate because properties can start on a different line
+/// or at a different indentation.
 pub(super) fn contents(source: &str, nodes: &[crate::Node<'_>]) -> Vec<Span> {
     nodes
         .iter()
@@ -66,8 +67,8 @@ impl Source {
     }
 }
 
-/// A boundary insertion changes coordinates, not syntax. The empty document
-/// root has an explicit affinity when a new line separates it from a marker.
+/// An insertion and the offset change it causes.
+/// `move_empty_root` determines which side of the insertion an empty root belongs to.
 struct Insertion {
     at: usize,
     length: usize,
@@ -102,14 +103,14 @@ impl Locations {
     }
 }
 
-/// Generated markers already include the insertion that created them. Only
-/// subsequent insertions contribute to their final coordinates.
+/// A document marker and the point at which its span was recorded.
+/// Only later insertions can shift its span.
 struct Marker {
     span: Span,
     generation: usize,
 }
 
-/// Builds document framing and a single mapping from old to framed coordinates.
+/// Source text with inserted markers and line breaks, and a map of the offset changes.
 pub(super) struct Frame<'a> {
     original: &'a Source,
     text: String,
@@ -118,7 +119,7 @@ pub(super) struct Frame<'a> {
     ends: Vec<Marker>,
 }
 
-/// Rendering syntax with coordinates in the framed source.
+/// Source and syntax with spans adjusted for inserted markers and line breaks.
 pub(super) struct Prepared {
     pub(super) source: Source,
     nodes: Vec<Node<Option<Span>>>,

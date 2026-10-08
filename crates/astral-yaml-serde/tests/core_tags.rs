@@ -24,7 +24,7 @@ enum Choice {
     Null,
 }
 
-// Core tags determine the YAML type; the Rust destination must accept that type.
+// Core tags determine the YAML type. The Rust destination must accept that type.
 // https://yaml.org/spec/1.2.2/#1031-tags
 #[test]
 fn core_tags_and_destination_types() {

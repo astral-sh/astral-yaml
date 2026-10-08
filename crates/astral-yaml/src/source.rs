@@ -11,11 +11,11 @@ pub enum Encoding {
     Utf32Le,
 }
 
-/// Decoded input with access to byte ranges in the original encoding.
+/// YAML input decoded to UTF-8.
 ///
-/// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned string;
-/// parsed scalars can borrow from that string. Parser spans refer to [`Self::text`].
-/// Use [`Self::original_span`] to convert them to offsets in the original input.
+/// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned
+/// string, which parsed scalars can borrow. Parser spans refer to [`Self::text`].
+/// Use [`Self::original_span`] to map them back to the encoded input.
 #[derive(Clone, Debug)]
 pub struct Source<'a> {
     bytes: &'a [u8],
@@ -24,18 +24,20 @@ pub struct Source<'a> {
 }
 
 impl<'a> Source<'a> {
-    /// Decodes UTF-8, UTF-16, or UTF-32, with or without a byte order mark.
+    /// Decode UTF-8, UTF-16, or UTF-32 input, with or without a byte order mark.
     ///
     /// # Errors
-    /// Returns a decoding error located in the original bytes, or a size-limit error.
+    /// Returns an error if the input is malformed or exceeds the default size limit.
+    /// Decoding errors use offsets in the original bytes.
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
         Self::with_limit(bytes, ParseOptions::default().max_input_bytes)
     }
 
-    /// Decodes input, bounding both the original and decoded byte lengths.
+    /// Decode `bytes`, limiting both the encoded and decoded lengths to `max_bytes`.
     ///
     /// # Errors
-    /// Returns a decoding error located in the original bytes, or a size-limit error.
+    /// Returns an error if the input is malformed or either length exceeds `max_bytes`.
+    /// Decoding errors use offsets in the original bytes.
     pub fn with_limit(bytes: &'a [u8], max_bytes: usize) -> Result<Self, Error> {
         enum CodeUnit {
             Utf16,
@@ -136,18 +138,18 @@ impl<'a> Source<'a> {
         self.encoding
     }
 
-    /// Parses the decoded text. Returned spans, including error spans, use UTF-8 offsets.
+    /// Parse the decoded text. Spans, including error spans, use UTF-8 byte offsets.
     ///
     /// # Errors
-    /// Returns a syntax or parser resource-limit error.
+    /// Returns an error if the YAML is invalid or a parser resource limit is exceeded.
     pub fn parse(&self) -> Result<Stream<'_>, Error> {
         parse(&self.text)
     }
 
-    /// Converts a decoded-text span into a span of the original bytes.
+    /// Map a span in the decoded text to the original encoded bytes.
     ///
-    /// For UTF-16/32 this scans the text through the end of the span. Returns `None`
-    /// for out-of-bounds offsets or offsets that split a UTF-8 character.
+    /// Returns `None` for out-of-bounds offsets or offsets that split a UTF-8 character.
+    /// For UTF-16 and UTF-32, this scans the text through the end of the span.
     #[must_use]
     pub fn original_span(&self, span: Span) -> Option<Span> {
         let before = self.text.get(..span.start)?;

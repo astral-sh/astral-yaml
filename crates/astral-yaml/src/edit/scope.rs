@@ -1,6 +1,6 @@
-//! A retained occurrence occupies a grammar slot owned by its enclosing
-//! collection. Scope selection and emission context use the same immutable
-//! index, including header indicators and dependencies through mapping keys.
+//! Find an enclosing source region that can represent an edit.
+//! A changed node may need its parent rewritten to supply YAML indicators or
+//! preserve comments. Edits within a mapping key can also change the key's notation.
 
 use super::{
     Comment, CommentPosition, Node, NodeKind,
@@ -178,8 +178,8 @@ impl<'a> Scopes<'a> {
         self.slots[id.0].body
     }
 
-    /// Every rejected local slot transfers ownership to a strict ancestor.
-    /// Document scope is terminal, so scope selection cannot cycle.
+    /// Choose a node whose source region can represent the edit at `id`.
+    /// Each step moves to a parent. The root is the final fallback.
     pub(super) fn select(&self, mut id: NodeId) -> NodeId {
         loop {
             let slot = self.slots[id.0];
