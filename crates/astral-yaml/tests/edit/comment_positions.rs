@@ -6,6 +6,7 @@ use astral_yaml::{
 use astral_yaml_dev::indoc;
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn reinsertion_retains_headers_and_collection_gaps() {
     let diff = edits(
         [
@@ -26,6 +27,21 @@ fn reinsertion_retains_headers_and_collection_gaps() {
                 # gap
 
                 - two
+            "},
+            indoc! {r"
+                # detached
+
+                # leading
+                ---
+                key: value
+            "},
+            indoc! {r"
+                # detached
+
+                # leading
+                ---
+                &root
+                key: value
             "},
         ],
         |editor| {
@@ -76,6 +92,32 @@ fn reinsertion_retains_headers_and_collection_gaps() {
     +# gap edited
      ⏎
      - two
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,5 +1,6 @@
+    -# detached
+     ⏎
+    -# leading
+    +# detached edited
+    +
+    +# leading edited
+     ---
+     key: value
+
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,6 +3,5 @@
+    -# detached
+     ⏎
+    -# leading
+    +# detached edited
+    +
+    +# leading edited
+     ---
+    -&root
+    +&root ⏎
+     key: value
     ");
 }
 

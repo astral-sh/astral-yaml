@@ -865,8 +865,11 @@ fn marker_anchor(
     region: Span,
     next: Option<LocatedComment<'_>>,
 ) -> Option<Anchor> {
-    match comment.placement {
-        CommentPlacement::Leading => {
+    match (comment.placement, comment.position) {
+        (CommentPlacement::Leading, _)
+        | (CommentPlacement::Detached, CommentPosition::Before | CommentPosition::Header) => {
+            // Prefix comments share a boundary even when none retain source
+            // spans. Moving only the leading comments would reverse their order.
             let marker = original.start_marker?;
             let collection = matches!(
                 layout.kind,
@@ -883,13 +886,14 @@ fn marker_anchor(
             Some(Anchor {
                 at: marker.start(),
                 before: String::new(),
-                after: "\n".to_owned(),
+                after: "\n".repeat(if comment.placement == CommentPlacement::Detached {
+                    2
+                } else {
+                    1
+                }),
             })
         }
-        CommentPlacement::Trailing | CommentPlacement::Detached
-            if comment.placement == CommentPlacement::Trailing
-                || comment.position == CommentPosition::After =>
-        {
+        (CommentPlacement::Trailing, _) | (CommentPlacement::Detached, CommentPosition::After) => {
             if let Some(next) = next.filter(|next| {
                 next.comment.placement == CommentPlacement::Inline
                     && next.span.start() >= layout.body.end()
@@ -924,7 +928,7 @@ fn marker_anchor(
                 after: String::new(),
             })
         }
-        CommentPlacement::Inline => {
+        (CommentPlacement::Inline, _) => {
             if let Ok(slot) = layout.inline.end.binary_search(&index) {
                 let marker = layout.inline.slots.get(slot)?.marker()?;
                 return Some(Anchor {
