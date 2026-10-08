@@ -6,6 +6,43 @@ use astral_yaml::{
 use astral_yaml_dev::indoc;
 
 #[test]
+fn unchanged_reinsertion_preserves_source() {
+    for source in [
+        indoc! {r"
+            # detached
+
+            item
+        "},
+        indoc! {r"
+            &node
+            # property
+            item
+        "},
+        indoc! {r"
+            - one
+
+            # gap
+
+            - two
+        "},
+    ] {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|editor| {
+                let owner = editor.root();
+                let comment = &editor.node(&owner)?.comments()[0];
+                let text = comment.text().to_owned();
+                let placement = comment.placement();
+                let position = editor.comment_position(&owner, 0)?;
+                editor.remove_comment(&owner, 0)?;
+                editor.insert_comment_at(&owner, 0, &text, placement, position)
+            })
+            .unwrap();
+        assert_eq!(document.source(), source);
+    }
+}
+
+#[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn reinsertion_retains_headers_and_collection_gaps() {
     let diff = edits(

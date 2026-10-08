@@ -6,7 +6,7 @@ use super::{
     emit,
     framing::{RootComments, RootLayout},
     layout::Layout,
-    scope::{Scopes, same_attachment},
+    scope::Scopes,
     source::Source,
     splice::{self, Boundary, PatchSet},
     view::Syntax,
@@ -82,11 +82,12 @@ impl Changes {
 }
 
 fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
+    // Provenance controls rewrite boundaries, not whether the final state
+    // changed. Removing and reinserting identical attachments is a no-op.
     old.len() == new.len()
-        && old
-            .iter()
-            .zip(new)
-            .all(|(old, new)| same_attachment(old, new) && old.position == new.position)
+        && old.iter().zip(new).all(|(old, new)| {
+            old.text == new.text && old.placement == new.placement && old.position == new.position
+        })
 }
 
 /// Existing comments outside the root token can be edited in the framing while
