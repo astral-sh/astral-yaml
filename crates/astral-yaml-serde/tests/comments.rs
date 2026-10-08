@@ -1,6 +1,8 @@
 //! Comment syntax: <https://yaml.org/spec/1.2.2/#66-comments>.
 //! Ownership and aggregation are astral-yaml-serde API behavior.
 
+use test_case::test_case;
+
 use astral_yaml_dev::span_snapshot;
 use astral_yaml_serde::{
     AttachedComment, CommentPlacement, Commented, from_document, from_str, to_string,
@@ -431,36 +433,35 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
     assert_eq!(stream.comments()[0].text, " only a comment");
 }
 
-#[test]
-fn unicode_crlf_and_original_encoding_spans_are_preserved() {
-    for encoding in ["utf16", "utf32"] {
-        let text = "\u{feff}name: café # 🌍  \r\n\r\n# footer\r\n";
-        let bytes: Vec<u8> = if encoding == "utf16" {
-            text.encode_utf16().flat_map(u16::to_le_bytes).collect()
-        } else {
-            text.chars()
-                .flat_map(|c| u32::from(c).to_be_bytes())
-                .collect()
-        };
-        let source = astral_yaml::Source::from_bytes(&bytes).unwrap();
-        let stream = source.parse().unwrap();
-        let value: Commented<'_, BTreeMap<String, String>> = from_document(&stream, 0).unwrap();
-        assert_eq!(comments(&value), [(" 🌍  ", Inline), (" footer", Detached)]);
-        assert_borrowed(&value, source.text());
+#[test_case("utf16")]
+#[test_case("utf32")]
+fn unicode_crlf_and_original_encoding_spans_are_preserved(encoding: &str) {
+    let text = "\u{feff}name: café # 🌍  \r\n\r\n# footer\r\n";
+    let bytes: Vec<u8> = if encoding == "utf16" {
+        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+    } else {
+        text.chars()
+            .flat_map(|c| u32::from(c).to_be_bytes())
+            .collect()
+    };
+    let source = astral_yaml::Source::from_bytes(&bytes).unwrap();
+    let stream = source.parse().unwrap();
+    let value: Commented<'_, BTreeMap<String, String>> = from_document(&stream, 0).unwrap();
+    assert_eq!(comments(&value), [(" 🌍  ", Inline), (" footer", Detached)]);
+    assert_borrowed(&value, source.text());
 
-        let span = source
-            .original_span(value.comments[0].comment.span)
-            .unwrap();
-        let expected: Vec<u8> = if encoding == "utf16" {
-            "# 🌍  ".encode_utf16().flat_map(u16::to_le_bytes).collect()
-        } else {
-            "# 🌍  "
-                .chars()
-                .flat_map(|c| u32::from(c).to_be_bytes())
-                .collect()
-        };
-        assert_eq!(span.slice_bytes(&bytes).unwrap(), expected);
-    }
+    let span = source
+        .original_span(value.comments[0].comment.span)
+        .unwrap();
+    let expected: Vec<u8> = if encoding == "utf16" {
+        "# 🌍  ".encode_utf16().flat_map(u16::to_le_bytes).collect()
+    } else {
+        "# 🌍  "
+            .chars()
+            .flat_map(|c| u32::from(c).to_be_bytes())
+            .collect()
+    };
+    assert_eq!(span.slice_bytes(&bytes).unwrap(), expected);
 }
 
 #[test]

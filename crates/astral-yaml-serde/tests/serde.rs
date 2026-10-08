@@ -1,3 +1,6 @@
+use astral_yaml::Encoding;
+use test_case::test_case;
+
 mod support;
 
 use astral_yaml_serde::{from_str, from_stream, to_string};
@@ -43,35 +46,30 @@ where
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
 }
 
-#[test]
-fn text_accepts_scalar_spellings_and_validates_explicit_tags() {
-    for (source, expected) in [
-        ("42", "42"),
-        ("true", "true"),
-        ("1.5", "1.5"),
-        ("null", "null"),
-        ("!!str '42'", "42"),
-        ("!!str false", "false"),
-        ("! null", "null"),
-        ("!<tag:yaml.org,2002:str> 42", "42"),
-        ("%TAG !c! tag:yaml.org,2002:\n--- !c!str 42", "42"),
-    ] {
-        assert_eq!(from_str::<String>(source).unwrap(), expected);
-        assert_eq!(from_str::<&str>(source).unwrap(), expected);
-    }
+#[test_case("42", "42")]
+#[test_case("true", "true")]
+#[test_case("1.5", "1.5")]
+#[test_case("null", "null")]
+#[test_case("!!str '42'", "42")]
+#[test_case("!!str false", "false")]
+#[test_case("! null", "null")]
+#[test_case("!<tag:yaml.org,2002:str> 42", "42")]
+#[test_case("%TAG !c! tag:yaml.org,2002:\n--- !c!str 42", "42")]
+fn untagged_scalars_deserialize_as_text(source: &str, expected: &str) {
+    assert_eq!(from_str::<String>(source).unwrap(), expected);
+    assert_eq!(from_str::<&str>(source).unwrap(), expected);
+}
 
-    for source in [
-        "[]",
-        "{}",
-        "!!int '42'",
-        "!!int nope",
-        "!!bool 2",
-        "!!seq scalar",
-        "!Local x",
-    ] {
-        assert!(from_str::<String>(source).is_err(), "{source}");
-        assert!(from_str::<&str>(source).is_err(), "{source}");
-    }
+#[test_case("[]")]
+#[test_case("{}")]
+#[test_case("!!int '42'")]
+#[test_case("!!int nope")]
+#[test_case("!!bool 2")]
+#[test_case("!!seq scalar")]
+#[test_case("!Local x")]
+fn non_string_tags_reject_text_destinations(source: &str) {
+    assert!(from_str::<String>(source).is_err(), "{source}");
+    assert!(from_str::<&str>(source).is_err(), "{source}");
 }
 
 #[test]
@@ -446,16 +444,29 @@ fn punctuation_heavy_strings_roundtrip_as_keys_and_values() {
 }
 
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
-#[test]
-fn serialization_escapes_at_different_offsets() {
-    for padding in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 31, 32, 63, 64] {
-        let characters = (0..=255).filter_map(char::from_u32).chain([
-            '\u{2028}', '\u{2029}', '\u{feff}', '\u{fffe}', '\u{ffff}', '中', '🌍',
-        ]);
-        for character in characters {
-            let text = format!("{}{character}tail", "a".repeat(padding));
-            roundtrip(&text);
-        }
+#[test_case(0)]
+#[test_case(1)]
+#[test_case(2)]
+#[test_case(3)]
+#[test_case(4)]
+#[test_case(5)]
+#[test_case(6)]
+#[test_case(7)]
+#[test_case(8)]
+#[test_case(9)]
+#[test_case(15)]
+#[test_case(16)]
+#[test_case(31)]
+#[test_case(32)]
+#[test_case(63)]
+#[test_case(64)]
+fn serialization_escapes_at_different_offsets(padding: usize) {
+    let characters = (0..=255).filter_map(char::from_u32).chain([
+        '\u{2028}', '\u{2029}', '\u{feff}', '\u{fffe}', '\u{ffff}', '中', '🌍',
+    ]);
+    for character in characters {
+        let text = format!("{}{character}tail", "a".repeat(padding));
+        roundtrip(&text);
     }
 }
 
@@ -510,37 +521,33 @@ fn block_scalars_and_nulls_across_documents() {
 }
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings
-#[test]
-fn deserialize_encoded_streams() {
-    use astral_yaml::{Encoding, Source};
+#[test_case(Encoding::Utf8)]
+#[test_case(Encoding::Utf16Be)]
+#[test_case(Encoding::Utf16Le)]
+#[test_case(Encoding::Utf32Be)]
+#[test_case(Encoding::Utf32Le)]
+fn deserialize_encoded_streams(encoding: Encoding) {
+    use astral_yaml::Source;
 
-    for encoding in [
-        Encoding::Utf8,
-        Encoding::Utf16Be,
-        Encoding::Utf16Le,
-        Encoding::Utf32Be,
-        Encoding::Utf32Le,
-    ] {
-        for bom in [false, true] {
-            let text = format!("{}message: 'é 🌍'\n", if bom { "\u{feff}" } else { "" });
-            let bytes: Vec<u8> = match encoding {
-                Encoding::Utf8 => text.as_bytes().to_vec(),
-                Encoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
-                Encoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
-                Encoding::Utf32Be => text
-                    .chars()
-                    .flat_map(|c| u32::from(c).to_be_bytes())
-                    .collect(),
-                Encoding::Utf32Le => text
-                    .chars()
-                    .flat_map(|c| u32::from(c).to_le_bytes())
-                    .collect(),
-            };
-            let source = Source::from_bytes(&bytes).unwrap();
-            let stream = source.parse().unwrap();
-            let value = from_stream::<serde_json::Value>(&stream).unwrap();
-            assert_eq!(value, serde_json::json!({"message": "é 🌍"}));
-        }
+    for bom in [false, true] {
+        let text = format!("{}message: 'é 🌍'\n", if bom { "\u{feff}" } else { "" });
+        let bytes: Vec<u8> = match encoding {
+            Encoding::Utf8 => text.as_bytes().to_vec(),
+            Encoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+            Encoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+            Encoding::Utf32Be => text
+                .chars()
+                .flat_map(|c| u32::from(c).to_be_bytes())
+                .collect(),
+            Encoding::Utf32Le => text
+                .chars()
+                .flat_map(|c| u32::from(c).to_le_bytes())
+                .collect(),
+        };
+        let source = Source::from_bytes(&bytes).unwrap();
+        let stream = source.parse().unwrap();
+        let value = from_stream::<serde_json::Value>(&stream).unwrap();
+        assert_eq!(value, serde_json::json!({"message": "é 🌍"}));
     }
 }
 
@@ -664,74 +671,70 @@ fn serialization_recursion_limit() {
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test]
-fn serialization_rejects_duplicate_mapping_keys() {
+#[test_case("''", "''", true)]
+#[test_case("ab", "ab", true)]
+#[test_case("abc", "abc", true)]
+#[test_case("abcd", "abcd", true)]
+#[test_case("abcde0", "abcde1", false)]
+#[test_case("text", "text", true)]
+#[test_case("42", "0x2a", true)]
+#[test_case("-0.0", "0.0", true)]
+#[test_case(".nan", ".nan", true)]
+#[test_case("[1, true]", "[1, true]", true)]
+#[test_case("{a: 1, b: 2}", "{b: 2, a: 1}", true)]
+#[test_case("1", "1.0", false)]
+#[test_case("'null'", "null", false)]
+fn serialization_rejects_duplicate_mapping_keys(left: &str, right: &str, duplicate: bool) {
     use astral_yaml_dev::Value;
 
-    for (left, right, duplicate) in [
-        ("''", "''", true),
-        ("ab", "ab", true),
-        ("abc", "abc", true),
-        ("abcd", "abcd", true),
-        ("abcde0", "abcde1", false),
-        ("text", "text", true),
-        ("42", "0x2a", true),
-        ("-0.0", "0.0", true),
-        (".nan", ".nan", true),
-        ("[1, true]", "[1, true]", true),
-        ("{a: 1, b: 2}", "{b: 2, a: 1}", true),
-        ("1", "1.0", false),
-        ("'null'", "null", false),
-    ] {
-        let key = |source| astral_yaml_serde::from_str::<Value>(source).unwrap();
-        for preceding in [0, 30, 31] {
-            let mut entries: Vec<_> = (0..preceding)
-                .map(|index| (Value::String(format!("prefix-{index}")), Value::Null))
-                .collect();
-            entries.extend([
-                (key(left), Value::Integer(1)),
-                (key(right), Value::Integer(2)),
-            ]);
-            let value = Value::Mapping(entries);
-            let result = astral_yaml_serde::to_string(&value);
-            if duplicate {
-                assert_eq!(
-                    result.unwrap_err().message,
-                    "duplicate mapping key",
-                    "{left}: {right}"
-                );
-            } else {
-                let source = result.unwrap();
-                assert_eq!(
-                    astral_yaml_serde::from_str::<Value>(&source).unwrap(),
-                    value
-                );
-            }
+    let key = |source| astral_yaml_serde::from_str::<Value>(source).unwrap();
+    for preceding in [0, 30, 31] {
+        let mut entries: Vec<_> = (0..preceding)
+            .map(|index| (Value::String(format!("prefix-{index}")), Value::Null))
+            .collect();
+        entries.extend([
+            (key(left), Value::Integer(1)),
+            (key(right), Value::Integer(2)),
+        ]);
+        let value = Value::Mapping(entries);
+        let result = astral_yaml_serde::to_string(&value);
+        if duplicate {
+            assert_eq!(
+                result.unwrap_err().message,
+                "duplicate mapping key",
+                "{left}: {right}"
+            );
+        } else {
+            let source = result.unwrap();
+            assert_eq!(
+                astral_yaml_serde::from_str::<Value>(&source).unwrap(),
+                value
+            );
         }
     }
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test]
-fn serialized_mapping_keys_are_scoped_to_each_mapping() {
+#[test_case(1)]
+#[test_case(31)]
+#[test_case(32)]
+fn serialized_mapping_keys_are_scoped_to_each_mapping(width: usize) {
     use astral_yaml_dev::Value;
 
-    for width in [1, 31, 32] {
-        // Equal-length keys sharing a prefix must still compare their full text.
-        let mut entries: Vec<_> = (0..width)
-            .map(|index| (Value::String(format!("shared-{index:03}")), Value::Null))
-            .collect();
-        entries.push((Value::Unsigned(1), Value::Null));
-        let child = Value::Mapping(entries.clone());
-        entries.push((
-            Value::String("children".into()),
-            Value::Sequence(vec![child.clone(), child]),
-        ));
-        let parent = Value::Mapping(entries);
+    // Equal-length keys sharing a prefix must still compare their full text.
+    let mut entries: Vec<_> = (0..width)
+        .map(|index| (Value::String(format!("shared-{index:03}")), Value::Null))
+        .collect();
+    entries.push((Value::Unsigned(1), Value::Null));
+    let child = Value::Mapping(entries.clone());
+    entries.push((
+        Value::String("children".into()),
+        Value::Sequence(vec![child.clone(), child]),
+    ));
+    let parent = Value::Mapping(entries);
 
-        // Reuse key storage after both nested and sibling mappings close.
-        roundtrip(&Value::Sequence(vec![parent.clone(), parent]));
-    }
+    // Reuse key storage after both nested and sibling mappings close.
+    roundtrip(&Value::Sequence(vec![parent.clone(), parent]));
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
@@ -790,37 +793,39 @@ fn mapping_key_uniqueness_uses_core_types() {
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test]
-fn mapping_key_uniqueness_across_mapping_sizes() {
-    for count in [1, 7, 8, 9, 64] {
-        let mut source = String::new();
+#[test_case(1)]
+#[test_case(7)]
+#[test_case(8)]
+#[test_case(9)]
+#[test_case(64)]
+fn mapping_key_uniqueness_across_mapping_sizes(count: usize) {
+    let mut source = String::new();
 
-        for key in 0..count {
-            writeln!(source, "{key}: value").unwrap();
-        }
-
-        let mapping = from_str::<BTreeMap<u64, String>>(&source).unwrap();
-        assert_eq!(mapping.len(), count);
-
-        source.push_str("0x00: duplicate\n");
-        let error = from_str::<BTreeMap<u64, String>>(&source).unwrap_err();
-        assert_eq!(error.message, "duplicate mapping key");
-        assert_eq!(error.span.unwrap().slice(&source), Some("0x00"));
-
-        let mut source = String::new();
-
-        for key in 0..count {
-            writeln!(source, "key{key}: value").unwrap();
-        }
-
-        let mapping = from_str::<BTreeMap<String, String>>(&source).unwrap();
-        assert_eq!(mapping.len(), count);
-
-        source.push_str("key0: duplicate\n");
-        let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
-        assert_eq!(error.message, "duplicate mapping key");
-        assert_eq!(error.span.unwrap().slice(&source), Some("key0"));
+    for key in 0..count {
+        writeln!(source, "{key}: value").unwrap();
     }
+
+    let mapping = from_str::<BTreeMap<u64, String>>(&source).unwrap();
+    assert_eq!(mapping.len(), count);
+
+    source.push_str("0x00: duplicate\n");
+    let error = from_str::<BTreeMap<u64, String>>(&source).unwrap_err();
+    assert_eq!(error.message, "duplicate mapping key");
+    assert_eq!(error.span.unwrap().slice(&source), Some("0x00"));
+
+    let mut source = String::new();
+
+    for key in 0..count {
+        writeln!(source, "key{key}: value").unwrap();
+    }
+
+    let mapping = from_str::<BTreeMap<String, String>>(&source).unwrap();
+    assert_eq!(mapping.len(), count);
+
+    source.push_str("key0: duplicate\n");
+    let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
+    assert_eq!(error.message, "duplicate mapping key");
+    assert_eq!(error.span.unwrap().slice(&source), Some("key0"));
 }
 
 // https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags

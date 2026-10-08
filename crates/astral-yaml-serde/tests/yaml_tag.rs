@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 mod support;
 
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string, with::yaml_tag};
@@ -485,18 +487,14 @@ impl<'de> Deserialize<'de> for BufferedMap {
     }
 }
 
-#[test]
-fn tag_buffering_enforces_map_consumption() {
+#[test_case("!partial 1", "tagged mapping was not fully consumed")]
+#[test_case("!key 1", "mapping key has no value")]
+#[test_case("!value 1", "mapping value has no key")]
+fn tag_buffering_enforces_map_consumption(source: &str, expected: &str) {
     from_tag::<BufferedMap>("!normal 1").unwrap();
-    for (source, expected) in [
-        ("!partial 1", "tagged mapping was not fully consumed"),
-        ("!key 1", "mapping key has no value"),
-        ("!value 1", "mapping value has no key"),
-    ] {
-        let error = from_tag::<BufferedMap>(source).unwrap_err();
-        assert_eq!(error.message, expected);
-        assert_eq!(error.span.unwrap().slice(source), Some(source));
-    }
+    let error = from_tag::<BufferedMap>(source).unwrap_err();
+    assert_eq!(error.message, expected);
+    assert_eq!(error.span.unwrap().slice(source), Some(source));
 }
 
 #[test]

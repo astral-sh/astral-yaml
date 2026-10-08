@@ -1,5 +1,7 @@
 //! YAML node kinds: <https://yaml.org/spec/1.2.2/#3211-nodes>.
 
+use test_case::test_case;
+
 use super::support::edit_syntax;
 use astral_yaml::{
     NodeId,
@@ -239,103 +241,153 @@ fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
-#[test]
-fn scalar_type_changes_refresh_the_typed_value() {
-    let mut diffs = Vec::new();
-    for (before, replacement, expected) in [
-        ("null", "true", json!(true)),
-        ("true", "42", json!(42)),
-        ("42", "1.5", json!(1.5)),
-        ("1.5", "'text'", json!("text")),
-        ("'text'", "null", Value::Null),
-    ] {
-        let source = formatdoc! {r"
-            {before} # value
-        "};
-        let document = edit_syntax::<Value>(&source, |editor| {
-            editor.replace(&editor.root(), replacement)
-        });
-
-        assert_eq!(document.value(), &expected);
-        diffs.push(edit_diff(&source, document.syntax().source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -null # value
-    +true # value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -true # value
-    +42 # value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -42 # value
-    +1.5 # value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -1.5 # value
-    +'text' # value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -'text' # value
-    +null # value
+#[test_case(
+    "null",
+    "true",
+    &json!(true)
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -null # value
+        +true # value
     ");
+    "null to boolean"
+)]
+#[test_case(
+    "true",
+    "42",
+    &json!(42)
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -true # value
+        +42 # value
+    ");
+    "boolean to integer"
+)]
+#[test_case(
+    "42",
+    "1.5",
+    &json!(1.5)
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -42 # value
+        +1.5 # value
+    ");
+    "integer to float"
+)]
+#[test_case(
+    "1.5",
+    "'text'",
+    &json!("text")
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -1.5 # value
+        +'text' # value
+    ");
+    "float to string"
+)]
+#[test_case(
+    "'text'",
+    "null",
+    &Value::Null
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -'text' # value
+        +null # value
+    ");
+    "string to null"
+)]
+fn scalar_type_changes_refresh_the_typed_value(
+    before: &str,
+    replacement: &str,
+    expected: &serde_json::Value,
+) -> String {
+    let source = formatdoc! {r"
+        {before} # value
+    "};
+    let document = edit_syntax::<Value>(&source, |editor| {
+        editor.replace(&editor.root(), replacement)
+    });
+
+    assert_eq!(document.value(), expected);
+    edit_diff(&source, document.syntax().source())
 }
 
-#[test]
-fn null_and_empty_collections_can_replace_each_other() {
-    let mut diffs = Vec::new();
-    for (before, replacement, expected) in [
-        ("null", "[]", Some(Shape::Sequence(Vec::new()))),
-        ("[]", "null", None),
-        ("null", "{}", Some(Shape::Mapping(BTreeMap::new()))),
-        ("{}", "null", None),
-    ] {
-        let source = formatdoc! {r"
-            {before} # nullable
-        "};
-        let document = edit_syntax::<Option<Shape>>(&source, |editor| {
-            editor.replace(&editor.root(), replacement)
-        });
-
-        assert_eq!(document.value(), &expected);
-        diffs.push(edit_diff(&source, document.syntax().source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -null # nullable
-    +[] # nullable
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -[] # nullable
-    +null # nullable
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -null # nullable
-    +{} # nullable
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{} # nullable
-    +null # nullable
+#[test_case(
+    "null",
+    "[]",
+    Some(&Shape::Sequence(Vec::new()))
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -null # nullable
+        +[] # nullable
     ");
+    "null to sequence"
+)]
+#[test_case(
+    "[]",
+    "null",
+    None
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -[] # nullable
+        +null # nullable
+    ");
+    "sequence to null"
+)]
+#[test_case(
+    "null",
+    "{}",
+    Some(&Shape::Mapping(BTreeMap::new()))
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -null # nullable
+        +{} # nullable
+    ");
+    "null to mapping"
+)]
+#[test_case(
+    "{}",
+    "null",
+    None
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{} # nullable
+        +null # nullable
+    ");
+    "mapping to null"
+)]
+fn null_and_empty_collections_can_replace_each_other(
+    before: &str,
+    replacement: &str,
+    expected: Option<&Shape>,
+) -> String {
+    let source = formatdoc! {r"
+        {before} # nullable
+    "};
+    let document = edit_syntax::<Option<Shape>>(&source, |editor| {
+        editor.replace(&editor.root(), replacement)
+    });
+
+    assert_eq!(document.value().as_ref(), expected);
+    edit_diff(&source, document.syntax().source())
 }
 
 fn assert_rejected_kind_changes<T>(source: &str, expected: &T, replacements: &[&str])

@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::{Editor, Error};
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 use astral_yaml_dev::edit_diff;
@@ -91,33 +93,32 @@ fn exhausted_mutations_poison_subsequent_setters() {
     assert_eq!(document.source(), "1");
 }
 
-#[test]
-fn cursor_reads_and_mutations_respect_the_syntax_work_budget() {
-    for mutate in [false, true] {
-        let mut document = EditableDocument::parse_with_options(
-            "1",
-            ParseOptions {
-                max_nodes: 1,
-                ..ParseOptions::default()
-            },
-        )
-        .unwrap();
-        let result: Result<(), Error> = document.try_edit(|syntax| {
-            let mut editor = Editor::new(syntax);
-            let mut root = editor.root_mut();
-            root.node()?;
-            if mutate {
-                root.set(2)
-            } else {
-                root.node().map(|_| ())
-            }
-        });
-        assert!(
-            result
-                .unwrap_err()
-                .message
-                .contains("editing resource limit")
-        );
-        assert_eq!(document.source(), "1");
-    }
+#[test_case(false)]
+#[test_case(true)]
+fn cursor_reads_and_mutations_respect_the_syntax_work_budget(mutate: bool) {
+    let mut document = EditableDocument::parse_with_options(
+        "1",
+        ParseOptions {
+            max_nodes: 1,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    let result: Result<(), Error> = document.try_edit(|syntax| {
+        let mut editor = Editor::new(syntax);
+        let mut root = editor.root_mut();
+        root.node()?;
+        if mutate {
+            root.set(2)
+        } else {
+            root.node().map(|_| ())
+        }
+    });
+    assert!(
+        result
+            .unwrap_err()
+            .message
+            .contains("editing resource limit")
+    );
+    assert_eq!(document.source(), "1");
 }

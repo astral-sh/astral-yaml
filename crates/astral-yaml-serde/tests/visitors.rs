@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 mod support;
 
 use astral_yaml_serde::{Error, Tagged, from_str, to_string};
@@ -239,21 +241,17 @@ impl<'de> Deserialize<'de> for ProtocolMap {
     }
 }
 
-#[test]
-fn map_visitors_must_follow_the_protocol() {
+#[test_case("{}", "mapping value requested before key")]
+#[test_case("{key: 1}", "mapping value was not consumed")]
+#[test_case("{partial: 1}", "mapping was not fully consumed")]
+#[test_case("[]", "expected a mapping")]
+#[test_case("{a: 1, a: 2}", "duplicate mapping key")]
+fn map_visitors_must_follow_the_protocol(source: &str, expected: &str) {
     from_str::<ProtocolMap>("{normal: 1}").unwrap();
 
-    for (source, expected) in [
-        ("{}", "mapping value requested before key"),
-        ("{key: 1}", "mapping value was not consumed"),
-        ("{partial: 1}", "mapping was not fully consumed"),
-        ("[]", "expected a mapping"),
-        ("{a: 1, a: 2}", "duplicate mapping key"),
-    ] {
-        let error = from_str::<ProtocolMap>(source).unwrap_err();
-        assert_eq!(error.message, expected);
-        assert!(error.span.is_some());
-    }
+    let error = from_str::<ProtocolMap>(source).unwrap_err();
+    assert_eq!(error.message, expected);
+    assert!(error.span.is_some());
 }
 
 #[derive(Debug)]

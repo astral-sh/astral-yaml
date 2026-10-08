@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{Editable, Spanned, Tagged};
 use serde::Deserialize;
@@ -39,40 +41,46 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     assert_eq!(config.into_inner().timeout.value, 100);
 }
 
-#[test]
-fn syntax_type_and_duplicate_key_failures_roll_back_both_views() {
-    for operation in 0..6 {
-        let source = indoc! {r"
-            timeout: 30 # seconds
-        "};
-        let mut config = Editable::<Config>::parse(source).unwrap();
-        let result = config.edit_syntax(|e| {
-            let root = e.root();
-            let entries = e.mapping_entries(&root)?;
-            match operation {
-                0 => e.replace(&entries[0].1, "256"),
-                1 => e.replace(&entries[0].1, "["),
-                2 => e.insert_entry(&root, 1, "timeout", "60"),
-                3 => e.remove_entry(&root, 0),
-                4 => e.replace(&entries[0].1, "[60]"),
-                _ => e.replace(&entries[0].1, "{value: 60}"),
-            }
-        });
-        assert!(result.is_err());
-        assert_eq!(config.value().timeout.value, 30);
-        assert_eq!(config.syntax().source(), source);
-    }
-    for source in [
-        "[",
-        indoc! {r"
-            ---
-            1
-            ---
-            2"},
-        "timeout: bad",
-    ] {
-        assert!(Editable::<Config>::parse(source).is_err());
-    }
+#[test_case(0; "integer overflow")]
+#[test_case(1; "invalid syntax")]
+#[test_case(2; "duplicate field")]
+#[test_case(3; "missing field")]
+#[test_case(4; "sequence type mismatch")]
+#[test_case(5; "mapping type mismatch")]
+fn syntax_type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
+    let source = indoc! {r"
+        timeout: 30 # seconds
+    "};
+    let mut config = Editable::<Config>::parse(source).unwrap();
+    let result = config.edit_syntax(|e| {
+        let root = e.root();
+        let entries = e.mapping_entries(&root)?;
+        match operation {
+            0 => e.replace(&entries[0].1, "256"),
+            1 => e.replace(&entries[0].1, "["),
+            2 => e.insert_entry(&root, 1, "timeout", "60"),
+            3 => e.remove_entry(&root, 0),
+            4 => e.replace(&entries[0].1, "[60]"),
+            _ => e.replace(&entries[0].1, "{value: 60}"),
+        }
+    });
+    assert!(result.is_err());
+    assert_eq!(config.value().timeout.value, 30);
+    assert_eq!(config.syntax().source(), source);
+}
+
+#[test_case("["; "invalid syntax")]
+#[test_case(
+    indoc! {r"
+        ---
+        1
+        ---
+        2"};
+    "multiple documents"
+)]
+#[test_case("timeout: bad"; "type mismatch")]
+fn typed_parse_rejects_invalid_documents(source: &str) {
+    assert!(Editable::<Config>::parse(source).is_err());
 }
 
 #[test]

@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use astral_yaml_dev::Value;
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string};
 use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeTupleStruct};
@@ -187,15 +189,14 @@ fn generic_yaml_values_reject_local_tags() {
 }
 
 // https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
-#[test]
-fn tag_uri_characters_retain_their_spelling() {
-    for source in ["!%12", "!#"] {
-        let tagged = from_str::<Tagged<()>>(source).unwrap();
-        assert_eq!(tagged.tag, source);
+#[test_case("!%12")]
+#[test_case("!#")]
+fn tag_uri_characters_retain_their_spelling(source: &str) {
+    let tagged = from_str::<Tagged<()>>(source).unwrap();
+    assert_eq!(tagged.tag, source);
 
-        let encoded = to_string(&tagged).unwrap();
-        assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
-    }
+    let encoded = to_string(&tagged).unwrap();
+    assert_eq!(from_str::<Tagged<()>>(&encoded).unwrap(), tagged);
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
@@ -367,40 +368,36 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
     );
 }
 
-#[test]
-fn serialization_checks_core_tag_content() {
+#[test_case("null", &["str", "null"][..])]
+#[test_case("true", &["str", "bool"])]
+#[test_case("42", &["str", "int", "float"])]
+#[test_case("1.5", &["str", "float"])]
+#[test_case(".inf", &["str", "float"])]
+#[test_case(".nan", &["str", "float"])]
+#[test_case("'42'", &["str", "int", "float"])]
+#[test_case("'0x10'", &["str", "int"])]
+#[test_case("'0o10'", &["str", "int"])]
+#[test_case("'true'", &["str", "bool"])]
+#[test_case("''", &["str", "null"])]
+#[test_case("text", &["str"])]
+#[test_case("[]", &["seq"])]
+#[test_case("[1, true]", &["seq"])]
+#[test_case("{}", &["map"])]
+#[test_case("{answer: 42}", &["map"])]
+fn serialization_checks_core_tag_content(source: &str, compatible: &[&str]) {
     // https://yaml.org/spec/1.2.2/#1032-tag-resolution
-    for (source, compatible) in [
-        ("null", &["str", "null"][..]),
-        ("true", &["str", "bool"]),
-        ("42", &["str", "int", "float"]),
-        ("1.5", &["str", "float"]),
-        (".inf", &["str", "float"]),
-        (".nan", &["str", "float"]),
-        ("'42'", &["str", "int", "float"]),
-        ("'0x10'", &["str", "int"]),
-        ("'0o10'", &["str", "int"]),
-        ("'true'", &["str", "bool"]),
-        ("''", &["str", "null"]),
-        ("text", &["str"]),
-        ("[]", &["seq"]),
-        ("[1, true]", &["seq"]),
-        ("{}", &["map"]),
-        ("{answer: 42}", &["map"]),
-    ] {
-        let value = from_str::<Value>(source).unwrap();
-        for tag in ["str", "null", "bool", "int", "float", "seq", "map"] {
-            let tagged = Tagged {
-                tag: format!("tag:yaml.org,2002:{tag}"),
-                value: &value,
-            };
-            let result = to_string(&tagged);
-            assert_eq!(result.is_ok(), compatible.contains(&tag), "{tag}: {source}");
+    let value = from_str::<Value>(source).unwrap();
+    for tag in ["str", "null", "bool", "int", "float", "seq", "map"] {
+        let tagged = Tagged {
+            tag: format!("tag:yaml.org,2002:{tag}"),
+            value: &value,
+        };
+        let result = to_string(&tagged);
+        assert_eq!(result.is_ok(), compatible.contains(&tag), "{tag}: {source}");
 
-            if let Ok(yaml) = result {
-                let expected = from_str::<Value>(&format!("!!{tag} {source}")).unwrap();
-                assert_eq!(from_str::<Value>(&yaml).unwrap(), expected, "{yaml}");
-            }
+        if let Ok(yaml) = result {
+            let expected = from_str::<Value>(&format!("!!{tag} {source}")).unwrap();
+            assert_eq!(from_str::<Value>(&yaml).unwrap(), expected, "{yaml}");
         }
     }
 }
@@ -496,13 +493,12 @@ fn core_tag_checks_follow_enum_shapes_and_transparent_wrappers() {
     );
 }
 
-#[test]
-fn recursive_tagged_values_require_opt_in_at_every_node() {
-    for source in ["&self !Sequence [*self]", "&self !Mapping {next: *self}"] {
-        assert!(from_str::<Value>(source).is_err());
-        assert!(from_str::<serde::de::IgnoredAny>(source).is_err());
-        assert!(from_str::<Tagged<serde::de::IgnoredAny>>(source).is_err());
-    }
+#[test_case("&self !Sequence [*self]")]
+#[test_case("&self !Mapping {next: *self}")]
+fn recursive_tagged_values_require_opt_in_at_every_node(source: &str) {
+    assert!(from_str::<Value>(source).is_err());
+    assert!(from_str::<serde::de::IgnoredAny>(source).is_err());
+    assert!(from_str::<Tagged<serde::de::IgnoredAny>>(source).is_err());
 }
 
 struct TagProtocol<'a, T> {
