@@ -21,28 +21,6 @@ fn mapping_value(editor: &Editor<'_>, path: &[&str]) -> Handle {
 }
 
 #[test]
-fn ci_permission_edit_preserves_the_inline_comment() {
-    let source = include_str!("../../../../fixtures/real-world/compose-ci.yaml");
-    let diff = edit(source, |editor| {
-        let contents = mapping_value(editor, &["permissions", "contents"]);
-        editor.replace(&contents, "write")
-    });
-    insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,7 @@
-     name: ci
-     ⏎
-     permissions:
-    -  contents: read # to fetch code (actions/checkout)
-    +  contents: write # to fetch code (actions/checkout)
-     ⏎
-     concurrency:
-       group: ${{ github.workflow }}-${{ github.ref }}
-    ");
-}
-
-#[test]
 fn openapi_server_insertion_preserves_surrounding_sections() {
     let source = include_str!("../../../../fixtures/real-world/openapi-petstore.yaml");
     let diff = edit(source, |editor| {

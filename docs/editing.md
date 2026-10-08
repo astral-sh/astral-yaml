@@ -66,6 +66,13 @@ and parsed YAML fragments. `replace()` takes a fragment's style, tags, and ancho
 present. Handles belong to one transaction. Replacement retains the selected
 handle and invalidates its old descendants; deleted and foreign handles fail.
 
+`comment_position(handle, index)` captures a comment's structural position.
+Use it with `insert_comment_at()` to retain a property header or collection gap
+when removing and reinserting a comment. For a new detached gap comment,
+`CommentPosition::BeforeChild(handle)` names a sequence item or mapping key in
+the owning collection. Headers may move during rendering; child gaps retain
+their target identity. Positions containing handles belong to one transaction.
+
 Inside a transaction, `node()` returns `Node<Option<Span>>`. `Some(span)` identifies
 an original occurrence, even after replacement. An omitted value has an empty
 span; inserted syntax has `None`. Committed nodes have fresh spans.

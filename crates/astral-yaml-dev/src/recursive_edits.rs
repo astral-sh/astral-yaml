@@ -507,16 +507,6 @@ fn check_draft(model: &Tree, root: NodeId, editor: &Editor<'_>) {
 }
 
 fn set_layout(model: &Tree, editor: &mut Editor<'_>, style: CollectionStyle) {
-    // Flow delimiters can host suffix comments that have no block spelling.
-    if style == CollectionStyle::Block
-        && model.nodes().iter().any(|node| {
-            node.comments
-                .iter()
-                .any(|(_, placement)| *placement != CommentPlacement::Leading)
-        })
-    {
-        return;
-    }
     for path in model.paths() {
         let kind = &model.at(&path).kind;
         let empty = match kind {
@@ -530,11 +520,44 @@ fn set_layout(model: &Tree, editor: &mut Editor<'_>, style: CollectionStyle) {
             }
             _ => continue,
         };
+        // A flow collection also constrains every descendant. Keep delimiters
+        // around detached suffixes that may precede an ancestor's trailing
+        // comments, suffixes followed by inline comments, and leading/inline
+        // pairs without a property header.
+        let delimiter = (0..=path.len()).any(|depth| {
+            let node = model.at(&path[..depth]);
+            let has = |placement| {
+                node.comments
+                    .iter()
+                    .any(|(_, existing)| *existing == placement)
+            };
+            let closing_inline = node
+                .comments
+                .iter()
+                .position(|(_, placement)| *placement == CommentPlacement::Inline)
+                .is_some_and(|index| {
+                    node.comments[..index].iter().any(|(_, placement)| {
+                        matches!(
+                            placement,
+                            CommentPlacement::Trailing | CommentPlacement::Detached
+                        )
+                    })
+                });
+            depth != 0
+                && (closing_inline
+                    || has(CommentPlacement::Detached)
+                    || (node.anchor.is_none()
+                        && node.tag.is_none()
+                        && has(CommentPlacement::Leading)
+                        && has(CommentPlacement::Inline)))
+        });
+        let requested = if empty || (style == CollectionStyle::Block && delimiter) {
+            CollectionStyle::Flow
+        } else {
+            style
+        };
         editor
-            .set_collection_style(
-                &handle(editor, &path),
-                if empty { CollectionStyle::Flow } else { style },
-            )
+            .set_collection_style(&handle(editor, &path), requested)
             .unwrap();
     }
 }
@@ -693,9 +716,10 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
             if selector & 4 == 0 {
                 editor.replace_comment(&owner, index, &text).unwrap();
             } else {
+                let position = editor.comment_position(&owner, index).unwrap();
                 editor.remove_comment(&owner, index).unwrap();
                 editor
-                    .insert_comment(&owner, index, &text, comments[index].1)
+                    .insert_comment_at(&owner, index, &text, comments[index].1, position)
                     .unwrap();
             }
             comments[index].0 = text;

@@ -61,6 +61,26 @@ aliases.
 Corpora and artifacts are gitignored. Reproduce and minimize findings, then save
 them in `fixtures/regressions` with a regression assertion.
 
+## Valid-edit model bounds
+
+The recursive model retains live alias targets and avoids nested scalar suffixes
+and trailing comments on empty nested collections: these have no attachment
+boundary. Explicit style requests end a batch, since later edits can require a
+different style. Block conversion retains flow delimiters where comment order or
+an enclosing trailing comment requires them; descendants of flow nodes stay flow.
+
+Other bounds limit the model, not the API:
+
+| Model scope | Complementary checks |
+| --- | --- |
+| One inline comment per node, allowing arbitrary scalar replacements | Bounded layouts with all subsets of tag, anchor, opening, and closing inline comments |
+| Replacement prefixes omitted when retained comments need property-header ordering | Bounded fragment-prefix merges with property comments in root, item, key, and value positions |
+| Generated detached comments use suffix positions | Corpus reinsertion at captured positions; gap insertion and child-deletion tests |
+
+The bounded layout tests compare equivalent comment edits with independent source
+projections. Explicit block conversions also have parsed block witnesses with the
+same content and attachments. Invalid edits remain covered by rollback tests.
+
 ## Corpus coverage
 
 Replay each corpus, then generate source reports:

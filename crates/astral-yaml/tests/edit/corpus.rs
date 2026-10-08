@@ -1,5 +1,7 @@
 //! Compare composed edits with the original corpus's ordered syntax and aliases.
 
+mod layouts;
+
 use std::collections::HashMap;
 
 use astral_yaml::{
@@ -161,14 +163,16 @@ fn corpus_comment_edits_preserve_the_expected_graph() {
                                     .to_owned();
                                 match operation {
                                     CommentEdit::Remove => editor.remove_comment(handle, index)?,
-                                    // Insertion cannot name a vacated collection gap.
-                                    CommentEdit::Reinsert
-                                        if *placement != CommentPlacement::Detached =>
-                                    {
+                                    CommentEdit::Reinsert => {
+                                        let position = editor.comment_position(handle, index)?;
                                         editor.remove_comment(handle, index)?;
-                                        editor.insert_comment(handle, index, text, *placement)?;
+                                        editor.insert_comment_at(
+                                            handle, index, text, *placement, position,
+                                        )?;
                                     }
-                                    _ => editor.replace_comment(handle, index, text)?,
+                                    CommentEdit::Replace => {
+                                        editor.replace_comment(handle, index, text)?;
+                                    }
                                 }
                             }
                             if matches!(operation, CommentEdit::Remove) {
