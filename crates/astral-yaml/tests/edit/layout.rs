@@ -29,52 +29,52 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     let diffs = edits(
         [
             indoc! {r"
-            outer:
-              key: old
-
-            # detached
-        "},
-            indoc! {r"
-            outer:
-              key: old
-
-            ...
-            # detached
-        "},
-            indoc! {r"
-            outer:
-              key: old
-
-              # detached
-        "},
-            indoc! {r"
-            outer:
-              key: old
+                outer:
+                  key: old
 
                 # detached
-            next: retained
-        "},
+            "},
             indoc! {r"
-            outer:
-              key: old
-              # trailing
+                outer:
+                  key: old
 
-            # detached
-        "},
+                ...
+                # detached
+            "},
             indoc! {r"
-            - - old
+                outer:
+                  key: old
 
-              # detached
-        "},
+                  # detached
+            "},
+            indoc! {r"
+                outer:
+                  key: old
+
+                    # detached
+                next: retained
+            "},
+            indoc! {r"
+                outer:
+                  key: old
+                  # trailing
+
+                # detached
+            "},
+            indoc! {r"
+                - - old
+
+                  # detached
+            "},
         ],
         |editor| {
             editor.replace(
                 &first_leaf(editor),
                 indoc! {r"
-                |+
-                  new
+                    |+
+                      new
 
-            "},
+                "},
             )
         },
     );
@@ -715,14 +715,13 @@ fn required_collection_boundaries_do_not_override_explicit_styles() {
 
 #[test]
 fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         outer:
           key: old
         # trailing
 
     "};
-    diffs.push(edit(source, |editor| {
+    let diff = edit(source, |editor| {
         editor.remove_comment(&editor.root(), 0)?;
         editor.replace(
             &first_leaf(editor),
@@ -732,8 +731,8 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
 
             "},
         )
-    }));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,7 @@
@@ -955,28 +954,28 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     let diffs = edits(
         [
             indoc! {r"
-            old
-            # remove
-            # tail
-        "},
+                old
+                # remove
+                # tail
+            "},
             indoc! {r"
-            outer:
-              key: old
-            # remove
-            # tail
-        "},
+                outer:
+                  key: old
+                # remove
+                # tail
+            "},
             indoc! {r"
-            - - old
-            # remove
-            # tail
-        "},
+                - - old
+                # remove
+                # tail
+            "},
             indoc! {r"
-            outer:
-              key: old
-            # remove
-            ... # boundary
-            # tail
-        "},
+                outer:
+                  key: old
+                # remove
+                ... # boundary
+                # tail
+            "},
         ],
         |editor| {
             let root = editor.root();
@@ -984,10 +983,10 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
             editor.replace(
                 &first_leaf(editor),
                 indoc! {r"
-            |+
-              new
+                    |+
+                      new
 
-        "},
+                "},
             )
         },
     );
@@ -1050,47 +1049,47 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
     let diffs = edits(
         [
             indoc! {r"
-            outer:
-              value: old
+                outer:
+                  value: old
 
-              # nested
+                  # nested
 
-            # keep
+                # keep
 
-            # remove
-        "},
+                # remove
+            "},
             indoc! {r"
-            -
-              - old
+                -
+                  - old
 
-              # nested
+                  # nested
 
-            # keep
+                # keep
 
-            # remove
-        "},
+                # remove
+            "},
             indoc! {r"
-            outer:
-              inner:
-                value: old
+                outer:
+                  inner:
+                    value: old
 
-                # nested
+                    # nested
 
-            # keep
+                # keep
 
-            # remove
-        "},
+                # remove
+            "},
             indoc! {r"
-            outer:
-              value: old
+                outer:
+                  value: old
 
-              # nested
-            ...
+                  # nested
+                ...
 
-            # keep
+                # keep
 
-            # remove
-        "},
+                # remove
+            "},
         ],
         |editor| {
             let root = editor.root();
@@ -1109,10 +1108,10 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
             editor.replace(
                 &node,
                 indoc! {r"
-        |+
-          new
+                    |+
+                      new
 
-    "},
+                "},
             )
         },
     );

@@ -1,4 +1,4 @@
-use super::support::{edit, edits};
+use super::support::{edit, edited, edits};
 use astral_yaml::edit::EditableDocument;
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -13,21 +13,21 @@ fn imported_aliases_follow_the_retained_or_fragment_anchor() {
     for (source, nested) in [
         (
             indoc! {r"
-            &old [before]
-        "},
+                &old [before]
+            "},
             false,
         ),
         (
             indoc! {r"
-            [before]
-        "},
+                [before]
+            "},
             false,
         ),
         (
             indoc! {r"
-            definition: &old [before]
-            copy: *old
-        "},
+                definition: &old [before]
+                copy: *old
+            "},
             true,
         ),
     ] {
@@ -74,19 +74,19 @@ fn retained_aliases_follow_anchor_changes_outside_the_definition() {
     let diffs = edits(
         [
             indoc! {r"
-            definition: &old before
-            first: *old # keep
-            second: *old
-            untouched:   [a,b]
-        "},
+                definition: &old before
+                first: *old # keep
+                second: *old
+                untouched:   [a,b]
+            "},
             indoc! {r"
-            {definition: &old before, first: *old, second: *old, untouched:   [a,b]}
-        "},
+                {definition: &old before, first: *old, second: *old, untouched:   [a,b]}
+            "},
             indoc! {r"
-            definition: &old before
-            ? *old
-            : value
-        "},
+                definition: &old before
+                ? *old
+                : value
+            "},
         ],
         |editor| {
             let target = editor.mapping_entries(&editor.root())?[0].1.clone();
@@ -129,14 +129,11 @@ fn canceled_anchor_changes_do_not_rewrite_alias_occurrences() {
         first:   *old
         second: *old # keep
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let target = editor.mapping_entries(&editor.root())?[0].1.clone();
-            editor.replace(&target, "&temporary 'before'")?;
-            editor.replace(&target, "&old 'before'")
-        })
-        .unwrap();
+    let document = edited(source, |editor| {
+        let target = editor.mapping_entries(&editor.root())?[0].1.clone();
+        editor.replace(&target, "&temporary 'before'")?;
+        editor.replace(&target, "&old 'before'")
+    });
     assert_eq!(document.source(), source);
 }
 
@@ -179,17 +176,14 @@ fn alias_bindings_only_need_to_be_complete_at_the_end_of_mutation() {
         - &retained value
         - *retained
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let root = editor.root();
-            editor.remove_item(&root, 0)?;
-            editor.remove_item(&root, 0)?;
-            let target = editor.sequence_items(&root)?[0].clone();
-            editor.replace(&target, "changed")?;
-            editor.replace(&target, "&retained changed")
-        })
-        .unwrap();
+    let document = edited(source, |editor| {
+        let root = editor.root();
+        editor.remove_item(&root, 0)?;
+        editor.remove_item(&root, 0)?;
+        let target = editor.sequence_items(&root)?[0].clone();
+        editor.replace(&target, "changed")?;
+        editor.replace(&target, "&retained changed")
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml

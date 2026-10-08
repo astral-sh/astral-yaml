@@ -25,11 +25,18 @@ pub(super) fn edit(
     source: &str,
     operation: impl FnOnce(&mut Editor<'_>) -> Result<(), Error>,
 ) -> String {
+    edit_diff(source, edited(source, operation).source())
+}
+
+pub(super) fn edited(
+    source: &str,
+    operation: impl FnOnce(&mut Editor<'_>) -> Result<(), Error>,
+) -> EditableDocument {
     let mut document = EditableDocument::parse(source).unwrap();
     document
         .edit(operation)
         .unwrap_or_else(|error| panic!("{source:?}: {error}"));
-    edit_diff(source, document.source())
+    document
 }
 
 pub(super) fn edits<const N: usize>(

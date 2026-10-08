@@ -1,4 +1,4 @@
-use super::support::{edit, edits};
+use super::support::{edit, edited, edits};
 use astral_yaml::{
     comments::CommentPlacement,
     edit::{CommentPosition, EditableDocument, NodeKind},
@@ -26,18 +26,15 @@ fn unchanged_reinsertion_preserves_source() {
             - two
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let owner = editor.root();
-                let comment = &editor.node(&owner)?.comments()[0];
-                let text = comment.text().to_owned();
-                let placement = comment.placement();
-                let position = editor.comment_position(&owner, 0)?;
-                editor.remove_comment(&owner, 0)?;
-                editor.insert_comment_at(&owner, 0, &text, placement, position)
-            })
-            .unwrap();
+        let document = edited(source, |editor| {
+            let owner = editor.root();
+            let comment = &editor.node(&owner)?.comments()[0];
+            let text = comment.text().to_owned();
+            let placement = comment.placement();
+            let position = editor.comment_position(&owner, 0)?;
+            editor.remove_comment(&owner, 0)?;
+            editor.insert_comment_at(&owner, 0, &text, placement, position)
+        });
         assert_eq!(document.source(), source);
     }
 }

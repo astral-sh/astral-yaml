@@ -7,19 +7,19 @@ fn flow_conversion_uses_content_indentation_after_properties() {
     let results = edits(
         [
             indoc! {r"
-            outer: &mapping
-              items: &sequence
-                - x
-              untouched:   [a,b]
-            copy: *sequence
-        "},
+                outer: &mapping
+                  items: &sequence
+                    - x
+                  untouched:   [a,b]
+                copy: *sequence
+            "},
             indoc! {r"
-            outer: &mapping
-              items: &sequence
-              - x
-              untouched:   [a,b]
-            copy: *sequence
-        "},
+                outer: &mapping
+                  items: &sequence
+                  - x
+                  untouched:   [a,b]
+                copy: *sequence
+            "},
         ],
         |editor| {
             let mapping = editor.mapping_entries(&editor.root())?[0].1.clone();
@@ -58,13 +58,13 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
     let results = edits(
         [
             indoc! {r"
-            ? - {nested: &a [old]}
-            : *a
-            outside:   [x,y]
-        "},
+                ? - {nested: &a [old]}
+                : *a
+                outside:   [x,y]
+            "},
             indoc! {r"
-            {? [{nested: &a [old]}]: *a, outside:   [x,y]}
-        "},
+                {? [{nested: &a [old]}]: *a, outside:   [x,y]}
+            "},
         ],
         |editor| {
             let key = editor.mapping_entries(&editor.root())?[0].0.clone();
@@ -120,11 +120,11 @@ fn omitted_keys_retain_entries_without_value_indicators() {
     let results = edits(
         [
             indoc! {"
-            {old}
-        "},
+                {old}
+            "},
             indoc! {"
-            {old, retained: untouched}
-        "},
+                {old, retained: untouched}
+            "},
         ],
         |editor| {
             let key = editor.mapping_entries(&editor.root())?[0].0.clone();
@@ -370,24 +370,20 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite() {
             [[[[a]: b]: c]: d]
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut sequence = editor.root();
-                if source.starts_with("outer:") {
-                    sequence = editor.mapping_entries(&sequence)?.remove(0).1;
-                }
-                while let Ok(items) = editor.sequence_items(&sequence) {
-                    let item = &items[0];
-                    let Ok(entries) = editor.mapping_entries(item) else {
-                        break;
-                    };
-                    sequence = entries[0].0.clone();
-                }
-                editor.insert_item(&sequence, 0, "new")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let mut sequence = editor.root();
+            if source.starts_with("outer:") {
+                sequence = editor.mapping_entries(&sequence)?.remove(0).1;
+            }
+            while let Ok(items) = editor.sequence_items(&sequence) {
+                let item = &items[0];
+                let Ok(entries) = editor.mapping_entries(item) else {
+                    break;
+                };
+                sequence = entries[0].0.clone();
+            }
+            editor.insert_item(&sequence, 0, "new")
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -425,28 +421,28 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     let diffs = edits(
         [
             indoc! {r"
-            {key}
-        "},
+                {key}
+            "},
             indoc! {r"
-            {? key}
-        "},
+                {? key}
+            "},
             indoc! {r"
-            ? key
-        "},
+                ? key
+            "},
             indoc! {r"
-            ?
-        "},
+                ?
+            "},
             indoc! {r"
-            ? key # note
-        "},
+                ? key # note
+            "},
             indoc! {"
-            {key # a colon in a comment:\x20
-            }
-        "},
+                {key # a colon in a comment:\x20
+                }
+            "},
             indoc! {r"
-            key:  # note
-            other : 'untouched'
-        "},
+                key:  # note
+                other : 'untouched'
+            "},
         ],
         |editor| {
             let value = editor.mapping_entries(&editor.root())?.remove(0).1;
@@ -689,25 +685,21 @@ fn explicit_keys_accept_block_style_requests() {
             : [value]
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let mut mapping = editor.root();
-                if source.starts_with("outer:") {
-                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+        diffs.push(edit(source, |editor| {
+            let mut mapping = editor.root();
+            if source.starts_with("outer:") {
+                mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+            }
+            let (key, value) = editor.mapping_entries(&mapping)?.remove(0);
+            match editor.node(&key)?.kind() {
+                astral_yaml::edit::NodeKind::Scalar { style, .. } => {
+                    editor.set_scalar_style(&key, *style)?;
                 }
-                let (key, value) = editor.mapping_entries(&mapping)?.remove(0);
-                match editor.node(&key)?.kind() {
-                    astral_yaml::edit::NodeKind::Scalar { style, .. } => {
-                        editor.set_scalar_style(&key, *style)?;
-                    }
-                    _ => editor.set_collection_style(&key, CollectionStyle::Block)?,
-                }
-                // Force a visible change even when the key already has its requested style.
-                editor.replace(&value, "updated")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+                _ => editor.set_collection_style(&key, CollectionStyle::Block)?,
+            }
+            // Force a visible change even when the key already has its requested style.
+            editor.replace(&value, "updated")
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     --- before.yaml

@@ -1,6 +1,6 @@
 //! Comment placement across fragment replacement and presentation changes.
 
-use super::support::edit;
+use super::support::{edit, edited};
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -168,10 +168,9 @@ fn root_collection_headers_retain_inline_comments() {
             # trailing
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
-            .unwrap();
+        let mut document = edited(source, |editor| {
+            editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+        });
         let once = document.source().to_owned();
         document
             .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
@@ -326,11 +325,9 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
             "},
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml

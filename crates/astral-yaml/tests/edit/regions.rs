@@ -1,9 +1,9 @@
 //! Comments and separation: <https://yaml.org/spec/1.2.2/#66-comments>.
 
-use super::support::edit;
+use super::support::{edit, edited};
 use astral_yaml::{
     CollectionStyle,
-    edit::{EditableDocument, Editor, Handle, NodeKind},
+    edit::{Editor, Handle, NodeKind},
 };
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -61,16 +61,13 @@ fn flow_delimiter_comments_survive_collection_edits() {
             false,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let target = collection(editor, nested);
-                match editor.node(&target)?.kind() {
-                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                    _ => editor.insert_entry(&target, 1, "added", "new"),
-                }
-            })
-            .unwrap();
+        let mut document = edited(source, |editor| {
+            let target = collection(editor, nested);
+            match editor.node(&target)?.kind() {
+                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
+                _ => editor.insert_entry(&target, 1, "added", "new"),
+            }
+        });
         let committed = document.to_yaml();
         document
             .edit(|editor| {
@@ -150,17 +147,13 @@ fn shrinking_collections_retain_their_comment_boundaries() {
               key: old
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let target = collection(editor, true);
-                match editor.node(&target)?.kind() {
-                    NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
-                    _ => editor.remove_entry(&target, 0),
-                }
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let target = collection(editor, true);
+            match editor.node(&target)?.kind() {
+                NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
+                _ => editor.remove_entry(&target, 0),
+            }
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -223,28 +216,24 @@ fn rewrite_context_is_selected_after_all_mutations() {
 
 #[test]
 fn retained_opening_comments_merge_with_fragment_prefixes() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         [ # open
           old
         ] # close
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor.replace(
-                &editor.root(),
-                indoc! {r"
-                    # detached
+    let document = edited(source, |editor| {
+        editor.replace(
+            &editor.root(),
+            indoc! {r"
+                # detached
 
-                    [new]
-                "},
-            )?;
-            editor.replace_comment(&editor.root(), 1, " updated")
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+                [new]
+            "},
+        )?;
+        editor.replace_comment(&editor.root(), 1, " updated")
+    });
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,4 @@

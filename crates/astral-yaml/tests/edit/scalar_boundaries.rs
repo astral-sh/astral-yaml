@@ -6,7 +6,6 @@ use astral_yaml_dev::indoc;
 
 #[test]
 fn relocated_inline_headers_keep_detached_suffix_separation() {
-    let mut diffs = Vec::new();
     let source = indoc! {"
         --- # property
         &a [ # open
@@ -18,15 +17,15 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
 
         # last
     "};
-    diffs.push(edit(source, |editor| {
+    let diff = edit(source, |editor| {
         editor.replace(
             &editor.root(),
             indoc! {r"
                 - new
             "},
         )
-    }));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,9 +1,9 @@
@@ -164,34 +163,34 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
         [
             "|+\n  new\n\n# tail\n ",
             indoc! {r"
-            |+
-              new
+                |+
+                  new
 
-            # tail
+                # tail
 
-        "},
+            "},
             indoc! {r"
-            |+
-              new
+                |+
+                  new
 
-            # tail
+                # tail
 
-            ...
-        "},
+                ...
+            "},
             indoc! {r"
-            - |+
-                new
+                - |+
+                    new
 
-            # tail
+                # tail
 
-        "},
+            "},
             indoc! {r"
-            key: |+
-              new
+                key: |+
+                  new
 
-            # tail
+                # tail
 
-        "},
+            "},
         ],
         |editor| editor.remove_comment(&editor.root(), 0),
     );
@@ -255,17 +254,17 @@ fn trailing_comments_can_reclaim_blank_document_suffixes() {
     let diffs = edits(
         [
             indoc! {r"
-            old
+                old
 
-            ... # inline
-        "},
+                ... # inline
+            "},
             indoc! {r"
-            old
-            ...
+                old
+                ...
 
-            ... # inline
+                ... # inline
 
-        "},
+            "},
         ],
         |editor| {
             let root = editor.root();
@@ -300,7 +299,6 @@ fn trailing_comments_can_reclaim_blank_document_suffixes() {
 
 #[test]
 fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         ---
         old
@@ -311,15 +309,15 @@ fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
         ... # inline
         ... # last
     "};
-    diffs.push(edit(source, |editor| {
+    let diff = edit(source, |editor| {
         editor.replace(
             &editor.root(),
             indoc! {r"
                 ---
             "},
         )
-    }));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    });
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,7 +1,6 @@

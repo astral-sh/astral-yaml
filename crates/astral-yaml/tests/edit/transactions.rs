@@ -1,5 +1,5 @@
 //! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
-use super::support::{edit, edits};
+use super::support::{edit, edited, edits};
 use astral_yaml::{
     ParseOptions,
     comments::CommentPlacement,
@@ -13,22 +13,20 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         existing: # keep
         items: []
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let entries = editor.mapping_entries(&editor.root())?;
-            let existing = &entries[0].1;
-            let items = &entries[1].1;
-            let empty_origin = editor.node(existing)?.span();
-            editor.replace(existing, "new")?;
-            editor.insert_item(items, 0, "'' # imported")?;
-            editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
-            let item = &editor.sequence_items(items)?[0];
-            editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
+    let document = edited(source, |editor| {
+        let entries = editor.mapping_entries(&editor.root())?;
+        let existing = &entries[0].1;
+        let items = &entries[1].1;
+        let empty_origin = editor.node(existing)?.span();
+        editor.replace(existing, "new")?;
+        editor.insert_item(items, 0, "'' # imported")?;
+        editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
+        let item = &editor.sequence_items(items)?[0];
+        editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
 
-            let replacement = editor.node(existing)?;
-            let item = editor.node(item)?;
-            insta::assert_snapshot!(formatdoc! {"
+        let replacement = editor.node(existing)?;
+        let item = editor.node(item)?;
+        insta::assert_snapshot!(formatdoc! {"
             original empty value: {:?}
             replacement origin: {:?}
             retained comment: {:?}
@@ -50,9 +48,8 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         inserted comment: None
         imported comment: None
         "##);
-            Ok(())
-        })
-        .unwrap();
+        Ok(())
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -73,13 +70,10 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
         timeout : 30   # seconds
         other:    'untouched'
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let entries = editor.mapping_entries(&editor.root())?;
-            editor.replace(&entries[0].1, "600")
-        })
-        .unwrap();
+    let mut document = edited(source, |editor| {
+        let entries = editor.mapping_entries(&editor.root())?;
+        editor.replace(&entries[0].1, "600")
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -230,13 +224,10 @@ fn aliases_cannot_be_dangled_or_silently_rebound() {
         assert_eq!(document.source(), source);
     }
     let source = "[&a 1, *a]";
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let first = e.sequence_items(&e.root())?.remove(0);
-            e.replace(&first, "&a 2")
-        })
-        .unwrap();
+    let mut document = edited(source, |e| {
+        let first = e.sequence_items(&e.root())?.remove(0);
+        e.replace(&first, "&a 2")
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
     --- before.yaml
     +++ after.yaml
@@ -268,14 +259,11 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
         --- # marker
         42 # number
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let root = e.root();
-            e.replace_comment(&root, 0, " updated")?;
-            e.remove_comment(&root, 1)
-        })
-        .unwrap();
+    let document = edited(source, |e| {
+        let root = e.root();
+        e.replace_comment(&root, 0, " updated")?;
+        e.remove_comment(&root, 1)
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -290,14 +278,11 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
         a: 1
         b: 2
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let entries = e.mapping_entries(&e.root())?;
-            e.insert_comment(&entries[0].1, 0, " first", CommentPlacement::Leading)?;
-            e.insert_comment(&entries[1].1, 0, " second", CommentPlacement::Inline)
-        })
-        .unwrap();
+    let document = edited(source, |e| {
+        let entries = e.mapping_entries(&e.root())?;
+        e.insert_comment(&entries[0].1, 0, " first", CommentPlacement::Leading)?;
+        e.insert_comment(&entries[1].1, 0, " second", CommentPlacement::Inline)
+    });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
     +++ after.yaml
@@ -391,17 +376,17 @@ fn local_collection_edits_leave_siblings_untouched() {
     let diffs = edits(
         [
             indoc! {r"
-            a:  'untouched'
-            b: [1, 2]
-            c : true
-        "},
+                a:  'untouched'
+                b: [1, 2]
+                c : true
+            "},
             indoc! {r"
-            a:  'untouched'
-            b:
-              - 1
-              - 2
-            c : true
-        "},
+                a:  'untouched'
+                b:
+                  - 1
+                  - 2
+                c : true
+            "},
         ],
         |e| {
             let entries = e.mapping_entries(&e.root())?;
@@ -538,10 +523,9 @@ fn empty_collections_remain_in_flow_style() {
     use astral_yaml::CollectionStyle;
 
     for source in ["[]", "{}"] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|e| e.set_collection_style(&e.root(), CollectionStyle::Block))
-            .unwrap();
+        let document = edited(source, |e| {
+            e.set_collection_style(&e.root(), CollectionStyle::Block)
+        });
         assert_eq!(document.source(), source);
     }
 }
@@ -798,19 +782,15 @@ fn repeated_navigation_is_bounded() {
 fn replacing_implicit_nulls_adds_required_separation() {
     let mut diffs = Vec::new();
     for source in ["---", "a:", "-", "{a:}"] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|e| {
-                let root = e.root();
-                let target = match e.node(&root)?.kind() {
-                    NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
-                    NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
-                    _ => root,
-                };
-                e.replace(&target, "42")
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |e| {
+            let root = e.root();
+            let target = match e.node(&root)?.kind() {
+                NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
+                NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
+                _ => root,
+            };
+            e.replace(&target, "42")
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -947,25 +927,22 @@ fn canceled_edits_do_not_expand_the_final_rewrite() {
     "};
     let mut diffs = Vec::new();
     for replacement in [None, Some("new")] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let value = editor.mapping_entries(&editor.root())?[0].1.clone();
-                editor.set_scalar_style(&value, ScalarStyle::Literal)?;
-                editor.set_scalar_style(&value, ScalarStyle::Plain)?;
-                editor.insert_comment(&value, 0, "temporary", CommentPlacement::Leading)?;
-                editor.remove_comment(&value, 0)?;
-                let items = editor.mapping_entries(&editor.root())?[1].1.clone();
-                editor.insert_item(&items, 1, "temporary")?;
-                editor.remove_item(&items, 1)?;
-                editor.set_collection_style(&items, astral_yaml::CollectionStyle::Block)?;
-                editor.set_collection_style(&items, astral_yaml::CollectionStyle::Flow)?;
-                if let Some(replacement) = replacement {
-                    editor.replace(&value, replacement)?;
-                }
-                Ok(())
-            })
-            .unwrap();
+        let document = edited(source, |editor| {
+            let value = editor.mapping_entries(&editor.root())?[0].1.clone();
+            editor.set_scalar_style(&value, ScalarStyle::Literal)?;
+            editor.set_scalar_style(&value, ScalarStyle::Plain)?;
+            editor.insert_comment(&value, 0, "temporary", CommentPlacement::Leading)?;
+            editor.remove_comment(&value, 0)?;
+            let items = editor.mapping_entries(&editor.root())?[1].1.clone();
+            editor.insert_item(&items, 1, "temporary")?;
+            editor.remove_item(&items, 1)?;
+            editor.set_collection_style(&items, astral_yaml::CollectionStyle::Block)?;
+            editor.set_collection_style(&items, astral_yaml::CollectionStyle::Flow)?;
+            if let Some(replacement) = replacement {
+                editor.replace(&value, replacement)?;
+            }
+            Ok(())
+        });
         let diff = edit_diff(source, document.source());
         diffs.push(format!(
             "Final replacement: {replacement:?}\n{}",

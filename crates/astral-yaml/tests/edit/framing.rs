@@ -1,6 +1,6 @@
 //! Document framing, source separators, and comments between collection children.
 
-use super::support::edit;
+use super::support::{edit, edited};
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -711,18 +711,14 @@ fn removing_the_last_gap_preserves_block_scalar_content() {
             true,
         ),
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                if sequence {
-                    editor.remove_item(&root, 1)
-                } else {
-                    editor.remove_entry(&root, 1)
-                }
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            if sequence {
+                editor.remove_item(&root, 1)
+            } else {
+                editor.remove_entry(&root, 1)
+            }
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -774,19 +770,15 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
             # tail
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                let count = editor.node(&root)?.comments().len();
-                editor.insert_comment(&root, count, " added", CommentPlacement::Trailing)?;
-                for _ in 0..count {
-                    editor.remove_comment(&root, 0)?;
-                }
-                Ok(())
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            let count = editor.node(&root)?.comments().len();
+            editor.insert_comment(&root, count, " added", CommentPlacement::Trailing)?;
+            for _ in 0..count {
+                editor.remove_comment(&root, 0)?;
+            }
+            Ok(())
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -830,23 +822,19 @@ fn block_roots_can_use_the_document_marker_for_inline_comments() {
             --- old
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let root = editor.root();
-                while !editor.node(&root)?.comments().is_empty() {
-                    editor.remove_comment(&root, 0)?;
-                }
-                editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
-                editor.replace(
-                    &root,
-                    indoc! {r"
-                        a: new
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let root = editor.root();
+            while !editor.node(&root)?.comments().is_empty() {
+                editor.remove_comment(&root, 0)?;
+            }
+            editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
+            editor.replace(
+                &root,
+                indoc! {r"
+                    a: new
+                "},
+            )
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -896,13 +884,9 @@ fn root_leading_comments_use_the_start_marker_boundary() {
             ... # end
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -979,18 +963,14 @@ fn root_omission_retains_comments_at_document_boundaries() {
             ...
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                editor.replace(
-                    &editor.root(),
-                    indoc! {r"
-                        ---
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(
+                &editor.root(),
+                indoc! {r"
+                    ---
+                "},
+            )
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -1077,11 +1057,9 @@ fn collection_comments_can_use_both_document_marker_headers() {
             ...
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -1128,11 +1106,9 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
             astral_yaml::ScalarStyle::Literal,
             astral_yaml::ScalarStyle::Folded,
         ] {
-            let mut document = EditableDocument::parse(source).unwrap();
-            document
-                .edit(|editor| editor.set_scalar_style(&editor.root(), style))
-                .unwrap();
-            diffs.push(edit_diff(source, document.source()));
+            diffs.push(edit(source, |editor| {
+                editor.set_scalar_style(&editor.root(), style)
+            }));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -1172,7 +1148,6 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
 
 #[test]
 fn framing_text_edits_retain_the_unchanged_body_layout() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         ---
         &root
@@ -1182,12 +1157,11 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
         ...
         # tail
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| editor.replace_comment(&editor.root(), 1, " changed"))
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    let document = edited(source, |editor| {
+        editor.replace_comment(&editor.root(), 1, " changed")
+    });
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -4,4 +4,4 @@

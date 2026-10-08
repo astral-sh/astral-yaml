@@ -30,6 +30,9 @@ enum Operation {
 impl Operation {
     fn apply(self, editor: &mut Editor<'_>) -> Result<(), Error> {
         let root = editor.root();
+        if let Some(fragment) = self.content() {
+            return editor.replace(&root, fragment);
+        }
         let count = editor.node(&root)?.comments().len();
         match self {
             Self::ReplaceFirst | Self::ReplaceLast if count > 0 => {
@@ -60,50 +63,6 @@ impl Operation {
             Self::AppendDetached => {
                 editor.insert_comment(&root, count, " detached", CommentPlacement::Detached)
             }
-            Self::SetTailSequence => editor.replace(
-                &root,
-                indoc! {r"
-                    - |+
-                        new
-
-                "},
-            ),
-            Self::SetTailMapping => editor.replace(
-                &root,
-                indoc! {r"
-                    key: |+
-                      new
-
-                "},
-            ),
-            Self::SetSequence => editor.replace(
-                &root,
-                indoc! {r"
-                    - new
-                "},
-            ),
-            Self::SetScalar => editor.replace(&root, "value"),
-            Self::SetMapping => editor.replace(
-                &root,
-                indoc! {r"
-                    key: new
-                "},
-            ),
-            Self::SetFlowSequence => editor.replace(&root, "[new]"),
-            Self::SetLiteral => editor.replace(
-                &root,
-                indoc! {r"
-                    |+
-                      new
-
-                "},
-            ),
-            Self::SetEmpty => editor.replace(
-                &root,
-                indoc! {r"
-                    ---
-                "},
-            ),
             _ => Ok(()),
         }
     }

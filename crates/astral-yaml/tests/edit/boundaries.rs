@@ -1,6 +1,6 @@
 //! Root edits may require document boundaries to preserve comment ownership.
 
-use super::support::edit;
+use super::support::{edit, edited};
 use astral_yaml::{ParseOptions, comments::CommentPlacement, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -351,14 +351,10 @@ fn nested_inline_comments_can_use_available_syntax_headers() {
             value: &a old # first
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-                editor.insert_comment(&value, 1, " second", CommentPlacement::Inline)
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+            editor.insert_comment(&value, 1, " second", CommentPlacement::Inline)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     --- before.yaml
@@ -379,22 +375,18 @@ fn nested_inline_comments_can_use_available_syntax_headers() {
 
 #[test]
 fn detached_suffix_comments_follow_inserted_root_content() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         ---
         ...
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let root = editor.root();
-            editor.insert_comment(&root, 0, " gap", CommentPlacement::Detached)?;
-            editor.insert_comment(&root, 1, " end", CommentPlacement::Inline)?;
-            editor.replace(&root, "new")
-        })
-        .unwrap();
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    let document = edited(source, |editor| {
+        let root = editor.root();
+        editor.insert_comment(&root, 0, " gap", CommentPlacement::Detached)?;
+        editor.insert_comment(&root, 1, " end", CommentPlacement::Inline)?;
+        editor.replace(&root, "new")
+    });
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,5 @@

@@ -1,4 +1,4 @@
-use super::support::{edit, edits};
+use super::support::{edit, edited, edits};
 use astral_yaml::{
     CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
@@ -145,18 +145,15 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
           # old
         value
     "};
-    let mut document = EditableDocument::parse(&source).unwrap();
-    document
-        .edit(|editor| {
-            let root = editor.root();
-            editor.insert_comment(&root, 0, " discarded", CommentPlacement::Leading)?;
-            editor.replace_comment(&root, 1, " renamed")?;
-            editor.insert_comment(&root, 0, " first", CommentPlacement::Leading)?;
-            editor.remove_comment(&root, 1)?;
-            editor.insert_comment(&root, 2, " last", CommentPlacement::Leading)?;
-            editor.replace(&root, "changed")
-        })
-        .unwrap();
+    let mut document = edited(&source, |editor| {
+        let root = editor.root();
+        editor.insert_comment(&root, 0, " discarded", CommentPlacement::Leading)?;
+        editor.replace_comment(&root, 1, " renamed")?;
+        editor.insert_comment(&root, 0, " first", CommentPlacement::Leading)?;
+        editor.remove_comment(&root, 1)?;
+        editor.insert_comment(&root, 2, " last", CommentPlacement::Leading)?;
+        editor.replace(&root, "changed")
+    });
     diffs.push(formatdoc! {r"
         initial edits
         {}",
@@ -217,19 +214,15 @@ fn block_roots_can_move_off_a_document_marker_line() {
             ...
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                editor.replace(
-                    &editor.root(),
-                    indoc! {r"
-                        - new
-                        - values
-                    "},
-                )
-            })
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.replace(
+                &editor.root(),
+                indoc! {r"
+                    - new
+                    - values
+                "},
+            )
+        }));
     }
     for source in [
         indoc! {r"
@@ -245,11 +238,9 @@ fn block_roots_can_move_off_a_document_marker_line() {
             --- !!map {old: value}
         "},
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
-            .unwrap();
-        diffs.push(edit_diff(source, document.source()));
+        diffs.push(edit(source, |editor| {
+            editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+        }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
     --- before.yaml
@@ -428,27 +419,27 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     let diffs = edits(
         [
             indoc! {r"
-            'old'
-        "},
+                'old'
+            "},
             indoc! {r"
-            'old'
+                'old'
 
-        "},
+            "},
             "'old'\n  \n  ",
             indoc! {r"
-            'old' # keep
+                'old' # keep
 
-        "},
+            "},
             indoc! {r"
-            'old'
+                'old'
 
-            ...
-        "},
+                ...
+            "},
             indoc! {r"
-            %YAML 1.2 # directive
-            --- 'old' # inline
-            ... # end
-        "},
+                %YAML 1.2 # directive
+                --- 'old' # inline
+                ... # end
+            "},
         ],
         |editor| {
             let root = editor.root();
