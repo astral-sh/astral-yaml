@@ -385,25 +385,41 @@ impl Draft {
         index: usize,
         text: &str,
         placement: CommentPlacement,
+        position: Option<CommentPosition>,
     ) -> Result<(), Error> {
         self.comment_text(text)?;
+        if let Some(CommentPosition::BeforeChild(child)) = position {
+            if placement != CommentPlacement::Detached {
+                return Err(self.error("collection gaps require detached comments"));
+            }
+            let direct = match &self.node(id).kind {
+                NodeKind::Sequence { items, .. } => items.contains(&child),
+                NodeKind::Mapping { entries, .. } => entries.iter().any(|&(key, _)| key == child),
+                _ => false,
+            };
+            if !direct {
+                return Err(self.error("comment boundary is not a collection child"));
+            }
+        }
         let comments = &mut self.slots[id.0].node.comments;
         if index > comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
-        let position = if placement == CommentPlacement::Leading {
-            CommentPosition::Before
-        } else if placement == CommentPlacement::Detached {
-            comments[index..]
-                .iter()
-                .find_map(|comment| match comment.position {
-                    CommentPosition::BeforeChild(_) => Some(comment.position),
-                    _ => None,
-                })
-                .unwrap_or(CommentPosition::After)
-        } else {
-            CommentPosition::After
-        };
+        let position = position.unwrap_or_else(|| {
+            if placement == CommentPlacement::Leading {
+                CommentPosition::Before
+            } else if placement == CommentPlacement::Detached {
+                comments[index..]
+                    .iter()
+                    .find_map(|comment| match comment.position {
+                        CommentPosition::BeforeChild(_) => Some(comment.position),
+                        _ => None,
+                    })
+                    .unwrap_or(CommentPosition::After)
+            } else {
+                CommentPosition::After
+            }
+        });
         comments.insert(
             index,
             Comment {

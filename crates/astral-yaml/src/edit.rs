@@ -75,15 +75,36 @@ pub struct Comment<Location = Span> {
 
 /// Source position and attachment are distinct: comments between a node's
 /// properties and content can be attached as trailing comments to that node.
+/// Owned syntax uses node IDs; editing operations use transaction handles.
+/// Emission may move headers while preserving attachments. Detached collection
+/// comments retain their boundary before the named child.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CommentPosition {
+pub enum CommentPosition<Child = NodeId> {
+    /// Before the node's properties and content.
     Before,
+    /// Between the node's properties and its content.
     Header,
     /// An inline comment after a flow collection's opening delimiter.
     Opening,
     /// A collection-owned comment before an item or mapping key.
-    BeforeChild(NodeId),
+    BeforeChild(Child),
+    /// After the node's content.
     After,
+}
+
+impl<Child> CommentPosition<Child> {
+    fn try_map<T>(
+        self,
+        map: impl FnOnce(Child) -> Result<T, Error>,
+    ) -> Result<CommentPosition<T>, Error> {
+        Ok(match self {
+            Self::Before => CommentPosition::Before,
+            Self::Header => CommentPosition::Header,
+            Self::Opening => CommentPosition::Opening,
+            Self::BeforeChild(child) => CommentPosition::BeforeChild(map(child)?),
+            Self::After => CommentPosition::After,
+        })
+    }
 }
 
 impl CommentPosition {
@@ -355,6 +376,13 @@ impl<Location> Comment<Location> {
     #[must_use]
     pub fn placement(&self) -> CommentPlacement {
         self.placement
+    }
+
+    /// The comment's structural boundary. For reinsertion during an edit, use
+    /// [`Editor::comment_position`] to obtain transaction-bound child handles.
+    #[must_use]
+    pub fn position(&self) -> CommentPosition {
+        self.position
     }
 
     /// The comment's source location. Committed comments return their current span.

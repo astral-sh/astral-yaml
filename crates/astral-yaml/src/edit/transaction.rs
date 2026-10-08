@@ -1,5 +1,5 @@
 use super::{
-    EditableDocument, Node, NodeKind,
+    CommentPosition, EditableDocument, Node, NodeKind,
     draft::Draft,
     layout::Layout,
     plan::{Changes, Plan},
@@ -248,6 +248,9 @@ impl<'a> Editor<'a> {
 
     /// Inserts comment text (without `#` or a line break) at an owner-local index.
     /// Inline comments require distinct syntax headers in the emitted layout.
+    /// Leading comments precede the node. Detached comments use the next existing
+    /// collection gap, or follow the node; other placements follow the node.
+    /// Use [`Self::insert_comment_at`] to select or retain a structural position.
     ///
     /// # Errors
     /// Rejects invalid handles, indices, multiline text, or resource limits.
@@ -260,7 +263,47 @@ impl<'a> Editor<'a> {
         placement: CommentPlacement,
     ) -> Result<(), Error> {
         self.mutate(handle, |draft, id| {
-            draft.insert_comment(id, index, text, placement)
+            draft.insert_comment(id, index, text, placement, None)
+        })
+    }
+
+    /// Returns an owned comment's structural position for reuse within this
+    /// transaction. Child boundaries retain occurrence identity through edits.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, or exhausted work budgets.
+    pub fn comment_position(
+        &self,
+        handle: &Handle,
+        index: usize,
+    ) -> Result<CommentPosition<Handle>, Error> {
+        let comment = self
+            .node(handle)?
+            .comments
+            .get(index)
+            .ok_or_else(|| self.error("comment index out of bounds"))?;
+        comment.position().try_map(|child| Ok(self.handle(child)))
+    }
+
+    /// Inserts a comment at an explicit structural position and owner-local
+    /// index. For detached comments, `BeforeChild` accepts a sequence item or
+    /// mapping key owned by `handle`. Capture a position with [`Self::comment_position`]
+    /// before removing a comment to preserve a header or collection gap.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, child boundaries, multiline text, or
+    /// resource limits. Commit rejects unrepresentable attachments.
+    pub fn insert_comment_at(
+        &mut self,
+        handle: &Handle,
+        index: usize,
+        text: &str,
+        placement: CommentPlacement,
+        position: CommentPosition<Handle>,
+    ) -> Result<(), Error> {
+        let position = position.try_map(|child| self.id(&child));
+        self.mutate(handle, |draft, id| {
+            draft.insert_comment(id, index, text, placement, Some(position?))
         })
     }
 

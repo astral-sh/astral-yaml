@@ -1064,6 +1064,7 @@ mod tests {
                     candidate.node(candidate.root()).comments.len(),
                     text,
                     CommentPlacement::Inline,
+                    None,
                 )
                 .unwrap();
         }
