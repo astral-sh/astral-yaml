@@ -16,9 +16,6 @@ To compare deserialization with other implementations, use the `compare` target
 cargo bench -p astral-yaml-dev --features compare --bench compare --locked
 ```
 
-See the [benchmark source](../crates/astral-yaml-dev/benches/compare.rs) for workloads
-and implementation settings. Measurements include dropping the output.
-
 Pull requests receive CodSpeed reports. Add the `benchmarks:compare` label to
 include comparisons with other implementations. Local `cargo bench` timings
 measure elapsed time and are not directly comparable to CodSpeed's simulation.
