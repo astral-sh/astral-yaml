@@ -1,4 +1,6 @@
 //! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
+use test_case::test_case;
+
 use super::support::{edit, edited, edits};
 use astral_yaml::{
     ParseOptions,
@@ -294,81 +296,77 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
     ");
 }
 
-#[test]
-fn invalid_operations_roll_back() {
+#[test_case("42", 0)]
+#[test_case("[]", 1)]
+#[test_case("[]", 2)]
+#[test_case("[]", 3)]
+#[test_case("42", 4)]
+#[test_case("[]", 5)]
+#[test_case("{}", 6)]
+#[test_case("{}", 7)]
+#[test_case("{}", 8)]
+#[test_case("42", 9)]
+#[test_case("{}", 10)]
+#[test_case("[]", 11)]
+#[test_case("42", 12)]
+#[test_case("42", 13)]
+#[test_case("42", 14)]
+#[test_case("42", 15)]
+#[test_case("value: 42 # old", 16)]
+#[test_case("42", 17)]
+#[test_case("42", 18)]
+#[test_case("42", 19)]
+#[test_case("42", 20)]
+fn invalid_operations_roll_back(source: &str, operation: usize) {
     use astral_yaml::{CollectionStyle, ScalarStyle};
-    for (source, operation) in [
-        ("42", 0),
-        ("[]", 1),
-        ("[]", 2),
-        ("[]", 3),
-        ("42", 4),
-        ("[]", 5),
-        ("{}", 6),
-        ("{}", 7),
-        ("{}", 8),
-        ("42", 9),
-        ("{}", 10),
-        ("[]", 11),
-        ("42", 12),
-        ("42", 13),
-        ("42", 14),
-        ("42", 15),
-        ("value: 42 # old", 16),
-        ("42", 17),
-        ("42", 18),
-        ("42", 19),
-        ("42", 20),
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        let result = document.edit(|e| {
-            let root = e.root();
-            match operation {
-                0 => e.insert_item(&root, 0, "1"),
-                1 => e.insert_item(&root, 1, "1"),
-                2 => e.insert_item(&root, 0, "["),
-                3 | 4 => e.remove_item(&root, 0),
-                5 => e.insert_entry(&root, 0, "key", "value"),
-                6 => e.insert_entry(&root, 1, "key", "value"),
-                7 => e.insert_entry(&root, 0, "[", "value"),
-                8 => e.insert_entry(&root, 0, "key", "["),
-                9 | 10 => e.remove_entry(&root, 0),
-                11 => e.set_scalar_style(&root, ScalarStyle::Plain),
-                12 => e.set_collection_style(&root, CollectionStyle::Flow),
-                13 => e.insert_comment(&root, 1, " note", CommentPlacement::Inline),
-                14 => e.replace_comment(&root, 0, " note"),
-                15 => e.remove_comment(&root, 0),
-                16 => {
-                    let value = e.mapping_entries(&root)?.remove(0).1;
-                    e.insert_comment(&value, 0, " note", CommentPlacement::Inline)
-                }
-                17 => e.insert_comment(
-                    &root,
-                    0,
-                    indoc! {r"
+    let mut document = EditableDocument::parse(source).unwrap();
+    let result = document.edit(|e| {
+        let root = e.root();
+        match operation {
+            0 => e.insert_item(&root, 0, "1"),
+            1 => e.insert_item(&root, 1, "1"),
+            2 => e.insert_item(&root, 0, "["),
+            3 | 4 => e.remove_item(&root, 0),
+            5 => e.insert_entry(&root, 0, "key", "value"),
+            6 => e.insert_entry(&root, 1, "key", "value"),
+            7 => e.insert_entry(&root, 0, "[", "value"),
+            8 => e.insert_entry(&root, 0, "key", "["),
+            9 | 10 => e.remove_entry(&root, 0),
+            11 => e.set_scalar_style(&root, ScalarStyle::Plain),
+            12 => e.set_collection_style(&root, CollectionStyle::Flow),
+            13 => e.insert_comment(&root, 1, " note", CommentPlacement::Inline),
+            14 => e.replace_comment(&root, 0, " note"),
+            15 => e.remove_comment(&root, 0),
+            16 => {
+                let value = e.mapping_entries(&root)?.remove(0).1;
+                e.insert_comment(&value, 0, " note", CommentPlacement::Inline)
+            }
+            17 => e.insert_comment(
+                &root,
+                0,
+                indoc! {r"
                         bad
                         comment"},
-                    CommentPlacement::Leading,
-                ),
-                18 => {
-                    e.replace(&root, "[1]")?;
-                    let old = e.sequence_items(&root)?.remove(0);
-                    e.replace(&root, "[2]")?;
-                    e.replace(&old, "3")
-                }
-                19 => {
-                    e.mapping_entries(&root)?;
-                    Ok(())
-                }
-                _ => {
-                    e.sequence_items(&root)?;
-                    Ok(())
-                }
+                CommentPlacement::Leading,
+            ),
+            18 => {
+                e.replace(&root, "[1]")?;
+                let old = e.sequence_items(&root)?.remove(0);
+                e.replace(&root, "[2]")?;
+                e.replace(&old, "3")
             }
-        });
-        assert!(result.is_err(), "{source:?} operation {operation}");
-        assert_eq!(document.source(), source);
-    }
+            19 => {
+                e.mapping_entries(&root)?;
+                Ok(())
+            }
+            _ => {
+                e.sequence_items(&root)?;
+                Ok(())
+            }
+        }
+    });
+    assert!(result.is_err(), "{source:?} operation {operation}");
+    assert_eq!(document.source(), source);
 }
 
 #[test]
@@ -518,16 +516,15 @@ fn scalar_styles_can_be_changed() {
     "#);
 }
 
-#[test]
-fn empty_collections_remain_in_flow_style() {
+#[test_case("[]")]
+#[test_case("{}")]
+fn empty_collections_remain_in_flow_style(source: &str) {
     use astral_yaml::CollectionStyle;
 
-    for source in ["[]", "{}"] {
-        let document = edited(source, |e| {
-            e.set_collection_style(&e.root(), CollectionStyle::Block)
-        });
-        assert_eq!(document.source(), source);
-    }
+    let document = edited(source, |e| {
+        e.set_collection_style(&e.root(), CollectionStyle::Block)
+    });
+    assert_eq!(document.source(), source);
 }
 
 #[test]
@@ -778,53 +775,68 @@ fn repeated_navigation_is_bounded() {
     );
 }
 
-#[test]
-fn replacing_implicit_nulls_adds_required_separation() {
-    let mut diffs = Vec::new();
-    for source in ["---", "a:", "-", "{a:}"] {
-        diffs.push(edit(source, |e| {
-            let root = e.root();
-            let target = match e.node(&root)?.kind() {
-                NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
-                NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
-                _ => root,
-            };
-            e.replace(&target, "42")
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    ----
-    \ No newline at end of file
-    +--- 42
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -a:
-    \ No newline at end of file
-    +a: 42
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    --
-    \ No newline at end of file
-    +- 42
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{a:}
-    \ No newline at end of file
-    +{a: 42}
-    \ No newline at end of file
+#[test_case(
+    "---"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        ----
+        \ No newline at end of file
+        +--- 42
+        \ No newline at end of file
     ");
+    "document"
+)]
+#[test_case(
+    "a:"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -a:
+        \ No newline at end of file
+        +a: 42
+        \ No newline at end of file
+    ");
+    "block mapping"
+)]
+#[test_case(
+    "-"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        --
+        \ No newline at end of file
+        +- 42
+        \ No newline at end of file
+    ");
+    "sequence"
+)]
+#[test_case(
+    "{a:}"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{a:}
+        \ No newline at end of file
+        +{a: 42}
+        \ No newline at end of file
+    ");
+    "flow mapping"
+)]
+fn replacing_implicit_nulls_adds_required_separation(source: &str) -> String {
+    edit(source, |e| {
+        let root = e.root();
+        let target = match e.node(&root)?.kind() {
+            NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
+            NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
+            _ => root,
+        };
+        e.replace(&target, "42")
+    })
 }
 
 #[test]

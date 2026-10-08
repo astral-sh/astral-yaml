@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::{Boundary, PatchSet};
 use crate::{
     Span,
@@ -105,56 +107,58 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
     ");
 }
 
-#[test]
-fn erased_root_boundaries_retain_shared_marker_lines() {
-    let mut results = Vec::new();
-    for source in [
-        indoc! {"
-              old
+#[test_case(
+    indoc! {"
+          old
 
-            ...
-        "},
-        indoc! {"
-            --- old
-
-            ...
-        "},
-    ] {
-        let start = source.find("old").unwrap();
-        let body = Span::new(start, start + 3).unwrap();
-        let boundary = Boundary::new(source, body, true, None);
-        let replacement = boundary
-            .complete(
-                Fragment {
-                    text: String::new(),
-                    ending: Ending::Token,
-                },
-                1024,
-            )
-            .unwrap();
-        assert!(boundary.reserved().start() <= replacement.span.start());
-        assert!(replacement.span.end() <= boundary.reserved().end());
-        let output = PatchSet::new(source, vec![(replacement.span, replacement.text)], 1024)
-            .unwrap()
-            .apply();
-        results.push(edit_diff(source, &output));
-    }
-    insta::assert_snapshot!(results.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1 @@
-    -  old
-    -
-     ...
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-    ---- old
-    -
-    +--- ⏎
-     ...
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1 @@
+        -  old
+        -
+         ...
     ");
+    "end marker"
+)]
+#[test_case(
+    indoc! {"
+        --- old
+
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,2 @@
+        ---- old
+        -
+        +--- ⏎
+         ...
+    ");
+    "start and end markers"
+)]
+fn erased_root_boundaries_retain_shared_marker_lines(source: &str) -> String {
+    let start = source.find("old").unwrap();
+    let body = Span::new(start, start + 3).unwrap();
+    let boundary = Boundary::new(source, body, true, None);
+    let replacement = boundary
+        .complete(
+            Fragment {
+                text: String::new(),
+                ending: Ending::Token,
+            },
+            1024,
+        )
+        .unwrap();
+    assert!(boundary.reserved().start() <= replacement.span.start());
+    assert!(replacement.span.end() <= boundary.reserved().end());
+    let output = PatchSet::new(source, vec![(replacement.span, replacement.text)], 1024)
+        .unwrap()
+        .apply();
+    edit_diff(source, &output)
 }
 
 #[test]

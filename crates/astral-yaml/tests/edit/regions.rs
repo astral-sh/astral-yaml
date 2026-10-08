@@ -1,5 +1,7 @@
 //! Comments and separation: <https://yaml.org/spec/1.2.2/#66-comments>.
 
+use test_case::test_case;
+
 use super::support::{edit, edited};
 use astral_yaml::{
     CollectionStyle,
@@ -121,73 +123,83 @@ fn flow_delimiter_comments_survive_collection_edits() {
     ");
 }
 
-#[test]
-fn shrinking_collections_retain_their_comment_boundaries() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            outer: [ # open
-              old
-              ] # close
-        "},
-        indoc! {r"
-            outer: { # open
-              key: old
-              } # close
-        "},
-        indoc! {r"
-            outer:
-            # leading
-              {key: old}
-        "},
-        indoc! {r"
-            outer:
-            # detached
-
-              key: old
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let target = collection(editor, true);
-            match editor.node(&target)?.kind() {
-                NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
-                _ => editor.remove_entry(&target, 0),
-            }
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: [ # open
-    -  old
-       ] # close
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-     outer: { # open
-    -  key: old
-       } # close
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,2 @@
-    -outer:
-     # leading
-    -  {key: old}
-    +outer: {}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     outer:
-    -# detached
-    +  # detached
-     ⏎
-    -  key: old
-    +  {}
+#[test_case(
+    indoc! {r"
+        outer: [ # open
+          old
+          ] # close
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,2 @@
+         outer: [ # open
+        -  old
+           ] # close
     ");
+    "sequence delimiters"
+)]
+#[test_case(
+    indoc! {r"
+        outer: { # open
+          key: old
+          } # close
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,2 @@
+         outer: { # open
+        -  key: old
+           } # close
+    ");
+    "mapping delimiters"
+)]
+#[test_case(
+    indoc! {r"
+        outer:
+        # leading
+          {key: old}
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,2 @@
+        -outer:
+         # leading
+        -  {key: old}
+        +outer: {}
+    ");
+    "leading comment"
+)]
+#[test_case(
+    indoc! {r"
+        outer:
+        # detached
+
+          key: old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         outer:
+        -# detached
+        +  # detached
+         ⏎
+        -  key: old
+        +  {}
+    ");
+    "detached comment"
+)]
+fn shrinking_collections_retain_their_comment_boundaries(source: &str) -> String {
+    edit(source, |editor| {
+        let target = collection(editor, true);
+        match editor.node(&target)?.kind() {
+            NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
+            _ => editor.remove_entry(&target, 0),
+        }
+    })
 }
 
 #[test]

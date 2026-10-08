@@ -1,3 +1,5 @@
+use test_case::test_matrix;
+
 use astral_yaml::{Encoding, Source, Span};
 
 fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
@@ -17,48 +19,41 @@ fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
 }
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings
-#[test]
-fn encodings_and_original_spans() {
-    for encoding in [
-        Encoding::Utf8,
-        Encoding::Utf16Be,
-        Encoding::Utf16Le,
-        Encoding::Utf32Be,
-        Encoding::Utf32Le,
-    ] {
-        for bom in ["", "\u{feff}"] {
-            let text = format!("{bom}---\na: '🌍 é' # café\n");
-            let bytes = encode(&text, encoding);
-            let source = Source::from_bytes(&bytes).unwrap();
-            assert_eq!(source.text(), text);
-            assert_eq!(source.encoding(), encoding);
-            assert_eq!(source.bytes(), bytes);
+#[test_matrix(
+    [Encoding::Utf8, Encoding::Utf16Be, Encoding::Utf16Le, Encoding::Utf32Be, Encoding::Utf32Le],
+    ["", "\u{feff}"]
+)]
+fn encodings_and_original_spans(encoding: Encoding, bom: &str) {
+    let text = format!("{bom}---\na: '🌍 é' # café\n");
+    let bytes = encode(&text, encoding);
+    let source = Source::from_bytes(&bytes).unwrap();
+    assert_eq!(source.text(), text);
+    assert_eq!(source.encoding(), encoding);
+    assert_eq!(source.bytes(), bytes);
 
-            let stream = source.parse().unwrap();
+    let stream = source.parse().unwrap();
 
-            for span in stream
-                .nodes()
-                .iter()
-                .map(|n| n.span)
-                .chain(stream.comments().iter().map(|c| c.span))
-                .chain(stream.byte_order_marks().iter().copied())
-            {
-                let original = source.original_span(span).unwrap();
-                assert_eq!(
-                    original.slice_bytes(&bytes).unwrap(),
-                    encode(span.slice(&text).unwrap(), encoding)
-                );
-            }
-
-            let inside = text.find('🌍').unwrap() + 1;
-            assert!(
-                source
-                    .original_span(Span::new(inside, inside).unwrap())
-                    .is_none()
-            );
-            assert_ne!(format!("{:?}", source.clone()), "");
-        }
+    for span in stream
+        .nodes()
+        .iter()
+        .map(|n| n.span)
+        .chain(stream.comments().iter().map(|c| c.span))
+        .chain(stream.byte_order_marks().iter().copied())
+    {
+        let original = source.original_span(span).unwrap();
+        assert_eq!(
+            original.slice_bytes(&bytes).unwrap(),
+            encode(span.slice(&text).unwrap(), encoding)
+        );
     }
+
+    let inside = text.find('🌍').unwrap() + 1;
+    assert!(
+        source
+            .original_span(Span::new(inside, inside).unwrap())
+            .is_none()
+    );
+    assert_ne!(format!("{:?}", source.clone()), "");
 }
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings

@@ -1,141 +1,146 @@
+use test_case::test_case;
+
 use super::support::{edit, edited, edits};
 use astral_yaml::{
     CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement, edit::EditableDocument,
 };
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
-#[test]
-fn emission_limits_roll_back_root_and_subtree_rewrites() {
+#[test_case(false)]
+#[test_case(true)]
+fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     let quoted = format!("\"{}\"", "\\x01".repeat(8));
     let replacement = format!("\"\\x02{}\"", "\\x01".repeat(7));
-    for nested in [false, true] {
-        let source = if nested {
-            formatdoc! {r"
-                key: {quoted}
-            "}
-        } else {
-            quoted.clone()
-        };
-        let mut document = EditableDocument::parse_with_options(
-            &source,
-            ParseOptions {
-                max_input_bytes: source.len(),
-                ..ParseOptions::default()
-            },
-        )
-        .unwrap();
-        // Emission canonicalizes the short escapes, exceeding the source limit
-        // inside the renderer, before a replacement patch can be constructed.
-        let error = document
-            .edit(|editor| {
-                let value = if nested {
-                    editor.mapping_entries(&editor.root())?.remove(0).1
-                } else {
-                    editor.root()
-                };
-                editor.replace(&value, &replacement)
-            })
-            .unwrap_err();
-        assert_eq!(error.message, "emitted YAML exceeds input byte limit");
-        assert_eq!(document.source(), source);
-    }
+    let source = if nested {
+        formatdoc! {r"
+            key: {quoted}
+        "}
+    } else {
+        quoted.clone()
+    };
+    let mut document = EditableDocument::parse_with_options(
+        &source,
+        ParseOptions {
+            max_input_bytes: source.len(),
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    // Emission canonicalizes the short escapes, exceeding the source limit
+    // inside the renderer, before a replacement patch can be constructed.
+    let error = document
+        .edit(|editor| {
+            let value = if nested {
+                editor.mapping_entries(&editor.root())?.remove(0).1
+            } else {
+                editor.root()
+            };
+            editor.replace(&value, &replacement)
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "emitted YAML exceeds input byte limit");
+    assert_eq!(document.source(), source);
 }
 
-#[test]
-fn root_comments_retain_the_requested_order() {
-    let mut diffs = Vec::new();
-    for (source, placement) in [
-        (
-            indoc! {r"
-                # old
-                value
-            "},
-            CommentPlacement::Leading,
-        ),
-        (
-            indoc! {r"
-                value
-                # old
-            "},
-            CommentPlacement::Trailing,
-        ),
-        (
-            indoc! {r"
-                value
-
-                # old
-            "},
-            CommentPlacement::Detached,
-        ),
-        (
-            indoc! {r"
-                # old
-                --- value
-                ...
-            "},
-            CommentPlacement::Leading,
-        ),
-        (
-            indoc! {r"
-                value
-                ...
-
-                # old
-            "},
-            CommentPlacement::Detached,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            editor.insert_comment(&root, 0, " first", placement)?;
-            editor.insert_comment(&root, 2, " last", placement)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-    +# first
-     # old
-    +# last
-     value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-     value
-    +# first
-     # old
-    +# last
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-     value
-     ⏎
-    +# first
-     # old
-    +# last
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,5 @@
-    +# first
-     # old
-    +# last
-     --- value
-     ...
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,6 @@
-     value
-     ...
-     ⏎
-    +# first
-     # old
-    +# last
+#[test_case(
+    indoc! {r"
+        # old
+        value
+    "},
+    CommentPlacement::Leading
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,4 @@
+        +# first
+         # old
+        +# last
+         value
     ");
+    "leading"
+)]
+#[test_case(
+    indoc! {r"
+        value
+        # old
+    "},
+    CommentPlacement::Trailing
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,4 @@
+         value
+        +# first
+         # old
+        +# last
+    ");
+    "trailing"
+)]
+#[test_case(
+    indoc! {r"
+        value
+
+        # old
+    "},
+    CommentPlacement::Detached
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,5 @@
+         value
+         ⏎
+        +# first
+         # old
+        +# last
+    ");
+    "detached"
+)]
+#[test_case(
+    indoc! {r"
+        # old
+        --- value
+        ...
+    "},
+    CommentPlacement::Leading
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,5 @@
+        +# first
+         # old
+        +# last
+         --- value
+         ...
+    ");
+    "leading before start marker"
+)]
+#[test_case(
+    indoc! {r"
+        value
+        ...
+
+        # old
+    "},
+    CommentPlacement::Detached
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,6 @@
+         value
+         ...
+         ⏎
+        +# first
+         # old
+        +# last
+    ");
+    "detached after end marker"
+)]
+fn root_comments_retain_the_requested_order(source: &str, placement: CommentPlacement) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        editor.insert_comment(&root, 0, " first", placement)?;
+        editor.insert_comment(&root, 2, " last", placement)
+    })
 }
 
 #[test]
@@ -348,70 +353,75 @@ fn root_comment_placement_respects_the_document_prefix() {
     assert_eq!(document.source(), source);
 }
 
-#[test]
-fn exact_scalar_style_requests_preserve_multiline_values() {
-    let mut diffs = Vec::new();
-    for (source, style) in [
-        (
-            indoc! {r#"
-                "a\nb"
-            "#},
-            ScalarStyle::SingleQuoted,
-        ),
-        (
-            indoc! {r#"
-                "a\nb"
-            "#},
-            ScalarStyle::Plain,
-        ),
-        (
-            indoc! {r#"
-                "\n"
-            "#},
-            ScalarStyle::Literal,
-        ),
-        (
-            indoc! {r#"
-                "\n"
-            "#},
-            ScalarStyle::Folded,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            editor.set_scalar_style(&editor.root(), style)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -"a\nb"
-    +'a
-    +
-    +  b'
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -"a\nb"
-    +a
-    +
-    +  b
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    -"\n"
-    +|2+
-    +  ⏎
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    -"\n"
-    +>2+
-    +  ⏎
+#[test_case(
+    indoc! {r#"
+        "a\nb"
+    "#},
+    ScalarStyle::SingleQuoted
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,3 @@
+        -"a\nb"
+        +'a
+        +
+        +  b'
     "#);
+    "single quoted"
+)]
+#[test_case(
+    indoc! {r#"
+        "a\nb"
+    "#},
+    ScalarStyle::Plain
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,3 @@
+        -"a\nb"
+        +a
+        +
+        +  b
+    "#);
+    "plain"
+)]
+#[test_case(
+    indoc! {r#"
+        "\n"
+    "#},
+    ScalarStyle::Literal
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        -"\n"
+        +|2+
+        +  ⏎
+    "#);
+    "literal"
+)]
+#[test_case(
+    indoc! {r#"
+        "\n"
+    "#},
+    ScalarStyle::Folded
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        -"\n"
+        +>2+
+        +  ⏎
+    "#);
+    "folded"
+)]
+fn exact_scalar_style_requests_preserve_multiline_values(
+    source: &str,
+    style: ScalarStyle,
+) -> String {
+    edit(source, |editor| {
+        editor.set_scalar_style(&editor.root(), style)
+    })
 }
 
 #[test]
@@ -500,44 +510,49 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     ");
 }
 
-#[test]
-fn nested_block_scalar_boundaries_stop_before_following_syntax() {
-    let mut diffs = Vec::new();
-    for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
-        let source = indoc! {r"
-            outer:
-              value: old # keep
-
-            next: retained
-        "};
-        diffs.push(edit(source, |editor| {
-            let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
-            let value = editor.mapping_entries(&outer)?.remove(0).1;
-            editor.replace(&value, "\"\\n\"")?;
-            editor.set_scalar_style(&value, style)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     outer:
-    -  value: old # keep
-    -
-    +  value: |2+ # keep
-    +    ⏎
-     next: retained
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     outer:
-    -  value: old # keep
-    -
-    +  value: >2+ # keep
-    +    ⏎
-     next: retained
+#[test_case(
+    ScalarStyle::Literal
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         outer:
+        -  value: old # keep
+        -
+        +  value: |2+ # keep
+        +    ⏎
+         next: retained
     ");
+    "literal"
+)]
+#[test_case(
+    ScalarStyle::Folded
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         outer:
+        -  value: old # keep
+        -
+        +  value: >2+ # keep
+        +    ⏎
+         next: retained
+    ");
+    "folded"
+)]
+fn nested_block_scalar_boundaries_stop_before_following_syntax(style: ScalarStyle) -> String {
+    let source = indoc! {r"
+        outer:
+          value: old # keep
+
+        next: retained
+    "};
+    edit(source, |editor| {
+        let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
+        let value = editor.mapping_entries(&outer)?.remove(0).1;
+        editor.replace(&value, "\"\\n\"")?;
+        editor.set_scalar_style(&value, style)
+    })
 }
 
 #[test]
@@ -725,70 +740,76 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     ");
 }
 
-#[test]
-fn edits_preserve_comments_between_headers_properties_and_content() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            key: # header
-              &a # anchor
-              # before value
-              old
-        "},
-        indoc! {r"
-            key: !!str # tag
-              &a # anchor
-              # before value
-              old
-        "},
-        indoc! {r"
-            key: # header
-              # before anchor
-              &a # anchor
-              # before value
-              old
-        "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document
-            .edit(|editor| {
-                let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-                editor.replace_preserving_style(&value, "new")
-            })
-            .unwrap_or_else(|error| panic!("{source:?}: {error}"));
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     key: # header
-       &a # anchor
-    -  # before value
-    -  old
-    +    # before value
-    +    new
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-    -key: !!str # tag
-    +key: # tag
-       &a # anchor
-    -  # before value
-    -  old
-    +    # before value
-    +    new
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-     key: # header
-       # before anchor
-       &a # anchor
-    -  # before value
-    -  old
-    +    # before value
-    +    new
+#[test_case(
+    indoc! {r"
+        key: # header
+          &a # anchor
+          # before value
+          old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         key: # header
+           &a # anchor
+        -  # before value
+        -  old
+        +    # before value
+        +    new
     ");
+    "anchor"
+)]
+#[test_case(
+    indoc! {r"
+        key: !!str # tag
+          &a # anchor
+          # before value
+          old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+        -key: !!str # tag
+        +key: # tag
+           &a # anchor
+        -  # before value
+        -  old
+        +    # before value
+        +    new
+    ");
+    "tag and anchor"
+)]
+#[test_case(
+    indoc! {r"
+        key: # header
+          # before anchor
+          &a # anchor
+          # before value
+          old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,5 +1,5 @@
+         key: # header
+           # before anchor
+           &a # anchor
+        -  # before value
+        -  old
+        +    # before value
+        +    new
+    ");
+    "leading anchor comment"
+)]
+fn edits_preserve_comments_between_headers_properties_and_content(source: &str) -> String {
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|editor| {
+            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+            editor.replace_preserving_style(&value, "new")
+        })
+        .unwrap_or_else(|error| panic!("{source:?}: {error}"));
+    edit_diff(source, document.source())
 }

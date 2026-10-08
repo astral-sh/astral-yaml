@@ -1,201 +1,205 @@
+use test_case::{test_case, test_matrix};
+
 use std::borrow::Cow;
 
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
 
 // https://yaml.org/spec/1.2.2/#51-character-set
-#[test]
-fn ascii_character_checks_cover_chunk_boundaries() {
-    for padding in [0, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127] {
-        for byte in 0..=127 {
-            let character = char::from(byte);
-            let source = format!("# {}{character}\n", "a".repeat(padding));
-            let allowed = matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~');
-            let result = parse(&source);
-            assert_eq!(result.is_ok(), allowed, "{source:?}");
+#[test_case(0)]
+#[test_case(7)]
+#[test_case(8)]
+#[test_case(15)]
+#[test_case(16)]
+#[test_case(31)]
+#[test_case(32)]
+#[test_case(63)]
+#[test_case(64)]
+#[test_case(65)]
+#[test_case(127)]
+fn ascii_character_checks_cover_chunk_boundaries(padding: usize) {
+    for byte in 0..=127 {
+        let character = char::from(byte);
+        let source = format!("# {}{character}\n", "a".repeat(padding));
+        let allowed = matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~');
+        let result = parse(&source);
+        assert_eq!(result.is_ok(), allowed, "{source:?}");
 
-            if let Err(error) = result {
-                let expected = character.to_string();
-                assert_eq!(error.span.slice(&source), Some(expected.as_str()));
-            }
+        if let Err(error) = result {
+            let expected = character.to_string();
+            assert_eq!(error.span.slice(&source), Some(expected.as_str()));
         }
     }
 }
 
 // https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
-#[test]
-fn line_tracking_survives_scalar_lookahead() {
+#[test_case("\n")]
+#[test_case("\r")]
+#[test_case("\r\n")]
+fn line_tracking_survives_scalar_lookahead(newline: &str) {
     let template = "\u{feff}first: one\nsecond:\n  - two\n  - three\nfolded: four\n  five\nlast: six\n---\n[seven,\n eight]\n";
 
-    for newline in ["\n", "\r", "\r\n"] {
-        let source = template.replace('\n', newline);
-        let stream = parse(&source).unwrap();
-        assert_eq!(stream.documents().len(), 2);
-        let scalars: Vec<_> = stream
-            .nodes()
-            .iter()
-            .filter_map(|node| match &node.kind {
-                NodeKind::Scalar(scalar) => Some(scalar.value.as_ref()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            scalars,
-            [
-                "first",
-                "one",
-                "second",
-                "two",
-                "three",
-                "folded",
-                "four five",
-                "last",
-                "six",
-                "seven",
-                "eight",
-            ]
-        );
-    }
+    let source = template.replace('\n', newline);
+    let stream = parse(&source).unwrap();
+    assert_eq!(stream.documents().len(), 2);
+    let scalars: Vec<_> = stream
+        .nodes()
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Scalar(scalar) => Some(scalar.value.as_ref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        scalars,
+        [
+            "first",
+            "one",
+            "second",
+            "two",
+            "three",
+            "folded",
+            "four five",
+            "last",
+            "six",
+            "seven",
+            "eight",
+        ]
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#54-line-break-characters
 // https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
-#[test]
-fn scalar_scans_preserve_content_and_spans_across_line_endings() {
-    for newline in ["\n", "\r", "\r\n"] {
-        for padding in [0, 15, 31, 64] {
-            let prefix = format!("{}é", "a".repeat(padding));
+#[test_matrix(["\n", "\r", "\r\n"], [0, 15, 31, 64])]
+fn scalar_scans_preserve_content_and_spans_across_line_endings(newline: &str, padding: usize) {
+    let prefix = format!("{}é", "a".repeat(padding));
 
-            for (body, expected) in [
-                (
-                    format!("{prefix}:url#fragment \t"),
-                    format!("{prefix}:url#fragment"),
-                ),
-                (
-                    format!("{prefix}\n  continued\t"),
-                    format!("{prefix} continued"),
-                ),
-                (format!("'{prefix}''tail'"), format!("{prefix}'tail")),
-                (format!("\"{prefix}\\\"tail\""), format!("{prefix}\"tail")),
-                (
-                    format!("\"{prefix}\n  continued\""),
-                    format!("{prefix} continued"),
-                ),
-            ] {
-                let body = body.replace('\n', newline);
-                let source = format!("key: {body} # {prefix}comment{newline}last: done{newline}");
-                let stream = parse(&source).unwrap();
-                let root = stream.node(stream.documents()[0].root).unwrap();
-                let NodeKind::Mapping { entries, .. } = &root.kind else {
-                    panic!("expected mapping");
-                };
-                let NodeKind::Scalar(scalar) = &stream.node(entries[0].value).unwrap().kind else {
-                    panic!("expected scalar");
-                };
+    for (body, expected) in [
+        (
+            format!("{prefix}:url#fragment \t"),
+            format!("{prefix}:url#fragment"),
+        ),
+        (
+            format!("{prefix}\n  continued\t"),
+            format!("{prefix} continued"),
+        ),
+        (format!("'{prefix}''tail'"), format!("{prefix}'tail")),
+        (format!("\"{prefix}\\\"tail\""), format!("{prefix}\"tail")),
+        (
+            format!("\"{prefix}\n  continued\""),
+            format!("{prefix} continued"),
+        ),
+    ] {
+        let body = body.replace('\n', newline);
+        let source = format!("key: {body} # {prefix}comment{newline}last: done{newline}");
+        let stream = parse(&source).unwrap();
+        let root = stream.node(stream.documents()[0].root).unwrap();
+        let NodeKind::Mapping { entries, .. } = &root.kind else {
+            panic!("expected mapping");
+        };
+        let NodeKind::Scalar(scalar) = &stream.node(entries[0].value).unwrap().kind else {
+            panic!("expected scalar");
+        };
 
-                assert_eq!(scalar.value, expected, "{source:?}");
-                assert_eq!(
-                    scalar.span.slice(&source),
-                    Some(body.trim_end_matches([' ', '\t']))
-                );
-                assert_eq!(stream.comments().len(), 1);
-                assert_eq!(stream.comments()[0].text, format!(" {prefix}comment"));
-                assert_eq!(entries.len(), 2);
-            }
-        }
+        assert_eq!(scalar.value, expected, "{source:?}");
+        assert_eq!(
+            scalar.span.slice(&source),
+            Some(body.trim_end_matches([' ', '\t']))
+        );
+        assert_eq!(stream.comments().len(), 1);
+        assert_eq!(stream.comments()[0].text, format!(" {prefix}comment"));
+        assert_eq!(entries.len(), 2);
     }
 }
 
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
-#[test]
-fn json_surrogate_pairs_and_malformed_escapes() {
-    for value in [0x10000, 0x1d11e, 0x1f30d, 0x0010_ffff] {
-        let character = char::from_u32(value).unwrap();
-        let mut units = [0; 2];
-        character.encode_utf16(&mut units);
-        let source = format!(r#""before\u{:04X}\u{:04X}after""#, units[0], units[1]);
-        let stream = parse(&source).unwrap();
-        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
-            panic!("expected scalar");
-        };
+#[test_case(0x10000_u32)]
+#[test_case(0x1d11e_u32)]
+#[test_case(0x1f30d_u32)]
+#[test_case(0x0010_ffff_u32)]
+fn json_surrogate_pairs(value: u32) {
+    let character = char::from_u32(value).unwrap();
+    let mut units = [0; 2];
+    character.encode_utf16(&mut units);
+    let source = format!(r#""before\u{:04X}\u{:04X}after""#, units[0], units[1]);
+    let stream = parse(&source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar");
+    };
 
-        assert_eq!(scalar.value, format!("before{character}after"));
-        assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
-    }
+    assert_eq!(scalar.value, format!("before{character}after"));
+    assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+}
 
-    for source in [
-        r#""\uD800""#,
-        r#""\uD800"#,
-        r#""\uDC00""#,
-        r#""\uDC00\uD800""#,
-        r#""\uD800\uD800""#,
-        r#""\uD800\u0041""#,
-        r#""\uD800\uFFFF""#,
-        r#""\uD800x""#,
-        r#""\uD800\n""#,
-        r#""\uD800\u""#,
-        r#""\uD800\uZZZZ""#,
-        r#""\uD800 \uDC00""#,
-        r#""\uD800\U0000DC00""#,
-        r#""\U0000D800\uDC00""#,
-    ] {
-        let error = parse(source).unwrap_err();
-        assert!(error.span.slice(source).is_some(), "{source}");
-    }
+#[test_case(r#""\uD800""#)]
+#[test_case(r#""\uD800"#)]
+#[test_case(r#""\uDC00""#)]
+#[test_case(r#""\uDC00\uD800""#)]
+#[test_case(r#""\uD800\uD800""#)]
+#[test_case(r#""\uD800\u0041""#)]
+#[test_case(r#""\uD800\uFFFF""#)]
+#[test_case(r#""\uD800x""#)]
+#[test_case(r#""\uD800\n""#)]
+#[test_case(r#""\uD800\u""#)]
+#[test_case(r#""\uD800\uZZZZ""#)]
+#[test_case(r#""\uD800 \uDC00""#)]
+#[test_case(r#""\uD800\U0000DC00""#)]
+#[test_case(r#""\U0000D800\uDC00""#)]
+fn malformed_surrogate_escapes(source: &str) {
+    let error = parse(source).unwrap_err();
+    assert!(error.span.slice(source).is_some(), "{source}");
 }
 
 // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
 // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
-#[test]
-fn block_scalar_eof_and_indentation_follow_the_test_suite() {
+#[test_case("|")]
+#[test_case(">")]
+fn block_scalar_eof_and_indentation_follow_the_test_suite(style: &str) {
     // Follow the suite's EOF-as-line-break interpretation (yaml/yaml-test-suite#118).
-    for style in ["|", ">"] {
-        for (body, clipped, kept) in [
-            ("  text", "text\n", "text\n"),
-            ("  text\n", "text\n", "text\n"),
-            ("  text\r", "text\n", "text\n"),
-            ("  text\r\n", "text\n", "text\n"),
-            ("  text\n ", "text\n", "text\n\n"),
-            ("  text\n   ", "text\n \n", "text\n \n"),
-            ("", "", ""),
-            ("  ", "", "\n"),
-        ] {
-            for (chomp, expected) in [
-                ("", clipped),
-                ("+", kept),
-                ("-", clipped.trim_end_matches('\n')),
-            ] {
-                let source = format!("{style}{chomp}\n{body}");
-                let stream = parse(&source).unwrap();
-                let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
-                    panic!("expected scalar")
-                };
-
-                assert_eq!(scalar.value, expected, "{source:?}");
-                assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
-            }
-        }
-
-        // yaml/yaml-test-suite#37: an indented # is the first content line,
-        // not a trailing comment. Prior empty lines must not be more indented.
-        let source = format!("key: {style}\n\n   \n  # content\n");
-        assert_eq!(
-            parse(&source).unwrap_err().message,
-            "leading empty line is over-indented"
-        );
-    }
-
-    // A tab after the detected spaces is content (YAML 1.2.2 example 8.2).
-    for (source, expected) in [
-        ("|\n  \ttext\n", "\ttext\n"),
-        (">\n  \t\n  text\n", "\t\ntext\n"),
+    for (body, clipped, kept) in [
+        ("  text", "text\n", "text\n"),
+        ("  text\n", "text\n", "text\n"),
+        ("  text\r", "text\n", "text\n"),
+        ("  text\r\n", "text\n", "text\n"),
+        ("  text\n ", "text\n", "text\n\n"),
+        ("  text\n   ", "text\n \n", "text\n \n"),
+        ("", "", ""),
+        ("  ", "", "\n"),
     ] {
-        let stream = parse(source).unwrap();
-        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
-            panic!("expected scalar")
-        };
+        for (chomp, expected) in [
+            ("", clipped),
+            ("+", kept),
+            ("-", clipped.trim_end_matches('\n')),
+        ] {
+            let source = format!("{style}{chomp}\n{body}");
+            let stream = parse(&source).unwrap();
+            let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+                panic!("expected scalar")
+            };
 
-        assert_eq!(scalar.value, expected);
+            assert_eq!(scalar.value, expected, "{source:?}");
+            assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+        }
     }
+
+    // yaml/yaml-test-suite#37: an indented # is the first content line,
+    // not a trailing comment. Prior empty lines must not be more indented.
+    let source = format!("key: {style}\n\n   \n  # content\n");
+    assert_eq!(
+        parse(&source).unwrap_err().message,
+        "leading empty line is over-indented"
+    );
+}
+
+#[test_case("|\n  \ttext\n", "\ttext\n")]
+#[test_case(">\n  \t\n  text\n", "\t\ntext\n")]
+fn block_scalar_tabs_after_indentation_are_content(source: &str, expected: &str) {
+    // A tab after the detected spaces is content (YAML 1.2.2 example 8.2).
+    let stream = parse(source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar")
+    };
+
+    assert_eq!(scalar.value, expected);
 }
 
 // https://yaml.org/spec/1.2.2/#51-character-set
@@ -373,71 +377,72 @@ fn aliases_preserve_identity_and_cycles() {
 
 // https://yaml.org/spec/1.2.2/#51-character-set
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
-#[test]
-fn invalid_unicode_and_escape_regressions() {
-    for source in [
-        "\0",
-        "\u{7f}",
-        "\u{80}",
-        "\u{fffe}",
-        "\"\\é\"",
-        "\"\\uD800\"",
-        "\"\\U00110000\"",
-        "\"\\u000X\"",
-    ] {
-        let error = parse(source).unwrap_err();
-        assert!(error.span.slice(source).is_some(), "{source:?}: {error:?}");
-        assert!(error.to_string().contains(error.message));
-    }
+#[test_case("\0")]
+#[test_case("\u{7f}")]
+#[test_case("\u{80}")]
+#[test_case("\u{fffe}")]
+#[test_case("\"\\é\"")]
+#[test_case("\"\\uD800\"")]
+#[test_case("\"\\U00110000\"")]
+#[test_case("\"\\u000X\"")]
+fn invalid_unicode_and_escape_regressions(source: &str) {
+    let error = parse(source).unwrap_err();
+    assert!(error.span.slice(source).is_some(), "{source:?}: {error:?}");
+    assert!(error.to_string().contains(error.message));
 }
 
 // https://yaml.org/spec/1.2.2/#742-flow-mappings
 // https://yaml.org/spec/1.2.2/#822-block-mappings
-#[test]
-fn implicit_key_limits_include_separation_before_the_colon() {
-    for key in ["key", "'key'", "[key]", "é", "'🌍'"] {
-        for length in [1024, 1025] {
-            let padding = " ".repeat(length - key.chars().count());
+#[test_case("key")]
+#[test_case("'key'")]
+#[test_case("[key]")]
+#[test_case("é")]
+#[test_case("'🌍'")]
+fn implicit_key_limits_include_separation_before_the_colon(key: &str) {
+    for length in [1024, 1025] {
+        let padding = " ".repeat(length - key.chars().count());
 
-            for (context, source, accepted) in [
-                (
-                    "block mapping",
-                    format!("{key}{padding}: value"),
-                    length == 1024,
-                ),
-                (
-                    "flow pair",
-                    format!("[{key}{padding}: value]"),
-                    length == 1024,
-                ),
-                ("flow mapping", format!("{{{key}{padding}: value}}"), true),
-                (
-                    "explicit block key",
-                    format!("? {key}{padding}\n: value"),
-                    true,
-                ),
-            ] {
-                assert_eq!(
-                    parse(&source).is_ok(),
-                    accepted,
-                    "{context}: {key:?}, {length} characters"
-                );
-            }
+        for (context, source, accepted) in [
+            (
+                "block mapping",
+                format!("{key}{padding}: value"),
+                length == 1024,
+            ),
+            (
+                "flow pair",
+                format!("[{key}{padding}: value]"),
+                length == 1024,
+            ),
+            ("flow mapping", format!("{{{key}{padding}: value}}"), true),
+            (
+                "explicit block key",
+                format!("? {key}{padding}\n: value"),
+                true,
+            ),
+        ] {
+            assert_eq!(
+                parse(&source).is_ok(),
+                accepted,
+                "{context}: {key:?}, {length} characters"
+            );
         }
     }
+}
 
-    for newline in ["\n", "\r", "\r\n"] {
-        for (source, accepted) in [
-            ("{key\n: value}", true),
-            ("[key\n: value]", false),
-            ("'key\n  tail': value", false),
-            ("\"key\\\n  tail\": value", false),
-            ("[key,\n  tail]: value", false),
-            ("\"key\\ntail\": value", true),
-        ] {
-            let source = source.replace('\n', newline);
-            assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
-        }
+#[test_case("\n")]
+#[test_case("\r")]
+#[test_case("\r\n")]
+fn implicit_keys_restrict_physical_line_breaks(newline: &str) {
+    for (source, accepted) in [
+        ("{key\n: value}", true),
+        ("[key\n: value]", false),
+        ("'key\n  tail': value", false),
+        ("\"key\\\n  tail\": value", false),
+        ("[key,\n  tail]: value", false),
+        ("\"key\\ntail\": value", true),
+    ] {
+        let source = source.replace('\n', newline);
+        assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
     }
 }
 
@@ -478,22 +483,22 @@ fn json_compatible_quoted_characters() {
 }
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings
-#[test]
-fn byte_order_marks_are_content_inside_quoted_continuations() {
-    for (quote, escaped) in [('\'', false), ('"', false), ('"', true)] {
-        for line_break in ["\n", "\r\n", "\r"] {
-            let escape = if escaped { "\\" } else { "" };
-            let separator = if escaped { "" } else { " " };
-            let source = format!("{quote}a{escape}{line_break}\u{feff}b{quote}");
-            let stream = parse(&source).unwrap();
-            let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
-                panic!("expected a scalar");
-            };
+#[test_case('\'', false)]
+#[test_case('"', false)]
+#[test_case('"', true)]
+fn byte_order_marks_are_content_inside_quoted_continuations(quote: char, escaped: bool) {
+    for line_break in ["\n", "\r\n", "\r"] {
+        let escape = if escaped { "\\" } else { "" };
+        let separator = if escaped { "" } else { " " };
+        let source = format!("{quote}a{escape}{line_break}\u{feff}b{quote}");
+        let stream = parse(&source).unwrap();
+        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+            panic!("expected a scalar");
+        };
 
-            assert_eq!(scalar.value, format!("a{separator}\u{feff}b"));
-            assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
-            assert_eq!(stream.byte_order_marks(), []);
-        }
+        assert_eq!(scalar.value, format!("a{separator}\u{feff}b"));
+        assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
+        assert_eq!(stream.byte_order_marks(), []);
     }
 }
 
@@ -533,57 +538,53 @@ fn metadata_respects_the_element_budget() {
 }
 
 // https://yaml.org/spec/1.2.2/#68-directives
-#[test]
-fn directive_parameters_and_comments_are_separate() {
-    for (header, arguments, comment) in [
-        ("%FOO", "", None),
-        ("%FOO # comment", "", Some(" comment")),
-        ("%FOO\t# comment", "", Some(" comment")),
-        ("%FOO bar#hash # comment", "bar#hash", Some(" comment")),
-        ("%FOO bar baz", "bar baz", None),
-    ] {
-        for newline in ["\n", "\r", "\r\n"] {
-            let source = format!("{header}{newline}--- value{newline}");
-            let stream = parse(&source).unwrap();
-            let directive = &stream.documents()[0].directives[0];
-            assert_eq!(directive.arguments, arguments, "{source:?}");
-            assert_eq!(
-                stream.comments().first().map(|comment| comment.text),
-                comment,
-                "{source:?}"
-            );
+#[test_case("%FOO", "", None)]
+#[test_case("%FOO # comment", "", Some(" comment"))]
+#[test_case("%FOO\t# comment", "", Some(" comment"))]
+#[test_case("%FOO bar#hash # comment", "bar#hash", Some(" comment"))]
+#[test_case("%FOO bar baz", "bar baz", None)]
+fn directive_parameters_and_comments_are_separate(
+    header: &str,
+    arguments: &str,
+    comment: Option<&str>,
+) {
+    for newline in ["\n", "\r", "\r\n"] {
+        let source = format!("{header}{newline}--- value{newline}");
+        let stream = parse(&source).unwrap();
+        let directive = &stream.documents()[0].directives[0];
+        assert_eq!(directive.arguments, arguments, "{source:?}");
+        assert_eq!(
+            stream.comments().first().map(|comment| comment.text),
+            comment,
+            "{source:?}"
+        );
 
-            for comment in stream.comments() {
-                assert_eq!(
-                    comment.span.slice(&source),
-                    Some(format!("#{}", comment.text).as_str())
-                );
-            }
+        for comment in stream.comments() {
+            assert_eq!(
+                comment.span.slice(&source),
+                Some(format!("#{}", comment.text).as_str())
+            );
         }
     }
 }
 
 // https://yaml.org/spec/1.2.2/#681-yaml-directives
-#[test]
-fn yaml_versions_have_decimal_components() {
-    for (version, accepted) in [
-        ("1.1", true),
-        ("1.2", true),
-        ("1.3", true),
-        ("01.02", true),
-        ("0001.0002", true),
-        ("2.0", false),
-        ("1", false),
-        ("1.", false),
-        (".2", false),
-        ("+1.2", false),
-        ("1.2.3", false),
-        ("1.2 extra", false),
-        ("1.２", false),
-    ] {
-        let source = format!("%YAML {version}\n--- value\n");
-        assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
-    }
+#[test_case("1.1", true)]
+#[test_case("1.2", true)]
+#[test_case("1.3", true)]
+#[test_case("01.02", true)]
+#[test_case("0001.0002", true)]
+#[test_case("2.0", false)]
+#[test_case("1", false)]
+#[test_case("1.", false)]
+#[test_case(".2", false)]
+#[test_case("+1.2", false)]
+#[test_case("1.2.3", false)]
+#[test_case("1.2 extra", false)]
+#[test_case("1.２", false; "non ASCII minor version")]
+fn yaml_versions_have_decimal_components(version: &str, accepted: bool) {
+    let source = format!("%YAML {version}\n--- value\n");
+    assert_eq!(parse(&source).is_ok(), accepted, "{source:?}");
 }
 
 // https://yaml.org/spec/1.2.2/#68-directives
@@ -638,64 +639,52 @@ fn escape_repertoire_and_empty_pairs() {
 
 // https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 // https://yaml.org/spec/1.2.2/#691-node-tags
-#[test]
-fn tag_uris_preserve_percent_escapes() {
-    for (source, tag) in [
-        ("!local%21 value", "!local%21"),
-        (
-            "!<tag:example.com,2000:%c3%a9> value",
-            "tag:example.com,2000:%c3%a9",
-        ),
-        (
-            "%TAG !e! tag:example:%FF\n--- !e!suffix value",
-            "tag:example:%FFsuffix",
-        ),
-    ] {
-        let stream = parse(source).unwrap();
-        assert_eq!(
-            stream
-                .node(stream.documents()[0].root)
-                .unwrap()
-                .tag
-                .as_ref()
-                .unwrap()
-                .value,
-            tag
-        );
-    }
+#[test_case("!local%21 value", "!local%21")]
+#[test_case("!<tag:example.com,2000:%c3%a9> value", "tag:example.com,2000:%c3%a9")]
+#[test_case(
+    "%TAG !e! tag:example:%FF\n--- !e!suffix value",
+    "tag:example:%FFsuffix"
+)]
+fn tag_uris_preserve_percent_escapes(source: &str, tag: &str) {
+    let stream = parse(source).unwrap();
+    assert_eq!(
+        stream
+            .node(stream.documents()[0].root)
+            .unwrap()
+            .tag
+            .as_ref()
+            .unwrap()
+            .value,
+        tag
+    );
+}
 
-    for source in [
-        "!é x",
-        "!<tag:a|b> x",
-        "!<!> x",
-        "!<$:?> x",
-        "!<relative> x",
-        "%TAG !e! relative\n--- !e!path x",
-    ] {
-        assert!(parse(source).is_err(), "{source}");
-    }
+#[test_case("!é x")]
+#[test_case("!<tag:a|b> x")]
+#[test_case("!<!> x")]
+#[test_case("!<$:?> x")]
+#[test_case("!<relative> x")]
+#[test_case("%TAG !e! relative\n--- !e!path x")]
+fn invalid_tag_uris_are_rejected(source: &str) {
+    assert!(parse(source).is_err(), "{source}");
 }
 
 // https://yaml.org/spec/1.2.2/#823-block-nodes
-#[test]
-fn multiline_properties_preserve_anchor_identity() {
-    for source in [
-        "!!seq\n&a [*a]",
-        "&a\n!!seq [*a]",
-        "&a\n- *a",
-        "!!seq\n&a\n- *a",
-    ] {
-        let stream = parse(source).unwrap();
-        let root = stream.documents()[0].root;
-        assert_eq!(stream.nodes().len(), 2, "{source}");
-        let NodeKind::Sequence { items, .. } = &stream.node(root).unwrap().kind else {
-            panic!("sequence")
-        };
+#[test_case("!!seq\n&a [*a]")]
+#[test_case("&a\n!!seq [*a]")]
+#[test_case("&a\n- *a")]
+#[test_case("!!seq\n&a\n- *a")]
+fn multiline_properties_preserve_anchor_identity(source: &str) {
+    let stream = parse(source).unwrap();
+    let root = stream.documents()[0].root;
+    assert_eq!(stream.nodes().len(), 2, "{source}");
+    let NodeKind::Sequence { items, .. } = &stream.node(root).unwrap().kind else {
+        panic!("sequence")
+    };
 
-        assert!(
-            matches!(stream.node(items[0]).unwrap().kind, NodeKind::Alias { target, .. } if target == root)
-        );
-    }
+    assert!(
+        matches!(stream.node(items[0]).unwrap().kind, NodeKind::Alias { target, .. } if target == root)
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#72-empty-nodes
@@ -719,30 +708,28 @@ fn empty_scalar_span_follows_properties() {
 
 // https://yaml.org/spec/1.2.2/#61-indentation-spaces
 // https://yaml.org/spec/1.2.2/#63-line-prefixes
-#[test]
-fn continuation_indentation_uses_spaces() {
-    for source in [
-        "a: plain\n\tcontinued",
-        "a: \"first\\\nsecond\"",
-        "\"first\\\n---\nsecond\"",
-    ] {
-        assert!(parse(source).is_err(), "{source:?}");
-    }
+#[test_case("a: plain\n\tcontinued")]
+#[test_case("a: \"first\\\nsecond\"")]
+#[test_case("\"first\\\n---\nsecond\"")]
+fn tab_indented_continuations_are_rejected(source: &str) {
+    assert!(parse(source).is_err(), "{source:?}");
+}
 
-    for source in ["a: plain\n \tcontinued", "a: \"first\\\n \tsecond\""] {
-        assert!(parse(source).is_ok(), "{source:?}");
-    }
+#[test_case("a: plain\n \tcontinued")]
+#[test_case("a: \"first\\\n \tsecond\"")]
+fn tabs_after_continuation_indentation_are_content(source: &str) {
+    assert!(parse(source).is_ok(), "{source:?}");
 }
 
 // https://yaml.org/spec/1.2.2/#822-block-mappings
-#[test]
-fn implicit_key_must_end_at_the_mapping_separator() {
-    for source in ["\"a\" extra: b", "[a] extra: b", "{a: b} extra: c"] {
-        assert_eq!(
-            parse(source).unwrap_err().message,
-            "expected ':' after mapping key"
-        );
-    }
+#[test_case("\"a\" extra: b")]
+#[test_case("[a] extra: b")]
+#[test_case("{a: b} extra: c")]
+fn implicit_key_must_end_at_the_mapping_separator(source: &str) {
+    assert_eq!(
+        parse(source).unwrap_err().message,
+        "expected ':' after mapping key"
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#733-plain-style
@@ -791,47 +778,46 @@ fn collection_keys_allow_quotes_inside_plain_scalars() {
 
 // https://yaml.org/spec/1.2.2/#61-indentation-spaces
 // https://yaml.org/spec/1.2.2/#822-block-mappings
-#[test]
-fn block_collections_reject_invalid_indentation_and_compact_values() {
-    for source in [
-        "a: ?",
-        "a: ? # comment\n",
-        "- a: ?\n",
-        "foo:\n  a: 1\n \tb: 2\n",
-        "foo:\n  a: 1\n\t b: 2\n",
-        "foo:\n - a: 1\n  \tb: 2\n",
-        "foo:\n  - a\n \t- b\n",
-    ] {
-        assert!(parse(source).is_err(), "{source:?}");
-    }
+#[test_case("a: ?")]
+#[test_case("a: ? # comment\n")]
+#[test_case("- a: ?\n")]
+#[test_case("foo:\n  a: 1\n \tb: 2\n")]
+#[test_case("foo:\n  a: 1\n\t b: 2\n")]
+#[test_case("foo:\n - a: 1\n  \tb: 2\n")]
+#[test_case("foo:\n  - a\n \t- b\n")]
+fn block_collections_reject_invalid_indentation_and_compact_values(source: &str) {
+    assert!(parse(source).is_err(), "{source:?}");
+}
 
-    for source in [
-        "a: ?foo",
-        "a: '?'",
-        "a:\n  ?\n",
-        "? a\n: ?\n",
-        "[\n\ta,\n\tb\n]",
-        "foo:\n  a: 1\n\t\n  b: 2\n",
-    ] {
-        assert!(parse(source).is_ok(), "{source:?}");
-    }
+#[test_case("a: ?foo")]
+#[test_case("a: '?'")]
+#[test_case("a:\n  ?\n")]
+#[test_case("? a\n: ?\n")]
+#[test_case("[\n\ta,\n\tb\n]")]
+#[test_case("foo:\n  a: 1\n\t\n  b: 2\n")]
+fn collection_indicators_and_blank_line_tabs_are_accepted(source: &str) {
+    assert!(parse(source).is_ok(), "{source:?}");
 }
 
 // https://yaml.org/spec/1.2.2/#6822-tag-prefixes
-#[test]
-fn tag_prefixes_obey_the_first_character_rule() {
-    for prefix in [",tag:example", "[tag:example", "]tag:example"] {
-        let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
-        assert_eq!(
-            parse(&source).unwrap_err().message,
-            "invalid global tag prefix"
-        );
-    }
+#[test_case(",tag:example")]
+#[test_case("[tag:example")]
+#[test_case("]tag:example")]
+fn tag_prefixes_reject_leading_flow_indicators(prefix: &str) {
+    let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
+    assert_eq!(
+        parse(&source).unwrap_err().message,
+        "invalid global tag prefix"
+    );
+}
 
-    for prefix in ["!", "![]", "tag:example,[prefix]", "%74ag:example,"] {
-        let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
-        parse(&source).unwrap();
-    }
+#[test_case("!")]
+#[test_case("![]")]
+#[test_case("tag:example,[prefix]")]
+#[test_case("%74ag:example,")]
+fn tag_prefixes_accept_local_and_global_forms(prefix: &str) {
+    let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
+    parse(&source).unwrap();
 }
 
 // https://yaml.org/spec/1.2.2/#92-streams
@@ -935,23 +921,22 @@ fn large_flow_collections_and_line_backtracking() {
 
 // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
 // https://yaml.org/spec/1.2.2/#813-folded-style
-#[test]
-fn large_block_scalars_with_leading_empty_lines() {
+#[test_case("|", "\n")]
+#[test_case(">", " ")]
+fn large_block_scalars_with_leading_empty_lines(style: &str, separator: &str) {
     let blank_lines = "\n".repeat(30_000);
     let content = "  text\n".repeat(30_000);
 
-    for (style, separator) in [("|", "\n"), (">", " ")] {
-        let source = format!("{style}\n{blank_lines}{content}");
-        let stream = parse(&source).unwrap();
-        let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
-            panic!("expected scalar");
-        };
+    let source = format!("{style}\n{blank_lines}{content}");
+    let stream = parse(&source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar");
+    };
 
-        let expected = format!(
-            "{blank_lines}{}text\n",
-            format!("text{separator}").repeat(29_999)
-        );
-        assert_eq!(scalar.value, expected);
-        assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
-    }
+    let expected = format!(
+        "{blank_lines}{}text\n",
+        format!("text{separator}").repeat(29_999)
+    );
+    assert_eq!(scalar.value, expected);
+    assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
 }

@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::support::edit;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
@@ -111,151 +113,162 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     ");
 }
 
-#[test]
-fn collection_prefixes_and_inline_comments_get_distinct_headers() {
-    let mut diffs = Vec::new();
-    for (source, target) in [
-        (
-            indoc! {r"
-                outer:
-                  # collection
-                    key: value
-            "},
-            Target::Value,
-        ),
-        (
-            indoc! {r"
-                -
-                  # collection
-                    - item
-            "},
-            Target::Item,
-        ),
-        (
-            indoc! {r"
-                &root
-                -
-                  # collection
-                    key: value
-            "},
-            Target::Item,
-        ),
-        (
-            indoc! {r"
-                ?
-                  # collection
-                    - key
-                : value
-            "},
-            Target::Key,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            let owner = match target {
-                Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
-                Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
-                Target::Item => editor.sequence_items(&root)?[0].clone(),
-            };
-            editor.insert_comment(&owner, 1, " inline", CommentPlacement::Inline)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer:
-    -  # collection
-    -    key: value
-    +# collection
-    +outer: # inline
-    +  key: value
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    --
-    -  # collection
-    -    - item
-    +# collection
-    +- # inline
-    +  - item
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-    -&root
-    +&root ⏎
-     -
-       # collection
-    -    key: value
-    +  {key: value} # inline
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     ?
-       # collection
-    -    - key
-    +  [key] # inline
-     : value
+#[test_case(
+    indoc! {r"
+        outer:
+          # collection
+            key: value
+    "},
+    Target::Value
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,3 @@
+        -outer:
+        -  # collection
+        -    key: value
+        +# collection
+        +outer: # inline
+        +  key: value
     ");
+    "mapping value"
+)]
+#[test_case(
+    indoc! {r"
+        -
+          # collection
+            - item
+    "},
+    Target::Item
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,3 @@
+        --
+        -  # collection
+        -    - item
+        +# collection
+        +- # inline
+        +  - item
+    ");
+    "sequence item"
+)]
+#[test_case(
+    indoc! {r"
+        &root
+        -
+          # collection
+            key: value
+    "},
+    Target::Item
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+        -&root
+        +&root ⏎
+         -
+           # collection
+        -    key: value
+        +  {key: value} # inline
+    ");
+    "anchored sequence"
+)]
+#[test_case(
+    indoc! {r"
+        ?
+          # collection
+            - key
+        : value
+    "},
+    Target::Key
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         ?
+           # collection
+        -    - key
+        +  [key] # inline
+         : value
+    ");
+    "mapping key"
+)]
+fn collection_prefixes_and_inline_comments_get_distinct_headers(
+    source: &str,
+    target: Target,
+) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        let owner = match target {
+            Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
+            Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
+            Target::Item => editor.sequence_items(&root)?[0].clone(),
+        };
+        editor.insert_comment(&owner, 1, " inline", CommentPlacement::Inline)
+    })
 }
 
-#[test]
-fn collection_suffixes_can_precede_a_closing_inline_comment() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            outer: &inner
-              key: value
-              # trailing
-        "},
-        indoc! {r"
-            outer: &inner
-              - item
-
-              # detached
-        "},
-        indoc! {r"
-            outer: !!map &inner
-              key: value
-              # trailing
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
-            editor.insert_comment(&inner, 1, " inline", CommentPlacement::Inline)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer: &inner
-    -  key: value
-    +outer: &inner {key: value,
-       # trailing
-    +  } # inline
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-    -outer: &inner
-    -  - item
-    -
-    +outer: &inner [item,
-    +  ⏎
-       # detached
-    +  ] # inline
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    -outer: !!map &inner
-    -  key: value
-    +outer: !<tag:yaml.org,2002:map> &inner {key: value,
-       # trailing
-    +  } # inline
+#[test_case(
+    indoc! {r"
+        outer: &inner
+          key: value
+          # trailing
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,3 @@
+        -outer: &inner
+        -  key: value
+        +outer: &inner {key: value,
+           # trailing
+        +  } # inline
     ");
+    "mapping trailing"
+)]
+#[test_case(
+    indoc! {r"
+        outer: &inner
+          - item
+
+          # detached
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+        -outer: &inner
+        -  - item
+        -
+        +outer: &inner [item,
+        +  ⏎
+           # detached
+        +  ] # inline
+    ");
+    "sequence detached"
+)]
+#[test_case(
+    indoc! {r"
+        outer: !!map &inner
+          key: value
+          # trailing
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,3 @@
+        -outer: !!map &inner
+        -  key: value
+        +outer: !<tag:yaml.org,2002:map> &inner {key: value,
+           # trailing
+        +  } # inline
+    ");
+    "tagged mapping trailing"
+)]
+fn collection_suffixes_can_precede_a_closing_inline_comment(source: &str) -> String {
+    edit(source, |editor| {
+        let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
+        editor.insert_comment(&inner, 1, " inline", CommentPlacement::Inline)
+    })
 }

@@ -23,7 +23,8 @@
   of asserts for expected state/structure. Snapshots must be inline. Do not use
   sidecar `.snap` files. Avoid assertions that duplicate snapshot expectations.
 
-- Tests should be table-driven where appropriate, rather than defining several nearly-identical test functions.
+- Use `test_case` for independent parameterized tests. Keep loops for stateful
+  sequences, corpus traversal, and exhaustive model checks.
 
 - Where appropriate, tests should reference the section of the YAML specification they're testing for,
   with a link to that section.

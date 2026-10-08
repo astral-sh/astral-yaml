@@ -1,5 +1,7 @@
 //! Root edits may require document boundaries to preserve comment ownership.
 
+use test_case::test_case;
+
 use super::support::{edit, edited};
 use astral_yaml::{ParseOptions, comments::CommentPlacement, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -340,37 +342,39 @@ fn root_inline_comments_can_use_additional_marker_lines() {
     ");
 }
 
-#[test]
-fn nested_inline_comments_can_use_available_syntax_headers() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            value: [old] # first
-        "},
-        indoc! {r"
-            value: &a old # first
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-            editor.insert_comment(&value, 1, " second", CommentPlacement::Inline)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    -value: [old] # first
-    +value: [ # first
-    +  old] # second
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    -value: &a old # first
-    +value: &a # first
-    +  old # second
+#[test_case(
+    indoc! {r"
+        value: [old] # first
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        -value: [old] # first
+        +value: [ # first
+        +  old] # second
     ");
+    "sequence delimiter"
+)]
+#[test_case(
+    indoc! {r"
+        value: &a old # first
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        -value: &a old # first
+        +value: &a # first
+        +  old # second
+    ");
+    "scalar anchor"
+)]
+fn nested_inline_comments_can_use_available_syntax_headers(source: &str) -> String {
+    edit(source, |editor| {
+        let value = editor.mapping_entries(&editor.root())?.remove(0).1;
+        editor.insert_comment(&value, 1, " second", CommentPlacement::Inline)
+    })
 }
 
 #[test]
@@ -399,50 +403,52 @@ fn detached_suffix_comments_follow_inserted_root_content() {
     ");
 }
 
-#[test]
-fn generated_start_markers_preserve_root_prefixes() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            # child
-            [ # open
-              old
-            ] # close
-        "},
-        indoc! {r"
-            # child
-            { # open
-              key: old
-            } # close
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            let index = editor.node(&root)?.comments().len();
-            editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     # child
-    -[ # open
-    -  old
-    -] # close
-    +--- # open
-    +[ # close
-    +  old] # added
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     # child
-    -{ # open
-    -  key: old
-    -} # close
-    +--- # open
-    +{ # close
-    +  key: old} # added
+#[test_case(
+    indoc! {r"
+        # child
+        [ # open
+          old
+        ] # close
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         # child
+        -[ # open
+        -  old
+        -] # close
+        +--- # open
+        +[ # close
+        +  old] # added
     ");
+    "sequence"
+)]
+#[test_case(
+    indoc! {r"
+        # child
+        { # open
+          key: old
+        } # close
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+         # child
+        -{ # open
+        -  key: old
+        -} # close
+        +--- # open
+        +{ # close
+        +  key: old} # added
+    ");
+    "mapping"
+)]
+fn generated_start_markers_preserve_root_prefixes(source: &str) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        let index = editor.node(&root)?.comments().len();
+        editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
+    })
 }

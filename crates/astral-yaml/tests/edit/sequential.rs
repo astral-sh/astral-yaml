@@ -1,5 +1,7 @@
 //! Transaction semantics for successive edits to the same syntax.
 
+use test_case::test_case;
+
 use super::support::edit;
 use astral_yaml::{ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -34,42 +36,47 @@ fn sequential_replacements_emit_the_final_candidate() {
     ");
 }
 
-#[test]
-fn removed_subtrees_discard_pending_rewrites_and_style_requests() {
-    let mut diffs = Vec::new();
-    for remove in [false, true] {
-        let source = indoc! {r"
-            items: [old, keep]
-            other: retained
-        "};
-        diffs.push(edit(source, |e| {
-            let items = e.mapping_entries(&e.root())?.remove(0).1;
-            let old = e.sequence_items(&items)?.remove(0);
-            e.replace(&old, "new")?;
-            e.set_scalar_style(&old, ScalarStyle::SingleQuoted)?;
-            if remove {
-                e.remove_item(&items, 0)?;
-            } else {
-                e.replace(&items, "[replacement]")?;
-            }
-            Ok(())
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -items: [old, keep]
-    +items: [replacement]
-     other: retained
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -items: [old, keep]
-    +items: [keep]
-     other: retained
+#[test_case(
+    false
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+        -items: [old, keep]
+        +items: [replacement]
+         other: retained
     ");
+    "replace"
+)]
+#[test_case(
+    true
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+        -items: [old, keep]
+        +items: [keep]
+         other: retained
+    ");
+    "remove"
+)]
+fn removed_subtrees_discard_pending_rewrites_and_style_requests(remove: bool) -> String {
+    let source = indoc! {r"
+        items: [old, keep]
+        other: retained
+    "};
+    edit(source, |e| {
+        let items = e.mapping_entries(&e.root())?.remove(0).1;
+        let old = e.sequence_items(&items)?.remove(0);
+        e.replace(&old, "new")?;
+        e.set_scalar_style(&old, ScalarStyle::SingleQuoted)?;
+        if remove {
+            e.remove_item(&items, 0)?;
+        } else {
+            e.replace(&items, "[replacement]")?;
+        }
+        Ok(())
+    })
 }
 
 #[test]

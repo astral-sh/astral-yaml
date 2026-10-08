@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::support::normalize;
 use astral_yaml::{ParseOptions, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
@@ -237,43 +239,51 @@ fn normalization_preserves_leading_comments_in_flow_collections() {
     ");
 }
 
-#[test]
-fn normalization_preserves_empty_scalar_text() {
+#[test_case(
+    indoc! {r"
+        name:
+    "};
+    "implicit null"
+)]
+#[test_case(
+    indoc! {r"
+        name: !custom
+    "};
+    "application tagged null"
+)]
+#[test_case(
+    indoc! {r"
+        {name: , other: null}
+    "};
+    "flow omitted value"
+)]
+#[test_case(
+    indoc! {r"
+        -
+        - !!str
+    "};
+    "sequence omitted and string"
+)]
+fn normalization_preserves_empty_scalar_text(source: &str) {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
-    for source in [
-        indoc! {r"
-            name:
-        "},
-        indoc! {r"
-            name: !custom
-        "},
-        indoc! {r"
-            {name: , other: null}
-        "},
-        indoc! {r"
-            -
-            - !!str
-        "},
-    ] {
-        let document = EditableDocument::parse(source).unwrap();
-        let output = document.normalized_yaml().unwrap();
-        let scalars = |source: &str| {
-            astral_yaml::parse(source)
-                .unwrap()
-                .nodes()
-                .iter()
-                .filter_map(|node| match &node.kind {
-                    astral_yaml::NodeKind::Scalar(scalar) => Some(scalar.value.to_string()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            scalars(&output),
-            scalars(source),
-            "{source:?} -> {output:?}"
-        );
-    }
+    let document = EditableDocument::parse(source).unwrap();
+    let output = document.normalized_yaml().unwrap();
+    let scalars = |source: &str| {
+        astral_yaml::parse(source)
+            .unwrap()
+            .nodes()
+            .iter()
+            .filter_map(|node| match &node.kind {
+                astral_yaml::NodeKind::Scalar(scalar) => Some(scalar.value.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        scalars(&output),
+        scalars(source),
+        "{source:?} -> {output:?}"
+    );
 }
 
 #[test]
@@ -381,32 +391,28 @@ fn normalization_preserves_separate_header_comments() {
     ");
 }
 
-#[test]
-fn normalization_uses_explicit_keys_when_escaped_syntax_is_long() {
+#[test_case(&format!("\"{}\"", "\\u0001".repeat(103)))]
+#[test_case(&format!("&{} short", "a".repeat(1024)))]
+#[test_case(&format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)))]
+#[test_case(&format!("\"{}\"", "a".repeat(1023)))]
+fn normalization_uses_explicit_keys_when_escaped_syntax_is_long(key: &str) {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    for key in [
-        format!("\"{}\"", "\\u0001".repeat(103)),
-        format!("&{} short", "a".repeat(1024)),
-        format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)),
-        format!("\"{}\"", "a".repeat(1023)),
-    ] {
-        let source = formatdoc! {r"
-            ? {key}
-            : value
-        "};
-        let output = EditableDocument::parse(&source)
+    let source = formatdoc! {r"
+        ? {key}
+        : value
+    "};
+    let output = EditableDocument::parse(&source)
+        .unwrap()
+        .normalized_yaml()
+        .unwrap();
+    assert!(output.starts_with("? "), "{output:?}");
+    assert_eq!(
+        EditableDocument::parse(&output)
             .unwrap()
             .normalized_yaml()
-            .unwrap();
-        assert!(output.starts_with("? "), "{output:?}");
-        assert_eq!(
-            EditableDocument::parse(&output)
-                .unwrap()
-                .normalized_yaml()
-                .unwrap(),
-            output
-        );
-    }
+            .unwrap(),
+        output
+    );
 }
 
 #[test]

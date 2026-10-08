@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::support::{edit, edited, edits};
 use astral_yaml::{
     comments::CommentPlacement,
@@ -5,38 +7,43 @@ use astral_yaml::{
 };
 use astral_yaml_dev::indoc;
 
-#[test]
-fn unchanged_reinsertion_preserves_source() {
-    for source in [
-        indoc! {r"
-            # detached
+#[test_case(
+    indoc! {r"
+        # detached
 
-            item
-        "},
-        indoc! {r"
-            &node
-            # property
-            item
-        "},
-        indoc! {r"
-            - one
+        item
+    "};
+    "detached prefix"
+)]
+#[test_case(
+    indoc! {r"
+        &node
+        # property
+        item
+    "};
+    "property header"
+)]
+#[test_case(
+    indoc! {r"
+        - one
 
-            # gap
+        # gap
 
-            - two
-        "},
-    ] {
-        let document = edited(source, |editor| {
-            let owner = editor.root();
-            let comment = &editor.node(&owner)?.comments()[0];
-            let text = comment.text().to_owned();
-            let placement = comment.placement();
-            let position = editor.comment_position(&owner, 0)?;
-            editor.remove_comment(&owner, 0)?;
-            editor.insert_comment_at(&owner, 0, &text, placement, position)
-        });
-        assert_eq!(document.source(), source);
-    }
+        - two
+    "};
+    "collection gap"
+)]
+fn unchanged_reinsertion_preserves_source(source: &str) {
+    let document = edited(source, |editor| {
+        let owner = editor.root();
+        let comment = &editor.node(&owner)?.comments()[0];
+        let text = comment.text().to_owned();
+        let placement = comment.placement();
+        let position = editor.comment_position(&owner, 0)?;
+        editor.remove_comment(&owner, 0)?;
+        editor.insert_comment_at(&owner, 0, &text, placement, position)
+    });
+    assert_eq!(document.source(), source);
 }
 
 #[test]
@@ -155,69 +162,71 @@ fn reinsertion_retains_headers_and_collection_gaps() {
     ");
 }
 
-#[test]
-fn inserted_gaps_follow_children_through_collection_edits() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            - one
-            - two
-            - three
-        "},
-        indoc! {r"
-            one: 1
-            two: 2
-            three: 3
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            let sequence = matches!(editor.node(&root)?.kind(), NodeKind::Sequence { .. });
-            let before = if sequence {
-                editor.sequence_items(&root)?[1].clone()
-            } else {
-                editor.mapping_entries(&root)?[1].0.clone()
-            };
-            editor.insert_comment_at(
-                &root,
-                0,
-                " section",
-                CommentPlacement::Detached,
-                CommentPosition::BeforeChild(before),
-            )?;
-            if sequence {
-                editor.insert_item(&root, 0, "zero")?;
-                editor.remove_item(&root, 2)?;
-            } else {
-                editor.insert_entry(&root, 0, "zero", "0")?;
-                editor.remove_entry(&root, 2)?;
-            }
-            Ok(())
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,6 @@
-    +- zero
-     - one
-    -- two
-    +
-    +# section
-    +
-     - three
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,6 @@
-    +zero: 0
-     one: 1
-    -two: 2
-    +
-    +# section
-    +
-     three: 3
+#[test_case(
+    indoc! {r"
+        - one
+        - two
+        - three
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,6 @@
+        +- zero
+         - one
+        -- two
+        +
+        +# section
+        +
+         - three
     ");
+    "sequence"
+)]
+#[test_case(
+    indoc! {r"
+        one: 1
+        two: 2
+        three: 3
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,6 @@
+        +zero: 0
+         one: 1
+        -two: 2
+        +
+        +# section
+        +
+         three: 3
+    ");
+    "mapping"
+)]
+fn inserted_gaps_follow_children_through_collection_edits(source: &str) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        let sequence = matches!(editor.node(&root)?.kind(), NodeKind::Sequence { .. });
+        let before = if sequence {
+            editor.sequence_items(&root)?[1].clone()
+        } else {
+            editor.mapping_entries(&root)?[1].0.clone()
+        };
+        editor.insert_comment_at(
+            &root,
+            0,
+            " section",
+            CommentPlacement::Detached,
+            CommentPosition::BeforeChild(before),
+        )?;
+        if sequence {
+            editor.insert_item(&root, 0, "zero")?;
+            editor.remove_item(&root, 2)?;
+        } else {
+            editor.insert_entry(&root, 0, "zero", "0")?;
+            editor.remove_entry(&root, 2)?;
+        }
+        Ok(())
+    })
 }
 
 #[test]

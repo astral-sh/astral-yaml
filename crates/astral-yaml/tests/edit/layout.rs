@@ -1,5 +1,7 @@
 //! Nested scalar termination and comment separation are layout dependencies.
 
+use test_case::test_case;
+
 use super::support::{edit, edits};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use std::fmt::Write;
@@ -230,70 +232,70 @@ fn comments(document: &EditableDocument) -> Vec<(Vec<usize>, String, CommentPlac
     comments
 }
 
-#[test]
-fn scalar_layouts_preserve_values_and_comment_owners_at_each_depth() {
-    for depth in 1..=4 {
-        let mut body = String::new();
-        for n in 0..depth {
-            write!(
-                body,
-                "{}key{n}:{}",
-                "  ".repeat(n),
-                if n + 1 == depth { " old" } else { "\n" }
-            )
-            .unwrap();
-        }
-        for gap in ["\n", "\n\n", "\n \n", "\n\t\n"] {
-            for indent in 0..=depth {
-                for ending in [
-                    "",
-                    "\n",
-                    "\n\n",
-                    indoc! {r"
+#[test_case(1)]
+#[test_case(2)]
+#[test_case(3)]
+#[test_case(4)]
+fn scalar_layouts_preserve_values_and_comment_owners_at_each_depth(depth: usize) {
+    let mut body = String::new();
+    for n in 0..depth {
+        write!(
+            body,
+            "{}key{n}:{}",
+            "  ".repeat(n),
+            if n + 1 == depth { " old" } else { "\n" }
+        )
+        .unwrap();
+    }
+    for gap in ["\n", "\n\n", "\n \n", "\n\t\n"] {
+        for indent in 0..=depth {
+            for ending in [
+                "",
+                "\n",
+                "\n\n",
+                indoc! {r"
 
-                        ...
+                    ...
+                "},
+                indoc! {r"
+
+
+                    ... # end
+                "},
+            ] {
+                let source = format!("{body}{gap}{}# comment{ending}", "  ".repeat(indent));
+                for fragment in [
+                    indoc! {r"
+                        |+
+                          new
+
                     "},
                     indoc! {r"
+                        >+
+                          new
 
-
-                        ... # end
                     "},
                 ] {
-                    let source = format!("{body}{gap}{}# comment{ending}", "  ".repeat(indent));
-                    for fragment in [
-                        indoc! {r"
-                            |+
-                              new
-
-                        "},
-                        indoc! {r"
-                            >+
-                              new
-
-                        "},
-                    ] {
-                        let mut document = EditableDocument::parse(&source).unwrap();
-                        let expected_comments = comments(&document);
-                        document
-                            .edit(|editor| editor.replace(&first_leaf(editor), fragment))
-                            .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
-                        assert_eq!(comments(&document), expected_comments);
-                        let mut id = document.root();
-                        for _ in 0..depth {
-                            let NodeKind::Mapping { entries, .. } =
-                                document.node(id).unwrap().kind()
-                            else {
-                                panic!("expected mapping")
-                            };
-                            id = entries[0].1;
-                        }
-                        assert!(
-                            matches!(document.node(id).unwrap().kind(), NodeKind::Scalar { value, .. } if value == indoc! {r"
-                                new
-
-                            "})
-                        );
+                    let mut document = EditableDocument::parse(&source).unwrap();
+                    let expected_comments = comments(&document);
+                    document
+                        .edit(|editor| editor.replace(&first_leaf(editor), fragment))
+                        .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
+                    assert_eq!(comments(&document), expected_comments);
+                    let mut id = document.root();
+                    for _ in 0..depth {
+                        let NodeKind::Mapping { entries, .. } = document.node(id).unwrap().kind()
+                        else {
+                            panic!("expected mapping")
+                        };
+                        id = entries[0].1;
                     }
+                    assert!(
+                        matches!(document.node(id).unwrap().kind(), NodeKind::Scalar { value, .. } if value == indoc! {r"
+                            new
+
+                        "})
+                    );
                 }
             }
         }
