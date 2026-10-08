@@ -1,4 +1,4 @@
-use super::support::edit;
+use super::support::{edit, edit_syntax};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{
     Editable, Tagged,
@@ -144,14 +144,11 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
         --- [old]
         ...
     "};
-    let mut document = Editable::<Vec<String>>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            let mut root = editor.root_mut();
-            root.set(["new", "values"])?;
-            root.set_collection_style(CollectionStyle::Block)
-        })
-        .unwrap();
+    let document = edit::<Vec<String>>(source, |editor| {
+        let mut root = editor.root_mut();
+        root.set(["new", "values"])?;
+        root.set_collection_style(CollectionStyle::Block)
+    });
     assert_eq!(document.value().as_slice(), ["new", "values"]);
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     --- before.yaml
@@ -169,14 +166,11 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
 
         # old
     "};
-    let mut document = Editable::<String>::parse(source).unwrap();
-    document
-        .edit(|editor| {
-            editor
-                .root_mut()
-                .append_comment(" new", CommentPlacement::Detached)
-        })
-        .unwrap();
+    let mut document = edit::<String>(source, |editor| {
+        editor
+            .root_mut()
+            .append_comment(" new", CommentPlacement::Detached)
+    });
     document
         .edit(|editor| editor.root_mut().replace_comment(1, " changed"))
         .unwrap();
@@ -358,7 +352,6 @@ fn typed_root_setters_distinguish_strings_from_document_markers() {
 
 #[test]
 fn typed_setters_preserve_comments_interleaved_with_properties() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         key: # header
           &a # anchor
@@ -368,8 +361,8 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
     let document =
         edit::<serde_json::Value>(source, |editor| editor.root_mut().field("key")?.set("new"));
     assert_eq!(document.value()["key"], "new");
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,4 @@
@@ -654,23 +647,19 @@ fn commented_fragments_refresh_the_typed_view() {
 
         # tail
     "};
-    let mut document =
-        Editable::<std::collections::BTreeMap<String, String>>::parse(source).unwrap();
-    document
-        .edit_syntax(|editor| {
-            editor.replace(
-                &editor.root(),
-                indoc! {r"
-                    # leading
-                    a: one
+    let document = edit_syntax::<std::collections::BTreeMap<String, String>>(source, |editor| {
+        editor.replace(
+            &editor.root(),
+            indoc! {r"
+                # leading
+                a: one
 
-                    # middle
+                # middle
 
-                    b: two
-                "},
-            )
-        })
-        .unwrap();
+                b: two
+            "},
+        )
+    });
     assert_eq!(
         document.value(),
         &std::collections::BTreeMap::from([
@@ -696,7 +685,6 @@ fn commented_fragments_refresh_the_typed_view() {
 
 #[test]
 fn typed_insertions_keep_flow_delimiter_comments() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         [ # open
           old
@@ -707,8 +695,8 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         Ok(())
     });
     assert_eq!(document.value(), &["old", "new"]);
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,3 +1,2 @@
@@ -782,7 +770,6 @@ fn typed_collection_edits_retain_outside_comments() {
 
 #[test]
 fn typed_collection_edits_use_document_comment_boundaries() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         ---
         [ # open
@@ -797,8 +784,8 @@ fn typed_collection_edits_use_document_comment_boundaries() {
         Ok(())
     });
     assert_eq!(document.value(), &["old", "new"]);
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1,5 +1,4 @@
@@ -816,27 +803,23 @@ fn typed_collection_edits_use_document_comment_boundaries() {
 
 #[test]
 fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         ---
         # leading
         old # inline
         ...
     "};
-    let mut document = Editable::<Option<String>>::parse(source).unwrap();
-    document
-        .edit_syntax(|editor| {
-            editor.replace(
-                &editor.root(),
-                indoc! {r"
-                    ---
-                "},
-            )
-        })
-        .unwrap();
+    let document = edit_syntax::<Option<String>>(source, |editor| {
+        editor.replace(
+            &editor.root(),
+            indoc! {r"
+                ---
+            "},
+        )
+    });
     assert_eq!(document.value(), &None);
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,4 +1,3 @@
@@ -850,7 +833,6 @@ fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
 
 #[test]
 fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
-    let mut diffs = Vec::new();
     let source = indoc! {r"
           old
         # tail
@@ -859,8 +841,8 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
         editor.root_mut().set_scalar_style(ScalarStyle::Literal)
     });
     assert_eq!(document.value(), "old");
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @"
     --- before.yaml
     +++ after.yaml
     @@ -1,2 +1,3 @@

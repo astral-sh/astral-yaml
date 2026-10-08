@@ -343,7 +343,6 @@ fn typed_comment_insertions_share_the_root_header_plan() {
     use astral_yaml_dev::edit_diff;
     use astral_yaml_serde::edit::CommentPlacement;
 
-    let mut diffs = Vec::new();
     let source = indoc! {r"
         old # first
     "};
@@ -354,8 +353,8 @@ fn typed_comment_insertions_share_the_root_header_plan() {
         root.set(["new"])
     });
     assert_eq!(document.value(), &json!(["new"]));
-    diffs.push(edit_diff(source, document.source()));
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    let diff = edit_diff(source, document.source());
+    insta::assert_snapshot!(diff, @r#"
     --- before.yaml
     +++ after.yaml
     @@ -1 +1,3 @@

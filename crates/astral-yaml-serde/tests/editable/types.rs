@@ -1,5 +1,6 @@
 //! YAML node kinds: <https://yaml.org/spec/1.2.2/#3211-nodes>.
 
+use super::support::edit_syntax;
 use astral_yaml::{
     NodeId,
     edit::{EditableDocument, NodeKind},
@@ -72,10 +73,9 @@ fn root_kind_changes_refresh_the_untagged_variant_and_span() {
         let source = formatdoc! {r"
             {before}
         "};
-        let mut document = Editable::<Spanned<Shape>>::parse(&source).unwrap();
-        document
-            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let document = edit_syntax::<Spanned<Shape>>(&source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        });
 
         assert_shape(
             document.value(),
@@ -155,13 +155,10 @@ fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
         ",
             before.replace('\n', "\n  ")
         };
-        let mut document = Editable::<ShapeConfig>::parse(&source).unwrap();
-        document
-            .edit_syntax(|editor| {
-                let entries = editor.mapping_entries(&editor.root())?;
-                editor.replace(&entries[0].1, replacement)
-            })
-            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let document = edit_syntax::<ShapeConfig>(&source, |editor| {
+            let entries = editor.mapping_entries(&editor.root())?;
+            editor.replace(&entries[0].1, replacement)
+        });
 
         let syntax = document.syntax();
         let NodeKind::Mapping { entries, .. } = syntax.node(syntax.root()).unwrap().kind() else {
@@ -255,10 +252,9 @@ fn scalar_type_changes_refresh_the_typed_value() {
         let source = formatdoc! {r"
             {before} # value
         "};
-        let mut document = Editable::<Value>::parse(&source).unwrap();
-        document
-            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
+        let document = edit_syntax::<Value>(&source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        });
 
         assert_eq!(document.value(), &expected);
         diffs.push(edit_diff(&source, document.syntax().source()));
@@ -308,10 +304,9 @@ fn null_and_empty_collections_can_replace_each_other() {
         let source = formatdoc! {r"
             {before} # nullable
         "};
-        let mut document = Editable::<Option<Shape>>::parse(&source).unwrap();
-        document
-            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
+        let document = edit_syntax::<Option<Shape>>(&source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        });
 
         assert_eq!(document.value(), &expected);
         diffs.push(edit_diff(&source, document.syntax().source()));
@@ -406,11 +401,10 @@ fn kind_changes_create_boundaries_for_outer_comments() {
         "two: 2",
         "{two: 2}",
     ] {
-        let mut document = Editable::<Spanned<Shape>>::parse(source).unwrap();
         let expected = from_str::<Shape>(replacement).unwrap();
-        document
-            .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
-            .unwrap();
+        let document = edit_syntax::<Spanned<Shape>>(source, |editor| {
+            editor.replace(&editor.root(), replacement)
+        });
         assert_eq!(document.value().value, expected);
         let syntax = document.syntax();
         assert_eq!(

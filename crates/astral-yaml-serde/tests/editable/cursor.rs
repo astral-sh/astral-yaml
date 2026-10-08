@@ -138,6 +138,9 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
 
 #[test]
 fn rust_values_never_interpret_strings_as_yaml() {
+    let source = indoc! {r"
+        old
+    "};
     let mut diffs = Vec::new();
     for (name, value) in [
         ("string", json!("false")),
@@ -154,17 +157,11 @@ fn rust_values_never_interpret_strings_as_yaml() {
                 new line"}),
         ),
     ] {
-        let mut document = Editable::<Value>::parse(indoc! {r"
-            old
-        "})
-        .unwrap();
-        document.edit(|e| e.root_mut().set(&value)).unwrap();
+        let document = edit::<Value>(source, |e| e.root_mut().set(&value));
         assert_eq!(document.value(), &value);
         diffs.push(formatdoc! {r"
             {name}
-            {}", edit_diff(indoc! {r"
-                old
-            "}, document.source())});
+            {}", edit_diff(source, document.source())});
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     string
@@ -443,15 +440,12 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
         timeout: 30
         servers: [primary]
     "};
-    let mut document = Editable::<Config>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            e.root_mut().field("timeout")?.set("temporarily invalid")?;
-            e.root_mut().field("timeout")?.set(60)?;
-            e.root_mut().field("servers")?.set(["old"])?;
-            e.root_mut().field("servers")?.item(0)?.set("new")
-        })
-        .unwrap();
+    let mut document = edit::<Config>(source, |e| {
+        e.root_mut().field("timeout")?.set("temporarily invalid")?;
+        e.root_mut().field("timeout")?.set(60)?;
+        e.root_mut().field("servers")?.set(["old"])?;
+        e.root_mut().field("servers")?.item(0)?.set("new")
+    });
     assert_eq!(document.value().timeout, 60);
     assert_eq!(document.value().servers, ["new"]);
     let before = document.to_yaml();
