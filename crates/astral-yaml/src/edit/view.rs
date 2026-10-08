@@ -13,6 +13,7 @@ pub(super) struct Syntax<'a, Location> {
 
 impl<'a> From<&'a EditableDocument> for Syntax<'a, Span> {
     fn from(document: &'a EditableDocument) -> Self {
+        let document = &document.source;
         Self {
             nodes: &document.nodes,
             root: document.root,
@@ -33,10 +34,11 @@ pub(super) struct Emission<'a, Location> {
 
 impl<'a> From<&'a EditableDocument> for Emission<'a, Span> {
     fn from(document: &'a EditableDocument) -> Self {
+        let document = &document.source;
         Self {
             nodes: &document.nodes,
             root: document.root,
-            source: &document.source,
+            source: &document.text,
             options: document.options,
             end_marker: document.end_marker,
         }

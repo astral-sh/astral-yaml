@@ -1,0 +1,358 @@
+use super::{
+    CommentPosition, EditableDocument, Node, NodeKind,
+    draft::Draft,
+    layout::Layout,
+    plan::{Changes, Plan},
+};
+use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
+use std::sync::Arc;
+
+#[cfg(test)]
+mod tests;
+
+/// A node reference belonging to one edit transaction. Handles can be cloned,
+/// but cannot be used in another transaction or after their node is deleted.
+#[derive(Clone, Debug)]
+pub struct Handle {
+    transaction: Arc<()>,
+    id: NodeId,
+}
+
+/// Mutable candidate syntax. Obtain handles by navigating from [`Self::root`].
+/// Node and comment locations refer to their original occurrences, even after
+/// replacement. Inserted syntax has no source location (`None`).
+#[derive(Debug)]
+pub struct Editor<'a> {
+    original: &'a EditableDocument,
+    draft: Draft,
+    transaction: Arc<()>,
+    failure: Option<Error>,
+}
+
+impl EditableDocument {
+    /// Applies syntax edits atomically. Failed mutation operations poison the transaction,
+    /// even if the callback catches their errors.
+    ///
+    /// # Errors
+    /// Returns an error for invalid edits, invalid emitted syntax, altered alias
+    /// identity, or exhausted resource limits. The document remains unchanged.
+    pub fn edit<R>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit(edit)
+    }
+
+    /// Applies a transaction whose callback uses an application-defined error.
+    /// The callback's result is returned only after a successful commit.
+    ///
+    /// # Errors
+    /// Returns callback or edit errors, leaving the document unchanged.
+    pub fn try_edit<R, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let mut editor = Editor::new(self);
+        let result = edit(&mut editor)?;
+        let candidate = editor.finish()?;
+        *self = candidate;
+        Ok(result)
+    }
+}
+
+impl<'a> Editor<'a> {
+    fn new(original: &'a EditableDocument) -> Self {
+        Self {
+            original,
+            draft: Draft::from(original),
+            transaction: Arc::new(()),
+            failure: None,
+        }
+    }
+
+    fn error(&self, message: &'static str) -> Error {
+        Error {
+            span: self.original.source.nodes[self.original.source.root.0].span,
+            message,
+        }
+    }
+
+    fn id(&self, handle: &Handle) -> Result<NodeId, Error> {
+        self.draft.charge(1)?;
+        if !Arc::ptr_eq(&self.transaction, &handle.transaction) || !self.draft.contains(handle.id) {
+            return Err(self.error("foreign or deleted edit handle"));
+        }
+        Ok(handle.id)
+    }
+
+    fn handle(&self, id: NodeId) -> Handle {
+        Handle {
+            transaction: Arc::clone(&self.transaction),
+            id,
+        }
+    }
+
+    fn mutate(
+        &mut self,
+        handle: &Handle,
+        operation: impl FnOnce(&mut Draft, NodeId) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        let result = self
+            .id(handle)
+            .and_then(|id| operation(&mut self.draft, id));
+        if let Err(error) = &result {
+            self.failure = Some(error.clone());
+        }
+        result
+    }
+
+    /// The root of this transaction's candidate document.
+    #[must_use]
+    pub fn root(&self) -> Handle {
+        self.handle(self.draft.root())
+    }
+
+    /// Inspects a live node in this transaction.
+    ///
+    /// # Errors
+    /// Rejects foreign/deleted handles and exhausted work budgets.
+    pub fn node(&self, handle: &Handle) -> Result<&Node<Option<Span>>, Error> {
+        Ok(self.draft.node(self.id(handle)?))
+    }
+
+    /// Returns sequence-item handles in source order.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, non-sequences, and exhausted work budgets.
+    pub fn sequence_items(&self, handle: &Handle) -> Result<Vec<Handle>, Error> {
+        let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
+            return Err(self.error("expected a sequence"));
+        };
+        self.draft.charge(items.len())?;
+        Ok(items.iter().map(|&id| self.handle(id)).collect())
+    }
+
+    /// Returns mapping key/value handles in source order, including complex keys.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, non-mappings, and exhausted work budgets.
+    pub fn mapping_entries(&self, handle: &Handle) -> Result<Vec<(Handle, Handle)>, Error> {
+        let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
+            return Err(self.error("expected a mapping"));
+        };
+        self.draft.charge(entries.len())?;
+        Ok(entries
+            .iter()
+            .map(|&(key, value)| (self.handle(key), self.handle(value)))
+            .collect())
+    }
+
+    /// Replaces a node with a parsed single-node YAML fragment, retaining its
+    /// outer comment attachments. Its handle remains valid; handles to its old
+    /// descendants expire. Later operations see the replacement's content.
+    /// Existing aliases to the node use its new anchor. Commit rejects a missing
+    /// anchor or shadowing that would change an alias's target identity.
+    ///
+    /// # Errors
+    /// Rejects invalid fragments, handles, or limits.
+    pub fn replace(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
+        self.replace_impl(handle, yaml, false)
+    }
+
+    /// Replaces a node from a YAML fragment, retaining any existing anchor, outer comments,
+    /// and compatible scalar or collection style. The fragment supplies tags.
+    /// Its anchor is used when the original node has none. Aliases in the fragment
+    /// retain their target identity when an existing anchor takes its place.
+    /// Unlike an explicit style request, the retained style may fall back when
+    /// the new content cannot use it.
+    ///
+    /// # Errors
+    /// Rejects invalid fragments, handles, or limits.
+    pub fn replace_preserving_style(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
+        self.replace_impl(handle, yaml, true)
+    }
+
+    fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
+    }
+
+    /// Inserts a parsed item before `index`; `len` appends.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, fragments, node kinds, or limits.
+    pub fn insert_item(
+        &mut self,
+        sequence: &Handle,
+        index: usize,
+        yaml: &str,
+    ) -> Result<(), Error> {
+        self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))
+    }
+
+    /// Removes an item and comments owned by its subtree.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, node kinds, or limits.
+    pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
+        self.mutate(sequence, |draft, id| draft.remove_item(id, index))
+    }
+
+    /// Inserts an ordered mapping entry from two single-node YAML fragments.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, fragments, node kinds, or limits.
+    pub fn insert_entry(
+        &mut self,
+        mapping: &Handle,
+        index: usize,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Error> {
+        self.mutate(mapping, |draft, id| {
+            draft.insert_entry(id, index, key, value)
+        })
+    }
+
+    /// Removes an entry and comments owned by its key/value subtrees.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, node kinds, or limits.
+    pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
+        self.mutate(mapping, |draft, id| draft.remove_entry(id, index))
+    }
+
+    /// Requests a scalar style. Commit rejects styles that change the scalar's
+    /// implicit type or cannot represent its text in the surrounding context.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, non-scalars, or exhausted work budgets.
+    pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| draft.set_scalar_style(id, style))
+    }
+
+    /// Requests block or flow collection syntax. An empty collection is emitted
+    /// in flow style regardless of the requested preference.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, non-collections, or exhausted work budgets.
+    pub fn set_collection_style(
+        &mut self,
+        handle: &Handle,
+        style: CollectionStyle,
+    ) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
+    }
+
+    /// Inserts comment text (without `#` or a line break) at an owner-local index.
+    /// Inline comments require distinct syntax headers in the emitted layout.
+    /// Leading comments precede the node. Detached comments use the next existing
+    /// collection gap, or follow the node; other placements follow the node.
+    /// Use [`Self::insert_comment_at`] to select or retain a structural position.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, multiline text, or resource limits.
+    /// Commit rejects placements that cannot preserve the node's attachments.
+    pub fn insert_comment(
+        &mut self,
+        handle: &Handle,
+        index: usize,
+        text: &str,
+        placement: CommentPlacement,
+    ) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| {
+            draft.insert_comment(id, index, text, placement, None)
+        })
+    }
+
+    /// Returns an owned comment's structural position for reuse within this
+    /// transaction. Child boundaries retain occurrence identity through edits.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, or exhausted work budgets.
+    pub fn comment_position(
+        &self,
+        handle: &Handle,
+        index: usize,
+    ) -> Result<CommentPosition<Handle>, Error> {
+        let comment = self
+            .node(handle)?
+            .comments
+            .get(index)
+            .ok_or_else(|| self.error("comment index out of bounds"))?;
+        comment.position().try_map(|child| Ok(self.handle(child)))
+    }
+
+    /// Inserts a comment at an explicit structural position and owner-local
+    /// index. For detached comments, `BeforeChild` accepts a sequence item or
+    /// mapping key owned by `handle`. Capture a position with [`Self::comment_position`]
+    /// before removing a comment to preserve a header or collection gap.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, child boundaries, multiline text, or
+    /// resource limits. Commit rejects unrepresentable attachments.
+    pub fn insert_comment_at(
+        &mut self,
+        handle: &Handle,
+        index: usize,
+        text: &str,
+        placement: CommentPlacement,
+        position: CommentPosition<Handle>,
+    ) -> Result<(), Error> {
+        let position = position.try_map(|child| self.id(&child));
+        self.mutate(handle, |draft, id| {
+            draft.insert_comment(id, index, text, placement, Some(position?))
+        })
+    }
+
+    /// Replaces an owned comment's text, keeping its placement.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, multiline text, or resource limits.
+    pub fn replace_comment(
+        &mut self,
+        handle: &Handle,
+        index: usize,
+        text: &str,
+    ) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| draft.replace_comment(id, index, text))
+    }
+
+    /// Removes a directly owned comment.
+    ///
+    /// # Errors
+    /// Rejects invalid handles, indices, or resource limits.
+    pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
+        self.mutate(handle, |draft, id| draft.remove_comment(id, index))
+    }
+
+    fn finish(mut self) -> Result<EditableDocument, Error> {
+        if let Some(error) = self.failure.take() {
+            return Err(error);
+        }
+        let candidate = self.draft.freeze()?;
+        let syntax = Layout::new(&candidate);
+        let original = &self.original.source;
+        let changes = Changes::between(original, &candidate, &syntax);
+        let framed = if changes.is_empty() {
+            None
+        } else {
+            super::framing::prepare(original, (&candidate).into(), &syntax)
+        };
+        let (source, planned) = framed.as_ref().map_or_else(
+            || (original, (&candidate).into()),
+            |framed| (&framed.source, framed.syntax()),
+        );
+        let output = Plan {
+            original: source,
+            candidate: planned,
+            parents: candidate.parents(),
+            changes,
+            work: candidate.work(),
+        }
+        .render(&syntax)?;
+        candidate.commit(&output)
+    }
+}

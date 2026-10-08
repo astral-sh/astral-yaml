@@ -1,5 +1,31 @@
-use super::{EditableDocument, NodeKind, correspondence, region, render};
+use super::{EditableDocument, NodeKind, correspondence};
+use crate::edit::draft::Draft;
+use crate::edit::splice::{indent, region, render};
 use astral_yaml_dev::indoc;
+
+/// Render a frozen draft against its original source.
+fn render_draft(original: &EditableDocument, draft: Draft) -> String {
+    let candidate = draft.freeze().unwrap();
+    let syntax = (&candidate).into();
+    let source = original.source.clone();
+    let region = region(original, original.source.root, false);
+    let rendered = render(
+        source.emission(syntax),
+        original.source.root,
+        region,
+        indent(&original.source.text, region.start()),
+        false,
+    )
+    .unwrap();
+    let output = format!(
+        "{}{}{}",
+        &original.source.text[..rendered.span.start()],
+        rendered.text,
+        &original.source.text[rendered.span.end()..]
+    );
+    candidate.commit(&output).unwrap();
+    output
+}
 
 #[test]
 fn emission_accepts_syntax_without_source_locations() {
@@ -33,13 +59,13 @@ fn emission_accepts_syntax_without_source_locations() {
         nodes: &nodes,
         root: NodeId(0),
         source,
-        options: original.options,
-        end_marker: original.end_marker,
+        options: original.source.options,
+        end_marker: original.source.end_marker,
     };
     let rendered = render(
         input,
         input.root,
-        original.nodes[original.root.0].span,
+        original.source.nodes[original.source.root.0].span,
         0,
         false,
     )
@@ -318,17 +344,24 @@ fn rendering_obeys_work_and_output_budgets() {
         ),
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
-        document.options.max_nodes = nodes;
-        document.options.max_input_bytes = bytes;
-        let error = render(
-            &document,
-            document.root,
-            region(&document, document.root, false),
-            0,
-            false,
-        )
-        .unwrap_err();
-        assert_eq!(error.message, expected);
+        document.source.options.max_nodes = nodes;
+        document.source.options.max_input_bytes = bytes;
+        let source = document.source.clone();
+        let draft = Draft::from(&document).freeze().unwrap();
+        let region = region(&document, document.source.root, false);
+        // Both committed syntax and drafts obey the same rendering limits.
+        for result in [
+            render(&document, document.source.root, region, 0, false),
+            render(
+                source.emission((&draft).into()),
+                document.source.root,
+                region,
+                0,
+                false,
+            ),
+        ] {
+            assert_eq!(result.unwrap_err().message, expected);
+        }
     }
 }
 
@@ -377,6 +410,7 @@ fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
     let source = "[&old value, *old]";
     let mut document = EditableDocument::parse(source).unwrap();
     let target = document
+        .source
         .nodes
         .iter()
         .find_map(|node| match node.kind {
@@ -384,10 +418,10 @@ fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
             _ => None,
         })
         .unwrap();
-    document.nodes[target.0].anchor = Some("new".to_owned());
+    document.source.nodes[target.0].anchor = Some("new".to_owned());
     insta::assert_snapshot!(document.normalized_yaml().unwrap(), @"[&new value, *new]");
 
-    document.nodes[target.0].anchor = None;
+    document.source.nodes[target.0].anchor = None;
     insta::assert_snapshot!(document.normalized_yaml().unwrap_err().message, @"alias target has no anchor");
 }
 
@@ -396,12 +430,14 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
     let mut document = EditableDocument::parse("[&a 1, &a 2, *a]").unwrap();
     let first = crate::NodeId(
         document
+            .source
             .nodes
             .iter()
             .position(|node| node.anchor.as_deref() == Some("a"))
             .unwrap(),
     );
     let target = document
+        .source
         .nodes
         .iter_mut()
         .find_map(|node| {
@@ -425,21 +461,26 @@ fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
 fn normalization_rejects_reassigned_comments() {
     let mut document = EditableDocument::parse(indoc! {r"
         a: one
+        # trailing
         b: two
     "})
     .unwrap();
+    let mut comment = document
+        .source
+        .nodes
+        .iter_mut()
+        .find_map(|node| node.comments.pop())
+        .unwrap();
+    comment.placement = crate::comments::CommentPlacement::Trailing;
+    comment.position = super::CommentPosition::After;
     let value = document
+        .source
         .nodes
         .iter_mut()
         .find(|node| matches!(&node.kind, NodeKind::Scalar { value, .. } if value == "one"))
         .unwrap();
     // This attachment would become a leading comment on the next field.
-    value.comments.push(crate::edit::Comment {
-        text: " trailing".to_owned(),
-        placement: crate::comments::CommentPlacement::Trailing,
-        position: super::CommentPosition::After,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
+    value.comments.push(comment);
     assert_eq!(
         document.normalized_yaml().unwrap_err().message,
         "emission changed comment ownership or placement"
@@ -449,15 +490,10 @@ fn normalization_rejects_reassigned_comments() {
 #[test]
 fn normalization_ignores_comments_on_unreachable_nodes() {
     let mut document = EditableDocument::parse("value").unwrap();
-    let mut removed = document.nodes[document.root.0].clone();
-    removed.comments.push(crate::edit::Comment {
-        text: " removed".to_owned(),
-        placement: crate::comments::CommentPlacement::Inline,
-        position: super::CommentPosition::After,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
+    let fragment = EditableDocument::parse("removed # comment").unwrap();
+    let removed = fragment.source.nodes[fragment.source.root.0].clone();
     // Replaced nodes may remain in the arena without belonging to the document.
-    document.nodes.push(removed);
+    document.source.nodes.push(removed);
     assert_eq!(document.normalized_yaml().unwrap(), "value");
 }
 
@@ -572,6 +608,8 @@ fn normalized_syntax_preserves_values_and_comments() {
         let document = EditableDocument::parse(source).unwrap();
         assert_eq!(document.to_yaml(), source);
         let output = document.normalized_yaml().expect(source);
+        // Location types must not affect output.
+        assert_eq!(render_draft(&document, Draft::from(&document)), output);
         assert_eq!(
             astral_yaml_dev::benchmarks::documents::<Value>(&output),
             astral_yaml_dev::benchmarks::documents::<Value>(source),
@@ -613,7 +651,9 @@ fn root_scalar_candidates_respect_document_position() {
     ] {
         for replacement in ["---", "... text"] {
             let mut document = EditableDocument::parse(source).unwrap();
-            if let NodeKind::Scalar { value, .. } = &mut document.nodes[document.root.0].kind {
+            if let NodeKind::Scalar { value, .. } =
+                &mut document.source.nodes[document.source.root.0].kind
+            {
                 replacement.clone_into(value);
             }
             outputs.push(document.normalized_yaml().unwrap());
@@ -718,6 +758,7 @@ fn removed_properties_leave_room_for_retained_header_comments() {
     "};
     let mut document = EditableDocument::parse(source).unwrap();
     let value = document
+        .source
         .nodes
         .iter_mut()
         .find(|node| node.anchor.as_deref() == Some("a"))
@@ -849,8 +890,8 @@ fn detached_prefixes_are_emitted_before_content() {
         let document = EditableDocument::parse(source).unwrap();
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
-        let span = region(&document, document.root, true);
-        let rendered = render(&document, document.root, span, 0, false).unwrap();
+        let span = region(&document, document.source.root, true);
+        let rendered = render(&document, document.source.root, span, 0, false).unwrap();
         let parsed = EditableDocument::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
         assert!(super::comments_preserved(
@@ -982,7 +1023,7 @@ fn omitted_roots_own_their_erased_line() {
         "},
     ] {
         let mut candidate = EditableDocument::parse(source).unwrap();
-        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+        candidate.source.nodes[candidate.source.root.0].kind = NodeKind::Scalar {
             value: String::new(),
             style: crate::ScalarStyle::Plain,
         };
@@ -1014,16 +1055,18 @@ fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
         "old \t \n",
         "[old] \t\n",
     ] {
-        let mut candidate = EditableDocument::parse(source).unwrap();
-        candidate.nodes[candidate.root.0]
-            .comments
-            .push(super::Comment {
-                text: " added".to_owned(),
-                placement: crate::comments::CommentPlacement::Trailing,
-                position: super::CommentPosition::After,
-                span: crate::Span::new(0, 0).unwrap(),
-            });
-        outputs.push(candidate.normalized_yaml().unwrap());
+        let original = EditableDocument::parse(source).unwrap();
+        let mut candidate = Draft::from(&original);
+        candidate
+            .insert_comment(
+                candidate.root(),
+                0,
+                " added",
+                crate::comments::CommentPlacement::Trailing,
+                None,
+            )
+            .unwrap();
+        outputs.push(render_draft(&original, candidate));
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
@@ -1056,16 +1099,16 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
         "},
     ] {
         let mut candidate = EditableDocument::parse(source).unwrap();
-        candidate.nodes[candidate.root.0].kind = NodeKind::Scalar {
+        candidate.source.nodes[candidate.source.root.0].kind = NodeKind::Scalar {
             value: "old".to_owned(),
             style: crate::ScalarStyle::Literal,
         };
-        let region = region(&candidate, candidate.root, true);
+        let region = region(&candidate, candidate.source.root, true);
         let rendered = render(
             &candidate,
-            candidate.root,
+            candidate.source.root,
             region,
-            super::indent(source, region.start()),
+            indent(source, region.start()),
             false,
         )
         .unwrap();
@@ -1093,27 +1136,25 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
 #[test]
 fn omitted_roots_own_their_line_when_comments_are_emitted() {
     let mut outputs = Vec::new();
-    let source = indoc! {r"
-        ---
-        old
-        ...
-    "};
-    let mut candidate = EditableDocument::parse(source).unwrap();
-    let root = &mut candidate.nodes[candidate.root.0];
-    root.kind = NodeKind::Scalar {
-        value: String::new(),
-        style: crate::ScalarStyle::Plain,
-    };
-    root.comments.push(super::Comment {
-        text: " added".to_owned(),
-        placement: crate::comments::CommentPlacement::Leading,
-        position: super::CommentPosition::Before,
-        span: crate::Span::new(0, 0).unwrap(),
-    });
-    outputs.push(candidate.normalized_yaml().unwrap());
+    for source in ["---\nold\n...\n", "--- old\n...\n"] {
+        let original = EditableDocument::parse(source).unwrap();
+        let mut candidate = Draft::from(&original);
+        candidate.replace(candidate.root(), "---", false).unwrap();
+        candidate
+            .insert_comment(
+                candidate.root(),
+                0,
+                " added",
+                crate::comments::CommentPlacement::Leading,
+                None,
+            )
+            .unwrap();
+        outputs.push(render_draft(&original, candidate));
+    }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
         "---\n# added\n...\n",
+        "--- \n# added\n...\n",
     ]
     "#);
 }
@@ -1134,19 +1175,23 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
             crate::comments::CommentPlacement::Trailing,
             crate::comments::CommentPlacement::Detached,
         ] {
-            let mut candidate = EditableDocument::parse(source).unwrap();
+            let original = EditableDocument::parse(source).unwrap();
+            let mut candidate = Draft::from(&original);
             let mut children = Vec::new();
-            super::children(&candidate.nodes[candidate.root.0].kind, &mut children);
+            super::children(&candidate.node(candidate.root()).kind, &mut children);
             let inner = children[1];
-            candidate.nodes[inner.0].comments.push(super::Comment {
-                text: " added".to_owned(),
-                placement,
-                position: super::CommentPosition::After,
-                span: crate::Span::new(0, 0).unwrap(),
-            });
+            candidate
+                .insert_comment(
+                    inner,
+                    candidate.node(inner).comments.len(),
+                    " added",
+                    placement,
+                    None,
+                )
+                .unwrap();
             diffs.push(astral_yaml_dev::edit_diff(
                 source,
-                &candidate.normalized_yaml().unwrap(),
+                &render_draft(&original, candidate),
             ));
         }
     }

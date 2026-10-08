@@ -1,7 +1,17 @@
 //! Owned YAML syntax for source-preserving editing.
 
+mod draft;
 mod emit;
+mod framing;
+mod layout;
+mod plan;
+mod scope;
+mod source;
+mod splice;
+mod transaction;
 mod view;
+
+pub use transaction::{Editor, Handle};
 
 use std::borrow::Cow;
 
@@ -15,11 +25,7 @@ use crate::{
 /// to this document's current, normalized view.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
-    pub(crate) source: String,
-    pub(crate) nodes: Vec<Node>,
-    pub(crate) root: NodeId,
-    pub(crate) options: ParseOptions,
-    pub(crate) end_marker: Option<Span>,
+    source: source::Source,
 }
 
 /// An owned syntax node. Properties and comments belong to the occurrence,
@@ -69,15 +75,36 @@ pub struct Comment<Location = Span> {
 
 /// Source position and attachment are distinct: comments between a node's
 /// properties and content can be attached as trailing comments to that node.
+/// Owned syntax uses node IDs; editing operations use transaction handles.
+/// Emission may move headers while preserving attachments. Detached collection
+/// comments retain their boundary before the named child.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CommentPosition {
+pub enum CommentPosition<Child = NodeId> {
+    /// Before the node's properties and content.
     Before,
+    /// Between the node's properties and its content.
     Header,
     /// An inline comment after a flow collection's opening delimiter.
     Opening,
     /// A collection-owned comment before an item or mapping key.
-    BeforeChild(NodeId),
+    BeforeChild(Child),
+    /// After the node's content.
     After,
+}
+
+impl<Child> CommentPosition<Child> {
+    fn try_map<T>(
+        self,
+        map: impl FnOnce(Child) -> Result<T, Error>,
+    ) -> Result<CommentPosition<T>, Error> {
+        Ok(match self {
+            Self::Before => CommentPosition::Before,
+            Self::Header => CommentPosition::Header,
+            Self::Opening => CommentPosition::Opening,
+            Self::BeforeChild(child) => CommentPosition::BeforeChild(map(child)?),
+            Self::After => CommentPosition::After,
+        })
+    }
 }
 
 impl CommentPosition {
@@ -184,20 +211,10 @@ impl EditableDocument {
                 }
             })
             .collect();
-        let mut content_starts = vec![None; nodes.len()];
+        let contents = source::contents(&source, stream.nodes());
         for (owner, attached) in CommentIndex::new(&stream, 0)?.direct() {
-            let node = &stream.nodes()[owner.0];
-            let content_start = *content_starts[owner.0].get_or_insert_with(|| {
-                let properties_end = node
-                    .anchor
-                    .iter()
-                    .chain(node.tag.iter())
-                    .map(|property| property.span.end())
-                    .max()
-                    .unwrap_or(node.span.start());
-                crate::comments::skip_trivia(&source, properties_end).min(node.span.end())
-            });
-            let position = CommentPosition::for_comment(&stream, owner, attached, content_start);
+            let position =
+                CommentPosition::for_comment(&stream, owner, attached, contents[owner.0].start());
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
@@ -206,18 +223,38 @@ impl EditableDocument {
             });
         }
         Ok(Self {
-            nodes,
-            root: document.root,
-            options,
-            end_marker: document.end_marker,
-            source: source.into_owned(),
+            source: source::Source {
+                nodes,
+                contents,
+                root: document.root,
+                options,
+                start_marker: document.start_marker,
+                end_marker: document.end_marker,
+                extra_end_markers: stream
+                    .document_end_markers()
+                    .iter()
+                    .copied()
+                    .filter(|marker| {
+                        document
+                            .end_marker
+                            .is_some_and(|first| marker.start() > first.start())
+                    })
+                    .collect(),
+                text: source.into_owned(),
+            },
         })
     }
 
     /// Returns the document's current source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
-        self.source.clone()
+        self.source.text.clone()
+    }
+
+    /// Consumes the document and returns its committed source without cloning it.
+    #[must_use]
+    pub fn into_yaml(self) -> String {
+        self.source.text
     }
 
     /// Emits the document with normalized whitespace, preserving comments and
@@ -227,13 +264,20 @@ impl EditableDocument {
     /// Returns an error if emission exceeds resource limits or cannot preserve
     /// scalar text, alias identity, or comment ownership and placement.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
-        let region = emit::region(self, self.root, false);
-        let indent = emit::indent(&self.source, region.start());
-        let rendered = emit::render(self, self.root, region, indent, false)?;
-        let mut output = self.source[..rendered.span.start()].to_owned();
-        output.push_str(&rendered.text);
-        output.push_str(&self.source[rendered.span.end()..]);
-        let parsed = Self::parse_with_options(&output, self.options)?;
+        let region = splice::region(self, self.source.root, false);
+        let indent = splice::indent(&self.source.text, region.start());
+        let rendered = splice::render(self, self.source.root, region, indent, false)?;
+        let output = splice::PatchSet::new(
+            &self.source.text,
+            vec![(rendered.span, rendered.text)],
+            self.source.options.max_input_bytes,
+        )
+        .map_err(|message| Error {
+            span: region,
+            message,
+        })?
+        .apply();
+        let parsed = Self::parse_with_options(&output, self.source.options)?;
         let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
             span: region,
             message: "emission changed YAML content or alias identity",
@@ -250,25 +294,25 @@ impl EditableDocument {
     /// The current committed UTF-8 source, with LF line endings.
     #[must_use]
     pub fn source(&self) -> &str {
-        &self.source
+        &self.source.text
     }
 
     /// The root of this document's current syntax view.
     #[must_use]
     pub fn root(&self) -> NodeId {
-        self.root
+        self.source.root
     }
 
     /// Looks up a node in the current syntax view.
     #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(id.0)
+        self.source.nodes.get(id.0)
     }
 
     /// Parser limits used when constructing this document.
     #[must_use]
     pub fn options(&self) -> ParseOptions {
-        self.options
+        self.source.options
     }
 }
 
@@ -332,6 +376,13 @@ impl<Location> Comment<Location> {
     #[must_use]
     pub fn placement(&self) -> CommentPlacement {
         self.placement
+    }
+
+    /// The comment's structural boundary. For reinsertion during an edit, use
+    /// [`Editor::comment_position`] to obtain transaction-bound child handles.
+    #[must_use]
+    pub fn position(&self) -> CommentPosition {
+        self.position
     }
 
     /// The comment's source location. Committed comments return their current span.
