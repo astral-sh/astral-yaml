@@ -1,72 +1,74 @@
+use test_case::test_case;
+
 use super::support::{edit, edited, edits};
 use astral_yaml::edit::EditableDocument;
 use astral_yaml_dev::{edit_diff, indoc};
 
-#[test]
-fn imported_aliases_follow_the_retained_or_fragment_anchor() {
+#[test_case(
+    indoc! {r"
+        &old [before]
+    "},
+    false
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,3 @@
+        -&old [before]
+        +&old ⏎
+        +self: *old
+        +nested: &item [*old, *item]
+    ");
+    "retained root anchor"
+)]
+#[test_case(
+    indoc! {r"
+        [before]
+    "},
+    false
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,3 @@
+        -[before]
+        +&fragment ⏎
+        +self: *fragment
+        +nested: &item [*fragment, *item]
+    ");
+    "imported root anchor"
+)]
+#[test_case(
+    indoc! {r"
+        definition: &old [before]
+        copy: *old
+    "},
+    true
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,5 @@
+        -definition: &old [before]
+        +definition:
+        +  &old ⏎
+        +  self: *old
+        +  nested: &item [*old, *item]
+         copy: *old
+    ");
+    "retained nested anchor"
+)]
+fn imported_aliases_follow_the_retained_or_fragment_anchor(source: &str, nested: bool) -> String {
     let fragment = indoc! {r"
         &fragment
         self: *fragment
         nested: &item [*fragment, *item]
     "};
-    let mut diffs = Vec::new();
-    for (source, nested) in [
-        (
-            indoc! {r"
-                &old [before]
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                [before]
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                definition: &old [before]
-                copy: *old
-            "},
-            true,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let target = if nested {
-                editor.mapping_entries(&editor.root())?[0].1.clone()
-            } else {
-                editor.root()
-            };
-            editor.replace_preserving_style(&target, fragment)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -&old [before]
-    +&old ⏎
-    +self: *old
-    +nested: &item [*old, *item]
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -[before]
-    +&fragment ⏎
-    +self: *fragment
-    +nested: &item [*fragment, *item]
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,5 @@
-    -definition: &old [before]
-    +definition:
-    +  &old ⏎
-    +  self: *old
-    +  nested: &item [*old, *item]
-     copy: *old
-    ");
+    edit(source, |editor| {
+        let target = if nested {
+            editor.mapping_entries(&editor.root())?[0].1.clone()
+        } else {
+            editor.root()
+        };
+        editor.replace_preserving_style(&target, fragment)
+    })
 }
 
 #[test]
@@ -137,35 +139,38 @@ fn canceled_anchor_changes_do_not_rewrite_alias_occurrences() {
     assert_eq!(document.source(), source);
 }
 
-#[test]
-fn invalid_alias_bindings_roll_back_the_transaction() {
-    let mut errors = Vec::new();
-    for (source, replacement) in [
-        ("[&old before, *old]", None),
-        ("[&old before, *old]", Some("after")),
-        ("[&old before, &shadow other, *old]", Some("&shadow after")),
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        let error = document
-            .edit(|editor| {
-                let target = editor.sequence_items(&editor.root())?[0].clone();
-                if let Some(replacement) = replacement {
-                    editor.replace(&target, replacement)
-                } else {
-                    editor.remove_item(&editor.root(), 0)
-                }
-            })
-            .unwrap_err();
-        assert_eq!(document.source(), source);
-        errors.push(error.message);
-    }
-    insta::assert_debug_snapshot!(errors, @r#"
-    [
-        "alias target was removed",
-        "alias target has no anchor",
-        "emission changed YAML content or alias identity",
-    ]
-    "#);
+#[test_case(
+    "[&old before, *old]", None
+    => with |error| insta::assert_snapshot!(error, @"alias target was removed");
+    "remove target"
+)]
+#[test_case(
+    "[&old before, *old]", Some("after")
+    => with |error| insta::assert_snapshot!(error, @"alias target has no anchor");
+    "remove anchor"
+)]
+#[test_case(
+    "[&old before, &shadow other, *old]", Some("&shadow after")
+    => with |error| insta::assert_snapshot!(error, @"emission changed YAML content or alias identity");
+    "shadow anchor"
+)]
+fn invalid_alias_bindings_roll_back_the_transaction(
+    source: &str,
+    replacement: Option<&str>,
+) -> &'static str {
+    let mut document = EditableDocument::parse(source).unwrap();
+    let error = document
+        .edit(|editor| {
+            let target = editor.sequence_items(&editor.root())?[0].clone();
+            if let Some(replacement) = replacement {
+                editor.replace(&target, replacement)
+            } else {
+                editor.remove_item(&editor.root(), 0)
+            }
+        })
+        .unwrap_err();
+    assert_eq!(document.source(), source);
+    error.message
 }
 
 #[test]

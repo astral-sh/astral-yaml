@@ -18,3 +18,4 @@ memchr.workspace = true
 [dev-dependencies]
 astral-yaml-dev.workspace = true
 insta.workspace = true
+test-case.workspace = true

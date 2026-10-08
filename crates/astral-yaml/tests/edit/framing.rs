@@ -1,5 +1,7 @@
 //! Document framing, source separators, and comments between collection children.
 
+use test_case::test_case;
+
 use super::support::{edit, edited};
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -225,74 +227,80 @@ fn suffix_boundaries_preserve_detached_comments() {
     ");
 }
 
-#[test]
-fn structural_edits_preserve_framing_and_outer_comments() {
-    // Document markers: https://yaml.org/spec/1.2.2/#922-document-markers
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            # config
-            %YAML 1.2
-            ---
-            key: old
-            ...
-              # tail
-        "},
-        indoc! {r"
-            # config
-            %TAG !e! tag:example.com,2026:
-            ---
-            key: !e!value old
-            ... # end
-        "},
-        indoc! {r"
-            # config
-            ---
-            key:
-              - old
-            ...
-              # tail
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            editor.insert_entry(&root, 0, "added", "new")?;
-            editor.remove_entry(&root, 1)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,6 +1,6 @@
-     # config
-     %YAML 1.2
-     ---
-    -key: old
-    +added: new
-     ...
-       # tail
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,5 @@
-     # config
-     %TAG !e! tag:example.com,2026:
-     ---
-    -key: !e!value old
-    +added: new
-     ... # end
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,6 +1,5 @@
-     # config
-     ---
-    -key:
-    -  - old
-    +added: new
-     ...
-       # tail
+#[test_case(
+    indoc! {r"
+        # config
+        %YAML 1.2
+        ---
+        key: old
+        ...
+          # tail
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,6 +1,6 @@
+         # config
+         %YAML 1.2
+         ---
+        -key: old
+        +added: new
+         ...
+           # tail
     ");
+    "version directive"
+)]
+#[test_case(
+    indoc! {r"
+        # config
+        %TAG !e! tag:example.com,2026:
+        ---
+        key: !e!value old
+        ... # end
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,5 +1,5 @@
+         # config
+         %TAG !e! tag:example.com,2026:
+         ---
+        -key: !e!value old
+        +added: new
+         ... # end
+    ");
+    "tag directive"
+)]
+#[test_case(
+    indoc! {r"
+        # config
+        ---
+        key:
+          - old
+        ...
+          # tail
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,6 +1,5 @@
+         # config
+         ---
+        -key:
+        -  - old
+        +added: new
+         ...
+           # tail
+    ");
+    "nested sequence"
+)]
+fn structural_edits_preserve_framing_and_outer_comments(source: &str) -> String {
+    // Document markers: https://yaml.org/spec/1.2.2/#922-document-markers
+    edit(source, |editor| {
+        let root = editor.root();
+        editor.insert_entry(&root, 0, "added", "new")?;
+        editor.remove_entry(&root, 1)
+    })
 }
 
 #[test]
@@ -378,30 +386,35 @@ fn inserted_roots_are_separated_from_end_markers() {
     ");
 }
 
-#[test]
-fn comment_terminators_compose_with_retained_suffixes() {
-    for source in [
-        indoc! {r"
-            key: old # inline
-            # tail
-        "},
-        indoc! {r"
-            key: old # inline
-        "},
-        indoc! {r"
-            outer:
-              key: old # inline
-              # tail
-            other: unchanged
-        "},
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        for _ in 0..3 {
-            document
-                .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
-                .unwrap();
-            assert_eq!(document.source(), source);
-        }
+#[test_case(
+    indoc! {r"
+        key: old # inline
+        # tail
+    "};
+    "inline and trailing"
+)]
+#[test_case(
+    indoc! {r"
+        key: old # inline
+    "};
+    "inline only"
+)]
+#[test_case(
+    indoc! {r"
+        outer:
+          key: old # inline
+          # tail
+        other: unchanged
+    "};
+    "nested inline and trailing"
+)]
+fn comment_terminators_compose_with_retained_suffixes(source: &str) {
+    let mut document = EditableDocument::parse(source).unwrap();
+    for _ in 0..3 {
+        document
+            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
+            .unwrap();
+        assert_eq!(document.source(), source);
     }
 }
 
@@ -592,61 +605,62 @@ fn detached_comment_gaps_survive_collection_mutations() {
     ");
 }
 
-#[test]
-fn removed_children_leave_their_comments_in_the_surviving_gap() {
-    let mut diffs = Vec::new();
-    for (source, sequence) in [
-        (
-            indoc! {r"
-                a: old
+#[test_case(
+    indoc! {r"
+        a: old
 
-                # detached
+        # detached
 
-                b: removed
-                c: kept
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                - old
-
-                # detached
-
-                - removed
-                - kept
-            "},
-            true,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            if sequence {
-                editor.remove_item(&root, 1)
-            } else {
-                editor.remove_entry(&root, 1)
-            }
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,5 +2,4 @@
-     ⏎
-     # detached
-     ⏎
-    -b: removed
-     c: kept
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,5 +2,4 @@
-     ⏎
-     # detached
-     ⏎
-    -- removed
-     - kept
+        b: removed
+        c: kept
+    "},
+    false
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -2,5 +2,4 @@
+         ⏎
+         # detached
+         ⏎
+        -b: removed
+         c: kept
     ");
+    "mapping"
+)]
+#[test_case(
+    indoc! {r"
+        - old
+
+        # detached
+
+        - removed
+        - kept
+    "},
+    true
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -2,5 +2,4 @@
+         ⏎
+         # detached
+         ⏎
+        -- removed
+         - kept
+    ");
+    "sequence"
+)]
+fn removed_children_leave_their_comments_in_the_surviving_gap(
+    source: &str,
+    sequence: bool,
+) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        if sequence {
+            editor.remove_item(&root, 1)
+        } else {
+            editor.remove_entry(&root, 1)
+        }
+    })
 }
 
 #[test]
@@ -683,70 +697,68 @@ fn new_detached_comments_share_the_following_comment_gap() {
     ");
 }
 
-#[test]
-fn removing_the_last_gap_preserves_block_scalar_content() {
-    // A document boundary keeps detached suffix separation outside the scalar.
-    let mut diffs = Vec::new();
-    for (source, sequence) in [
-        (
-            indoc! {r"
-                a: |+
-                  text
+#[test_case(
+    indoc! {r"
+        a: |+
+          text
 
-                # detached
+        # detached
 
-                b: removed
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                - |+
-                  text
-
-                # detached
-
-                - removed
-            "},
-            true,
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            if sequence {
-                editor.remove_item(&root, 1)
-            } else {
-                editor.remove_entry(&root, 1)
-            }
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,6 +1,6 @@
-    -a: |+
-    +a: |2+
-       text
-    +  ⏎
-    +...
-     ⏎
-     # detached
-    -
-    -b: removed
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,6 +1,6 @@
-    -- |+
-    +- |2+
-       text
-    +  ⏎
-    +...
-     ⏎
-     # detached
-    -
-    -- removed
+        b: removed
+    "},
+    false
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,6 +1,6 @@
+        -a: |+
+        +a: |2+
+           text
+        +  ⏎
+        +...
+         ⏎
+         # detached
+        -
+        -b: removed
     ");
+    "mapping"
+)]
+#[test_case(
+    indoc! {r"
+        - |+
+          text
+
+        # detached
+
+        - removed
+    "},
+    true
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,6 +1,6 @@
+        -- |+
+        +- |2+
+           text
+        +  ⏎
+        +...
+         ⏎
+         # detached
+        -
+        -- removed
+    ");
+    "sequence"
+)]
+fn removing_the_last_gap_preserves_block_scalar_content(source: &str, sequence: bool) -> String {
+    // A document boundary keeps detached suffix separation outside the scalar.
+    edit(source, |editor| {
+        let root = editor.root();
+        if sequence {
+            editor.remove_item(&root, 1)
+        } else {
+            editor.remove_entry(&root, 1)
+        }
+    })
 }
 
 #[test]
@@ -808,110 +820,122 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
     ");
 }
 
-#[test]
-fn block_roots_can_use_the_document_marker_for_inline_comments() {
+#[test_case(
+    "--- # header"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        ---- # header
+        \ No newline at end of file
+        +---  # added
+        +a: new
+        \ No newline at end of file
+    ");
+    "header comment"
+)]
+#[test_case(
+    indoc! {r"
+        ---
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        ----
+        +--- # added
+        +a: new
+        \ No newline at end of file
+    ");
+    "empty root"
+)]
+#[test_case(
+    indoc! {r"
+        --- old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,2 @@
+        ---- old
+        +---  # added
+        +a: new
+    ");
+    "scalar root"
+)]
+fn block_roots_can_use_the_document_marker_for_inline_comments(source: &str) -> String {
     use astral_yaml::comments::CommentPlacement;
 
-    let mut diffs = Vec::new();
-    for source in [
-        "--- # header",
-        indoc! {r"
-            ---
-        "},
-        indoc! {r"
-            --- old
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            while !editor.node(&root)?.comments().is_empty() {
-                editor.remove_comment(&root, 0)?;
-            }
-            editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
-            editor.replace(
-                &root,
-                indoc! {r"
-                    a: new
-                "},
-            )
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    ---- # header
-    \ No newline at end of file
-    +---  # added
-    +a: new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    ----
-    +--- # added
-    +a: new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    ---- old
-    +---  # added
-    +a: new
-    ");
+    edit(source, |editor| {
+        let root = editor.root();
+        while !editor.node(&root)?.comments().is_empty() {
+            editor.remove_comment(&root, 0)?;
+        }
+        editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
+        editor.replace(
+            &root,
+            indoc! {r"
+                a: new
+            "},
+        )
+    })
 }
 
-#[test]
-fn root_leading_comments_use_the_start_marker_boundary() {
+#[test_case(
+    indoc! {r"
+        ---
+        - old
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,4 @@
+        +# added
+         ---
+         - old
+         ...
+    ");
+    "sequence root"
+)]
+#[test_case(
+    indoc! {r"
+        --- # header
+        key: old
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,3 @@
+        +# added
+         --- # header
+         key: old
+    ");
+    "mapping root with header"
+)]
+#[test_case(
+    indoc! {r"
+        ---
+
+        ... # end
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,4 @@
+         ---
+         ⏎
+        +# added
+         ... # end
+    ");
+    "empty root with end comment"
+)]
+fn root_leading_comments_use_the_start_marker_boundary(source: &str) -> String {
     use astral_yaml::comments::CommentPlacement;
 
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            ---
-            - old
-            ...
-        "},
-        indoc! {r"
-            --- # header
-            key: old
-        "},
-        indoc! {r"
-            ---
-
-            ... # end
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-    +# added
-     ---
-     - old
-     ...
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-    +# added
-     --- # header
-     key: old
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,4 @@
-     ---
-     ⏎
-    +# added
-     ... # end
-    ");
+    edit(source, |editor| {
+        editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
+    })
 }
 
 #[test]
@@ -1038,54 +1062,56 @@ fn root_omission_retains_comments_at_document_boundaries() {
     ");
 }
 
-#[test]
-fn collection_comments_can_use_both_document_marker_headers() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            ---
-            [ # open
-              old
-            ] # close
-            ...
-        "},
-        indoc! {r"
-            ---
-            { # open
-              key: old
-            } # close
-            ...
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            editor.set_collection_style(&editor.root(), CollectionStyle::Block)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,3 @@
-    ----
-    -[ # open
-    -  old
-    -] # close
-    -...
-    +--- # open
-    +- old
-    +... # close
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,3 @@
-    ----
-    -{ # open
-    -  key: old
-    -} # close
-    -...
-    +--- # open
-    +key: old
-    +... # close
+#[test_case(
+    indoc! {r"
+        ---
+        [ # open
+          old
+        ] # close
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,5 +1,3 @@
+        ----
+        -[ # open
+        -  old
+        -] # close
+        -...
+        +--- # open
+        +- old
+        +... # close
     ");
+    "sequence"
+)]
+#[test_case(
+    indoc! {r"
+        ---
+        { # open
+          key: old
+        } # close
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,5 +1,3 @@
+        ----
+        -{ # open
+        -  key: old
+        -} # close
+        -...
+        +--- # open
+        +key: old
+        +... # close
+    ");
+    "mapping"
+)]
+fn collection_comments_can_use_both_document_marker_headers(source: &str) -> String {
+    edit(source, |editor| {
+        editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+    })
 }
 
 #[test]
@@ -1173,57 +1199,63 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
     ");
 }
 
-#[test]
-fn replaced_inline_comments_reuse_the_root_line_terminator() {
+#[test_case(
+    indoc! {r"
+        [] # old
+        # trailing
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+        -[] # old
+        +[] # new
+         # trailing
+    ");
+    "empty sequence"
+)]
+#[test_case(
+    indoc! {r"
+        value # old
+        # trailing
+
+        # detached
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,4 +1,4 @@
+        -value # old
+        +value # new
+         # trailing
+         ⏎
+         # detached
+    ");
+    "scalar with suffixes"
+)]
+#[test_case(
+    indoc! {r"
+        --- &root {key: value} # old
+        # trailing
+        ...
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,3 +1,3 @@
+        ---- &root {key: value} # old
+        +--- &root {key: value} # new
+         # trailing
+         ...
+    ");
+    "anchored mapping"
+)]
+fn replaced_inline_comments_reuse_the_root_line_terminator(source: &str) -> String {
     use astral_yaml::comments::CommentPlacement;
 
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            [] # old
-            # trailing
-        "},
-        indoc! {r"
-            value # old
-            # trailing
-
-            # detached
-        "},
-        indoc! {r"
-            --- &root {key: value} # old
-            # trailing
-            ...
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            editor.remove_comment(&root, 0)?;
-            editor.insert_comment(&root, 0, " new", CommentPlacement::Inline)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -[] # old
-    +[] # new
-     # trailing
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-    -value # old
-    +value # new
-     # trailing
-     ⏎
-     # detached
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,3 +1,3 @@
-    ---- &root {key: value} # old
-    +--- &root {key: value} # new
-     # trailing
-     ...
-    ");
+    edit(source, |editor| {
+        let root = editor.root();
+        editor.remove_comment(&root, 0)?;
+        editor.insert_comment(&root, 0, " new", CommentPlacement::Inline)
+    })
 }

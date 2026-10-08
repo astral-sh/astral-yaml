@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use crate::CollectionStyle;
 use crate::edit::{
     draft::{Candidate, same_style},
@@ -167,27 +169,27 @@ fn outer_comment_plans_obey_work_and_output_limits() {
     );
 }
 
-#[test]
-fn requested_style_comparison_checks_kind_and_collection_contents() {
-    for (left, right, expected) in [
-        ("one", "one", true),
-        ("one", "'one'", false),
-        ("one", "[one]", false),
-        ("[]", "[]", true),
-        ("[one]", "- one", false),
-        ("{}", "{}", true),
-        ("{one: two}", "one: two", false),
-    ] {
-        let left = EditableDocument::parse(left).unwrap();
-        let right = EditableDocument::parse(right).unwrap();
-        assert_eq!(
-            same_style(
-                &left.source.nodes[left.source.root.0].kind,
-                &right.source.nodes[right.source.root.0].kind
-            ),
-            expected
-        );
-    }
+#[test_case("one", "one", true)]
+#[test_case("one", "'one'", false)]
+#[test_case("one", "[one]", false)]
+#[test_case("[]", "[]", true)]
+#[test_case("[one]", "- one", false)]
+#[test_case("{}", "{}", true)]
+#[test_case("{one: two}", "one: two", false)]
+fn requested_style_comparison_checks_kind_and_collection_contents(
+    left: &str,
+    right: &str,
+    expected: bool,
+) {
+    let left = EditableDocument::parse(left).unwrap();
+    let right = EditableDocument::parse(right).unwrap();
+    assert_eq!(
+        same_style(
+            &left.source.nodes[left.source.root.0].kind,
+            &right.source.nodes[right.source.root.0].kind
+        ),
+        expected
+    );
 }
 
 #[test]

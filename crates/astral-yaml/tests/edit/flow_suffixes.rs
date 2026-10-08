@@ -1,5 +1,7 @@
 //! Flow collection suffix comments belong before their closing delimiter.
 
+use test_case::test_case;
+
 use super::support::normalize;
 use astral_yaml::edit::EditableDocument;
 use astral_yaml_dev::{formatdoc, indoc};
@@ -162,78 +164,74 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
     ");
 }
 
-#[test]
-fn flow_comment_layouts_normalize_idempotently() {
+#[test_case("[", "one", "]")]
+#[test_case("{", "key: value", "}")]
+#[test_case("{", "key: ,", "}")]
+#[test_case("[", "", "]")]
+#[test_case("{", "", "}")]
+fn flow_comment_layouts_normalize_idempotently(open: &str, body: &str, close: &str) {
     // Delimiters enclose comments independently of block indentation:
     // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
-    for (open, body, close) in [
-        ("[", "one", "]"),
-        ("{", "key: value", "}"),
-        ("{", "key: ,", "}"),
-        ("[", "", "]"),
-        ("{", "", "}"),
-    ] {
-        for prefix in [
-            "",
-            r" # open
+    for prefix in [
+        "",
+        r" # open
   ",
-            r"
+        r"
   # leading
   ",
+        r"
+
+  # detached
+
+  ",
+    ] {
+        for suffix in [
+            "",
+            r"
+  # trailing
+  ",
             r"
 
   # detached
+  ",
+            r"
+  # trailing
 
+  # detached
   ",
         ] {
-            for suffix in [
-                "",
-                r"
-  # trailing
-  ",
-                r"
-
-  # detached
-  ",
-                r"
-  # trailing
-
-  # detached
-  ",
-            ] {
-                for end in ["", " # close"] {
-                    let inner = format!("{open}{prefix}{body}{suffix}{close}{end}");
-                    for source in [
-                        formatdoc! {r"
-                            {inner}
-                        "},
-                        formatdoc! {r"
-                            outer: {inner}
-                        "},
-                        formatdoc! {r"
-                            - {inner}
-                        "},
-                        formatdoc! {r"
-                            [{inner}
-                            ]
-                        "},
-                        formatdoc! {r"
-                            {{outer: {inner}
-                            }}
-                        "},
-                    ] {
-                        let document = EditableDocument::parse(&source).unwrap();
-                        let output = document
+            for end in ["", " # close"] {
+                let inner = format!("{open}{prefix}{body}{suffix}{close}{end}");
+                for source in [
+                    formatdoc! {r"
+                        {inner}
+                    "},
+                    formatdoc! {r"
+                        outer: {inner}
+                    "},
+                    formatdoc! {r"
+                        - {inner}
+                    "},
+                    formatdoc! {r"
+                        [{inner}
+                        ]
+                    "},
+                    formatdoc! {r"
+                        {{outer: {inner}
+                        }}
+                    "},
+                ] {
+                    let document = EditableDocument::parse(&source).unwrap();
+                    let output = document
+                        .normalized_yaml()
+                        .unwrap_or_else(|error| panic!("{source:?}: {error}"));
+                    assert_eq!(
+                        EditableDocument::parse(&output)
+                            .unwrap()
                             .normalized_yaml()
-                            .unwrap_or_else(|error| panic!("{source:?}: {error}"));
-                        assert_eq!(
-                            EditableDocument::parse(&output)
-                                .unwrap()
-                                .normalized_yaml()
-                                .unwrap(),
-                            output
-                        );
-                    }
+                            .unwrap(),
+                        output
+                    );
                 }
             }
         }

@@ -1,5 +1,7 @@
 //! Comment placement across fragment replacement and presentation changes.
 
+use test_case::test_case;
+
 use super::support::{edit, edited};
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -410,60 +412,62 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
     ");
 }
 
-#[test]
-fn nested_fragment_prefixes_belong_to_the_selected_value() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            outer: old
-            other: keep
-        "},
-        indoc! {r"
-            - old
-            - keep
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let root = editor.root();
-            let value = if source.starts_with("outer") {
-                editor.mapping_entries(&root)?.remove(0).1
-            } else {
-                editor.sequence_items(&root)?.remove(0)
-            };
-            editor.replace(
-                &value,
-                indoc! {r"
-                    # detached
-
-                    # leading
-                    new
-                "},
-            )
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,6 @@
-    -outer: old
-    +outer:
-    +  # detached
-    +
-    +  # leading
-    +  new
-     other: keep
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,6 @@
-    -- old
-    +-
-    +  # detached
-    +
-    +  # leading
-    +  new
-     - keep
+#[test_case(
+    indoc! {r"
+        outer: old
+        other: keep
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,6 @@
+        -outer: old
+        +outer:
+        +  # detached
+        +
+        +  # leading
+        +  new
+         other: keep
     ");
+    "mapping"
+)]
+#[test_case(
+    indoc! {r"
+        - old
+        - keep
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,6 @@
+        -- old
+        +-
+        +  # detached
+        +
+        +  # leading
+        +  new
+         - keep
+    ");
+    "sequence"
+)]
+fn nested_fragment_prefixes_belong_to_the_selected_value(source: &str) -> String {
+    edit(source, |editor| {
+        let root = editor.root();
+        let value = if source.starts_with("outer") {
+            editor.mapping_entries(&root)?.remove(0).1
+        } else {
+            editor.sequence_items(&root)?.remove(0)
+        };
+        editor.replace(
+            &value,
+            indoc! {r"
+                # detached
+
+                # leading
+                new
+            "},
+        )
+    })
 }
 
 #[test]

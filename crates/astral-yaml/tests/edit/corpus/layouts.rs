@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::{assert_projection, project};
 use astral_yaml::{CollectionStyle, comments::CommentPlacement, edit::EditableDocument};
 use astral_yaml_dev::{formatdoc, indoc};
@@ -259,34 +261,33 @@ impl Case {
     }
 }
 
-#[test]
-fn bounded_comment_headers_preserve_equivalent_edits() {
-    for kind in [Kind::Scalar, Kind::Sequence, Kind::Mapping] {
-        for properties in 0usize..4 {
-            let headers =
-                properties.count_ones() + if matches!(kind, Kind::Scalar) { 1 } else { 2 };
-            for mask in 0..1 << headers {
-                for (leading, detached_prefix) in
-                    [(false, false), (false, true), (true, false), (true, true)]
-                {
-                    for slot in [Slot::Root, Slot::Item, Slot::Value, Slot::Key] {
-                        for frame in 0..3 {
-                            for header_comment in [false, true] {
-                                if header_comment && properties == 0 {
-                                    continue;
-                                }
-                                Case {
-                                    kind,
-                                    properties,
-                                    mask,
-                                    leading,
-                                    slot,
-                                    frame,
-                                    header_comment,
-                                    detached_prefix,
-                                }
-                                .check();
+#[test_case(Kind::Scalar)]
+#[test_case(Kind::Sequence)]
+#[test_case(Kind::Mapping)]
+fn bounded_comment_headers_preserve_equivalent_edits(kind: Kind) {
+    for properties in 0usize..4 {
+        let headers = properties.count_ones() + if matches!(kind, Kind::Scalar) { 1 } else { 2 };
+        for mask in 0..1 << headers {
+            for (leading, detached_prefix) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
+                for slot in [Slot::Root, Slot::Item, Slot::Value, Slot::Key] {
+                    for frame in 0..3 {
+                        for header_comment in [false, true] {
+                            if header_comment && properties == 0 {
+                                continue;
                             }
+                            Case {
+                                kind,
+                                properties,
+                                mask,
+                                leading,
+                                slot,
+                                frame,
+                                header_comment,
+                                detached_prefix,
+                            }
+                            .check();
                         }
                     }
                 }
@@ -302,11 +303,11 @@ fn a_nested_suffix_then_inline_comment_requires_a_closing_delimiter() {
             let body = format!(
                 "{properties}{}",
                 indoc! {r"
-                [
-                  item
-                # trailing
-                ] # closing
-            "}
+                    [
+                      item
+                    # trailing
+                    ] # closing
+                "}
             );
             let source = slot.source(&body);
             let mut document = EditableDocument::parse(&source).unwrap();

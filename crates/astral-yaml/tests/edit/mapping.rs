@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use super::support::{edit, edits};
 use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -317,101 +319,109 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     ");
 }
 
-#[test]
-fn empty_key_insertions_do_not_copy_a_preceding_line_break() {
-    // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            a: b
-            : c
-        "},
-        indoc! {r"
-            a: b
-            : c"},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let key = editor.mapping_entries(&editor.root())?.remove(1).0;
-            editor.replace(&key, "next")
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-     a: b
-    -: c
-    +next: c
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-     a: b
-    -: c
-    \ No newline at end of file
-    +next: c
-    \ No newline at end of file
+#[test_case(
+    indoc! {r"
+        a: b
+        : c
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+         a: b
+        -: c
+        +next: c
     ");
+    "final newline"
+)]
+#[test_case(
+    indoc! {r"
+        a: b
+        : c"}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+         a: b
+        -: c
+        \ No newline at end of file
+        +next: c
+        \ No newline at end of file
+    ");
+    "no final newline"
+)]
+fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> String {
+    // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
+    edit(source, |editor| {
+        let key = editor.mapping_entries(&editor.root())?.remove(1).0;
+        editor.replace(&key, "next")
+    })
 }
 
-#[test]
-fn nested_flow_pair_keys_expand_the_enclosing_rewrite() {
-    // Implicit flow pairs: https://yaml.org/spec/1.2.2/#741-flow-sequences
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            [[[a]: b]: c]
-        "},
-        indoc! {r"
-            outer: [[[a]: b]: c]
-            outside : untouched
-        "},
-        indoc! {r"
-            [[[[a]: b]: c]: d]
-        "},
-    ] {
-        diffs.push(edit(source, |editor| {
-            let mut sequence = editor.root();
-            if source.starts_with("outer:") {
-                sequence = editor.mapping_entries(&sequence)?.remove(0).1;
-            }
-            while let Ok(items) = editor.sequence_items(&sequence) {
-                let item = &items[0];
-                let Ok(entries) = editor.mapping_entries(item) else {
-                    break;
-                };
-                sequence = entries[0].0.clone();
-            }
-            editor.insert_item(&sequence, 0, "new")
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -[[[a]: b]: c]
-    +[{? [{? [new, a]
-    +      : b}]
-    +  : c}]
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-    -outer: [[[a]: b]: c]
-    +outer: [{? [{? [new, a]
-    +      : b}]
-    +  : c}]
-     outside : untouched
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,4 @@
-    -[[[[a]: b]: c]: d]
-    +[{? [{? [{? [new, a]
-    +          : b}]
-    +      : c}]
-    +  : d}]
+#[test_case(
+    indoc! {r"
+        [[[a]: b]: c]
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,3 @@
+        -[[[a]: b]: c]
+        +[{? [{? [new, a]
+        +      : b}]
+        +  : c}]
     ");
+    "root pair"
+)]
+#[test_case(
+    indoc! {r"
+        outer: [[[a]: b]: c]
+        outside : untouched
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,4 @@
+        -outer: [[[a]: b]: c]
+        +outer: [{? [{? [new, a]
+        +      : b}]
+        +  : c}]
+         outside : untouched
+    ");
+    "nested pair"
+)]
+#[test_case(
+    indoc! {r"
+        [[[[a]: b]: c]: d]
+    "}
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1,4 @@
+        -[[[[a]: b]: c]: d]
+        +[{? [{? [{? [new, a]
+        +          : b}]
+        +      : c}]
+        +  : d}]
+    ");
+    "recursive pair"
+)]
+fn nested_flow_pair_keys_expand_the_enclosing_rewrite(source: &str) -> String {
+    // Implicit flow pairs: https://yaml.org/spec/1.2.2/#741-flow-sequences
+    edit(source, |editor| {
+        let mut sequence = editor.root();
+        if source.starts_with("outer:") {
+            sequence = editor.mapping_entries(&sequence)?.remove(0).1;
+        }
+        while let Ok(items) = editor.sequence_items(&sequence) {
+            let item = &items[0];
+            let Ok(entries) = editor.mapping_entries(item) else {
+                break;
+            };
+            sequence = entries[0].0.clone();
+        }
+        editor.insert_item(&sequence, 0, "new")
+    })
 }
 
 #[test]
@@ -497,104 +507,115 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     ");
 }
 
-#[test]
-fn mapping_scalar_key_replacement_preserves_required_separation() {
-    // JSON-like keys: https://yaml.org/spec/1.2.2/#742-flow-mappings
-    let mut diffs = Vec::new();
-    for (source, replacement) in [
-        (
-            indoc! {r#"
-                {"key":"value"}
-            "#},
-            "next",
-        ),
-        (
-            indoc! {r#"
-                {"key":42}
-            "#},
-            "next",
-        ),
-        (
-            indoc! {r#"
-                {"key":{}}
-            "#},
-            "next",
-        ),
-        (
-            indoc! {r#"
-                {"key" :"value"}
-            "#},
-            "next",
-        ),
-        (
-            indoc! {r"
-                key  :  value # note
-                other : 'untouched'
-            "},
-            "next",
-        ),
-        (
-            indoc! {r#"
-                {"key":}
-            "#},
-            "next",
-        ),
-        (
-            indoc! {r#"
-                {"key":"value"}
-            "#},
-            "'next'",
-        ),
-    ] {
-        diffs.push(edit(source, |editor| {
-            let key = editor.mapping_entries(&editor.root())?.remove(0).0;
-            editor.replace(&key, replacement)
-        }));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key":"value"}
-    +{next: "value"}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key":42}
-    +{next: 42}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key":{}}
-    +{next: {}}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key" :"value"}
-    +{next: "value"}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -key  :  value # note
-    +next  :  value # note
-     other : 'untouched'
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key":}
-    +{next:}
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{"key":"value"}
-    +{'next':"value"}
+#[test_case(
+    indoc! {r#"
+        {"key":"value"}
+    "#},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key":"value"}
+        +{next: "value"}
     "#);
+    "string value"
+)]
+#[test_case(
+    indoc! {r#"
+        {"key":42}
+    "#},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key":42}
+        +{next: 42}
+    "#);
+    "numeric value"
+)]
+#[test_case(
+    indoc! {r#"
+        {"key":{}}
+    "#},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key":{}}
+        +{next: {}}
+    "#);
+    "mapping value"
+)]
+#[test_case(
+    indoc! {r#"
+        {"key" :"value"}
+    "#},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key" :"value"}
+        +{next: "value"}
+    "#);
+    "spaced colon"
+)]
+#[test_case(
+    indoc! {r"
+        key  :  value # note
+        other : 'untouched'
+    "},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1,2 +1,2 @@
+        -key  :  value # note
+        +next  :  value # note
+         other : 'untouched'
+    ");
+    "block mapping"
+)]
+#[test_case(
+    indoc! {r#"
+        {"key":}
+    "#},
+    "next"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key":}
+        +{next:}
+    "#);
+    "omitted value"
+)]
+#[test_case(
+    indoc! {r#"
+        {"key":"value"}
+    "#},
+    "'next'"
+    => with |diff| insta::assert_snapshot!(diff, @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{"key":"value"}
+        +{'next':"value"}
+    "#);
+    "quoted replacement"
+)]
+fn mapping_scalar_key_replacement_preserves_required_separation(
+    source: &str,
+    replacement: &str,
+) -> String {
+    // JSON-like keys: https://yaml.org/spec/1.2.2/#742-flow-mappings
+    edit(source, |editor| {
+        let key = editor.mapping_entries(&editor.root())?.remove(0).0;
+        editor.replace(&key, replacement)
+    })
 }
 
 #[test]

@@ -1,4 +1,7 @@
+use test_case::test_case;
+
 use super::{EditableDocument, NodeKind, correspondence};
+use crate::ScalarStyle;
 use crate::edit::draft::Draft;
 use crate::edit::splice::{indent, region, render};
 use astral_yaml_dev::indoc;
@@ -93,316 +96,317 @@ fn emission_accepts_syntax_without_source_locations() {
     ");
 }
 
-#[test]
-fn emitted_content_comparison_checks_shapes_values_and_alias_targets() {
-    for (left, right, expected) in [
-        ("text", "'text'", true),
-        ("null", "~", false),
-        ("a:", "a: null", false),
-        ("!custom", "!custom null", false),
-        ("!!null null", "!!null null", true),
-        ("!!bool true", "!!bool true", true),
-        ("!!int '42'", "!!int 42", true),
-        ("!!float 1.0", "!!float 1.0", true),
-        ("!!str 42", "!!int 42", false),
-        ("1", "2", false),
-        ("[1]", "[]", false),
-        ("{a: b}", "{}", false),
-        ("{a: b}", "{a: b}", true),
-        ("[]", "{}", false),
-        ("[&a 1, &b 1, *a]", "[&a 1, &b 1, *b]", false),
-    ] {
-        let left = EditableDocument::parse(left).unwrap();
-        let right = EditableDocument::parse(right).unwrap();
-        assert_eq!(correspondence(&left, &right).is_some(), expected);
-    }
+#[test_case("text", "'text'", true)]
+#[test_case("null", "~", false)]
+#[test_case("a:", "a: null", false)]
+#[test_case("!custom", "!custom null", false)]
+#[test_case("!!null null", "!!null null", true)]
+#[test_case("!!bool true", "!!bool true", true)]
+#[test_case("!!int '42'", "!!int 42", true)]
+#[test_case("!!float 1.0", "!!float 1.0", true)]
+#[test_case("!!str 42", "!!int 42", false)]
+#[test_case("1", "2", false)]
+#[test_case("[1]", "[]", false)]
+#[test_case("{a: b}", "{}", false)]
+#[test_case("{a: b}", "{a: b}", true)]
+#[test_case("[]", "{}", false)]
+#[test_case("[&a 1, &b 1, *a]", "[&a 1, &b 1, *b]", false)]
+fn emitted_content_comparison_checks_shapes_values_and_alias_targets(
+    left: &str,
+    right: &str,
+    expected: bool,
+) {
+    let left = EditableDocument::parse(left).unwrap();
+    let right = EditableDocument::parse(right).unwrap();
+    assert_eq!(correspondence(&left, &right).is_some(), expected);
 }
 
-#[test]
-fn comment_comparison_preserves_each_owners_order() {
-    for (before, after, expected) in [
-        (
-            indoc! {r"
-                # first
-                # second
-                value
-            "},
-            indoc! {r"
-                # first
-                # second
-                value
-            "},
-            true,
-        ),
-        (
-            indoc! {r"
-                # first
-                # second
-                value
-            "},
-            indoc! {r"
-                # second
-                # first
-                value
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                value
+#[test_case(
+    indoc! {r"
+        # first
+        # second
+        value
+    "},
+    indoc! {r"
+        # first
+        # second
+        value
+    "},
+    true;
+    "same order"
+)]
+#[test_case(
+    indoc! {r"
+        # first
+        # second
+        value
+    "},
+    indoc! {r"
+        # second
+        # first
+        value
+    "},
+    false;
+    "reversed leading comments"
+)]
+#[test_case(
+    indoc! {r"
+        value
 
-                # first
+        # first
 
-                # second
-            "},
-            indoc! {r"
-                value
+        # second
+    "},
+    indoc! {r"
+        value
 
-                # second
+        # second
 
-                # first
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                # first
-                value
-            "},
-            indoc! {r"
-                value # first
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                # first
-                value
-            "},
-            indoc! {r"
-                value
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                value
-            "},
-            indoc! {r"
-                # first
-                value
-            "},
-            false,
-        ),
-    ] {
-        let before = EditableDocument::parse(before).unwrap();
-        let after = EditableDocument::parse(after).unwrap();
-        let correspondence = correspondence(&before, &after).unwrap();
-        assert_eq!(
-            super::comments_preserved(&before, &after, &correspondence),
-            expected
-        );
-    }
+        # first
+    "},
+    false;
+    "reversed detached comments"
+)]
+#[test_case(
+    indoc! {r"
+        # first
+        value
+    "},
+    indoc! {r"
+        value # first
+    "},
+    false;
+    "changed placement"
+)]
+#[test_case(
+    indoc! {r"
+        # first
+        value
+    "},
+    indoc! {r"
+        value
+    "},
+    false;
+    "removed comment"
+)]
+#[test_case(
+    indoc! {r"
+        value
+    "},
+    indoc! {r"
+        # first
+        value
+    "},
+    false;
+    "added comment"
+)]
+fn comment_comparison_preserves_each_owners_order(before: &str, after: &str, expected: bool) {
+    let before = EditableDocument::parse(before).unwrap();
+    let after = EditableDocument::parse(after).unwrap();
+    let correspondence = correspondence(&before, &after).unwrap();
+    assert_eq!(
+        super::comments_preserved(&before, &after, &correspondence),
+        expected
+    );
 }
 
-#[test]
-fn scalar_emission_preserves_representable_line_breaks() {
+#[test_case(ScalarStyle::Plain)]
+#[test_case(ScalarStyle::SingleQuoted)]
+#[test_case(ScalarStyle::Literal)]
+#[test_case(ScalarStyle::Folded)]
+fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
     // Flow folding and block chomping:
     // https://yaml.org/spec/1.2.2/#65-line-folding
     // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
-    use crate::ScalarStyle;
-    for style in [
-        ScalarStyle::Plain,
-        ScalarStyle::SingleQuoted,
-        ScalarStyle::Literal,
-        ScalarStyle::Folded,
+    for value in [
+        "a\nb", "a\n\nb", "\nb", "\n\nb", "b\n", "b\n\n", "\n", "\n\n",
     ] {
-        for value in [
-            "a\nb", "a\n\nb", "\nb", "\n\nb", "b\n", "b\n\n", "\n", "\n\n",
-        ] {
-            if style == ScalarStyle::Plain && (value.starts_with('\n') || value.ends_with('\n')) {
-                continue;
-            }
-            for indent in [0, 2, 4] {
-                for flow in [false, true] {
-                    if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
-                        continue;
-                    }
-                    let text = super::scalar(
-                        value,
-                        style,
-                        if flow {
-                            super::ScalarPosition::Flow
-                        } else {
-                            super::ScalarPosition::Block
-                        },
-                        indent,
-                    );
-                    let source = if flow {
-                        format!("[{text}]")
-                    } else {
-                        format!("{}value: {text}", " ".repeat(indent))
-                    };
-                    let stream = crate::parse(&source).unwrap();
-                    let mut node = stream.node(stream.documents()[0].root).unwrap();
-                    if let crate::NodeKind::Sequence { items, .. } = &node.kind {
-                        node = stream.node(items[0]).unwrap();
-                    } else if let crate::NodeKind::Mapping { entries, .. } = &node.kind {
-                        node = stream.node(entries[0].value).unwrap();
-                    }
-                    assert!(
-                        matches!(&node.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
-                        "{style:?}, {flow}, {indent}, {value:?} -> {text:?}"
-                    );
+        if style == ScalarStyle::Plain && (value.starts_with('\n') || value.ends_with('\n')) {
+            continue;
+        }
+        for indent in [0, 2, 4] {
+            for flow in [false, true] {
+                if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
+                    continue;
                 }
+                let text = super::scalar(
+                    value,
+                    style,
+                    if flow {
+                        super::ScalarPosition::Flow
+                    } else {
+                        super::ScalarPosition::Block
+                    },
+                    indent,
+                );
+                let source = if flow {
+                    format!("[{text}]")
+                } else {
+                    format!("{}value: {text}", " ".repeat(indent))
+                };
+                let stream = crate::parse(&source).unwrap();
+                let mut node = stream.node(stream.documents()[0].root).unwrap();
+                if let crate::NodeKind::Sequence { items, .. } = &node.kind {
+                    node = stream.node(items[0]).unwrap();
+                } else if let crate::NodeKind::Mapping { entries, .. } = &node.kind {
+                    node = stream.node(entries[0].value).unwrap();
+                }
+                assert!(
+                    matches!(&node.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
+                    "{style:?}, {flow}, {indent}, {value:?} -> {text:?}"
+                );
             }
         }
     }
 }
 
-#[test]
-fn scalar_emission_retains_whitespace_that_cannot_be_folded() {
-    use crate::ScalarStyle;
-    for style in [ScalarStyle::Plain, ScalarStyle::SingleQuoted] {
-        for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
-            let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
-            let parsed = crate::parse(&text).unwrap();
-            let node = parsed.node(parsed.documents()[0].root).unwrap();
-            assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
-                if scalar.value == value && scalar.style == ScalarStyle::DoubleQuoted));
-        }
-    }
-    for style in [ScalarStyle::Literal, ScalarStyle::Folded] {
-        for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
-            let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
-            let source = format!("  value: {text}");
-            let parsed = crate::parse(&source).unwrap();
-            let node = parsed
-                .nodes()
-                .iter()
-                .find(|node| {
-                    matches!(&node.kind,
-                crate::NodeKind::Scalar(scalar) if scalar.value == value)
-                })
-                .unwrap();
-            assert!(
-                matches!(&node.kind, crate::NodeKind::Scalar(scalar)
-                if scalar.style == style),
-                "{value:?} -> {text:?}"
-            );
-        }
+#[test_case(ScalarStyle::Plain)]
+#[test_case(ScalarStyle::SingleQuoted)]
+fn flow_scalars_quote_whitespace_that_cannot_be_folded(style: ScalarStyle) {
+    for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
+        let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
+        let parsed = crate::parse(&text).unwrap();
+        let node = parsed.node(parsed.documents()[0].root).unwrap();
+        assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
+            if scalar.value == value && scalar.style == ScalarStyle::DoubleQuoted));
     }
 }
 
-#[test]
-fn rendering_obeys_work_and_output_budgets() {
-    for (source, nodes, bytes, expected) in [
-        ("42", 0, 100, "emission resource limit exceeded"),
-        ("[42]", 1, 100, "emission resource limit exceeded"),
-        ("42", 100, 1, "emitted YAML exceeds input byte limit"),
-        (
-            indoc! {r"
-                a: old
-
-                # detached
-
-                b: new
-            "},
-            100,
-            10,
-            "emitted YAML exceeds input byte limit",
-        ),
-        (
-            indoc! {r"
-                - old
-
-                # detached
-
-                - new
-            "},
-            100,
-            10,
-            "emitted YAML exceeds input byte limit",
-        ),
-        (
-            indoc! {r"
-                # leading
-                a: value
-            "},
-            100,
-            3,
-            "emitted YAML exceeds input byte limit",
-        ),
-        (
-            indoc! {r"
-                a: # note
-                  - value
-            "},
-            100,
-            3,
-            "emitted YAML exceeds input byte limit",
-        ),
-    ] {
-        let mut document = EditableDocument::parse(source).unwrap();
-        document.source.options.max_nodes = nodes;
-        document.source.options.max_input_bytes = bytes;
-        let source = document.source.clone();
-        let draft = Draft::from(&document).freeze().unwrap();
-        let region = region(&document, document.source.root, false);
-        // Both committed syntax and drafts obey the same rendering limits.
-        for result in [
-            render(&document, document.source.root, region, 0, false),
-            render(
-                source.emission((&draft).into()),
-                document.source.root,
-                region,
-                0,
-                false,
-            ),
-        ] {
-            assert_eq!(result.unwrap_err().message, expected);
-        }
+#[test_case(ScalarStyle::Literal)]
+#[test_case(ScalarStyle::Folded)]
+fn block_scalars_preserve_indented_lines(style: ScalarStyle) {
+    for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
+        let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
+        let source = format!("  value: {text}");
+        let parsed = crate::parse(&source).unwrap();
+        let node = parsed
+            .nodes()
+            .iter()
+            .find(|node| {
+                matches!(&node.kind,
+            crate::NodeKind::Scalar(scalar) if scalar.value == value)
+            })
+            .unwrap();
+        assert!(
+            matches!(&node.kind, crate::NodeKind::Scalar(scalar)
+            if scalar.style == style),
+            "{value:?} -> {text:?}"
+        );
     }
 }
 
-#[test]
-fn plain_scalar_fallback_cannot_introduce_documents_or_collections() {
-    for (value, flow) in [
-        (
-            indoc! {r"
-                first
-                ---
-                second"},
+#[test_case("42", 0, 100, "emission resource limit exceeded")]
+#[test_case("[42]", 1, 100, "emission resource limit exceeded")]
+#[test_case("42", 100, 1, "emitted YAML exceeds input byte limit")]
+#[test_case(
+    indoc! {r"
+        a: old
+
+        # detached
+
+        b: new
+    "},
+    100,
+    10,
+    "emitted YAML exceeds input byte limit";
+    "mapping gap bytes"
+)]
+#[test_case(
+    indoc! {r"
+        - old
+
+        # detached
+
+        - new
+    "},
+    100,
+    10,
+    "emitted YAML exceeds input byte limit";
+    "sequence gap bytes"
+)]
+#[test_case(
+    indoc! {r"
+        # leading
+        a: value
+    "},
+    100,
+    3,
+    "emitted YAML exceeds input byte limit";
+    "leading comment bytes"
+)]
+#[test_case(
+    indoc! {r"
+        a: # note
+          - value
+    "},
+    100,
+    3,
+    "emitted YAML exceeds input byte limit";
+    "nested comment bytes"
+)]
+fn rendering_obeys_work_and_output_budgets(
+    source: &str,
+    nodes: usize,
+    bytes: usize,
+    expected: &str,
+) {
+    let mut document = EditableDocument::parse(source).unwrap();
+    document.source.options.max_nodes = nodes;
+    document.source.options.max_input_bytes = bytes;
+    let source = document.source.clone();
+    let draft = Draft::from(&document).freeze().unwrap();
+    let region = region(&document, document.source.root, false);
+    // Both committed syntax and drafts obey the same rendering limits.
+    for result in [
+        render(&document, document.source.root, region, 0, false),
+        render(
+            source.emission((&draft).into()),
+            document.source.root,
+            region,
+            0,
             false,
         ),
-        (
-            indoc! {r"
-                ]
-                ---
-                ["},
-            true,
-        ),
-        ("key]: value #", true),
-        ("first, second", true),
-        ("] # empty sequence", true),
-        ("first\r- second", false),
-        ("first\r---\rsecond", false),
     ] {
-        let output = super::scalar(
-            value,
-            crate::ScalarStyle::Plain,
-            if flow {
-                super::ScalarPosition::Flow
-            } else {
-                super::ScalarPosition::Block
-            },
-            0,
-        );
-        let parsed = crate::parse(&output).unwrap();
-        assert_eq!(parsed.documents().len(), 1, "{output:?}");
-        let root = parsed.node(parsed.documents()[0].root).unwrap();
-        assert!(matches!(&root.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value));
+        assert_eq!(result.unwrap_err().message, expected);
     }
+}
+
+#[test_case(
+    indoc! {r"
+        first
+        ---
+        second"},
+    false;
+    "document start in block value"
+)]
+#[test_case(
+    indoc! {r"
+        ]
+        ---
+        ["},
+    true;
+    "brackets in flow value"
+)]
+#[test_case("key]: value #", true)]
+#[test_case("first, second", true)]
+#[test_case("] # empty sequence", true)]
+#[test_case("first\r- second", false)]
+#[test_case("first\r---\rsecond", false)]
+fn plain_scalar_fallback_cannot_introduce_documents_or_collections(value: &str, flow: bool) {
+    let output = super::scalar(
+        value,
+        crate::ScalarStyle::Plain,
+        if flow {
+            super::ScalarPosition::Flow
+        } else {
+            super::ScalarPosition::Block
+        },
+        0,
+    );
+    let parsed = crate::parse(&output).unwrap();
+    assert_eq!(parsed.documents().len(), 1, "{output:?}");
+    let root = parsed.node(parsed.documents()[0].root).unwrap();
+    assert!(matches!(&root.kind, crate::NodeKind::Scalar(scalar) if scalar.value == value));
 }
 
 #[test]
@@ -772,91 +776,96 @@ fn removed_properties_leave_room_for_retained_header_comments() {
     ");
 }
 
-#[test]
-fn detached_comments_preserve_their_structural_boundaries() {
-    for (before, after, expected) in [
-        (
-            indoc! {r"
-                # note
+#[test_case(
+    indoc! {r"
+        # note
 
-                value
-            "},
-            indoc! {r"
-                value
+        value
+    "},
+    indoc! {r"
+        value
 
-                # note
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                a: old
+        # note
+    "},
+    false;
+    "prefix versus suffix"
+)]
+#[test_case(
+    indoc! {r"
+        a: old
 
-                # note
+        # note
 
-                b: old
-                c: old
-            "},
-            indoc! {r"
-                a: old
-                b: old
+        b: old
+        c: old
+    "},
+    indoc! {r"
+        a: old
+        b: old
 
-                # note
+        # note
 
-                c: old
-            "},
-            false,
-        ),
-        (
-            indoc! {r"
-                # note
+        c: old
+    "},
+    false;
+    "moved mapping gap"
+)]
+#[test_case(
+    indoc! {r"
+        # note
 
-                - old
-            "},
-            indoc! {r"
-                [
-                # note
+        - old
+    "},
+    indoc! {r"
+        [
+        # note
 
-                old]
-            "},
-            true,
-        ),
-        (
-            indoc! {r"
-                # note
+        old]
+    "},
+    true;
+    "sequence prefix across styles"
+)]
+#[test_case(
+    indoc! {r"
+        # note
 
-                a: old
-            "},
-            indoc! {r"
-                {
-                # note
+        a: old
+    "},
+    indoc! {r"
+        {
+        # note
 
-                a: old}
-            "},
-            true,
-        ),
-        (
-            indoc! {r"
-                # note
+        a: old}
+    "},
+    true;
+    "mapping prefix across styles"
+)]
+#[test_case(
+    indoc! {r"
+        # note
 
-                value
-            "},
-            indoc! {r"
-                # note
+        value
+    "},
+    indoc! {r"
+        # note
 
-                'value'
-            "},
-            true,
-        ),
-    ] {
-        let before = EditableDocument::parse(before).unwrap();
-        let after = EditableDocument::parse(after).unwrap();
-        let correspondence = correspondence(&before, &after).unwrap();
-        assert_eq!(
-            super::comments_preserved(&before, &after, &correspondence),
-            expected
-        );
-    }
+        'value'
+    "},
+    true;
+    "scalar prefix across styles"
+)]
+fn detached_comments_preserve_their_structural_boundaries(
+    before: &str,
+    after: &str,
+    expected: bool,
+) {
+    let before = EditableDocument::parse(before).unwrap();
+    let after = EditableDocument::parse(after).unwrap();
+    let correspondence = correspondence(&before, &after).unwrap();
+    assert_eq!(
+        super::comments_preserved(&before, &after, &correspondence),
+        expected
+    );
 }
 
 #[test]
