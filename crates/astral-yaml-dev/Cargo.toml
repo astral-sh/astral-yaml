@@ -11,6 +11,7 @@ publish = false
 compare = ["dep:deser", "dep:deser-value", "dep:deser-yaml", "dep:serde-saphyr", "dep:yaml_serde"]
 
 [dependencies]
+annotate-snippets.workspace = true
 astral-yaml.workspace = true
 astral-yaml-serde.workspace = true
 deser = { workspace = true, optional = true }

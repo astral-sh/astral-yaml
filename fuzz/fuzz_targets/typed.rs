@@ -1,7 +1,7 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use astral_yaml_serde::{Spanned, from_str, from_stream, to_string};
+use astral_yaml_serde::{Commented, Spanned, from_str, from_stream, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::{
     Deserialize, Serialize,
@@ -86,7 +86,7 @@ impl<'de> Deserialize<'de> for Bytes {
 // Expand each type twice so borrowed wrappers can use independent input lifetimes.
 macro_rules! check {
     ($ty:ty, $source:expr, $stream:expr) => {
-        match from_stream::<Spanned<'_, $ty>>($stream) {
+        match from_stream::<Spanned<Commented<'_, $ty>>>($stream) {
             Ok(value) => {
                 let root = $stream.node($stream.documents()[0].root).unwrap();
                 assert_eq!(value.span, root.span);
@@ -112,7 +112,7 @@ macro_rules! check {
                 }
 
                 if let Ok(encoded) = to_string(&value) {
-                    let decoded: Spanned<'_, $ty> = from_str(&encoded).unwrap();
+                    let decoded: Spanned<Commented<'_, $ty>> = from_str(&encoded).unwrap();
                     assert!(decoded.comments.is_empty());
 
                     // Compare serialized forms: NaN is unequal to itself, and
@@ -166,10 +166,10 @@ fuzz_target!(|data: &[u8]| {
         21 => check!(BTreeMap<String, u8>, source, &stream),
         22 => check!(Bytes, source, &stream),
         23 => check!(Configuration, source, &stream),
-        24 => check!(Vec<Spanned<'_, u64>>, source, &stream),
-        25 => check!(BTreeMap<String, Spanned<'_, String>>, source, &stream),
-        26 => check!(Spanned<'_, Option<String>>, source, &stream),
-        27 => check!(Kind<Spanned<'_, String>>, source, &stream),
+        24 => check!(Vec<Spanned<u64>>, source, &stream),
+        25 => check!(BTreeMap<String, Spanned<String>>, source, &stream),
+        26 => check!(Spanned<Option<String>>, source, &stream),
+        27 => check!(Kind<Spanned<String>>, source, &stream),
         _ => check!(SyntaxOnly, source, &stream),
     }
 });

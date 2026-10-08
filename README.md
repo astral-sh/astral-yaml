@@ -29,29 +29,28 @@ There are two primary interfaces:
   strings.
 
 
-One of astral-yaml's specialties is that it's _span aware_, and can convey
-span information even within the serde layer. For any deserializable `T`,
-wrap a value or field in `Spanned<'a, T>` to retain its source range and
-comments:
+Use `Spanned<T>` to retain a value's source range and `Commented<'a, T>`
+to borrow its comments. The wrappers compose in either order:
 
 ```rust
-use astral_yaml_serde::{Spanned, from_str};
+use astral_yaml_serde::{Commented, Spanned, from_str};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config<'a> {
     #[serde(borrow)]
-    timeout: Spanned<'a, u64>,
+    timeout: Spanned<Commented<'a, u64>>,
 }
 
 let source = "timeout: 30 # seconds\n";
 let config: Config<'_> = from_str(source).unwrap();
-assert_eq!(*config.timeout, 30);
+assert_eq!(**config.timeout, 30);
 assert_eq!(config.timeout.span.slice(source), Some("30"));
 assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 ```
 
-Note that `Spanned` has an interior lifetime, so it cannot be used with `DeserializeOwned`.
+`Spanned<T>` implements `DeserializeOwned` when `T` does. `Commented` borrows
+the input even for owned payloads. Both serialize only their value.
 
 Enums use variant names for unit variants and singleton mappings for variants
 with payloads. Serde's representation attributes, including `untagged`, still
@@ -94,7 +93,7 @@ assert_eq!(*text, "hello");
 
 `Tagged<T>` owns its tag and supports `DeserializeOwned` when `T` does. It rejects
 untagged input and preserves the tag when serialized. Use
-`Spanned<'a, Tagged<T>>` to capture the source span and comments as well.
+`Spanned<Commented<'a, Tagged<T>>>` to capture the source span and comments as well.
 
 ## Development
 

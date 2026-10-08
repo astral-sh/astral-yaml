@@ -1,6 +1,6 @@
 mod support;
 
-use astral_yaml_serde::{Spanned, Tagged, from_str, to_string, with::yaml_tag};
+use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string, with::yaml_tag};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::{collections::BTreeMap, fmt::Write};
 use support::{YamlTag, from_tag};
@@ -68,7 +68,7 @@ fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
 
     assert!(from_str::<Empty>("{ignored: !Count 42}").is_err());
     assert!(from_str::<Option<u32>>("!Count 42").is_err());
-    assert!(from_str::<Spanned<'_, String>>("!Text hello").is_err());
+    assert!(from_str::<Spanned<String>>("!Text hello").is_err());
     assert!(from_str::<Vec<u8>>("!Items [1]").is_err());
     assert!(from_str::<BTreeMap<String, u8>>("!Config {x: 1}").is_err());
     assert!(from_str::<Message>("!Text hello").is_err());
@@ -124,8 +124,8 @@ fn core_tags_work_without_opt_in() {
     );
 
     let source = "!!str hello # greeting";
-    let text = from_str::<Spanned<'_, &str>>(source).unwrap();
-    assert_eq!(text.value, "hello");
+    let text = from_str::<Spanned<Commented<'_, &str>>>(source).unwrap();
+    assert_eq!(text.value.value, "hello");
     assert!(std::ptr::eq(text.value.as_ptr(), source[6..].as_ptr()));
     assert_eq!(text.span.slice(source), Some("!!str hello"));
     assert_eq!(text.comments[0].comment.text, " greeting");
@@ -381,8 +381,8 @@ fn explicit_wrappers_preserve_tags_and_metadata() {
     }
 
     let source = "# greeting\n!Text hello # inline\n";
-    let value = from_tag::<Spanned<'_, Message>>(source).unwrap();
-    assert_eq!(value.value, Message::Text("hello".into()));
+    let value = from_tag::<Spanned<Commented<'_, Message>>>(source).unwrap();
+    assert_eq!(value.value.value, Message::Text("hello".into()));
     assert_eq!(value.span.slice(source), Some("!Text hello"));
     assert_eq!(value.comments.len(), 2);
 

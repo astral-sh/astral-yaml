@@ -29,7 +29,7 @@ Each workload processes all documents in one of the three fixed
 | --- | --- |
 | `astral::parse` | Parse the YAML stream. |
 | `astral::deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>`. |
-| `astral::deserialize_spanned` | Parse and deserialize, collecting each document root's span and descendant comments. |
+| `astral::deserialize_spanned` | Parse and deserialize, collecting each document root's span. |
 | `astral::deserialize_spanned_fields` | Also wrap each top-level mapping value in `Spanned`. |
 | `astral::serialize` | Serialize previously deserialized values. |
 

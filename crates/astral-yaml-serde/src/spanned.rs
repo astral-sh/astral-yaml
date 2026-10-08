@@ -1,5 +1,4 @@
-use crate::{AttachedComment, CommentPlacement};
-use astral_yaml::{Comment, Span};
+use astral_yaml::Span;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, SeqAccess, Visitor},
@@ -10,11 +9,11 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-// The private newtype protocol requests (start, end, value, comments) from the
+// The private newtype protocol requests (start, end, value) from the
 // deserializer. Offsets come from the parser, not YAML fields.
 pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 
-/// A deserialized value with its source span and borrowed comments.
+/// A deserialized value with its source span.
 ///
 /// Can wrap a field, mapping key, collection element, or whole document.
 ///
@@ -26,14 +25,7 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 /// to encoded input bytes.
 ///
 /// Serialization emits only the value. Mutating the value does not update its
-/// metadata. Equality and hashing include the value, span, and comments.
-///
-/// Comments include the node's own comments and those of all syntax descendants,
-/// in source order, once per wrapper. Parent and child lists overlap.
-/// Alias wrappers contain comments at the alias occurrence. Wrapped children of
-/// aliased collections retain comments from the anchor's definition. Comment
-/// placement is relative to the direct owner. Comments can lie outside
-/// the node's span. Comment text borrows the input even when `T` is owned.
+/// metadata. Equality and hashing include the value and span.
 ///
 /// Deserialization requires this crate's deserializer. Serde's buffering for
 /// `#[serde(untagged)]` and `#[serde(flatten)]` discards source
@@ -45,47 +37,32 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize)]
-/// struct Config<'a> {
-///     #[serde(borrow)]
-///     timeout: Spanned<'a, u64>,
+/// struct Config {
+///     timeout: Spanned<u64>,
 /// }
 ///
 /// let source = "timeout: 30 # seconds\n";
-/// let config: Config<'_> = from_str(source)?;
+/// let config: Config = from_str(source)?;
 /// assert_eq!(*config.timeout, 30);
 /// assert_eq!(config.timeout.span.slice(source), Some("30"));
-/// assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
-/// A wrapper cannot outlive the source of its comments:
+/// Owned payloads implement `DeserializeOwned`:
 ///
-/// ```compile_fail
-/// use astral_yaml_serde::{Spanned, from_str};
-/// let value = {
-///     let source = String::from("42 # answer");
-///     from_str::<Spanned<'_, u64>>(&source).unwrap()
-/// };
-/// println!("{:?}", value.comments);
 /// ```
-///
-/// It does not implement `DeserializeOwned`, even for an owned `T`:
-///
-/// ```compile_fail
 /// use astral_yaml_serde::Spanned;
 /// fn owned<T: serde::de::DeserializeOwned>() {}
-/// owned::<Spanned<'static, String>>();
+/// owned::<Spanned<String>>();
 /// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Spanned<'a, T> {
+pub struct Spanned<T> {
     /// The deserialized value.
     pub value: T,
     /// The source range of the YAML node from which the value was deserialized.
     pub span: Span,
-    /// Comments belonging to this node and its syntax descendants, in source order.
-    pub comments: Vec<AttachedComment<'a>>,
 }
 
-impl<T> Spanned<'_, T> {
+impl<T> Spanned<T> {
     /// Returns the value, discarding its metadata.
     #[must_use]
     pub fn into_inner(self) -> T {
@@ -93,7 +70,7 @@ impl<T> Spanned<'_, T> {
     }
 }
 
-impl<T> Deref for Spanned<'_, T> {
+impl<T> Deref for Spanned<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -101,81 +78,42 @@ impl<T> Deref for Spanned<'_, T> {
     }
 }
 
-impl<T> DerefMut for Spanned<'_, T> {
+impl<T> DerefMut for Spanned<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
     }
 }
 
-impl<T: Serialize> Serialize for Spanned<'_, T> {
+impl<T: Serialize> Serialize for Spanned<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.value.serialize(serializer)
     }
 }
 
-impl<'de: 'a, 'a, T: Deserialize<'de>> Deserialize<'de> for Spanned<'a, T> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Spanned<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_newtype_struct(NAME, SpannedVisitor(PhantomData))
     }
 }
 
-struct SpannedVisitor<'a, T>(PhantomData<(&'a (), T)>);
+struct SpannedVisitor<T>(PhantomData<T>);
 
-impl<'de: 'a, 'a, T: Deserialize<'de>> Visitor<'de> for SpannedVisitor<'a, T> {
-    type Value = Spanned<'a, T>;
+impl<'de, T: Deserialize<'de>> Visitor<'de> for SpannedVisitor<T> {
+    type Value = Spanned<T>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a source-spanned value from astral-yaml-serde")
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let start = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-        let end = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-        let Some(span) = Span::new(start, end) else {
-            return Err(de::Error::custom("span starts after its end"));
-        };
-
-        let value = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(2, &self))?;
-        let comments: Vec<CommentMetadata<'a>> = seq
-            .next_element()?
-            .ok_or_else(|| de::Error::invalid_length(3, &self))?;
+        let (start, end, value) =
+            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(&mut seq))?;
+        let span =
+            Span::new(start, end).ok_or_else(|| de::Error::custom("span starts after its end"))?;
         if seq.next_element::<de::IgnoredAny>()?.is_some() {
-            return Err(de::Error::invalid_length(5, &self));
+            return Err(de::Error::invalid_length(4, &self));
         }
 
-        Ok(Spanned {
-            value,
-            span,
-            comments: comments.into_iter().map(|metadata| metadata.0).collect(),
-        })
-    }
-}
-
-struct CommentMetadata<'a>(AttachedComment<'a>);
-
-impl<'de: 'a, 'a> Deserialize<'de> for CommentMetadata<'a> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (start, end, text, placement) =
-            <(usize, usize, &'a str, u8)>::deserialize(deserializer)?;
-        let span = Span::new(start, end)
-            .ok_or_else(|| de::Error::custom("comment span starts after its end"))?;
-        let placement = match placement {
-            0 => CommentPlacement::Leading,
-            1 => CommentPlacement::Inline,
-            2 => CommentPlacement::Trailing,
-            3 => CommentPlacement::Detached,
-            _ => return Err(de::Error::custom("invalid comment placement")),
-        };
-
-        Ok(Self(AttachedComment {
-            comment: Comment { span, text },
-            placement,
-        }))
+        Ok(Spanned { value, span })
     }
 }

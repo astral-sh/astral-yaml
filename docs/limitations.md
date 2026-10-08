@@ -9,8 +9,8 @@ fields. If a plain scalar resolves as a number, boolean, or null, the buffer
 loses its text and cannot deserialize it into a string. Quote the scalar or use
 `!!str` to preserve it as a string in these contexts.
 
-`Spanned` and `Tagged` require direct access to the YAML deserializer; Serde's
-intermediate buffers cannot retain their metadata. For `Spanned`, wrap the
+`Spanned`, `Commented`, and `Tagged` require direct access to the YAML deserializer; Serde's
+intermediate buffers cannot retain their metadata. For spans or comments, wrap the
 containing enum or struct instead of a field decoded from the buffer.
 
 ## Mapping keys

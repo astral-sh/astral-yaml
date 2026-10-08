@@ -21,6 +21,7 @@ astral-yaml-serde = { version = "0.1.0", path = "crates/astral-yaml-serde" }
 # Omit a version so Cargo excludes this development helper when publishing.
 astral-yaml-dev = { path = "crates/astral-yaml-dev" }
 
+annotate-snippets = "0.12.16"
 clap = { version = "4.6.7", features = ["derive"] }
 deser = { version = "=0.9.1", features = ["derive"] }
 deser-value = "=0.9.1"

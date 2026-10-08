@@ -53,7 +53,7 @@ detected block-scalar indentation is content (spec example 8.2).
 
 ## Spans and comments
 
-[`Spanned<'a, T>`](../README.md#usage) borrows a node's comments and those of its
+[`Commented<'a, T>`](../README.md#usage) borrows a node's comments and those of its
 syntax descendants, including keys and ignored fields. Each wrapper collects
 comments once, in source order. Parent and child lists overlap.
 

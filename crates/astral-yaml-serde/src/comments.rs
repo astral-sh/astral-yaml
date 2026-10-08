@@ -115,6 +115,16 @@ impl<'de> CommentIndex<'de> {
                     .is_ok()
                 {
                     (0, CommentPlacement::Inline)
+                } else if doc
+                    .start_marker
+                    .is_some_and(|marker| comment.span.start() < marker.start())
+                    || doc
+                        .end_marker
+                        .is_some_and(|marker| comment.span.start() >= marker.end())
+                {
+                    // Document markers separate framing comments from the
+                    // root's children, regardless of their indentation.
+                    (0, tree.placement(tree.nodes[0].span, comment))
                 } else {
                     tree.owner(0, comment)
                 };
