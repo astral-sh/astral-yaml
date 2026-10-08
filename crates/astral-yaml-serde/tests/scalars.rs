@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use astral_yaml_serde::from_str;
 use serde_json::{Value, json};
 
@@ -31,33 +33,29 @@ fn assert_presentations(scalar: &str, expected: &str) {
 }
 
 // https://yaml.org/spec/1.2.2/#81-block-scalar-styles
-#[test]
-fn block_scalar_styles_indentation_and_chomping() {
-    for (body, literal, folded) in [
-        ("  text\n", "text\n", "text\n"),
-        ("  text\n  next\n", "text\nnext\n", "text next\n"),
-        ("  text\n\n  next\n", "text\n\nnext\n", "text\nnext\n"),
-        (
-            "  text\n    more\n  next\n",
-            "text\n  more\nnext\n",
-            "text\n  more\nnext\n",
-        ),
-        ("  # content\n", "# content\n", "# content\n"),
-        ("\n  text\n", "\ntext\n", "\ntext\n"),
-        ("  text\n\n", "text\n\n", "text\n\n"),
-    ] {
-        for (style, kept) in [("|", literal), (">", folded)] {
-            let content = kept.trim_end_matches('\n');
+#[test_case("  text\n", "text\n", "text\n")]
+#[test_case("  text\n  next\n", "text\nnext\n", "text next\n")]
+#[test_case("  text\n\n  next\n", "text\n\nnext\n", "text\nnext\n")]
+#[test_case(
+    "  text\n    more\n  next\n",
+    "text\n  more\nnext\n",
+    "text\n  more\nnext\n"
+)]
+#[test_case("  # content\n", "# content\n", "# content\n")]
+#[test_case("\n  text\n", "\ntext\n", "\ntext\n")]
+#[test_case("  text\n\n", "text\n\n", "text\n\n")]
+fn block_scalar_styles_indentation_and_chomping(body: &str, literal: &str, folded: &str) {
+    for (style, kept) in [("|", literal), (">", folded)] {
+        let content = kept.trim_end_matches('\n');
 
-            for (chomp, expected) in [
-                ("-", content.to_owned()),
-                ("", format!("{content}\n")),
-                ("+", kept.to_owned()),
-            ] {
-                for indent in ["", "2"] {
-                    let scalar = format!("{style}{indent}{chomp}\n{body}");
-                    assert_presentations(&scalar, &expected);
-                }
+        for (chomp, expected) in [
+            ("-", content.to_owned()),
+            ("", format!("{content}\n")),
+            ("+", kept.to_owned()),
+        ] {
+            for indent in ["", "2"] {
+                let scalar = format!("{style}{indent}{chomp}\n{body}");
+                assert_presentations(&scalar, &expected);
             }
         }
     }
@@ -189,17 +187,13 @@ fn quoted_scalar_folding_and_escapes() {
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
-#[test]
-fn decimal_integers_can_have_leading_zeroes() {
-    for (source, expected) in [
-        ("0755", json!(755)),
-        ("0012", json!(12)),
-        ("-0012", json!(-12)),
-        ("+0012", json!(12)),
-        ("'0755'", json!("0755")),
-    ] {
-        assert_eq!(from_str::<Value>(source).unwrap(), expected, "{source}");
-    }
+#[test_case("0755", &json!(755))]
+#[test_case("0012", &json!(12))]
+#[test_case("-0012", &json!(-12))]
+#[test_case("+0012", &json!(12))]
+#[test_case("'0755'", &json!("0755"))]
+fn decimal_integers_can_have_leading_zeroes(source: &str, expected: &serde_json::Value) {
+    assert_eq!(&from_str::<Value>(source).unwrap(), expected, "{source}");
 }
 
 // https://yaml.org/spec/1.2.2/#742-flow-mappings

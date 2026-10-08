@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 mod support;
 
 use astral_yaml_serde::{Spanned, Tagged, from_str};
@@ -90,31 +92,30 @@ fn core_tags_and_destination_types() {
     ");
 }
 
-#[test]
-fn wrappers_and_aliases_preserve_tag_checks() {
-    for source in ["!!str 7", "!!int 7"] {
-        let expected = from_str::<String>(source);
-        assert_eq!(
-            from_str::<Tagged<String>>(source).map(|v| v.value),
-            expected
-        );
-        assert_eq!(
-            from_str::<Spanned<String>>(source).map(|v| v.value),
-            expected
-        );
-        assert_eq!(from_str::<Newtype>(source).map(|v| v.0), expected);
-        assert_eq!(
-            from_str::<Option<String>>(source),
-            expected.clone().map(Some)
-        );
+#[test_case("!!str 7")]
+#[test_case("!!int 7")]
+fn wrappers_and_aliases_preserve_tag_checks(source: &str) {
+    let expected = from_str::<String>(source);
+    assert_eq!(
+        from_str::<Tagged<String>>(source).map(|v| v.value),
+        expected
+    );
+    assert_eq!(
+        from_str::<Spanned<String>>(source).map(|v| v.value),
+        expected
+    );
+    assert_eq!(from_str::<Newtype>(source).map(|v| v.0), expected);
+    assert_eq!(
+        from_str::<Option<String>>(source),
+        expected.clone().map(Some)
+    );
 
-        let alias = format!("[&value {source}, *value]");
-        let result = from_str::<(IgnoredAny, &str)>(&alias);
-        assert_eq!(result.is_ok(), expected.is_ok());
+    let alias = format!("[&value {source}, *value]");
+    let result = from_str::<(IgnoredAny, &str)>(&alias);
+    assert_eq!(result.is_ok(), expected.is_ok());
 
-        if let Err(error) = result {
-            assert_eq!(error.span.unwrap().slice(&alias), Some("&value !!int 7"));
-        }
+    if let Err(error) = result {
+        assert_eq!(error.span.unwrap().slice(&alias), Some("&value !!int 7"));
     }
 }
 
@@ -141,25 +142,25 @@ fn tag_mismatch_errors_retain_the_node_span() {
     "#);
 }
 
-#[test]
-fn enum_names_and_field_names_preserve_tag_types() {
-    for (scalar, accepted) in [("7", true), ("!!str 7", true), ("!!int 7", false)] {
-        assert_eq!(from_tag::<Choice>(scalar).is_ok(), accepted);
+#[test_case("7", true)]
+#[test_case("!!str 7", true)]
+#[test_case("!!int 7", false)]
+fn enum_names_and_field_names_preserve_tag_types(scalar: &str, accepted: bool) {
+    assert_eq!(from_tag::<Choice>(scalar).is_ok(), accepted);
 
-        let mapping = format!("{{{scalar}: null}}");
-        assert_eq!(from_str::<Choice>(&mapping).is_ok(), accepted);
-        assert_eq!(from_str::<Record>(&mapping).is_ok(), accepted);
-        assert_eq!(
-            from_str::<BTreeMap<String, Option<u8>>>(&mapping).is_ok(),
-            accepted
-        );
+    let mapping = format!("{{{scalar}: null}}");
+    assert_eq!(from_str::<Choice>(&mapping).is_ok(), accepted);
+    assert_eq!(from_str::<Record>(&mapping).is_ok(), accepted);
+    assert_eq!(
+        from_str::<BTreeMap<String, Option<u8>>>(&mapping).is_ok(),
+        accepted
+    );
 
-        let alias_key = format!("[&key {scalar}, {{*key : null}}]");
-        assert_eq!(
-            from_str::<(IgnoredAny, Choice)>(&alias_key).is_ok(),
-            accepted
-        );
-    }
+    let alias_key = format!("[&key {scalar}, {{*key : null}}]");
+    assert_eq!(
+        from_str::<(IgnoredAny, Choice)>(&alias_key).is_ok(),
+        accepted
+    );
 }
 
 #[test]

@@ -1,5 +1,7 @@
 //! Value edits preserve YAML types: <https://yaml.org/spec/1.2.2/#103-core-schema>.
 
+use test_case::test_case;
+
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{
@@ -9,55 +11,56 @@ use astral_yaml_serde::{
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
 
-#[test]
-fn string_fields_do_not_match_application_tagged_keys() {
+#[test_case(
+    indoc! {r"
+        !custom name: old
+    "},
+    "name";
+    "plain tagged key"
+)]
+#[test_case(
+    indoc! {r"
+        !custom 'name': old
+    "},
+    "name";
+    "quoted tagged key"
+)]
+#[test_case(
+    indoc! {r"
+        !custom true: old
+    "},
+    "true";
+    "tagged boolean"
+)]
+#[test_case(
+    indoc! {r"
+        !custom 'true': old
+    "},
+    "true";
+    "quoted tagged boolean"
+)]
+#[test_case(
+    indoc! {r"
+        !<tag:example.org,2026:key> name: old
+    "},
+    "name";
+    "global tagged key"
+)]
+fn string_fields_do_not_match_application_tagged_keys(source: &str, name: &str) {
     // Node equality includes tags: https://yaml.org/spec/1.2.2/#3213-node-comparison
-    for (source, name) in [
-        (
-            indoc! {r"
-                !custom name: old
-            "},
-            "name",
-        ),
-        (
-            indoc! {r"
-                !custom 'name': old
-            "},
-            "name",
-        ),
-        (
-            indoc! {r"
-                !custom true: old
-            "},
-            "true",
-        ),
-        (
-            indoc! {r"
-                !custom 'true': old
-            "},
-            "true",
-        ),
-        (
-            indoc! {r"
-                !<tag:example.org,2026:key> name: old
-            "},
-            "name",
-        ),
-    ] {
-        let mut document = Editable::<
-            std::collections::BTreeMap<astral_yaml_serde::Tagged<String>, String>,
-        >::parse(source)
+    let mut document = Editable::<
+        std::collections::BTreeMap<astral_yaml_serde::Tagged<String>, String>,
+    >::parse(source)
+    .unwrap();
+    document
+        .edit(|editor| {
+            assert!(editor.root_mut().get(name)?.is_none(), "{source:?}");
+            assert!(editor.root_mut().field(name).is_err());
+            assert!(!editor.root_mut().remove_field(name)?);
+            Ok(())
+        })
         .unwrap();
-        document
-            .edit(|editor| {
-                assert!(editor.root_mut().get(name)?.is_none(), "{source:?}");
-                assert!(editor.root_mut().field(name).is_err());
-                assert!(!editor.root_mut().remove_field(name)?);
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(document.source(), source);
-    }
+    assert_eq!(document.source(), source);
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,37 +69,38 @@ struct Config {
     servers: Vec<String>,
 }
 
-#[test]
-fn results_are_returned_only_after_callback_syntax_and_type_checks() {
+#[test_case(0)]
+#[test_case(1)]
+#[test_case(2)]
+#[test_case(3)]
+fn results_are_returned_only_after_callback_syntax_and_type_checks(operation: usize) {
     let source = indoc! {r"
         timeout: 30
         servers: [primary]
     "};
-    for operation in 0..4 {
-        let mut document = Editable::<Config>::parse(source).unwrap();
-        let result = document.edit(|e| {
-            match operation {
-                0 => e.root_mut().field("timeout")?.set(60)?,
-                1 => e.root_mut().field("timeout")?.set(256)?,
-                2 => {
-                    e.root_mut().field("missing")?;
-                }
-                _ => e
-                    .root_mut()
-                    .field("servers")?
-                    .item(0)?
-                    .set_scalar_style(ScalarStyle::Literal)?,
+    let mut document = Editable::<Config>::parse(source).unwrap();
+    let result = document.edit(|e| {
+        match operation {
+            0 => e.root_mut().field("timeout")?.set(60)?,
+            1 => e.root_mut().field("timeout")?.set(256)?,
+            2 => {
+                e.root_mut().field("missing")?;
             }
-            Ok("committed")
-        });
-        if operation == 0 {
-            assert_eq!(result.unwrap(), "committed");
-            assert_eq!(document.value().timeout, 60);
-        } else {
-            assert!(result.is_err());
-            assert_eq!(document.source(), source);
-            assert_eq!(document.value().timeout, 30);
+            _ => e
+                .root_mut()
+                .field("servers")?
+                .item(0)?
+                .set_scalar_style(ScalarStyle::Literal)?,
         }
+        Ok("committed")
+    });
+    if operation == 0 {
+        assert_eq!(result.unwrap(), "committed");
+        assert_eq!(document.value().timeout, 60);
+    } else {
+        assert!(result.is_err());
+        assert_eq!(document.source(), source);
+        assert_eq!(document.value().timeout, 30);
     }
 }
 
@@ -224,105 +228,144 @@ fn rust_values_never_interpret_strings_as_yaml() {
     "#);
 }
 
-#[test]
-fn fields_use_literal_decoded_string_keys() {
-    let mut diffs = Vec::new();
-    for (source, name) in [
-        ("'it''s': old", "it's"),
-        ("'a.b/[0]': old", "a.b/[0]"),
-        ("é: old", "é"),
-        ("!!str true: old", "true"),
-        ("! true: old", "true"),
-        ("{true: ignored, 'true': old}", "true"),
-        ("{1: ignored, '1': old}", "1"),
-        ("{!!int '1': ignored, '1': old}", "1"),
-        ("{[complex, key]: ignored, name: old}", "name"),
-    ] {
-        let mut document = Editable::<IgnoredAny>::parse(source).unwrap();
-        document
-            .edit(|e| {
-                let mut field = e.root_mut().field(name)?;
-                assert!(
-                    matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old")
-                );
-                field.set("new")
-            })
-            .unwrap_or_else(|error| panic!("{source}: {error}"));
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -'it''s': old
-    \ No newline at end of file
-    +'it''s': new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -'a.b/[0]': old
-    \ No newline at end of file
-    +'a.b/[0]': new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -é: old
-    \ No newline at end of file
-    +é: new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -!!str true: old
-    \ No newline at end of file
-    +!!str true: new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -! true: old
-    \ No newline at end of file
-    +! true: new
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{true: ignored, 'true': old}
-    \ No newline at end of file
-    +{true: ignored, 'true': new}
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{1: ignored, '1': old}
-    \ No newline at end of file
-    +{1: ignored, '1': new}
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{!!int '1': ignored, '1': old}
-    \ No newline at end of file
-    +{!!int '1': ignored, '1': new}
-    \ No newline at end of file
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{[complex, key]: ignored, name: old}
-    \ No newline at end of file
-    +{[complex, key]: ignored, name: new}
-    \ No newline at end of file
+#[test_case(
+    "'it''s': old",
+    "it's"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -'it''s': old
+        \ No newline at end of file
+        +'it''s': new
+        \ No newline at end of file
     ");
+    "escaped quote"
+)]
+#[test_case(
+    "'a.b/[0]': old",
+    "a.b/[0]"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -'a.b/[0]': old
+        \ No newline at end of file
+        +'a.b/[0]': new
+        \ No newline at end of file
+    ");
+    "path punctuation"
+)]
+#[test_case(
+    "é: old",
+    "é"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -é: old
+        \ No newline at end of file
+        +é: new
+        \ No newline at end of file
+    ");
+    "unicode"
+)]
+#[test_case(
+    "!!str true: old",
+    "true"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -!!str true: old
+        \ No newline at end of file
+        +!!str true: new
+        \ No newline at end of file
+    ");
+    "core string tag"
+)]
+#[test_case(
+    "! true: old",
+    "true"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -! true: old
+        \ No newline at end of file
+        +! true: new
+        \ No newline at end of file
+    ");
+    "non specific tag"
+)]
+#[test_case(
+    "{true: ignored, 'true': old}",
+    "true"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{true: ignored, 'true': old}
+        \ No newline at end of file
+        +{true: ignored, 'true': new}
+        \ No newline at end of file
+    ");
+    "boolean spelling"
+)]
+#[test_case(
+    "{1: ignored, '1': old}",
+    "1"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{1: ignored, '1': old}
+        \ No newline at end of file
+        +{1: ignored, '1': new}
+        \ No newline at end of file
+    ");
+    "integer spelling"
+)]
+#[test_case(
+    "{!!int '1': ignored, '1': old}",
+    "1"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{!!int '1': ignored, '1': old}
+        \ No newline at end of file
+        +{!!int '1': ignored, '1': new}
+        \ No newline at end of file
+    ");
+    "explicit integer spelling"
+)]
+#[test_case(
+    "{[complex, key]: ignored, name: old}",
+    "name"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -{[complex, key]: ignored, name: old}
+        \ No newline at end of file
+        +{[complex, key]: ignored, name: new}
+        \ No newline at end of file
+    ");
+    "complex sibling key"
+)]
+fn fields_use_literal_decoded_string_keys(source: &str, name: &str) -> String {
+    let mut document = Editable::<IgnoredAny>::parse(source).unwrap();
+    document
+        .edit(|e| {
+            let mut field = e.root_mut().field(name)?;
+            assert!(
+                matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old")
+            );
+            field.set("new")
+        })
+        .unwrap_or_else(|error| panic!("{source}: {error}"));
+    edit_diff(source, document.source())
 }
 
 #[test]
@@ -517,31 +560,31 @@ fn navigation_errors_identify_the_selected_path() {
     "#);
 }
 
-#[test]
-fn ambiguous_string_keys_are_rejected_after_raw_insertions() {
-    for operation in 0..3 {
-        let mut document = Editable::<Value>::parse("name: old").unwrap();
-        let error = document
-            .edit(|e| {
-                let syntax = e.syntax_mut();
-                syntax.insert_entry(&syntax.root(), 1, "'name'", "other")?;
-                match operation {
-                    0 => {
-                        e.root_mut().field("name")?;
-                    }
-                    1 => {
-                        e.root_mut().set_entry("name", "new")?;
-                    }
-                    _ => {
-                        e.root_mut().remove_field("name")?;
-                    }
+#[test_case(0)]
+#[test_case(1)]
+#[test_case(2)]
+fn ambiguous_string_keys_are_rejected_after_raw_insertions(operation: usize) {
+    let mut document = Editable::<Value>::parse("name: old").unwrap();
+    let error = document
+        .edit(|e| {
+            let syntax = e.syntax_mut();
+            syntax.insert_entry(&syntax.root(), 1, "'name'", "other")?;
+            match operation {
+                0 => {
+                    e.root_mut().field("name")?;
                 }
-                Ok(())
-            })
-            .unwrap_err();
-        assert!(error.message.contains("ambiguous mapping key"));
-        assert_eq!(document.source(), "name: old");
-    }
+                1 => {
+                    e.root_mut().set_entry("name", "new")?;
+                }
+                _ => {
+                    e.root_mut().remove_field("name")?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(error.message.contains("ambiguous mapping key"));
+    assert_eq!(document.source(), "name: old");
 }
 
 struct FailsSerialization;

@@ -1,3 +1,5 @@
+use test_case::test_case;
+
 use std::{collections::BTreeMap, fmt::Debug};
 
 use astral_yaml_serde::{from_str, to_string};
@@ -32,36 +34,37 @@ fn every_unicode_scalar_survives_serialization() {
 }
 
 // https://yaml.org/spec/1.2.2/#10214-floating-point
-#[test]
-fn floating_point_exponents_and_mantissas_roundtrip() {
-    for sign in [0, 1_u64 << 63] {
-        for exponent in 0..=0x7ff {
-            for mantissa in [0, 1, (1 << 51) - 1, 1 << 51, (1 << 52) - 1] {
-                let value = f64::from_bits(sign | (exponent << 52) | mantissa);
-                let yaml = to_string(&value).unwrap();
-                let decoded = from_str::<f64>(&yaml).unwrap();
+#[test_case(0; "positive")]
+#[test_case(1 << 63; "negative")]
+fn f64_exponents_and_mantissas_roundtrip(sign: u64) {
+    for exponent in 0..=0x7ff {
+        for mantissa in [0, 1, (1 << 51) - 1, 1 << 51, (1 << 52) - 1] {
+            let value = f64::from_bits(sign | (exponent << 52) | mantissa);
+            let yaml = to_string(&value).unwrap();
+            let decoded = from_str::<f64>(&yaml).unwrap();
 
-                if value.is_nan() {
-                    assert!(decoded.is_nan());
-                } else {
-                    assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
-                }
+            if value.is_nan() {
+                assert!(decoded.is_nan());
+            } else {
+                assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
             }
         }
     }
+}
 
-    for sign in [0, 1_u32 << 31] {
-        for exponent in 0..=0xff {
-            for mantissa in [0, 1, (1 << 22) - 1, 1 << 22, (1 << 23) - 1] {
-                let value = f32::from_bits(sign | (exponent << 23) | mantissa);
-                let yaml = to_string(&value).unwrap();
-                let decoded = from_str::<f32>(&yaml).unwrap();
+#[test_case(0; "positive")]
+#[test_case(1 << 31; "negative")]
+fn f32_exponents_and_mantissas_roundtrip(sign: u32) {
+    for exponent in 0..=0xff {
+        for mantissa in [0, 1, (1 << 22) - 1, 1 << 22, (1 << 23) - 1] {
+            let value = f32::from_bits(sign | (exponent << 23) | mantissa);
+            let yaml = to_string(&value).unwrap();
+            let decoded = from_str::<f32>(&yaml).unwrap();
 
-                if value.is_nan() {
-                    assert!(decoded.is_nan());
-                } else {
-                    assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
-                }
+            if value.is_nan() {
+                assert!(decoded.is_nan());
+            } else {
+                assert_eq!(decoded.to_bits(), value.to_bits(), "{yaml:?}");
             }
         }
     }

@@ -1,112 +1,119 @@
 //! Typed projections follow scalar style changes and comment relocation.
 
+use test_case::test_case;
+
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
 use astral_yaml_serde::{Editable, edit::CollectionStyle};
 use serde_json::json;
 
-#[test]
-fn nested_layout_changes_keep_the_typed_model_current() {
-    for source in [
-        indoc! {r"
-            outer:
-              value: &a old
-        "},
-        indoc! {r"
-            outer:
-              value: &a old
+#[test_case(
+    indoc! {r"
+        outer:
+          value: &a old
+    "};
+    "nested value"
+)]
+#[test_case(
+    indoc! {r"
+        outer:
+          value: &a old
 
-            # root
-        "},
-        indoc! {r"
-            outer:
-              value: &a old
-            copy: *a
-        "},
-    ] {
-        for seed in 1..=128u64 {
-            let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
-            let mut expected = json!({"outer": {"value": "old"}});
-            if source.contains("copy:") {
-                expected["copy"] = json!("old");
-            }
-            let mut comments = [Vec::new(), Vec::new()];
-            if source.contains("# root") {
-                comments[0].push(" root");
-            }
-            let mut state = seed;
-            for _ in 0..32 {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                let operation = state % 8;
-                document
-                    .edit(|editor| {
-                        match operation {
-                            0 => {
-                                editor
-                                    .root_mut()
-                                    .field("outer")?
-                                    .field("value")?
-                                    .set("null")?;
-                            }
-                            1 => {
-                                let syntax = editor.syntax_mut();
-                                let outer = syntax.mapping_entries(&syntax.root())?[0].1.clone();
-                                let value = syntax.mapping_entries(&outer)?[0].1.clone();
-                                syntax.replace(
-                                    &value,
-                                    indoc! {r"
-                                        &a |+
-                                          new
+        # root
+    "};
+    "root comment"
+)]
+#[test_case(
+    indoc! {r"
+        outer:
+          value: &a old
+        copy: *a
+    "};
+    "external alias"
+)]
+fn nested_layout_changes_keep_the_typed_model_current(source: &str) {
+    for seed in 1..=128u64 {
+        let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
+        let mut expected = json!({"outer": {"value": "old"}});
+        if source.contains("copy:") {
+            expected["copy"] = json!("old");
+        }
+        let mut comments = [Vec::new(), Vec::new()];
+        if source.contains("# root") {
+            comments[0].push(" root");
+        }
+        let mut state = seed;
+        for _ in 0..32 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let operation = state % 8;
+            document
+                .edit(|editor| {
+                    match operation {
+                        0 => {
+                            editor
+                                .root_mut()
+                                .field("outer")?
+                                .field("value")?
+                                .set("null")?;
+                        }
+                        1 => {
+                            let syntax = editor.syntax_mut();
+                            let outer = syntax.mapping_entries(&syntax.root())?[0].1.clone();
+                            let value = syntax.mapping_entries(&outer)?[0].1.clone();
+                            syntax.replace(
+                                &value,
+                                indoc! {r"
+                                    &a |+
+                                      new
 
-                                    "},
-                                )?;
+                                "},
+                            )?;
+                        }
+                        2 | 3 => editor.root_mut().field("outer")?.set_collection_style(
+                            if operation == 2 {
+                                CollectionStyle::Flow
+                            } else {
+                                CollectionStyle::Block
+                            },
+                        )?,
+                        _ => {
+                            let owner = usize::from(operation == 4 || operation == 5);
+                            let mut cursor = editor.root_mut();
+                            if owner == 1 {
+                                cursor = cursor.field("outer")?;
                             }
-                            2 | 3 => editor.root_mut().field("outer")?.set_collection_style(
-                                if operation == 2 {
-                                    CollectionStyle::Flow
-                                } else {
-                                    CollectionStyle::Block
-                                },
-                            )?,
-                            _ => {
-                                let owner = usize::from(operation == 4 || operation == 5);
-                                let mut cursor = editor.root_mut();
-                                if owner == 1 {
-                                    cursor = cursor.field("outer")?;
-                                }
-                                if operation % 2 == 0 {
-                                    cursor.append_comment(" added", CommentPlacement::Detached)?;
-                                    comments[owner].push(" added");
-                                } else if !comments[owner].is_empty() {
-                                    cursor.remove_comment(0)?;
-                                    comments[owner].remove(0);
-                                }
+                            if operation % 2 == 0 {
+                                cursor.append_comment(" added", CommentPlacement::Detached)?;
+                                comments[owner].push(" added");
+                            } else if !comments[owner].is_empty() {
+                                cursor.remove_comment(0)?;
+                                comments[owner].remove(0);
                             }
                         }
-                        Ok(())
-                    })
-                    .unwrap_or_else(|error| {
-                        panic!("{source:?}, seed {seed}, operation {operation}: {error}")
-                    });
-                if operation <= 1 {
-                    let value = if operation == 0 {
-                        "null"
-                    } else {
-                        indoc! {r"
-                            new
-
-                        "}
-                    };
-                    expected["outer"]["value"] = json!(value);
-                    if source.contains("copy:") {
-                        expected["copy"] = json!(value);
                     }
+                    Ok(())
+                })
+                .unwrap_or_else(|error| {
+                    panic!("{source:?}, seed {seed}, operation {operation}: {error}")
+                });
+            if operation <= 1 {
+                let value = if operation == 0 {
+                    "null"
+                } else {
+                    indoc! {r"
+                        new
+
+                    "}
+                };
+                expected["outer"]["value"] = json!(value);
+                if source.contains("copy:") {
+                    expected["copy"] = json!(value);
                 }
-                assert_eq!(document.value(), &expected);
-                check_comments(&document, &comments);
             }
+            assert_eq!(document.value(), &expected);
+            check_comments(&document, &comments);
         }
     }
 }
