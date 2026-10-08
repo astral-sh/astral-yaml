@@ -65,21 +65,29 @@ pub(crate) fn run(args: Vec<OsString>) -> io::Result<ExitCode> {
     }
 
     let runs = if args.is_empty() {
-        ["parse", "serde", "decode", "typed"]
-            .map(|target| {
-                [
-                    "run",
-                    target,
-                    "--",
-                    "-max_total_time=60",
-                    "-timeout=2",
-                    "-max_len=65536",
-                    "-rss_limit_mb=2048",
-                ]
-                .map(OsString::from)
-                .to_vec()
-            })
+        [
+            "parse",
+            "serde",
+            "decode",
+            "typed",
+            "editable",
+            "editable-model",
+            "editable-graph",
+        ]
+        .map(|target| {
+            [
+                "run",
+                target,
+                "--",
+                "-max_total_time=60",
+                "-timeout=2",
+                "-max_len=65536",
+                "-rss_limit_mb=2048",
+            ]
+            .map(OsString::from)
             .to_vec()
+        })
+        .to_vec()
     } else {
         vec![args]
     };

@@ -96,3 +96,57 @@ mod astral {
         });
     }
 }
+
+#[cfg(feature = "editable")]
+mod editable {
+    use astral_yaml_dev::{Value, indoc};
+    use astral_yaml_serde::Editable;
+    use divan::{Bencher, black_box};
+
+    const SOURCE: &str = indoc! {r"
+        timeout: 30 # seconds
+        servers: [primary, backup]
+        extra: 'retained'
+    "};
+
+    #[divan::bench]
+    fn parse(bencher: Bencher) {
+        bencher.bench_local(|| {
+            black_box(Editable::<Value>::parse(black_box(SOURCE)).unwrap());
+        });
+    }
+
+    #[divan::bench]
+    fn unchanged_output(bencher: Bencher) {
+        let document = Editable::<Value>::parse(SOURCE).unwrap();
+        bencher.bench_local(|| {
+            black_box(document.to_yaml());
+        });
+    }
+
+    // Include construction: each transaction starts from the same source.
+    #[divan::bench]
+    fn replace_scalar(bencher: Bencher) {
+        bencher.bench_local(|| {
+            let mut document = Editable::<Value>::parse(SOURCE).unwrap();
+            document
+                .edit(|editor| editor.root_mut().field("timeout")?.set(60))
+                .unwrap();
+            black_box(document);
+        });
+    }
+
+    #[divan::bench]
+    fn insert_entry(bencher: Bencher) {
+        bencher.bench_local(|| {
+            let mut document = Editable::<Value>::parse(SOURCE).unwrap();
+            document
+                .edit(|editor| {
+                    editor.root_mut().set_entry("enabled", true)?;
+                    Ok(())
+                })
+                .unwrap();
+            black_box(document);
+        });
+    }
+}

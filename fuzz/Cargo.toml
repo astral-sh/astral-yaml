@@ -10,9 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde = { version = "1.0", features = ["derive"] }
-astral-yaml = { path = "../crates/astral-yaml" }
-astral-yaml-dev = { path = "../crates/astral-yaml-dev" }
-astral-yaml-serde = { path = "../crates/astral-yaml-serde" }
+astral-yaml = { path = "../crates/astral-yaml", features = ["editable"] }
+astral-yaml-dev = { path = "../crates/astral-yaml-dev", features = ["editable"] }
+astral-yaml-serde = { path = "../crates/astral-yaml-serde", features = ["editable"] }
 
 [[bin]]
 name = "parse"
@@ -38,6 +38,26 @@ bench = false
 [[bin]]
 name = "typed"
 path = "fuzz_targets/typed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "editable"
+path = "fuzz_targets/editable.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "editable-model"
+path = "fuzz_targets/editable_model.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "editable-graph"
+path = "fuzz_targets/editable_graph.rs"
 test = false
 doc = false
 bench = false

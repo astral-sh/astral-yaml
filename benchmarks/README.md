@@ -7,6 +7,8 @@ Run Astral's benchmarks from the repository root:
 cargo bench -p astral-yaml-dev --bench yaml --locked
 ```
 
+Add `--features editable` to include the editing benchmarks.
+
 To compare implementations, enable the `compare` feature and select its target:
 
 ```sh
@@ -30,6 +32,7 @@ Each workload processes all documents in one of the three fixed
 | `astral::parse` | Parse the YAML stream. |
 | `astral::deserialize` | Parse and deserialize into `Vec<astral_yaml_dev::Value>`. |
 | `astral::deserialize_spanned` | Parse and deserialize, collecting each document root's span. |
+| `editable::{parse,unchanged_output,replace_scalar,insert_entry}` | Owned syntax construction, unchanged output, and value-based edit transactions on a small configuration; edit cases include construction. |
 | `astral::deserialize_spanned_fields` | Also wrap each top-level mapping value in `Spanned`. |
 | `astral::serialize` | Serialize previously deserialized values. |
 
@@ -87,7 +90,7 @@ uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m
 To include comparisons:
 
 ```sh
-uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare --bench yaml --bench compare --locked -m simulation
+uv run --only-dev --locked cargo codspeed build -p astral-yaml-dev --features compare,editable --bench yaml --bench compare --locked -m simulation
 uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml --bench compare -m simulation
 ```
 

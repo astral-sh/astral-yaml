@@ -6,11 +6,11 @@ With `uv` and `rustup` on `PATH`, run:
 cargo xtask fuzz
 ```
 
-The command seeds all four corpora, installs nightly if missing, and adds its
+The command seeds all seven corpora, installs nightly if missing, and adds its
 `rust-src` and `llvm-tools-preview` components. It runs cargo-fuzz through
 `uv run --only-dev --locked`, using the project's pinned development tools.
-The `parse`, `serde`, `decode`, and `typed` targets run sequentially for 60 seconds
-each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
+The `parse`, `serde`, `decode`, `typed`, `editable`, `editable-model`, and `editable-graph` targets
+run sequentially for 60 seconds each, with a 2-second input timeout, 64 KiB input limit, and 2 GiB RSS limit.
 Setup or fuzzing failures stop the command. Missing `uv` is an error.
 
 Extra arguments are passed to cargo-fuzz after the same setup:
@@ -28,11 +28,26 @@ Seeding preserves existing corpus discoveries and artifacts.
 
 ## Targets
 
+The fuzz crate explicitly enables `editable` on both libraries and the shared
+development helpers.
+
 - `parse` checks source ranges, arena references, comment ordering, and error
   ranges. Its seeds include every official test-suite case.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
+- `editable` checks bounded syntax and typed edits on arbitrary YAML, including
+  LF normalization and rollback. Its first eight bytes select edits and paths;
+  bit 5 selects typed editing. The rest is YAML.
+- `editable-model` checks valid edits against independent value and comment
+  models, including nested collections, aliases, and canceled edits.
+- `editable-graph` checks drafts and commits against an independent recursive
+  tree and alias graph, including tags, complex keys, repeated anchors, document
+  markers, and all four comment placements. It generates representable attachments
+  and ends transaction batches at explicit layout requests. Up to eight initial
+  bytes seed the graph; byte zero also selects framing and batch size. Each
+  subsequent three-byte group selects an operation and position.
+  Inputs are bounded to 512 bytes and 32 operations.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
   tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
   selects one of 29 types; the rest is YAML.
@@ -46,12 +61,32 @@ aliases.
 Corpora and artifacts are gitignored. Reproduce and minimize findings, then save
 them in `fixtures/regressions` with a regression assertion.
 
+## Valid-edit model bounds
+
+The recursive model retains live alias targets and avoids nested scalar suffixes
+and trailing comments on empty nested collections: these have no attachment
+boundary. Explicit style requests end a batch, since later edits can require a
+different style. Block conversion retains flow delimiters where comment order or
+an enclosing trailing comment requires them; descendants of flow nodes stay flow.
+
+Other bounds limit the model, not the API:
+
+| Model scope | Complementary checks |
+| --- | --- |
+| One inline comment per node, allowing arbitrary scalar replacements | Bounded layouts with all subsets of tag, anchor, opening, and closing inline comments |
+| Replacement prefixes omitted when retained comments need property-header ordering | Bounded fragment-prefix merges with property comments in root, item, key, and value positions |
+| Generated detached comments use suffix positions | Corpus reinsertion at captured positions; gap insertion and child-deletion tests |
+
+The bounded layout tests compare equivalent comment edits with independent source
+projections. Explicit block conversions also have parsed block witnesses with the
+same content and attachments. Invalid edits remain covered by rollback tests.
+
 ## Corpus coverage
 
 Replay each corpus, then generate source reports:
 
 ```sh
-for target in parse serde decode typed; do
+for target in parse serde decode typed editable editable-model editable-graph; do
   cargo xtask fuzz coverage "$target" -- -timeout=2 -rss_limit_mb=2048
 done
 uv run --script scripts/fuzz-coverage.py

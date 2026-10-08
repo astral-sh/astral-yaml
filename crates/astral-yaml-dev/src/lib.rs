@@ -5,6 +5,8 @@ pub mod benchmarks;
 mod edits;
 mod events;
 pub mod fixtures;
+#[cfg(feature = "editable")]
+mod recursive_edits;
 mod spans;
 mod value;
 
@@ -12,5 +14,7 @@ pub use annotations::span_snapshot;
 pub use edits::edit_diff;
 pub use events::events;
 pub use indoc::{formatdoc, indoc};
+#[cfg(feature = "editable")]
+pub use recursive_edits::check_recursive_edits;
 pub use spans::validate_spans;
 pub use value::Value;

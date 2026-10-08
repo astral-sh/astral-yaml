@@ -21,3 +21,7 @@ workspace = true
 astral-yaml-dev.workspace = true
 insta.workspace = true
 serde_json.workspace = true
+
+[[example]]
+name = "edit-config"
+required-features = ["editable"]
