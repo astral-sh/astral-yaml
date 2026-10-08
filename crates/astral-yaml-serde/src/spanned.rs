@@ -17,13 +17,12 @@ pub(crate) const NAME: &str = "$astral_yaml::Spanned";
 ///
 /// Can wrap a field, mapping key, collection element, or whole document.
 ///
-/// The span is a half-open byte range in the decoded UTF-8 source. It covers the
-/// entire YAML node, including quotes, collection delimiters, tags, and anchors.
-/// An alias has the span of its `*name` occurrence; wrapped children within an
-/// aliased collection have spans in the anchor's definition. Implicit nulls can
-/// have empty spans. Use [`astral_yaml::Source::original_span`] to map a span back
-/// to encoded input bytes. In an editable document, spans refer to its
-/// LF-normalized source.
+/// The span is a half-open byte range in the decoded UTF-8 source. It covers the entire
+/// YAML node, including quotes, collection delimiters, tags, and anchors. An alias has
+/// the span of its `*name` occurrence. Wrapped children within an aliased collection
+/// have spans in the anchor's definition. Implicit nulls can have empty spans. Use
+/// [`astral_yaml::Source::original_span`] to map a span back to encoded input bytes. In
+/// an editable document, spans refer to its LF-normalized source.
 ///
 /// Serialization emits only the value. Mutating the value does not update its
 /// metadata. Equality and hashing include the value and span.

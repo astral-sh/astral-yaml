@@ -111,7 +111,7 @@ enum TagState {
     Unconsumed,
     // Core tags still determine the payload's type after capture.
     ConsumedCore,
-    // Application tags are metadata; resolve the payload without its tag.
+    // Application tags are metadata. Resolve the payload without its tag.
     ConsumedApplication,
 }
 

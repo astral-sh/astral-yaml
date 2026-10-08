@@ -1,6 +1,7 @@
-//! A retained occurrence occupies a grammar slot owned by its enclosing
-//! collection. Scope selection and emission context use the same immutable
-//! index, including header indicators and dependencies through mapping keys.
+//! Choose which source region an edit must rewrite.
+//!
+//! A node's enclosing collection determines its valid syntax. This index records
+//! those constraints, including headers and mapping keys, for planning and emission.
 
 use super::{
     Comment, CommentPosition, Node, NodeKind,

@@ -31,8 +31,8 @@ pub struct EditableDocument {
 /// An owned syntax node. Properties and comments belong to the occurrence,
 /// including when the occurrence is an alias.
 ///
-/// `Location` separates syntax from its source provenance. Committed nodes use
-/// [`Span`]; unfinished syntax can use a location type that represents absence.
+/// Committed nodes use [`Span`] for `Location`. During an edit, nodes use
+/// `Option<Span>` because inserted syntax has no original source range.
 #[derive(Clone, Debug)]
 pub struct Node<Location = Span> {
     pub(crate) span: Location,
@@ -73,11 +73,12 @@ pub struct Comment<Location = Span> {
     pub(crate) span: Location,
 }
 
-/// Source position and attachment are distinct: comments between a node's
-/// properties and content can be attached as trailing comments to that node.
-/// Owned syntax uses node IDs; editing operations use transaction handles.
-/// Emission may move headers while preserving attachments. Detached collection
-/// comments retain their boundary before the named child.
+/// A comment's position within its owner.
+///
+/// This differs from [`CommentPlacement`]. For example, a comment between a node's
+/// properties and content can have trailing placement. Emission may move headers
+/// while preserving placement, but detached comments stay before their named child.
+/// Committed syntax identifies children by node ID. Edits use transaction handles.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommentPosition<Child = NodeId> {
     /// Before the node's properties and content.
@@ -245,7 +246,7 @@ impl EditableDocument {
         })
     }
 
-    /// Returns the document's current source with LF line endings.
+    /// Clones the committed source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.source.text.clone()
@@ -309,7 +310,7 @@ impl EditableDocument {
         self.source.nodes.get(id.0)
     }
 
-    /// Parser limits used when constructing this document.
+    /// Parser limits used to construct this document and check its edits.
     #[must_use]
     pub fn options(&self) -> ParseOptions {
         self.source.options

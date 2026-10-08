@@ -10,11 +10,10 @@ enum Tail {
     Detached(NodeId),
 }
 
-/// Block collections need headers for inline comments and have no closing
-/// token. Their final scalar or detached comment can affect an enclosing
-/// comment's separation. Resolve these
-/// dependencies before choosing rewrite regions, without changing the
-/// candidate's meaning or requested styles.
+/// Resolve headers and comment separation before choosing rewrite regions.
+/// Block collections need a header for each inline comment. Their final scalar
+/// or detached comment can also require separation from an enclosing comment.
+/// Preserve the candidate's content and requested styles.
 pub(super) struct Layout {
     tails: Vec<Tail>,
     quoted: Vec<bool>,

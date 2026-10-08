@@ -118,9 +118,9 @@ impl Serializer {
         const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
         const SPACES: u64 = 0x2020_2020_2020_2020;
 
-        // High bits detect non-ASCII bytes. Adding one detects DEL; subtracting
-        // spaces detects controls. Carries and borrows cannot hide the first
-        // offending byte, and printable ASCII causes neither.
+        // High bits detect non-ASCII bytes. Adding one detects DEL. Subtracting spaces
+        // detects controls. Carries and borrows cannot hide the first offending byte,
+        // and printable ASCII causes neither.
         let non_printable = word | word.wrapping_add(ONES) | word.wrapping_sub(SPACES);
 
         // XOR turns quotes and backslashes into zero bytes. The zero-byte test
@@ -175,9 +175,9 @@ impl Serializer {
             escape
         };
 
-        // Copy runs of text until a possible escape. The non-ASCII characters
-        // escaped below start with C2, E2, or EF; stopping at those leading bytes
-        // or at ASCII preserves UTF-8 character boundaries.
+        // Copy runs of text until a possible escape. The non-ASCII characters escaped
+        // below start with C2, E2, or EF. Stopping at those leading bytes or at ASCII
+        // preserves UTF-8 character boundaries.
         while let Some(index) = value.bytes().position(|byte| ESCAPE[usize::from(byte)]) {
             self.output.push_str(&value[..index]);
             let c = value[index..].chars().next().unwrap();

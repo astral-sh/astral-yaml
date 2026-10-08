@@ -20,7 +20,7 @@ pub enum CommentPlacement {
 /// A source comment and its placement, with text borrowed from the input.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AttachedComment<'a> {
-    /// Text excludes `#`; the span includes it and excludes the line break.
+    /// Text excludes `#`. The span includes it and excludes the line break.
     pub comment: Comment<'a>,
     /// Placement relative to the direct owner, even in an ancestor's comment list.
     pub placement: CommentPlacement,
@@ -126,8 +126,8 @@ impl<'de> CommentIndex<'de> {
             .collect::<Result<_, Error>>()?;
         owned.sort_by_key(|(owner, comment)| (*owner, comment.comment.span.start()));
 
-        // Preorder makes each subtree a contiguous interval. Store comments by
-        // owner here; a wrapper sorts its subtree's comments into source order.
+        // Preorder makes each subtree a contiguous interval. Store comments by owner
+        // here. A wrapper sorts its subtree's comments into source order.
         let mut offsets = Vec::with_capacity(tree.nodes.len() + 1);
         let mut comment_index = 0;
 

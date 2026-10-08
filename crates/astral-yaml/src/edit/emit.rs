@@ -17,8 +17,8 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
     }
 }
 
-/// Emit syntax in an explicit placement. Source ownership and splicing belong
-/// to the boundary planner; the emitter cannot read or extend a source range.
+/// Emit syntax in an explicit placement. Source ownership and splicing belong to the
+/// boundary planner. The emitter cannot read or extend a source range.
 pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     document: Syntax<'a, Location>,
     options: crate::ParseOptions,
@@ -906,7 +906,7 @@ pub(super) fn key_form<Location>(node: &super::Node<Location>, flow: bool) -> Ke
 }
 
 /// Whether block presentation provides a header for an inline content comment.
-/// Collection headers need a tag or anchor; block scalars have their indicator.
+/// Collection headers need a tag or anchor. Block scalars have their indicator.
 pub(super) fn has_inline_header<Location>(node: &super::Node<Location>, flow: bool) -> bool {
     !flow
         && (matches!(

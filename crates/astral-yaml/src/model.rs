@@ -130,7 +130,7 @@ pub struct Node<'a> {
 pub struct Comment<'a> {
     /// Includes `#` and excludes the line break.
     pub span: Span,
-    /// Excludes `#` and the line break; preserves whitespace after `#`.
+    /// Excludes `#` and the line break. Preserves whitespace after `#`.
     pub text: &'a str,
 }
 

@@ -12,8 +12,8 @@ pub(super) struct Keys {
     canonical: Vec<Canonical>,
 }
 
-/// Duplicate checks are unnecessary when every key clears a different bit.
-/// A collision only requests an exact comparison; it never establishes equality.
+/// Duplicate checks are unnecessary when every key clears a different bit. A collision
+/// only requests an exact comparison. It never establishes equality.
 #[derive(Clone, Copy)]
 pub(super) struct Scope {
     start: usize,

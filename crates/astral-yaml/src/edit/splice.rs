@@ -1,6 +1,6 @@
-//! Source boundaries are reserved before emission. Syntax output describes its
-//! ending; it cannot choose which source bytes to replace. Patch construction
-//! checks all ranges and the complete output size before allocating the result.
+//! Join emitted syntax to retained source.
+//! Reserve source ranges before emission, then check their boundaries and total
+//! output size before allocating the result. Emission cannot expand these ranges.
 
 use super::{
     Comment,
@@ -51,8 +51,8 @@ pub(super) enum Separator {
     Line(usize),
 }
 
-/// Everything the emitter needs to join a node to its retained prefix. These
-/// are formatting instructions, not permission to inspect or consume source.
+/// Indentation and separators for joining emitted syntax to its retained prefix.
+/// The emitter receives no source ranges.
 pub(super) struct Placement<'a, Location> {
     pub(super) comments: &'a [Comment<Location>],
     pub(super) context: Context,
@@ -306,9 +306,9 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
     }
 }
 
-/// Validated borrowed/owned segments. Construction proves source ordering,
-/// disjoint UTF-8 intervals, and the exact final size. Application cannot fail
-/// or slice source at unchecked offsets.
+/// Borrowed and owned segments ready to concatenate.
+/// Construction checks ordering, disjoint UTF-8 ranges, and total size so
+/// applying the patch needs no further checks.
 pub(super) struct PatchSet<'a> {
     segments: Vec<Cow<'a, str>>,
     length: usize,

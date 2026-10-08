@@ -82,7 +82,7 @@ let config: Config = astral_yaml_serde::from_str("message: !Text hello").unwrap(
 ```
 
 The adapter supports mixed tagged/untagged enums. It applies to the annotated
-value through options and newtypes; nested values require their own opt-in.
+value through options and newtypes. Nested values require their own opt-in.
 
 Use `Tagged<T>` to retain an explicit local, global, or core tag with a typed payload:
 
@@ -114,8 +114,9 @@ compare Astral with `deser-yaml` 0.9.1, `yaml_serde` 0.10.7, and serde-saphyr 1.
 | OpenAPI Petstore | 14.81 µs | 44.89 µs | 69.25 µs | 114.30 µs |
 | 128 services (typed) | 107.95 µs | 229.60 µs | — | 887.05 µs |
 
-The fixture workloads deserialize into dynamic values; `deser-yaml` uses its own
-value type, which retains additional formatting information. The service workload
-uses the same structs for each implementation. These are medians of six run
-medians on an Apple M5 Max with Rust 1.98.1, including parsing and output
-destruction. See [benchmarks](benchmarks/README.md) for settings and more results.
+The fixture workloads deserialize into dynamic values. `deser-yaml` uses its own
+value type, which retains additional formatting information. The service
+workload uses the same structs for each implementation. These are medians of six
+run medians on an Apple M5 Max with Rust 1.98.1, including parsing and output
+destruction. See [benchmarks](benchmarks/README.md) for settings and more
+results.

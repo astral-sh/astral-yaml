@@ -1,5 +1,5 @@
-//! A mutable tree owns node identity, membership, and style requests. Freezing it
-//! ends mutation and supplies the intended syntax for planning and verification.
+//! Mutable syntax for a transaction, including node identities and style requests.
+//! Freezing the tree ends mutation. Planning and commit checks use the frozen tree.
 
 use super::{Comment, CommentPosition, EditableDocument, Node, NodeKind, emit, view::Syntax};
 use crate::{
@@ -237,8 +237,8 @@ impl Draft {
         let parent = self.parent(id);
         let document = self.fragment(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
-        // Attaching resets the root's style request and membership. Retire its
-        // previous descendants afterwards; they cannot refer to imported slots.
+        // Attaching resets the root's style request and membership. Retire its previous
+        // descendants afterwards. They cannot refer to imported slots.
         self.attach(document, parent, Some((id, preserve)));
         self.retire(
             removed
@@ -612,9 +612,9 @@ fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: 
     }
 }
 
-/// Merge the retained and imported comments at their structural positions.
-/// Each list keeps its own order; retained comments precede imports at a shared
-/// boundary. Collection gaps retain their ordinal position in the replacement.
+/// Merge the retained and imported comments at their structural positions. Each list
+/// keeps its own order. Retained comments precede imports at a shared boundary.
+/// Collection gaps retain their ordinal position in the replacement.
 fn merged_comments(
     old: &Node<Option<Span>>,
     replacement: &Node<Option<Span>>,

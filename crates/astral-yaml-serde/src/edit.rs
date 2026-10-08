@@ -55,9 +55,10 @@ impl<'a, 'doc> Editor<'a, 'doc> {
     }
 }
 
-/// A mutable position in the candidate syntax, scoped to one transaction.
-/// Navigation consumes the cursor; [`Self::reborrow`] retains a parent position.
-/// Aliases are occurrences and are not followed implicitly.
+/// A mutable position in a transaction's syntax.
+///
+/// Navigation consumes the cursor. Use [`Self::reborrow`] to keep the parent
+/// cursor for later edits. Navigation does not follow aliases.
 #[derive(Debug)]
 pub struct Cursor<'a, 'doc> {
     syntax: &'a mut SyntaxEditor<'doc>,
@@ -144,8 +145,8 @@ impl<'doc> Cursor<'_, 'doc> {
         }
     }
 
-    /// Selects a required decoded string key. Names are literal YAML keys;
-    /// periods, slashes, and brackets have no special meaning.
+    /// Selects a required string key. Periods, slashes, and brackets in `name`
+    /// are literal characters, not path separators.
     ///
     /// # Errors
     /// Rejects missing or ambiguous keys, non-mappings, and exhausted budgets.
@@ -172,9 +173,10 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(self)
     }
 
-    /// Replaces this node with a serialized Rust value. Strings remain strings.
-    /// Retains its anchor, outer comments, and compatible presentation style;
-    /// tags come from the new value. Old descendants are removed.
+    /// Replaces this node with a serialized Rust value, removing its descendants.
+    ///
+    /// Strings remain strings. The replacement keeps the node's anchor, outer
+    /// comments, and compatible style. Tags come from the new value.
     ///
     /// # Errors
     /// Serialization and mutation failures poison the transaction, even if caught.
@@ -217,8 +219,8 @@ impl<'doc> Cursor<'_, 'doc> {
         Ok(self)
     }
 
-    /// Removes a string-keyed entry and its owned comments. Returns whether the
-    /// entry existed; a missing key leaves the mapping unchanged.
+    /// Removes a string-keyed entry and its comments. Returns `false` without
+    /// changing the mapping if the key is absent.
     ///
     /// # Errors
     /// Rejects non-mappings, ambiguous keys, and exhausted budgets.
@@ -266,7 +268,7 @@ impl<'doc> Cursor<'_, 'doc> {
         self.mutate(|cursor| Ok(cursor.syntax.remove_item(&cursor.handle, index)?))
     }
 
-    /// Requests an exact scalar style; commit rejects an incompatible request.
+    /// Requests an exact scalar style. Commit rejects an incompatible request.
     ///
     /// # Errors
     /// Rejects non-scalars, type-changing styles, and resource limits.

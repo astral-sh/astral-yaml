@@ -605,8 +605,8 @@ fn replace(
             kind: Kind::Sequence(vec![child]),
         };
     }
-    // Merging a fragment prefix with retained property comments depends on
-    // source headers; keep those replacement fragments free of root comments.
+    // Merging a fragment prefix with retained property comments depends on source
+    // headers. Keep those replacement fragments free of root comments.
     if old
         .comments
         .iter()

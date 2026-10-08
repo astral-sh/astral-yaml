@@ -20,7 +20,7 @@ and resource limits. Development commands are in the [contributing guide](CONTRI
   and separate test modules are excluded.
 
 The twelve [real-world fixtures](fixtures/real-world/README.md) contain 223,181
-source bytes. Eleven parse successfully; Sentry's Compose file is a rejection
+source bytes. Eleven parse successfully. Sentry's Compose file is a rejection
 case for an under-indented closing flow delimiter. PyYAML's Python and LibYAML
 parsers agree on syntax events and scalar ranges for the eleven accepted files.
 They accept Sentry's file, which astral-yaml rejects. Tests also compare LF, CRLF,
@@ -70,8 +70,8 @@ five encodings, and all 29 typed-serde selectors. The four targets completed
 | --- | ---: | --- |
 | parse | 1,591,706 | Parser 98.82% |
 | serde | 337,350 | Parser 98.98% |
-| decode | 1,262,857 | Parser 99.53%; decoder 89.19% |
-| typed | 909,838 | Deserializer 92.92%; serializer 98.37%; comments 98.67%; wrapper 59.02% |
+| decode | 1,262,857 | Parser 99.53%, decoder 89.19% |
+| typed | 909,838 | Deserializer 92.92%, serializer 98.37%, comments 98.67%, wrapper 59.02% |
 
 ### After optimization (2026-09-25)
 
@@ -82,12 +82,12 @@ These runs include the serializer's UTF-8 copying optimization and completed
 | --- | ---: | --- |
 | parse | 3,078,457 | Parser 98.20% |
 | serde | 1,184,711 | Parser 98.98% |
-| decode | 2,129,596 | Parser 99.53%; decoder 88.29% |
-| typed | 1,979,070 | Deserializer 92.92%; serializer 98.37%; comments 98.67%; wrapper 59.02% |
+| decode | 2,129,596 | Parser 99.53%, decoder 88.29% |
+| typed | 1,979,070 | Deserializer 92.92%, serializer 98.37%, comments 98.67%, wrapper 59.02% |
 
 ### Spans and comments, before optimization (2026-09-25)
 
-The typed target completed 1,803,697 executions; the serde target completed
+The typed target completed 1,803,697 executions. The serde target completed
 973,639. The typed target checked all 29 type selections with `Spanned`, including
 nested wrappers and comment indexing for tags and cyclic aliases.
 
@@ -99,14 +99,14 @@ are from the pre-span baseline.
 
 These runs completed 7,132,929 executions. Seeds included 407 source files, all
 five encodings, and 24 serde type selections. Earlier runs found two scalar-slicing
-panics; both have saved regression inputs.
+panics. Both have saved regression inputs.
 
 | Target | Executions | Line coverage from corpus replay |
 | --- | ---: | --- |
 | parse | 2,270,594 | Parser 98.14% |
 | serde | 1,142,347 | Parser 98.95% |
-| decode | 1,541,102 | Parser 99.51%; decoder 88.29% |
-| typed | 2,178,886 | Deserializer 96.19%; serializer 98.32%; schema 100% |
+| decode | 1,541,102 | Parser 99.51%, decoder 88.29% |
+| typed | 2,178,886 | Deserializer 96.19%, serializer 98.32%, schema 100% |
 
 ## Performance
 

@@ -29,7 +29,7 @@ pub(super) struct Rewrite<'a> {
     context: emit::Context,
 }
 
-/// Differences from the final candidate; canceled edits produce no rewrites.
+/// Differences from the final candidate. Canceled edits produce no rewrites.
 pub(super) struct Changes {
     roots: HashSet<NodeId>,
     root_comments: bool,
@@ -90,8 +90,8 @@ fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
         })
 }
 
-/// Existing comments outside the root token can be edited in the framing while
-/// its body retains its source. Generated comments require a body/layout plan.
+/// Edit existing comments outside the root without rewriting its body.
+/// New comments need a body layout to determine their positions.
 fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
     let body = |span: Span| span.start() >= old.span.start() && span.end() <= old.span.end();
     if new.comments.iter().any(|comment| comment.span.is_none()) {

@@ -150,11 +150,11 @@ impl<'a> Editor<'a> {
             .collect())
     }
 
-    /// Replaces a node with a parsed single-node YAML fragment, retaining its
-    /// outer comment attachments. Its handle remains valid; handles to its old
-    /// descendants expire. Later operations see the replacement's content.
-    /// Existing aliases to the node use its new anchor. Commit rejects a missing
-    /// anchor or shadowing that would change an alias's target identity.
+    /// Replaces a node with a parsed YAML fragment, keeping its outer comments.
+    ///
+    /// The node's handle remains valid and sees the replacement. Handles to its
+    /// old descendants expire. Existing aliases use the replacement's anchor.
+    /// Commit fails if the anchor is missing or shadowing changes an alias's target.
     ///
     /// # Errors
     /// Rejects invalid fragments, handles, or limits.
@@ -179,7 +179,7 @@ impl<'a> Editor<'a> {
         self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
     }
 
-    /// Inserts a parsed item before `index`; `len` appends.
+    /// Inserts a parsed item before `index`. `len` appends.
     ///
     /// # Errors
     /// Rejects invalid handles, indices, fragments, node kinds, or limits.
@@ -246,11 +246,12 @@ impl<'a> Editor<'a> {
         self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
     }
 
-    /// Inserts comment text (without `#` or a line break) at an owner-local index.
-    /// Inline comments require distinct syntax headers in the emitted layout.
-    /// Leading comments precede the node. Detached comments use the next existing
-    /// collection gap, or follow the node; other placements follow the node.
-    /// Use [`Self::insert_comment_at`] to select or retain a structural position.
+    /// Inserts text without `#` or a line break into the node's own comment list.
+    ///
+    /// Each inline comment needs a distinct syntax header. Leading comments
+    /// precede the node. Detached comments use the next existing collection gap
+    /// or follow the node. Trailing comments follow the node.
+    /// Use [`Self::insert_comment_at`] to select a specific position.
     ///
     /// # Errors
     /// Rejects invalid handles, indices, multiline text, or resource limits.
@@ -285,10 +286,10 @@ impl<'a> Editor<'a> {
         comment.position().try_map(|child| Ok(self.handle(child)))
     }
 
-    /// Inserts a comment at an explicit structural position and owner-local
-    /// index. For detached comments, `BeforeChild` accepts a sequence item or
-    /// mapping key owned by `handle`. Capture a position with [`Self::comment_position`]
-    /// before removing a comment to preserve a header or collection gap.
+    /// Inserts a comment at `index` in the node's comment list and at `position`
+    /// in its syntax. For detached comments, `BeforeChild` accepts a sequence
+    /// item or mapping key owned by `handle`. To preserve a header or gap, capture
+    /// its position with [`Self::comment_position`] before removing the comment.
     ///
     /// # Errors
     /// Rejects invalid handles, indices, child boundaries, multiline text, or

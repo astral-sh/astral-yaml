@@ -209,8 +209,8 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
     {
         let source = fixture.source();
         let stream = astral_yaml::parse(&source).unwrap();
-        // Editing explicitly accepts one document. Syntax validity comes from
-        // the corpus manifest; unexpected parse failures are not skipped.
+        // Editing explicitly accepts one document. Syntax validity comes from the
+        // corpus manifest. Unexpected parse failures are not skipped.
         if stream.documents().len() != 1 {
             continue;
         }

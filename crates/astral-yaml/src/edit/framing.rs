@@ -1,6 +1,6 @@
-//! Root comments share source positions with document markers and directives.
-//! Plan their final positions separately from the root's syntax, so deleting a
-//! comment does not delete the framing boundary that can host its replacement.
+//! Place root comments around document markers and directives.
+//! Plan markers separately from the root body so deleting a comment cannot
+//! remove a marker needed by its replacement.
 
 use super::{
     Comment, CommentPosition, emit,
@@ -451,8 +451,8 @@ impl InlineLayout {
                         && comment.position == CommentPosition::After)
             })
             .unwrap_or(root.comments.len());
-        // An existing opening-delimiter comment remains at that delimiter;
-        // properties before it therefore cannot host later inline comments.
+        // An existing opening-delimiter comment remains at that delimiter. Properties
+        // before it therefore cannot host later inline comments.
         let mut available = if matches!(kind, RootKind::FlowCollection)
             && body_comments
                 .first()
@@ -750,9 +750,9 @@ impl RootLayout {
                 (end..boundary).contains(&comment.span.start())
                     && !retained.contains(&comment.span.start())
             })
-            // Keep any closing inline header on the body side of the marker.
-            // A block scalar's span can already end at the following line's
-            // start; that line belongs to the suffix and must stay outside.
+            // Keep any closing inline header on the body side of the marker. A block
+            // scalar's span can already end at the following line's start. That line
+            // belongs to the suffix and must stay outside.
             .then(|| {
                 if original.text[..end].ends_with('\n') {
                     end
@@ -787,8 +787,8 @@ impl RootLayout {
                     && (comment.placement != CommentPlacement::Leading
                         || self.inline.end.is_empty())
             }
-            // Indented comments can become block-scalar text; rendering them
-            // together supplies the indentation boundary after the scalar.
+            // Indented comments can become block-scalar text. Rendering them together
+            // supplies the indentation boundary after the scalar.
             RootKind::BlockScalar => false,
             RootKind::FlowCollection => comment.placement != CommentPlacement::Leading,
             RootKind::BlockCollection {
@@ -1005,10 +1005,10 @@ fn removal_span(source: &str, span: Span) -> Span {
         span
     }
 }
-/// Choose separation only when inserting beside a retained outer comment
-/// preserves both attachments. Otherwise emission places the new comment next
-/// to the rewritten content. Inline and leading/trailing comments must remain
-/// adjacent to their syntax; detached comments require blank separation.
+/// Choose separation only when inserting beside a retained outer comment preserves both
+/// attachments. Otherwise emission places the new comment next to the rewritten
+/// content. Inline and leading/trailing comments must remain adjacent to their syntax.
+/// Detached comments require blank separation.
 fn outer_comment_breaks(
     comment: &Comment<Option<Span>>,
     anchor: &Comment<Option<Span>>,

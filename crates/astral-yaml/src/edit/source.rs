@@ -1,5 +1,5 @@
-//! Source text and its syntax index. Framing relocates coordinates without
-//! changing the frozen candidate or constructing a committed document.
+//! Source ranges used by the rewrite planner.
+//! Document framing shifts these ranges without changing the frozen syntax.
 
 use super::{
     Node,

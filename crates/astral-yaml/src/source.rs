@@ -13,8 +13,8 @@ pub enum Encoding {
 
 /// Decoded input with access to byte ranges in the original encoding.
 ///
-/// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned string;
-/// parsed scalars can borrow from that string. Parser spans refer to [`Self::text`].
+/// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned string.
+/// Parsed scalars can borrow from that string. Parser spans refer to [`Self::text`].
 /// Use [`Self::original_span`] to convert them to offsets in the original input.
 #[derive(Clone, Debug)]
 pub struct Source<'a> {

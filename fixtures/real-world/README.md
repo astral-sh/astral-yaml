@@ -17,7 +17,7 @@ The inputs exercise expressions, multiline scripts, plain continuation lines,
 literal and folded scalars, flow collections, multiple documents, empty values,
 quotes, comments, anchors, aliases, and application tags.
 Airflow's configuration also exercises anchors, aliases, and `<<` mapping keys.
-The parser treats `<<` as an ordinary key; YAML 1.2 core does not define merge
+The parser treats `<<` as an ordinary key. YAML 1.2 core does not define merge
 expansion.
 
 Each fixture has an [inline Insta snapshot](../../crates/astral-yaml/tests/real_world/fixtures/)
@@ -27,7 +27,7 @@ styles and source ranges. Ranges use one-based Unicode line/column positions wit
 exclusive ends. Anchors, aliases, tags, collection styles, and document markers
 are retained.
 Multiline values show one quoted decoded line at a time. Escapes make newlines
-and tabs explicit; closing quotes expose trailing spaces.
+and tabs explicit. Closing quotes expose trailing spaces.
 
 For example:
 
@@ -59,7 +59,7 @@ comments. Benchmarks use the original three fixtures so results remain comparabl
 The manifest records syntax rejections separately from construction errors.
 These inputs stay unmodified and remain covered by snapshots and assertions.
 Of the 632 inputs, 629 have accepted syntax. Forty require application tag
-handling and one has duplicate mapping keys; default value construction rejects
+handling and one has duplicate mapping keys. Default value construction rejects
 those 41 inputs with the recorded `serde_error`.
 
 `sentry-compose.yaml` is a syntax rejection. The closing bracket in

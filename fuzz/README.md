@@ -37,20 +37,20 @@ development helpers.
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
 - `editable` checks bounded syntax and typed edits on arbitrary YAML, including
-  LF normalization and rollback. Its first eight bytes select edits and paths;
-  bit 5 selects typed editing. The rest is YAML.
+  LF normalization and rollback. Its first eight bytes select edits and paths.
+  Bit 5 selects typed editing. The rest is YAML.
 - `editable-model` checks valid edits against independent value and comment
   models, including nested collections, aliases, and canceled edits.
 - `editable-graph` checks drafts and commits against an independent recursive
   tree and alias graph, including tags, complex keys, repeated anchors, document
-  markers, and all four comment placements. It generates representable attachments
-  and ends transaction batches at explicit layout requests. Up to eight initial
-  bytes seed the graph; byte zero also selects framing and batch size. Each
-  subsequent three-byte group selects an operation and position.
+  markers, and all four comment placements. It generates representable
+  attachments and ends transaction batches at explicit layout requests. Up to
+  eight initial bytes seed the graph. Byte zero also selects framing and batch
+  size. Each subsequent three-byte group selects an operation and position.
   Inputs are bounded to 512 bytes and 32 operations.
 - `typed` covers integer widths, floats, booleans, characters, strings, options,
-  tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first byte
-  selects one of 29 types; the rest is YAML.
+  tuples, newtypes, enums, maps, byte visitors, and ignored fields. The first
+  byte selects one of 29 types. The rest is YAML.
 
 The typed target wraps each type in `Spanned<Commented<'a, T>>` and checks its source range,
 descendant comments, comment order, and borrowed text. It also checks nested
@@ -67,7 +67,8 @@ The recursive model retains live alias targets and avoids nested scalar suffixes
 and trailing comments on empty nested collections: these have no attachment
 boundary. Explicit style requests end a batch, since later edits can require a
 different style. Block conversion retains flow delimiters where comment order or
-an enclosing trailing comment requires them; descendants of flow nodes stay flow.
+an enclosing trailing comment requires them. Descendants of flow nodes stay
+flow.
 
 Other bounds limit the model, not the API:
 
@@ -75,7 +76,7 @@ Other bounds limit the model, not the API:
 | --- | --- |
 | One inline comment per node, allowing arbitrary scalar replacements | Bounded layouts with all subsets of tag, anchor, opening, and closing inline comments |
 | Replacement prefixes omitted when retained comments need property-header ordering | Bounded fragment-prefix merges with property comments in root, item, key, and value positions |
-| Generated detached comments use suffix positions | Corpus reinsertion at captured positions; gap insertion and child-deletion tests |
+| Generated detached comments use suffix positions | Corpus reinsertion at captured positions. Gap insertion and child-deletion tests |
 
 The bounded layout tests compare equivalent comment edits with independent source
 projections. Explicit block conversions also have parsed block witnesses with the
@@ -93,10 +94,10 @@ uv run --script scripts/fuzz-coverage.py
 ```
 
 The script reports coverage for the two YAML crates separately for each target
-and writes `fuzz/coverage/summary.json`. It uses cargo-fuzz's default coverage build
-directory and the host target. Each report pairs a binary with its profile;
-combining profiles from optimized harnesses can mix incompatible versions of
-shared symbols. Corpus replay does not perform mutations.
+and writes `fuzz/coverage/summary.json`. It uses cargo-fuzz's default coverage
+build directory and the host target. Each report pairs a binary with its
+profile. Combining profiles from optimized harnesses can mix incompatible
+versions of shared symbols. Corpus replay does not perform mutations.
 
 For coverage from unit and integration tests, run `cargo xtask cov`, or
 `cargo xtask cov --html` to inspect uncovered lines. The 100% line and function

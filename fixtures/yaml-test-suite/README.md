@@ -9,7 +9,7 @@ main revision `da267a5c4782e7361e82889e76c0dc7df0e1e870`.
 The parser's conformance test compares event streams for all valid inputs and
 requires an error for each invalid input. It checks source-span invariants for
 every accepted input or UTF-8 prefix. Event formatting decodes
-tag URI escapes to match the suite's event convention (case `6CK3`); the core AST
+tag URI escapes to match the suite's event convention (case `6CK3`). The core AST
 preserves the escaped tag spelling as required by YAML 1.2.2 section 5.6.
 
 ```sh

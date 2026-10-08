@@ -8,9 +8,9 @@ use serde::{
 
 /// A common deserialization target for tests, fuzzing, and benchmarks.
 ///
-/// Supports arbitrary mapping keys and non-finite floats. Integers are limited
-/// to 64 bits; tests for wider integers use concrete Rust types. Mapping equality
-/// ignores entry order. All NaNs compare equal, regardless of their bit patterns.
+/// Supports arbitrary mapping keys and non-finite floats. Integers are limited to 64
+/// bits. Tests for wider integers use concrete Rust types. Mapping equality ignores
+/// entry order. All NaNs compare equal, regardless of their bit patterns.
 #[derive(Debug, Clone)]
 pub enum Value {
     Null,

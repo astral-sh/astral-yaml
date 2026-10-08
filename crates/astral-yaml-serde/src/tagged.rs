@@ -14,9 +14,9 @@ pub(crate) const NAME: &str = "$astral_yaml::Tagged";
 /// A deserialized value with its explicit YAML tag.
 ///
 /// The tag is expanded: `!Text` stays `!Text`, while `!!str` becomes
-/// `tag:yaml.org,2002:str`. Percent escapes retain their original spelling.
-/// Untagged input is rejected. Application tags are consumed by the wrapper;
-/// core tags still determine the payload's type and must match its content.
+/// `tag:yaml.org,2002:str`. Percent escapes retain their original spelling. Untagged
+/// input is rejected. Application tags are consumed by the wrapper. Core tags still
+/// determine the payload's type and must match its content.
 ///
 /// The tag is owned, so this wrapper implements `DeserializeOwned` when `T`
 /// does. The payload can also borrow from the input. Use

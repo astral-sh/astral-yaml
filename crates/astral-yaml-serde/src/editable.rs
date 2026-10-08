@@ -8,9 +8,9 @@ use serde::de::DeserializeOwned;
 /// deserialize a fresh `T`. Any failure leaves the source and value unchanged.
 /// `T` needs neither `Serialize` nor `Clone`.
 ///
-/// Physical CR and CRLF line endings normalize to LF on load. Spans and errors
-/// use this source. Unchanged regions retain their text; rewrites may normalize
-/// whitespace. Use [`Self::to_yaml`] to retain syntax in the output.
+/// Physical CR and CRLF line endings normalize to LF on load. Spans and errors use this
+/// source. Unchanged regions retain their text. Rewrites may normalize whitespace. Use
+/// [`Self::to_yaml`] to retain syntax in the output.
 ///
 /// ```
 /// use astral_yaml_serde::Editable;
@@ -81,7 +81,7 @@ impl<T: DeserializeOwned> Editable<T> {
 }
 
 impl<T> Editable<T> {
-    /// The typed projection of the current committed syntax.
+    /// Returns the typed value from the last successful parse or edit.
     #[must_use]
     pub fn value(&self) -> &T {
         &self.value
@@ -99,13 +99,13 @@ impl<T> Editable<T> {
         self.syntax.source()
     }
 
-    /// Emits the current committed source with LF line endings.
+    /// Clones the committed source with LF line endings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         self.syntax.to_yaml()
     }
 
-    /// Consumes both views and returns the committed source without cloning it.
+    /// Consumes the document and returns its source without cloning it.
     #[must_use]
     pub fn into_yaml(self) -> String {
         self.syntax.into_yaml()

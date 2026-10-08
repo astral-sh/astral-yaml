@@ -49,7 +49,7 @@ cargo xtask fuzz
 cargo bench -p astral-yaml-dev --bench yaml --locked
 ```
 
-`cargo xtask fuzz` runs all four targets for 60 seconds each. Additional arguments
+`cargo xtask fuzz` runs all targets for 60 seconds each. Additional arguments
 are passed to cargo-fuzz instead.
 
 See [fuzzing](fuzz/README.md) and [benchmarks](benchmarks/README.md) for details.
