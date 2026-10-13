@@ -15,6 +15,10 @@ dev = [
 [tool.ruff.lint]
 extend-select = ["ANN", "I", "UP"]
 
+[tool.uv]
+require-build-hashes = true
+preview-features = ["build-dependency-hashes"]
+
 [[tool.uv.index]]
 url = "https://pypi.org/simple"
 default = true
