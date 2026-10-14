@@ -148,7 +148,7 @@ fn reinsertion_retains_headers_and_collection_gaps() {
 
     --- before.yaml
     +++ after.yaml
-    @@ -1,6 +3,5 @@
+    @@ -1,6 +1,7 @@
     -# detached
      ⏎
     -# leading
