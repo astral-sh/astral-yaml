@@ -50,34 +50,51 @@ impl Operation {
             Self::Integer => editor.root_mut().field("value")?.set(i64::MIN)?,
             Self::Null => editor.root_mut().field("value")?.set(())?,
             Self::PushString => {
-                editor.root_mut().field("items")?.push("true")?;
+                editor
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .push("true")?;
             }
             Self::PushObject => {
                 editor
                     .root_mut()
                     .field("items")?
+                    .into_sequence()?
                     .push(json!({"inner": [true, null, "false"]}))?;
             }
             Self::InsertFirst => {
-                editor.root_mut().field("items")?.insert(0, "0123")?;
+                editor
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .insert(0, "0123")?;
             }
             Self::RemoveFirst => {
-                let mut items = editor.root_mut().field("items")?;
-                if matches!(items.node()?.kind(), NodeKind::Sequence { items, .. } if !items.is_empty())
-                {
-                    items.remove_item(0)?;
+                let mut items = editor.root_mut().field("items")?.into_sequence()?;
+                if !items.is_empty() {
+                    items.remove(0)?;
                 }
             }
             Self::SetEntry => {
-                editor.root_mut().field("map")?.set_entry("true", false)?;
+                editor
+                    .root_mut()
+                    .field("map")?
+                    .into_mapping()?
+                    .set("true", false)?;
             }
             Self::RemoveEntry => {
-                editor.root_mut().field("map")?.remove_field("true")?;
+                editor
+                    .root_mut()
+                    .field("map")?
+                    .into_mapping()?
+                    .remove("true")?;
             }
             Self::EditSelectedEntry => editor
                 .root_mut()
                 .field("map")?
-                .set_entry("true", "first")?
+                .into_mapping()?
+                .set("true", "first")?
                 .set(42)?,
             Self::Flow => editor
                 .root_mut()

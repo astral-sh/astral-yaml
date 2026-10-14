@@ -236,8 +236,8 @@ fn collection_rewrites_include_their_comment_context() {
                 let target = editor.mapping_entries(&editor.root())?[0].1.clone();
                 editor.set_collection_style(&target, CollectionStyle::Flow)?;
                 match editor.node(&target)?.kind() {
-                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                    _ => editor.insert_entry(&target, 1, "added", "new"),
+                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
+                    _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
                 }
             })
             .unwrap();

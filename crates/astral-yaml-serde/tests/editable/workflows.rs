@@ -105,11 +105,12 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
                     .root_mut()
                     .field("services")?
                     .field("db")?
-                    .field("healthcheck")?;
-                health.reborrow().field("retries")?.set("temporary")?;
-                health.reborrow().field("retries")?.set(retries)?;
-                health.reborrow().field("interval")?.set("5s")?;
-                health.set_entry("timeout", "5s")?;
+                    .field("healthcheck")?
+                    .into_mapping()?;
+                health.field("retries")?.set("temporary")?;
+                health.field("retries")?.set(retries)?;
+                health.field("interval")?.set("5s")?;
+                health.set("timeout", "5s")?;
                 Ok(())
             })
             .unwrap();

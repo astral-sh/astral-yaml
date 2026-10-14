@@ -285,7 +285,7 @@ impl Draft {
         id: NodeId,
         index: usize,
         yaml: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<NodeId, Error> {
         let items = self.sequence_items_mut(id)?;
         if index > items.len() {
             return Err(self.error("item index out of bounds"));
@@ -293,7 +293,7 @@ impl Draft {
         let document = self.fragment(yaml, Some(id), self.available())?;
         let child = self.attach(document, Some(id), None);
         self.sequence_items_mut(id)?.insert(index, child);
-        Ok(())
+        Ok(child)
     }
 
     pub(super) fn remove_item(&mut self, id: NodeId, index: usize) -> Result<(), Error> {
@@ -315,7 +315,7 @@ impl Draft {
         index: usize,
         key: &str,
         value: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(NodeId, NodeId), Error> {
         let entries = self.mapping_entries_mut(id)?;
         if index > entries.len() {
             return Err(self.error("entry index out of bounds"));
@@ -331,7 +331,7 @@ impl Draft {
         let key = self.attach(key, Some(id), None);
         let value = self.attach(value, Some(id), None);
         self.mapping_entries_mut(id)?.insert(index, (key, value));
-        Ok(())
+        Ok((key, value))
     }
 
     pub(super) fn remove_entry(&mut self, id: NodeId, index: usize) -> Result<(), Error> {

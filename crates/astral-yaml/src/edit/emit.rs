@@ -937,7 +937,7 @@ fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
     })
 }
 
-fn quoted(value: &str) -> String {
+pub(super) fn quoted(value: &str) -> String {
     let mut result = String::from("\"");
     for character in value.chars() {
         match character {

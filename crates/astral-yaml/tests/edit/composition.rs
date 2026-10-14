@@ -521,8 +521,10 @@ impl NestedOperation {
         let children = editor.sequence_items(items)?;
         let entries = editor.mapping_entries(mapping)?;
         match self {
-            Self::PrependItem => editor.insert_item(items, 0, "'true'"),
-            Self::AppendItem => editor.insert_item(items, children.len(), "'null'"),
+            Self::PrependItem => editor.insert_item(items, 0, "'true'").map(|_| ()),
+            Self::AppendItem => editor
+                .insert_item(items, children.len(), "'null'")
+                .map(|_| ()),
             Self::RemoveFirstItem if !children.is_empty() => editor.remove_item(items, 0),
             Self::RemoveLastItem if !children.is_empty() => {
                 editor.remove_item(items, children.len() - 1)
@@ -534,10 +536,12 @@ impl NestedOperation {
                 editor.set_scalar_style(children.last().unwrap(), ScalarStyle::DoubleQuoted)
             }
             Self::FlowItems => editor.set_collection_style(items, CollectionStyle::Flow),
-            Self::PrependEntry => {
-                editor.insert_entry(mapping, 0, "[left, right]", "{inner: [new]}")
-            }
-            Self::AppendEntry => editor.insert_entry(mapping, entries.len(), "'0123'", "'---'"),
+            Self::PrependEntry => editor
+                .insert_entry(mapping, 0, "[left, right]", "{inner: [new]}")
+                .map(|_| ()),
+            Self::AppendEntry => editor
+                .insert_entry(mapping, entries.len(), "'0123'", "'---'")
+                .map(|_| ()),
             Self::RemoveFirstEntry if !entries.is_empty() => editor.remove_entry(mapping, 0),
             Self::ReplaceLastValue if !entries.is_empty() => {
                 editor.replace(&entries.last().unwrap().1, "'false'")

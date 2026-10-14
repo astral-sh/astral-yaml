@@ -56,7 +56,7 @@ fn string_fields_do_not_match_application_tagged_keys(source: &str, name: &str) 
         .edit(|editor| {
             assert!(editor.root_mut().get(name)?.is_none(), "{source:?}");
             assert!(editor.root_mut().field(name).is_err());
-            assert!(!editor.root_mut().remove_field(name)?);
+            assert!(!editor.root_mut().into_mapping()?.remove(name)?);
             Ok(())
         })
         .unwrap();
@@ -116,8 +116,11 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
         .edit(|e| {
             e.root_mut().field("timeout")?.set(60)?;
             e.root_mut().field("servers")?.item(1)?.set("backup")?;
-            e.root_mut().field("servers")?.push("tertiary")?;
-            e.root_mut().set_entry("enabled", true)?;
+            e.root_mut()
+                .field("servers")?
+                .into_sequence()?
+                .push("tertiary")?;
+            e.root_mut().into_mapping()?.set("enabled", true)?;
             Ok("committed")
         })
         .unwrap();
@@ -375,11 +378,11 @@ fn optional_lookup_and_removal_distinguish_absence() {
         second: 2 # retained
     "};
     let document = edit::<Value>(source, |e| {
-        let mut root = e.root_mut();
-        assert!(root.reborrow().get("absent")?.is_none());
-        assert!(!root.remove_field("absent")?);
-        assert!(root.remove_field("first")?);
-        root.reborrow().get("second")?.unwrap().set(3)
+        let mut root = e.root_mut().into_mapping()?;
+        assert!(root.get("absent")?.is_none());
+        assert!(!root.remove("absent")?);
+        assert!(root.remove("first")?);
+        root.get("second")?.unwrap().set(3)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     --- before.yaml
@@ -392,19 +395,17 @@ fn optional_lookup_and_removal_distinguish_absence() {
 }
 
 #[test]
-fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
+fn insertion_returns_a_cursor_and_parents_remain_available() {
     let source = indoc! {r"
         items: [old]
     "};
     let document = edit::<Value>(source, |e| {
-        let mut items = e.root_mut().field("items")?;
+        let mut items = e.root_mut().field("items")?.into_sequence()?;
         items
-            .reborrow()
             .insert(0, "first")?
             .set_scalar_style(ScalarStyle::SingleQuoted)?;
-        items.remove_item(1)?;
+        items.remove(1)?;
         items
-            .reborrow()
             .push(json!({"value": "old"}))?
             .field("value")?
             .set("new")?;
@@ -432,10 +433,12 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
         last: true
     "};
     let document = edit::<Value>(source, |e| {
-        e.root_mut().set_entry("first", "it's new")?;
-        e.root_mut().set_entry("added", ["initial"])?;
+        e.root_mut().into_mapping()?.set("first", "it's new")?;
+        e.root_mut().into_mapping()?.set("added", ["initial"])?;
         e.root_mut()
-            .set_entry("added", ["one"])?
+            .into_mapping()?
+            .set("added", ["one"])?
+            .into_sequence()?
             .push("two")?
             .append_comment(" added", CommentPlacement::Inline)?;
         Ok(())
@@ -554,8 +557,8 @@ fn navigation_errors_identify_the_selected_path() {
     }
     insta::assert_snapshot!(errors.join("\n"), @r#"
     $["missing"]: missing mapping key
-    $["items"][3]: item index out of bounds
-    $["items"][0]: expected a mapping at bytes 0..10
+    $["items"][3]: item index out of bounds at bytes 0..10
+    $["items"][0]["wrong"]: expected a mapping at bytes 0..10
     $: expected a sequence at bytes 0..10
     "#);
 }
@@ -563,6 +566,7 @@ fn navigation_errors_identify_the_selected_path() {
 #[test_case(0)]
 #[test_case(1)]
 #[test_case(2)]
+#[test_case(3)]
 fn ambiguous_string_keys_are_rejected_after_raw_insertions(operation: usize) {
     let mut document = Editable::<Value>::parse("name: old").unwrap();
     let error = document
@@ -574,16 +578,19 @@ fn ambiguous_string_keys_are_rejected_after_raw_insertions(operation: usize) {
                     e.root_mut().field("name")?;
                 }
                 1 => {
-                    e.root_mut().set_entry("name", "new")?;
+                    e.root_mut().into_mapping()?.set("name", "new")?;
+                }
+                2 => {
+                    e.root_mut().into_mapping()?.remove("name")?;
                 }
                 _ => {
-                    e.root_mut().remove_field("name")?;
+                    e.root_mut().into_mapping()?.entry("name")?;
                 }
             }
             Ok(())
         })
         .unwrap_err();
-    assert!(error.message.contains("ambiguous mapping key"));
+    assert_eq!(error.message, "$[\"name\"]: ambiguous mapping key");
     assert_eq!(document.source(), "name: old");
 }
 
@@ -595,87 +602,318 @@ impl Serialize for FailsSerialization {
     }
 }
 
+#[test_case(0, "$: serialization failed")]
+#[test_case(1, "$: unterminated flow sequence")]
+#[test_case(2, "$[\"items\"]: item index out of bounds")]
+#[test_case(3, "$[\"items\"]: comment text contains a line break")]
+#[test_case(4, "$[\"items\"][0]: comment index out of bounds")]
+#[test_case(5, "$[\"items\"]: item index out of bounds")]
+#[test_case(6, "$: comment index out of bounds")]
+#[test_case(7, "$: expected a scalar")]
+#[test_case(8, "$[\"items\"][0]: expected a collection")]
+#[test_case(9, "$[\"items\"]: serialization failed")]
+#[test_case(10, "$[\"missing\"]: serialization failed")]
+#[test_case(11, "$[\"missing\"]: serialization failed")]
+#[test_case(12, "$[\"missing\"]: unterminated flow sequence")]
+fn caught_mutation_errors_still_roll_back_the_transaction(operation: usize, expected: &str) {
+    let source = indoc! {r"
+        items: [old]
+    "};
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let error = document
+        .edit(|e| {
+            e.root_mut().field("items")?.item(0)?.set("changed")?;
+            let result = match operation {
+                0 => e.root_mut().set(FailsSerialization),
+                1 => e.root_mut().set_yaml("["),
+                2 => e
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .insert(3, "invalid index")
+                    .map(|_| ()),
+                3 => e.root_mut().field("items")?.append_comment(
+                    indoc! {r"
+                        bad
+                        comment"},
+                    CommentPlacement::Inline,
+                ),
+                4 => e
+                    .root_mut()
+                    .field("items")?
+                    .item(0)?
+                    .set_scalar_style(ScalarStyle::Plain)
+                    .and_then(|()| e.root_mut().field("items")?.item(0)?.remove_comment(0)),
+                5 => e.root_mut().field("items")?.into_sequence()?.remove(4),
+                6 => e.root_mut().replace_comment(0, " absent"),
+                7 => e.root_mut().set_scalar_style(ScalarStyle::Plain),
+                8 => e
+                    .root_mut()
+                    .field("items")?
+                    .item(0)?
+                    .set_collection_style(CollectionStyle::Block),
+                9 => e
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .push(FailsSerialization)
+                    .map(|_| ()),
+                10 => e
+                    .root_mut()
+                    .into_mapping()?
+                    .set("missing", FailsSerialization)
+                    .map(|_| ()),
+                11 => e
+                    .root_mut()
+                    .into_mapping()?
+                    .entry("missing")?
+                    .or_insert(FailsSerialization)
+                    .map(|_| ()),
+                _ => e
+                    .root_mut()
+                    .into_mapping()?
+                    .set_yaml("missing", "[")
+                    .map(|_| ()),
+            };
+            let error = result.unwrap_err();
+            assert_eq!(e.root_mut().set(42).unwrap_err(), error);
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, expected);
+    assert_eq!(document.source(), source);
+}
+
 #[test]
-fn caught_mutation_errors_still_roll_back_the_transaction() {
-    let mut errors = Vec::new();
-    for operation in 0..13 {
-        let source = indoc! {r"
-            items: [old]
-        "};
-        let mut document = Editable::<Value>::parse(source).unwrap();
-        let error = document
-            .edit(|e| {
-                e.root_mut().field("items")?.item(0)?.set("changed")?;
-                let result = match operation {
-                    0 => e.root_mut().set(FailsSerialization),
-                    1 => e.root_mut().push("wrong kind").map(|_| ()),
-                    2 => e
-                        .root_mut()
-                        .field("items")?
-                        .insert(3, "invalid index")
-                        .map(|_| ()),
-                    3 => e.root_mut().field("items")?.append_comment(
-                        indoc! {r"
-                            bad
-                            comment"},
-                        CommentPlacement::Inline,
-                    ),
-                    4 => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_scalar_style(ScalarStyle::Plain)
-                        .and_then(|()| e.root_mut().field("items")?.item(0)?.remove_comment(0)),
-                    5 => e.root_mut().remove_item(0),
-                    6 => e.root_mut().replace_comment(0, " absent"),
-                    7 => e.root_mut().set_scalar_style(ScalarStyle::Plain),
-                    8 => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_collection_style(CollectionStyle::Block),
-                    9 => e
-                        .root_mut()
-                        .field("items")?
-                        .push(FailsSerialization)
-                        .map(|_| ()),
-                    10 => e
-                        .root_mut()
-                        .set_entry("missing", FailsSerialization)
-                        .map(|_| ()),
-                    11 => e
-                        .root_mut()
-                        .field("items")?
-                        .remove_field("wrong kind")
-                        .map(|_| ()),
-                    _ => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_entry("wrong kind", true)
-                        .map(|_| ()),
-                };
-                let error = result.unwrap_err();
-                assert_eq!(e.root_mut().set(42).unwrap_err(), error);
-                Ok(())
-            })
-            .unwrap_err();
-        errors.push(error.message);
-        assert_eq!(document.source(), source);
-    }
-    insta::assert_snapshot!(errors.join("\n"), @r#"
-    $: serialization failed
-    $: expected a sequence
-    $["items"]: item index out of bounds
-    $["items"]: comment text contains a line break
-    $["items"][0]: comment index out of bounds
-    $: expected a sequence
-    $: comment index out of bounds
-    $: expected a scalar
-    $["items"][0]: expected a collection
-    $["items"]: serialization failed
-    $: serialization failed
-    $["items"]: expected a mapping
-    $["items"][0]: expected a mapping
+fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
+    let source = "services: {db: {healthcheck: {retries: 3, interval: '30s'}}}\n";
+    let document = edit::<Value>(source, |editor| {
+        let mut health = editor
+            .root_mut()
+            .field("services")?
+            .field("db")?
+            .field("healthcheck")?
+            .into_mapping()?;
+        assert_eq!(health.len(), 2);
+        assert!(!health.is_empty());
+        assert!(health.field("missing").is_err());
+        health.field("retries")?.set(5)?;
+        health.field("interval")?.set("5s")?;
+        assert!(health.entry("retries")?.is_occupied());
+        health.entry("retries")?.or_insert(FailsSerialization)?;
+        health.entry("interval")?.or_insert_yaml("[invalid")?;
+        assert!(!health.entry("timeout")?.is_occupied());
+        health.entry("timeout")?.or_insert("10s")?;
+        health.entry("timeout")?.or_insert("unused")?;
+        let mut options = health
+            .entry("options")?
+            .or_insert_yaml("{}")?
+            .into_mapping()?;
+        assert!(options.is_empty());
+        options.entry("enabled")?.or_insert(true)?;
+        options.into_cursor().field("enabled")?.set(false)?;
+        assert_eq!(health.len(), 4);
+        Ok(())
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -services: {db: {healthcheck: {retries: 3, interval: '30s'}}}
+    +services: {db: {healthcheck: {retries: 5, interval: '5s', "timeout": "10s", "options": {"enabled": false}}}}
     "#);
+}
+
+#[test]
+fn sequence_views_track_lengths_and_return_borrowed_children() {
+    let source = "items: []\n";
+    let document = edit::<Value>(source, |editor| {
+        let mut items = editor.root_mut().field("items")?.into_sequence()?;
+        assert!(items.is_empty());
+        assert!(items.get(0)?.is_none());
+        assert!(items.item(0).is_err());
+        items.push("first")?;
+        items
+            .push_yaml("{value: old}")?
+            .field("value")?
+            .set("new")?;
+        items.insert_yaml(1, "true")?;
+        items.get(0)?.unwrap().set("changed")?;
+        items.item(1)?.set(false)?;
+        assert_eq!(items.len(), 3);
+        items.remove(0)?;
+        assert_eq!(items.len(), 2);
+        items.into_cursor().item(1)?.field("value")?.set("last")
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -items: []
+    +items: [false, {value: last}]
+    "#);
+}
+
+#[test]
+fn indexed_mapping_selection_supports_arbitrary_keys() {
+    let source = "{[complex, key]: old, true: other}\n";
+    let document = edit::<IgnoredAny>(source, |editor| {
+        let mut mapping = editor.root_mut().into_mapping()?;
+        assert!(mapping.key_at(2).is_err());
+        assert!(mapping.value_at(2).is_err());
+        mapping.key_at(0)?.item(0)?.set("changed")?;
+        mapping.value_at(0)?.set("new")?;
+        mapping.key_at(1)?.set(false)?;
+        Ok(())
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1,2 @@
+    -{[complex, key]: old, true: other}
+    +{? [changed, key]
+    +  : new, false: other}
+    ");
+}
+
+#[test_case(false)]
+#[test_case(true)]
+fn raw_selected_replacement_controls_style_and_anchor(replace: bool) {
+    // Anchors identify serialization occurrences: https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
+    let source = "value: &old 'old' # keep\n";
+    let document = edit::<Value>(source, |editor| {
+        let mut value = editor.root_mut().field("value")?;
+        if replace {
+            value.replace_yaml("&new \"new\"")
+        } else {
+            value.set_yaml("&new \"new\"")
+        }
+    });
+    if replace {
+        insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -value: &old 'old' # keep
+        +value: &new "new" # keep
+        "#);
+    } else {
+        insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+        --- before.yaml
+        +++ after.yaml
+        @@ -1 +1 @@
+        -value: &old 'old' # keep
+        +value: &old 'new' # keep
+        ");
+    }
+}
+
+#[test]
+fn collection_views_expose_node_comments_and_style() {
+    let source = "mapping: {value: old} # map\nsequence: [old] # seq\n";
+    let document = edit::<Value>(source, |editor| {
+        let mut mapping = editor.root_mut().field("mapping")?.into_mapping()?;
+        assert!(matches!(mapping.node()?.kind(), NodeKind::Mapping { .. }));
+        mapping.replace_comment(0, " replaced")?;
+        mapping.remove_comment(0)?;
+        mapping.append_comment(" mapping", CommentPlacement::Leading)?;
+        mapping.set_collection_style(CollectionStyle::Block)?;
+        let mut sequence = editor.root_mut().field("sequence")?.into_sequence()?;
+        assert!(matches!(sequence.node()?.kind(), NodeKind::Sequence { .. }));
+        sequence.replace_comment(0, " replaced")?;
+        sequence.remove_comment(0)?;
+        sequence.append_comment(" sequence", CommentPlacement::Leading)?;
+        sequence.set_collection_style(CollectionStyle::Block)
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1,2 +1,6 @@
+    -mapping: {value: old} # map
+    -sequence: [old] # seq
+    +# mapping
+    +mapping:
+    +  value: old
+    +# sequence
+    +sequence:
+    +  - old
+    ");
+}
+
+#[test]
+fn wrong_kind_conversions_are_recoverable_navigation_errors() {
+    let source = "value: old\n";
+    let document = edit::<Value>(source, |editor| {
+        assert!(editor.root_mut().into_sequence().is_err());
+        assert!(editor.root_mut().field("value")?.into_mapping().is_err());
+        assert!(editor.root_mut().field("value")?.into_sequence().is_err());
+        editor.root_mut().field("value")?.set("new")
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    --- before.yaml
+    +++ after.yaml
+    @@ -1 +1 @@
+    -value: old
+    +value: new
+    ");
+}
+
+#[test_case(0; "replace YAML")]
+#[test_case(1; "insert serialization")]
+#[test_case(2; "append YAML")]
+#[test_case(3; "default YAML")]
+fn caught_fragment_and_serialization_failures_prevent_commit(operation: usize) {
+    let source = "items: []\n";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let error = document
+        .edit(|editor| {
+            let result = match operation {
+                0 => editor.root_mut().replace_yaml("["),
+                1 => editor
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .insert(0, FailsSerialization)
+                    .map(|_| ()),
+                2 => editor
+                    .root_mut()
+                    .field("items")?
+                    .into_sequence()?
+                    .push_yaml("[")
+                    .map(|_| ()),
+                _ => editor
+                    .root_mut()
+                    .into_mapping()?
+                    .entry("missing")?
+                    .or_insert_yaml("[")
+                    .map(|_| ()),
+            };
+            let error = result.unwrap_err();
+            assert_eq!(editor.root_mut().set(42).unwrap_err(), error);
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(error.message.starts_with('$'));
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn a_failed_yaml_setter_keeps_the_first_error_and_rolls_back_prior_edits() {
+    let source = "value: old\n";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let error = document
+        .edit(|editor| {
+            let mut value = editor.root_mut().field("value")?;
+            value.set_yaml("changed")?;
+            let first_error = value.set_yaml("[").unwrap_err();
+            assert_eq!(value.set_yaml("later").unwrap_err(), first_error);
+            assert!(
+                matches!(value.node()?.kind(), NodeKind::Scalar { value, .. } if value == "changed")
+            );
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "$[\"value\"]: unterminated flow sequence");
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value(), &json!({"value": "old"}));
 }

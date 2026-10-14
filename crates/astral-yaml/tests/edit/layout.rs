@@ -379,7 +379,9 @@ impl Operation {
                     editor.remove_comment(&owner, 0)
                 }
             }
-            Self::AddSibling => editor.insert_entry(&inner, entries.len(), "next", "sibling"),
+            Self::AddSibling => editor
+                .insert_entry(&inner, entries.len(), "next", "sibling")
+                .map(|_| ()),
             Self::RemoveSibling if entries.len() > 1 => {
                 editor.remove_entry(&inner, entries.len() - 1)
             }

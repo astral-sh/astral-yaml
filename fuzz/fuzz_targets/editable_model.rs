@@ -13,7 +13,7 @@ use astral_yaml_serde::{
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
 
-const OPERATIONS: u8 = 22;
+const OPERATIONS: u8 = 23;
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct Config {
@@ -85,25 +85,45 @@ fn apply(
             text.clone_into(&mut expected.copy);
         }
         1 => {
-            editor.root_mut().field("items")?.push(text)?;
+            editor
+                .root_mut()
+                .field("items")?
+                .into_sequence()?
+                .push(text)?;
             expected.items.push(text.to_owned());
         }
         2 => {
             let index = selector % (expected.items.len() + 1);
-            editor.root_mut().field("items")?.insert(index, text)?;
+            editor
+                .root_mut()
+                .field("items")?
+                .into_sequence()?
+                .insert(index, text)?;
             expected.items.insert(index, text.to_owned());
         }
         3 if !expected.items.is_empty() => {
             let index = selector % expected.items.len();
-            editor.root_mut().field("items")?.remove_item(index)?;
+            editor
+                .root_mut()
+                .field("items")?
+                .into_sequence()?
+                .remove(index)?;
             expected.items.remove(index);
         }
         4 => {
-            editor.root_mut().field("map")?.set_entry(key, text)?;
+            editor
+                .root_mut()
+                .field("map")?
+                .into_mapping()?
+                .set(key, text)?;
             expected.map.insert(key.to_owned(), text.to_owned());
         }
         5 => {
-            editor.root_mut().field("map")?.remove_field(key)?;
+            editor
+                .root_mut()
+                .field("map")?
+                .into_mapping()?
+                .remove(key)?;
             expected.map.remove(key);
         }
         6 => {
@@ -166,7 +186,8 @@ fn apply(
             editor
                 .root_mut()
                 .field("map")?
-                .set_entry(key, "first")?
+                .into_mapping()?
+                .set(key, "first")?
                 .set(text)?;
             expected.map.insert(key.to_owned(), text.to_owned());
         }
@@ -181,25 +202,13 @@ fn apply(
             " changed".clone_into(&mut comments.root[index].0);
         }
         14 => {
-            let syntax = editor.syntax_mut();
-            let mut nested = syntax
-                .mapping_entries(&syntax.root())?
-                .last()
-                .unwrap()
-                .1
-                .clone();
-            while matches!(syntax.node(&nested)?.kind(), NodeKind::Sequence { .. }) {
-                nested = syntax.sequence_items(&nested)?[0].clone();
-            }
-            let value = syntax.mapping_entries(&nested)?[0].1.clone();
-            syntax.replace(
-                &value,
-                if selector % 2 == 0 {
+            nested(editor)?
+                .field("value")?
+                .replace_yaml(if selector % 2 == 0 {
                     "|+\n  new\n\n"
                 } else {
                     ">+\n  new\n\n"
-                },
-            )?;
+                })?;
             "new\n\n".clone_into(expected.nested.value_mut());
         }
         15 => {
@@ -249,15 +258,27 @@ fn apply(
         }
         20 => {
             let index = selector % (expected.items.len() + 1);
-            let mut items = editor.root_mut().field("items")?;
-            items.reborrow().insert(index, text)?;
-            items.remove_item(index)?;
+            let mut items = editor.root_mut().field("items")?.into_sequence()?;
+            items.insert(index, text)?;
+            items.remove(index)?;
         }
         21 => {
             // This key is outside the model's persistent key vocabulary.
-            let mut map = editor.root_mut().field("map")?;
-            map.reborrow().set_entry("__temporary__", text)?;
-            map.remove_field("__temporary__")?;
+            let mut map = editor.root_mut().field("map")?.into_mapping()?;
+            map.set("__temporary__", text)?;
+            map.remove("__temporary__")?;
+        }
+        22 => {
+            editor
+                .root_mut()
+                .field("map")?
+                .into_mapping()?
+                .entry(key)?
+                .or_insert(text)?;
+            expected
+                .map
+                .entry(key.to_owned())
+                .or_insert_with(|| text.to_owned());
         }
         _ => {}
     }

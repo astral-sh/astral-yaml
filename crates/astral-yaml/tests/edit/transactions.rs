@@ -118,7 +118,9 @@ fn structural_edits_preserve_comments_and_accept_complex_keys() {
         editor.remove_entry(&root, 0)?;
         editor.remove_item(&entries[1].1, 0)?;
         editor.insert_item(&entries[1].1, 1, "4")?;
-        editor.insert_entry(&root, 1, "[x, y]", "{enabled: true}")
+        editor
+            .insert_entry(&root, 1, "[x, y]", "{enabled: true}")
+            .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
     --- before.yaml
@@ -323,14 +325,14 @@ fn invalid_operations_roll_back(source: &str, operation: usize) {
     let result = document.edit(|e| {
         let root = e.root();
         match operation {
-            0 => e.insert_item(&root, 0, "1"),
-            1 => e.insert_item(&root, 1, "1"),
-            2 => e.insert_item(&root, 0, "["),
+            0 => e.insert_item(&root, 0, "1").map(|_| ()),
+            1 => e.insert_item(&root, 1, "1").map(|_| ()),
+            2 => e.insert_item(&root, 0, "[").map(|_| ()),
             3 | 4 => e.remove_item(&root, 0),
-            5 => e.insert_entry(&root, 0, "key", "value"),
-            6 => e.insert_entry(&root, 1, "key", "value"),
-            7 => e.insert_entry(&root, 0, "[", "value"),
-            8 => e.insert_entry(&root, 0, "key", "["),
+            5 => e.insert_entry(&root, 0, "key", "value").map(|_| ()),
+            6 => e.insert_entry(&root, 1, "key", "value").map(|_| ()),
+            7 => e.insert_entry(&root, 0, "[", "value").map(|_| ()),
+            8 => e.insert_entry(&root, 0, "key", "[").map(|_| ()),
             9 | 10 => e.remove_entry(&root, 0),
             11 => e.set_scalar_style(&root, ScalarStyle::Plain),
             12 => e.set_collection_style(&root, CollectionStyle::Flow),
@@ -388,7 +390,7 @@ fn local_collection_edits_leave_siblings_untouched() {
         ],
         |e| {
             let entries = e.mapping_entries(&e.root())?;
-            e.insert_item(&entries[1].1, 2, "3")
+            e.insert_item(&entries[1].1, 2, "3").map(|_| ())
         },
     );
     insta::assert_snapshot!(diffs, @"
@@ -415,7 +417,7 @@ fn local_collection_edits_leave_siblings_untouched() {
     "};
     let diff = edit(source, |e| {
         let item = e.sequence_items(&e.root())?.remove(0);
-        e.insert_entry(&item, 2, "c", "3")
+        e.insert_entry(&item, 2, "c", "3").map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
     --- before.yaml
@@ -620,6 +622,7 @@ fn fragment_comments_and_nested_comment_updates_are_retained() {
         e.replace_comment(&entries[0].1, 0, " new")?;
         e.remove_comment(&entries[1].1, 0)?;
         e.insert_entry(&e.root(), 2, "c", "3 # imported")
+            .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
     --- before.yaml

@@ -7,6 +7,9 @@ use super::{
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::sync::Arc;
 
+mod cursor;
+pub use cursor::{Cursor, Entry, MappingMut, SequenceMut};
+
 #[cfg(test)]
 mod tests;
 
@@ -102,11 +105,11 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn mutate(
+    fn mutate<R>(
         &mut self,
         handle: &Handle,
-        operation: impl FnOnce(&mut Draft, NodeId) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        operation: impl FnOnce(&mut Draft, NodeId) -> Result<R, Error>,
+    ) -> Result<R, Error> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
@@ -123,6 +126,21 @@ impl<'a> Editor<'a> {
     #[must_use]
     pub fn root(&self) -> Handle {
         self.handle(self.draft.root())
+    }
+
+    /// Return a cursor to the document's root.
+    pub fn root_mut(&mut self) -> Cursor<'_, 'a> {
+        let handle = self.root();
+        Cursor::new(self, handle)
+    }
+
+    /// Return a cursor to a node selected by a handle.
+    ///
+    /// # Errors
+    /// Returns an error if the handle is invalid or the work limit is exceeded.
+    pub fn cursor_mut(&mut self, handle: &Handle) -> Result<Cursor<'_, 'a>, Error> {
+        self.id(handle)?;
+        Ok(Cursor::new(self, handle.clone()))
     }
 
     /// Return the node for `handle`, including pending edits.
@@ -145,6 +163,17 @@ impl<'a> Editor<'a> {
         Ok(items.iter().map(|&id| self.handle(id)).collect())
     }
 
+    /// Return the item at `index`, or `None` if the index is out of bounds.
+    ///
+    /// # Errors
+    /// Returns an error if `handle` is invalid or does not refer to a sequence.
+    pub fn sequence_item(&self, handle: &Handle, index: usize) -> Result<Option<Handle>, Error> {
+        let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
+            return Err(self.error("expected a sequence"));
+        };
+        Ok(items.get(index).map(|&id| self.handle(id)))
+    }
+
     /// Return handles to the mapping keys and values at `handle`, in their current order.
     /// Keys can be any kind of YAML node.
     ///
@@ -159,6 +188,24 @@ impl<'a> Editor<'a> {
             .iter()
             .map(|&(key, value)| (self.handle(key), self.handle(value)))
             .collect())
+    }
+
+    /// Return the key and value at `index`, or `None` if the index is out of bounds.
+    /// Keys can be any kind of YAML node.
+    ///
+    /// # Errors
+    /// Returns an error if `handle` is invalid or does not refer to a mapping.
+    pub fn mapping_entry(
+        &self,
+        handle: &Handle,
+        index: usize,
+    ) -> Result<Option<(Handle, Handle)>, Error> {
+        let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
+            return Err(self.error("expected a mapping"));
+        };
+        Ok(entries
+            .get(index)
+            .map(|&(key, value)| (self.handle(key), self.handle(value))))
     }
 
     /// Replace `handle`'s node with the parsed `yaml`, keeping its outer comments.
@@ -202,8 +249,9 @@ impl<'a> Editor<'a> {
         sequence: &Handle,
         index: usize,
         yaml: &str,
-    ) -> Result<(), Error> {
-        self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))
+    ) -> Result<Handle, Error> {
+        let child = self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))?;
+        Ok(self.handle(child))
     }
 
     /// Remove the item at `index` from `sequence`, including its descendants' comments.
@@ -227,10 +275,11 @@ impl<'a> Editor<'a> {
         index: usize,
         key: &str,
         value: &str,
-    ) -> Result<(), Error> {
-        self.mutate(mapping, |draft, id| {
+    ) -> Result<(Handle, Handle), Error> {
+        let (key, value) = self.mutate(mapping, |draft, id| {
             draft.insert_entry(id, index, key, value)
-        })
+        })?;
+        Ok((self.handle(key), self.handle(value)))
     }
 
     /// Remove the entry at `index` from `mapping`, including its key, value, and

@@ -452,8 +452,8 @@ fn detached_comment_gaps_survive_collection_mutations() {
             diffs.push(edit(source, |editor| {
                 let root = editor.root();
                 match (sequence, operation) {
-                    (true, 0) => editor.insert_item(&root, 0, "new"),
-                    (false, 0) => editor.insert_entry(&root, 0, "added", "new"),
+                    (true, 0) => editor.insert_item(&root, 0, "new").map(|_| ()),
+                    (false, 0) => editor.insert_entry(&root, 0, "added", "new").map(|_| ()),
                     (true, 1) => editor.remove_item(&root, 1),
                     (false, 1) => editor.remove_entry(&root, 1),
                     (true, 2) => editor.replace(
@@ -479,9 +479,9 @@ fn detached_comment_gaps_survive_collection_mutations() {
                         // imported collection before committing it.
                         editor.replace(&root, source)?;
                         if sequence {
-                            editor.insert_item(&root, 0, "new")
+                            editor.insert_item(&root, 0, "new").map(|_| ())
                         } else {
-                            editor.insert_entry(&root, 0, "added", "new")
+                            editor.insert_entry(&root, 0, "added", "new").map(|_| ())
                         }
                     }
                 }

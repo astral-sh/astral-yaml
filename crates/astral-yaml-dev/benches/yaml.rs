@@ -142,7 +142,7 @@ mod editable {
             let mut document = Editable::<Value>::parse(SOURCE).unwrap();
             document
                 .edit(|editor| {
-                    editor.root_mut().set_entry("enabled", true)?;
+                    editor.root_mut().into_mapping()?.set("enabled", true)?;
                     Ok(())
                 })
                 .unwrap();

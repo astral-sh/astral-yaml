@@ -29,10 +29,10 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
         let document = edit::<Config>(source, |editor| {
             match operation {
                 0 => {
-                    editor.root_mut().set_entry("enabled", true)?;
+                    editor.root_mut().into_mapping()?.set("enabled", true)?;
                 }
                 1 => {
-                    editor.root_mut().remove_field("other")?;
+                    editor.root_mut().into_mapping()?.remove("other")?;
                 }
                 _ => editor
                     .root_mut()
@@ -92,7 +92,7 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
             content
     "};
     let document = edit::<Config>(source, |editor| {
-        editor.root_mut().set_entry("enabled", true)?;
+        editor.root_mut().into_mapping()?.set("enabled", true)?;
         Ok(())
     });
     assert_eq!(
@@ -124,7 +124,7 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     let key = "\u{1}".repeat(103);
     document
         .edit(|editor| {
-            editor.root_mut().set_entry(&key, true)?;
+            editor.root_mut().into_mapping()?.set(&key, true)?;
             Ok(())
         })
         .unwrap();
@@ -524,9 +524,9 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
             document
                 .edit(|editor| {
                     if sequence {
-                        editor.root_mut().insert(0, "new")?;
+                        editor.root_mut().into_sequence()?.insert(0, "new")?;
                     } else {
-                        editor.root_mut().set_entry("added", "new")?;
+                        editor.root_mut().into_mapping()?.set("added", "new")?;
                     }
                     Ok(())
                 })
@@ -631,7 +631,7 @@ fn typed_collection_edits_preserve_root_property_comments() {
             editor
                 .root_mut()
                 .set_collection_style(CollectionStyle::Block)?;
-            editor.root_mut().push("new")?;
+            editor.root_mut().into_sequence()?.push("new")?;
             Ok(())
         });
         assert_eq!(document.value(), &["old", "new"]);
@@ -707,7 +707,7 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         ] # close
     "};
     let document = edit::<Vec<String>>(source, |editor| {
-        editor.root_mut().push("new")?;
+        editor.root_mut().into_sequence()?.push("new")?;
         Ok(())
     });
     assert_eq!(document.value(), &["old", "new"]);
@@ -771,9 +771,9 @@ fn typed_collection_edits_retain_outside_comments(source: &str) -> String {
     }
 
     let document = edit::<Config>(source, |editor| {
-        let mut outer = editor.root_mut().field("outer")?;
+        let mut outer = editor.root_mut().field("outer")?.into_mapping()?;
         outer.set_collection_style(CollectionStyle::Flow)?;
-        outer.reborrow().set_entry("added", "new")?;
+        outer.set("added", "new")?;
         Ok(())
     });
     assert_eq!(
@@ -796,7 +796,7 @@ fn typed_collection_edits_use_document_comment_boundaries() {
         ...
     "};
     let document = edit::<Vec<String>>(source, |editor| {
-        let mut root = editor.root_mut();
+        let mut root = editor.root_mut().into_sequence()?;
         root.set_collection_style(CollectionStyle::Block)?;
         root.push("new")?;
         Ok(())

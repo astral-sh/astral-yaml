@@ -74,7 +74,7 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
             let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
             let value = editor.sequence_items(&sequence)?[0].clone();
             editor.replace(&value, "changed")?;
-            editor.insert_item(&sequence, 1, "{child: yes}")
+            editor.insert_item(&sequence, 1, "{child: yes}").map(|_| ())
         },
     );
     insta::assert_snapshot!(results, @"
@@ -420,7 +420,7 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite(source: &str) -> String {
             };
             sequence = entries[0].0.clone();
         }
-        editor.insert_item(&sequence, 0, "new")
+        editor.insert_item(&sequence, 0, "new").map(|_| ())
     })
 }
 

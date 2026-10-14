@@ -18,14 +18,14 @@ extra: 'retained'
 ";
     let mut config = Editable::<Config>::parse(source)?;
     config.edit(|editor| {
-        editor.root_mut().field("timeout")?.set(60)?;
+        let mut settings = editor.root_mut().into_mapping()?;
+        settings.field("timeout")?.set(60)?;
+        settings.entry("enabled")?.or_insert(true)?;
 
-        let mut servers = editor.root_mut().field("servers")?;
-        servers.reborrow().item(1)?.set("backup")?;
+        let mut servers = settings.field("servers")?.into_sequence()?;
+        servers.item(1)?.set("backup")?;
         servers.set_collection_style(CollectionStyle::Block)?;
         servers.append_comment(" failover order", CommentPlacement::Leading)?;
-
-        editor.root_mut().set_entry("enabled", true)?;
         Ok(())
     })?;
     assert_eq!(config.value().timeout, 60);

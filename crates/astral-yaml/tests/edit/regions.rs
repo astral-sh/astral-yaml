@@ -66,8 +66,8 @@ fn flow_delimiter_comments_survive_collection_edits() {
         let mut document = edited(source, |editor| {
             let target = collection(editor, nested);
             match editor.node(&target)?.kind() {
-                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                _ => editor.insert_entry(&target, 1, "added", "new"),
+                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
+                _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
             }
         });
         let committed = document.to_yaml();

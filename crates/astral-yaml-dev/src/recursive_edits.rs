@@ -406,9 +406,9 @@ fn handle(editor: &Editor<'_>, path: &[Step]) -> Handle {
     let mut handle = editor.root();
     for step in path {
         handle = match step {
-            Step::Item(i) => editor.sequence_items(&handle).unwrap()[*i].clone(),
-            Step::Key(i) => editor.mapping_entries(&handle).unwrap()[*i].0.clone(),
-            Step::Value(i) => editor.mapping_entries(&handle).unwrap()[*i].1.clone(),
+            Step::Item(i) => editor.sequence_item(&handle, *i).unwrap().unwrap(),
+            Step::Key(i) => editor.mapping_entry(&handle, *i).unwrap().unwrap().0,
+            Step::Value(i) => editor.mapping_entry(&handle, *i).unwrap().unwrap().1,
         };
     }
     handle
@@ -776,7 +776,13 @@ fn sequence_edit(
             return;
         }
         let index = indices[selector % indices.len()];
-        editor.remove_item(&parent, index).unwrap();
+        editor
+            .cursor_mut(&parent)
+            .unwrap()
+            .into_sequence()
+            .unwrap()
+            .remove(index)
+            .unwrap();
         let Kind::Sequence(items) = &mut model.at_mut(path).kind else {
             unreachable!()
         };
@@ -789,7 +795,13 @@ fn sequence_edit(
     } else {
         let index = selector % (items.len() + 1);
         let item = builder.tree(1, &[]);
-        editor.insert_item(&parent, index, &item.yaml()).unwrap();
+        editor
+            .cursor_mut(&parent)
+            .unwrap()
+            .into_sequence()
+            .unwrap()
+            .insert_yaml(index, &item.yaml())
+            .unwrap();
         if operation == Operation::CancelInsertion {
             editor.remove_item(&parent, index).unwrap();
         } else {
