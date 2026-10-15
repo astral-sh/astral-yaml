@@ -8,6 +8,25 @@ astral-yaml-serde = { version = "0.1.0", features = ["editable"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
+## Change one value
+
+`EditableYaml` lets you edit a document without defining a Rust type for it.
+`set_at()` changes an existing value, so a misspelled path is an error:
+
+```rust
+use astral_yaml_serde::{EditableYaml, edit::edit_path};
+
+fn main() -> Result<(), astral_yaml_serde::Error> {
+    let mut deployment = EditableYaml::parse("containers:\n  - image: 'api:v1' # rollout\n")?;
+    deployment.set_at(edit_path!["containers", 0, "image"], "api:v2")?;
+    assert_eq!(deployment.source(), "containers:\n  - image: 'api:v2' # rollout\n");
+    Ok(())
+}
+```
+
+Paths contain literal keys and zero-based indices. For a path of just keys or just
+indices, an array like `["service", "port"]` or `[0, 1]` works without the macro.
+
 ## Update a configuration
 
 `Editable<T>` keeps the YAML source alongside its deserialized value. Edits retain
@@ -59,8 +78,8 @@ extra: 'retained'
 "retries": 3
 ```
 
-The callback starts at the root. To start at an existing field, write
-`config.edit_at(["timeout"], |mut timeout| timeout.set(60))?`.
+The callback starts at the root. For a single change to an existing field, write
+`config.set_at(["timeout"], 60)?`. To run several edits at that field instead, use `edit_at()`.
 Paths use literal keys, so `["service.db"]` selects one key and
 `["service", "db"]` selects a nested field. Collection views let you edit
 siblings without selecting their parent again.
@@ -93,9 +112,10 @@ target, while setting or updating that position replaces the alias itself.
 absent. `entry(name)?.or_insert(value)?` supplies an optional default. Existing
 entries stay unchanged and do not serialize the default. Use `set(name, value)`
 on a mapping view to replace an existing value or append a new entry.
-To edit a collection that might be absent, use `entry("servers")?.or_sequence()?`
-or `entry("settings")?.or_mapping()?`. These insert an empty collection when
-needed and report an error if an existing value has the wrong type.
+To edit a collection that might be absent, write `settings.ensure_sequence("servers")?.push("backup")?`
+or `settings.ensure_mapping("limits")?.set("cpu", "500m")?`. These insert an empty
+collection only when the key is absent. An existing scalar or alias is left alone and
+you get an error describing the expected collection.
 
 ## Roll back a failed edit
 

@@ -22,7 +22,7 @@ pub use commented::Commented;
 pub use comments::{AttachedComment, CommentPlacement};
 pub use de::{from_document, from_str, from_stream};
 #[cfg(feature = "editable")]
-pub use editable::Editable;
+pub use editable::{Editable, EditableYaml};
 pub use error::Error;
 pub use ser::to_string;
 pub use spanned::Spanned;

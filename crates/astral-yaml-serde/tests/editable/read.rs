@@ -24,7 +24,7 @@ fn a_failed_read_identifies_an_inserted_value_without_preventing_its_repair() {
     let error = document
         .edit_at(["settings"], |settings| {
             let mut fields = settings.into_mapping()?;
-            let limits = fields.set("limits", ["invalid"])?;
+            let mut limits = fields.set("limits", ["invalid"])?.into_sequence()?;
             let error = limits.read::<Vec<u8>>().unwrap_err();
             limits.item(0)?.set(5)?;
             Ok(error)

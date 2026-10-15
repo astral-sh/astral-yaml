@@ -8,7 +8,24 @@ use astral_yaml::{
     edit::{EditableDocument, Editor as SyntaxEditor},
     parse_with_options,
 };
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
+
+/// A YAML document you can edit without defining a Rust type for the whole document.
+///
+/// Read and write selected values using Rust types, or edit YAML fragments directly.
+/// Parsing and edits still check the document using Serde's YAML rules, including
+/// duplicate-key checks and alias limits. For application tags, use [`Editable<T>`]
+/// with an appropriate type, or edit the syntax with [`EditableDocument`].
+///
+/// ```
+/// use astral_yaml_serde::{EditableYaml, edit::edit_path};
+///
+/// let mut doc = EditableYaml::parse("servers: [{host: 'old'}]\n")?;
+/// doc.set_at(edit_path!["servers", 0, "host"], "new")?;
+/// assert_eq!(doc.source(), "servers: [{host: 'new'}]\n");
+/// # Ok::<(), astral_yaml_serde::Error>(())
+/// ```
+pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 
 /// A YAML document and its deserialized value, kept in sync by edits.
 ///
@@ -28,7 +45,7 @@ use serde::de::DeserializeOwned;
 /// struct Config { timeout: u64 }
 ///
 /// let mut config = Editable::<Config>::parse("timeout: 30 # seconds\n")?;
-/// config.edit_at(["timeout"], |mut timeout| timeout.set(60))?;
+/// config.set_at(["timeout"], 60)?;
 /// assert_eq!(config.value().timeout, 60);
 /// assert_eq!(config.to_yaml(), "timeout: 60 # seconds\n");
 /// # Ok::<(), astral_yaml_serde::Error>(())
@@ -98,6 +115,22 @@ impl<T: DeserializeOwned> Editable<T> {
         edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
     ) -> Result<R, E> {
         self.try_edit_syntax(|editor| edit::transaction(editor, edit))
+    }
+
+    /// Set the value at an existing path, retaining its anchor and compatible style.
+    ///
+    /// Keys are literal strings, indices are zero-based, and an empty path selects the root.
+    /// Use [`edit_path!`](crate::edit::edit_path) to mix keys and indices. To add a missing
+    /// mapping entry, use [`MappingMut::set`](crate::edit::MappingMut::set) instead.
+    ///
+    /// # Errors
+    /// Returns a selection, serialization, or edit error without changing the source or value.
+    pub fn set_at<'p>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        value: impl Serialize,
+    ) -> Result<(), Error> {
+        self.edit_at(path, |mut node| node.set(value))
     }
 
     /// Edit the node at `path`. Keys are literal strings and indices are zero-based.

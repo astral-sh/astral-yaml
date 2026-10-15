@@ -51,9 +51,9 @@ assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 `Spanned<T>` implements `DeserializeOwned` when `T` does. `Commented` borrows
 the input even for owned payloads. Both serialize only their value.
 
-Enable `astral-yaml-serde`'s non-default `editable` feature to use `Editable<T>`.
-Transactions update its owned syntax and typed view together after parsing and
-type checking. See [editing YAML](docs/editing.md) for usage and preservation rules.
+Enable `astral-yaml-serde`'s non-default `editable` feature to edit a document with
+`EditableYaml`, or use `Editable<T>` to check every edit against a Rust type.
+See [editing YAML](docs/editing.md) for examples and preservation rules.
 
 Enums use variant names for unit variants and singleton mappings for variants
 with payloads. Serde's representation attributes, including `untagged`, still

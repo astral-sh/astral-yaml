@@ -16,6 +16,8 @@ pub use transaction::{
     SequenceMut, ValueRef,
 };
 
+pub use crate::edit_path;
+
 use std::{borrow::Cow, cell::Cell};
 
 use crate::{

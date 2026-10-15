@@ -11,7 +11,7 @@ mod tests;
 pub use astral_yaml::{
     CollectionStyle, ScalarStyle,
     comments::CommentPlacement,
-    edit::{CommentPosition, Node, NodeKind, PathSegment},
+    edit::{CommentPosition, Node, NodeKind, PathSegment, edit_path},
 };
 
 pub(crate) fn transaction<R, E: From<Error>>(
@@ -117,21 +117,6 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
         self.context.select(self.syntax.into_sequence())
     }
 
-    /// Deserialize the selected value, including pending edits.
-    ///
-    /// The result can borrow from this cursor, including decoded scalar text. Reading
-    /// an alias follows it to its current target. An error does not prevent commit.
-    /// Source spans refer to the original document. Reads that require a source span
-    /// for a newly inserted node or comment fail until the edit commits.
-    ///
-    /// # Errors
-    /// Returns an error if the value cannot be deserialized as `T`, an alias target
-    /// was removed, or a resource limit is exceeded.
-    pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
-        self.context
-            .with_path(crate::de::from_edit_value(self.syntax.value()))
-    }
-
     /// Read the selected value as `T`, transform it, and replace it using [`Self::set`].
     ///
     /// For example, `retries.update(|n: u32| n + 1)?` increments a retry count.
@@ -226,6 +211,24 @@ impl<'doc> MappingMut<'_, 'doc> {
         let context = self.context.child(format_args!("[{name:?}]"));
         let syntax = context.with_path(self.syntax.entry(name))?;
         Ok(Entry { syntax, context })
+    }
+
+    /// Borrow the mapping at `name`, inserting an empty mapping if the key is absent.
+    ///
+    /// # Errors
+    /// Returns an error if an existing value is not a mapping, the key is ambiguous,
+    /// or an editing limit is exceeded. Existing values are never replaced.
+    pub fn ensure_mapping(&mut self, name: &str) -> Result<MappingMut<'_, 'doc>, Error> {
+        self.entry(name)?.or_mapping()
+    }
+
+    /// Borrow the sequence at `name`, inserting an empty sequence if the key is absent.
+    ///
+    /// # Errors
+    /// Returns an error if an existing value is not a sequence, the key is ambiguous,
+    /// or an editing limit is exceeded. Existing values are never replaced.
+    pub fn ensure_sequence(&mut self, name: &str) -> Result<SequenceMut<'_, 'doc>, Error> {
+        self.entry(name)?.or_sequence()
     }
 
     /// Set the value at string key `name`, appending the entry if absent.
@@ -410,6 +413,21 @@ impl<'a, 'doc> Entry<'a, 'doc> {
 }
 
 impl<State> Cursor<'_, '_, State> {
+    /// Deserialize the selected value, including pending edits.
+    ///
+    /// The result can borrow from this cursor, including decoded scalar text. Reading
+    /// an alias follows it to its current target. An error does not prevent commit.
+    /// Source spans refer to the original document. Reads that require a source span
+    /// for a newly inserted node or comment fail until the edit commits.
+    ///
+    /// # Errors
+    /// Returns an error if the value cannot be deserialized as `T`, an alias target
+    /// was removed, or a resource limit is exceeded.
+    pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
+        self.context
+            .with_path(crate::de::from_edit_value(self.syntax.value()))
+    }
+
     /// Return the selected node, including pending edits.
     /// Spans refer to the original source. Inserted nodes have no source span.
     ///

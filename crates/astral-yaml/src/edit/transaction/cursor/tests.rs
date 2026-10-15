@@ -10,12 +10,8 @@ fn collection_views_allow_repeated_edits_and_nested_defaults() {
     .unwrap();
     let lengths = document
         .edit(|mut root| {
-            let mut health = root
-                .reborrow()
-                .field("services")?
-                .field("db")?
-                .field("healthcheck")?
-                .into_mapping()?;
+            let mut db = root.reborrow().at(["services", "db"])?.into_mapping()?;
+            let mut health = db.ensure_mapping("healthcheck")?;
             health.field("retries")?.set_yaml("5")?;
             health.field("interval")?.set_yaml("5s")?;
             health.set_yaml("retries", "8")?;
@@ -257,7 +253,7 @@ fn empty_mapping_and_removal_lengths() {
         .edit(|root| {
             let mut mapping = root.into_mapping()?;
             assert!(mapping.is_empty());
-            mapping.entry("a")?.or_sequence()?.push_yaml("one")?;
+            mapping.ensure_sequence("a")?.push_yaml("one")?;
             assert_eq!(mapping.len(), 1);
             assert!(mapping.remove("a")?);
             assert_eq!(mapping.len(), 0);
@@ -331,7 +327,7 @@ fn mapping_length_does_not_change_after_failed_insertion(operation: MappingInser
 
 #[test]
 fn scoped_edits_use_literal_keys_and_current_indices() {
-    use PathSegment::{Index, Key};
+    use crate::edit::edit_path;
 
     let mut document = EditableDocument::parse("service.db: [80, 443] # public\n").unwrap();
     document
@@ -342,9 +338,7 @@ fn scoped_edits_use_literal_keys_and_current_indices() {
         })
         .unwrap();
     document
-        .edit_at([Key("service.db"), Index(2)], |mut port| {
-            port.set_yaml("8443")
-        })
+        .set_yaml_at(edit_path!["service.db", 2], "8443")
         .unwrap();
     insta::assert_snapshot!(document.source(), @"service.db: [3000, 8080, 8443] # public");
 }

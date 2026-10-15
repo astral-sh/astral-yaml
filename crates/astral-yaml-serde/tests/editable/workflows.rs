@@ -28,9 +28,7 @@ fn repeated_permission_updates_preserve_the_workflow() {
     ] {
         for repeat in [false, true] {
             let before = document.source().to_owned();
-            document
-                .edit_at(path.as_slice(), |mut contents| contents.set(text))
-                .unwrap();
+            document.set_at(path.as_slice(), text).unwrap();
             assert_eq!(document.value().permissions["contents"], expected);
             if repeat {
                 assert_eq!(
@@ -41,11 +39,7 @@ fn repeated_permission_updates_preserve_the_workflow() {
             }
         }
         let before = document.source().to_owned();
-        assert!(
-            document
-                .edit_at(path, |mut contents| contents.set("admin"))
-                .is_err()
-        );
+        assert!(document.set_at(path, "admin").is_err());
         assert_eq!(document.source(), before);
         assert_eq!(document.value().permissions["contents"], expected);
     }
@@ -108,10 +102,7 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
         let before = document.source().to_owned();
         assert!(
             document
-                .edit_at(
-                    ["services", "db", "healthcheck", "retries"],
-                    |mut retries| retries.set(-1)
-                )
+                .set_at(["services", "db", "healthcheck", "retries"], -1)
                 .is_err()
         );
         assert_eq!(document.source(), before);
@@ -146,9 +137,7 @@ fn a_commit_error_identifies_the_alias_use_instead_of_the_edit_path() {
 
     let source = "default: &port 80\nports: [*port]\n";
     let mut config = Editable::<Config>::parse(source).unwrap();
-    let error = config
-        .edit_at(["default"], |mut default| default.set("http"))
-        .unwrap_err();
+    let error = config.set_at(["default"], "http").unwrap_err();
 
     insta::assert_snapshot!(error, @r#"$["ports"][0]: expected an integer at bytes 15..19"#);
     assert_eq!(config.source(), source);

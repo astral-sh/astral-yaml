@@ -70,6 +70,22 @@ impl EditableDocument {
         self.try_edit_syntax(|editor| edit(editor.root_mut()))
     }
 
+    /// Set the YAML value at an existing path, retaining its anchor and compatible style.
+    ///
+    /// Keys are literal strings, indices are zero-based, and an empty path selects the root.
+    /// Use [`edit_path!`](crate::edit::edit_path) to mix keys and indices. To add a missing
+    /// mapping entry, use [`MappingMut::set_yaml`](super::MappingMut::set_yaml) instead.
+    ///
+    /// # Errors
+    /// Returns a selection or edit error without changing the document.
+    pub fn set_yaml_at<'p>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        yaml: &str,
+    ) -> Result<(), Error> {
+        self.edit_at(path, |mut node| node.set_yaml(yaml))
+    }
+
     /// Edit the node at `path`. Keys are literal strings and indices are zero-based.
     /// An empty path selects the root. Missing nodes are not created implicitly.
     ///

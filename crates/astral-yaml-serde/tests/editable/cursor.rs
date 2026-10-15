@@ -5,9 +5,10 @@ use test_case::test_case;
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
-    Editable, Error,
+    Editable, EditableYaml, Error,
     edit::{
         CollectionStyle, CommentPlacement, Cursor, NodeKind, PathSegment, ScalarStyle, SequenceMut,
+        edit_path,
     },
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
@@ -503,17 +504,15 @@ fn collection_views_expose_node_comments_and_style() {
 
 #[test]
 fn an_empty_edit_path_selects_the_root_and_a_missing_path_skips_the_callback() {
-    use astral_yaml_serde::edit::PathSegment::{Index, Key};
-
-    let mut document = Editable::<Value>::parse("services.db: [[80]] # public\n").unwrap();
+    let mut document = EditableYaml::parse("services.db: [[80]] # public\n").unwrap();
     document
-        .edit_at(std::iter::empty::<&str>(), |root| {
-            root.at([Key("services.db"), Index(0), Index(0)])?.set(8080)
+        .edit_at(edit_path![], |root| {
+            root.at(edit_path!["services.db", 0, 0])?.set(8080)
         })
         .unwrap();
     let source = document.to_yaml();
     let error = document
-        .edit_at([Key("services.db"), Index(1)], |_| -> Result<(), _> {
+        .edit_at(edit_path!["services.db", 1], |_| -> Result<(), _> {
             panic!("a failed selection must not call the edit callback")
         })
         .unwrap_err();
@@ -528,13 +527,13 @@ fn collection_defaults_reuse_existing_children_and_leave_scalars_alone() {
         .edit(|mut root| {
             assert!(root.reborrow().into_sequence().is_err());
             let mut settings = root.into_mapping()?;
-            assert!(settings.entry("enabled")?.or_sequence().is_err());
-            assert!(settings.entry("enabled")?.or_mapping().is_err());
+            assert!(settings.ensure_sequence("enabled").is_err());
+            assert!(settings.ensure_mapping("enabled").is_err());
 
-            settings.entry("services")?.or_mapping()?.set("web", 80)?;
-            let mut services = settings.entry("services")?.or_mapping()?;
-            services.entry("ports")?.or_sequence()?.push(443)?;
-            services.entry("ports")?.or_sequence()?.push(8443)?;
+            settings.ensure_mapping("services")?.set("web", 80)?;
+            let mut services = settings.ensure_mapping("services")?;
+            services.ensure_sequence("ports")?.push(443)?;
+            services.ensure_sequence("ports")?.push(8443)?;
             Ok(())
         })
         .unwrap();

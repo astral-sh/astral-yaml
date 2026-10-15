@@ -10,6 +10,27 @@ use std::marker::PhantomData;
 #[cfg(test)]
 mod tests;
 
+/// Build an edit path from literal mapping keys and zero-based sequence indices.
+///
+/// For a path containing only keys or only indices, an array like `["service", "port"]`
+/// works without this macro. Keys containing `.` or `/` are always taken literally.
+///
+/// ```
+/// use astral_yaml::edit::{EditableDocument, edit_path};
+///
+/// let mut doc = EditableDocument::parse("servers: [{host: 'old'}]\n")?;
+/// doc.set_yaml_at(edit_path!["servers", 0, "host"], "new")?;
+/// assert_eq!(doc.source(), "servers: [{host: 'new'}]\n");
+/// # Ok::<(), astral_yaml::Error>(())
+/// ```
+#[macro_export]
+macro_rules! edit_path {
+    () => { [] as [$crate::edit::PathSegment<'static>; 0] };
+    ($($segment:expr),+ $(,)?) => {
+        [$($crate::edit::PathSegment::from($segment)),+]
+    };
+}
+
 /// One step in an edit path. Strings are literal mapping keys, not path expressions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathSegment<'a> {
@@ -431,6 +452,24 @@ impl<'doc> MappingMut<'_, 'doc> {
             }
         };
         Ok(Entry { state })
+    }
+
+    /// Borrow the mapping at `name`, inserting an empty mapping if the key is absent.
+    ///
+    /// # Errors
+    /// Returns an error if an existing value is not a mapping, the key is ambiguous,
+    /// or an editing limit is exceeded. Existing values are never replaced.
+    pub fn ensure_mapping(&mut self, name: &str) -> Result<MappingMut<'_, 'doc>, Error> {
+        self.entry(name)?.or_mapping()
+    }
+
+    /// Borrow the sequence at `name`, inserting an empty sequence if the key is absent.
+    ///
+    /// # Errors
+    /// Returns an error if an existing value is not a sequence, the key is ambiguous,
+    /// or an editing limit is exceeded. Existing values are never replaced.
+    pub fn ensure_sequence(&mut self, name: &str) -> Result<SequenceMut<'_, 'doc>, Error> {
+        self.entry(name)?.or_sequence()
     }
 
     /// Set a string entry's YAML value and return a cursor to it.
