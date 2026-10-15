@@ -26,8 +26,6 @@ fn sequential_replacements_emit_the_final_candidate() {
         .unwrap();
     assert_eq!(result, 42);
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -value: 1 # keep
     -other : 'untouched'
@@ -39,8 +37,6 @@ fn sequential_replacements_emit_the_final_candidate() {
 #[test_case(
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
         -items: [old, keep]
         +items: [replacement]
@@ -51,8 +47,6 @@ fn sequential_replacements_emit_the_final_candidate() {
 #[test_case(
     true
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
         -items: [old, keep]
         +items: [keep]
@@ -137,32 +131,24 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
         e.replace_preserving_style(&value, "\"new\"")
     }));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old
     \ No newline at end of file
     +new
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old
     \ No newline at end of file
     +"false"
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -'old'
     \ No newline at end of file
     +'it''s new'
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -'old'
     \ No newline at end of file
@@ -171,16 +157,12 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
     +  break'
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -"old"
     \ No newline at end of file
     +60
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -|-
     -  old
@@ -188,29 +170,21 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
     +  new
     +  text
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -- old
     +- new
     +- values
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old: 1
     +new: 2
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -[]
     \ No newline at end of file
     +42
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -[&value 'old', *value]
     \ No newline at end of file

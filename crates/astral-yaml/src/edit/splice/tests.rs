@@ -78,8 +78,6 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
     }
     insta::assert_snapshot!(results.join("\n"), @"
     token
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -value: old   ⏎
     +value: new   ⏎
@@ -87,8 +85,6 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
      sibling: retained
 
     comment
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -value: old   ⏎
     +value: new # comment
@@ -96,8 +92,6 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
      sibling: retained
 
     block scalar
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -value: old   ⏎
     -
@@ -114,8 +108,6 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1 @@
         -  old
         -
@@ -130,8 +122,6 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,2 @@
         ---- old
         -
@@ -199,8 +189,6 @@ fn patch_order_preserves_insertions_at_shared_boundaries() {
     .collect();
     let output = PatchSet::new(source, patches, 7).unwrap().apply();
     insta::assert_snapshot!(edit_diff(source, &output), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -αβγ
     \ No newline at end of file

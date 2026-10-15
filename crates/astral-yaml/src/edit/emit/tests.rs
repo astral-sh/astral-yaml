@@ -77,8 +77,6 @@ fn emission_accepts_syntax_without_source_locations() {
     let matched = correspondence(syntax, &parsed).unwrap();
     assert!(super::comments_preserved(syntax, &parsed, &matched));
     insta::assert_snapshot!(astral_yaml_dev::edit_diff(source, &output), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     ---- old
     +--- 'new' # generated
@@ -1198,8 +1196,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -outer: [old] # inline
     +outer: [ # inline
@@ -1207,8 +1203,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -outer: [old] # inline
     +outer: [ # inline
@@ -1217,8 +1211,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -outer: {key: old} # inline
     +outer: { # inline
@@ -1226,8 +1218,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -outer: {key: old} # inline
     +outer: { # inline

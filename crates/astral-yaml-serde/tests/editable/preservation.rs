@@ -45,8 +45,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,5 @@
     -plain: &empty
     -tagged: !custom
@@ -56,8 +54,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
      other: keep
     +"enabled": true
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     -plain: &empty
     -tagged: !custom
@@ -66,8 +62,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
      copy: *empty
     -other: keep
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1 @@
     -plain: &empty
     -tagged: !custom
@@ -100,8 +94,6 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
         "}
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      text: &text # anchor
     -  | # header
@@ -142,8 +134,6 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
     });
     assert_eq!(document.value().as_slice(), ["new", "values"]);
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     ---- [old]
     +--- ⏎
@@ -165,8 +155,6 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
         .unwrap();
     assert_eq!(document.value(), "value");
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      value
      ⏎
@@ -221,8 +209,6 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
     assert_eq!(document.value()["key"], "new");
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      key: # header
        &a # anchor
@@ -345,8 +331,6 @@ fn commented_fragments_refresh_the_typed_view() {
         ])
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,8 @@
     -a: old
     +# leading
@@ -374,8 +358,6 @@ fn typed_insertions_keep_flow_delimiter_comments() {
     assert_eq!(document.value(), &["old", "new"]);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      [ # open
     -  old
@@ -393,8 +375,6 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         unknown: keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,5 @@
          outer:
         -# detached
@@ -414,8 +394,6 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         unknown: keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,3 @@
         -outer:
          # leading
@@ -465,8 +443,6 @@ fn typed_collection_edits_use_document_comment_boundaries() {
     assert_eq!(document.value(), &["old", "new"]);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
     ----
     -[ # open
@@ -499,8 +475,6 @@ fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
     assert_eq!(document.value(), &None);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     ----
      # leading
@@ -522,8 +496,6 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
     assert_eq!(document.value(), "old");
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     +  |2-
        old

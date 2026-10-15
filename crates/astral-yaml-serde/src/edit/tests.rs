@@ -42,31 +42,23 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     set_entry
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -!custom name: tagged
     +!<!custom> name: tagged
     +"name": "new"
 
     remove_field
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
      !<!custom> name: tagged
     -"name": "new"
 
     set_entry
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      !custom name: tagged
     -name: old
     +name: new
 
     remove_field
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -!custom name: tagged
     -name: new

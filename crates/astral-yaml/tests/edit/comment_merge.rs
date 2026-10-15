@@ -84,15 +84,11 @@ fn replacement_merges_comments_at_their_structural_positions() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -old # tail
     +# leading
     +new # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,7 @@
     -a: old
     +a: one
@@ -103,8 +99,6 @@ fn replacement_merges_comments_at_their_structural_positions() {
      ⏎
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,9 @@
     -a: old
     -b: old
@@ -119,8 +113,6 @@ fn replacement_merges_comments_at_their_structural_positions() {
     -c: old
     +c: three
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,9 @@
     -- old
     +# leading
@@ -134,8 +126,6 @@ fn replacement_merges_comments_at_their_structural_positions() {
     +
     +- two
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -old
     +new # inline
@@ -183,29 +173,21 @@ fn root_collection_headers_retain_inline_comments() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -&root [old] # inline
     +&root # inline
     +- old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -&root {a: old} # inline
     +&root # inline
     +a: old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -!!seq [old] # inline
     +!<tag:yaml.org,2002:seq> # inline
     +- old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -!!seq # tag
     -&root [old] # inline
@@ -213,8 +195,6 @@ fn root_collection_headers_retain_inline_comments() {
     +&root # inline
     +- old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
      # leading
      %YAML 1.2 # directive
@@ -334,16 +314,12 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -old
     +# detached
     +
     +new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     +# detached
     +
@@ -351,8 +327,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
     -old
     +new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      # retained
      ⏎
@@ -360,8 +334,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
     +# leading
     +new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      --- # marker
     +# detached
@@ -370,23 +342,17 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
     -old
     +new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -old # inline
     +new # inline
     +# trailing
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -old # inline
     +new # inline
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -old
     +new
@@ -394,8 +360,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -old
     +new
@@ -403,8 +367,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
      ⏎
      # detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -&root # retained
     -old
@@ -420,8 +382,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
         other: keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,6 @@
         -outer: old
         +outer:
@@ -439,8 +399,6 @@ fn imported_prefixes_and_suffixes_preserve_comment_adjacency() {
         - keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,6 @@
         -- old
         +-
@@ -529,8 +487,6 @@ fn merged_comment_gaps_survive_further_replacement_and_removal() {
         editor.remove_entry(&root, 1)
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,10 @@
     -a: old
     +a: first

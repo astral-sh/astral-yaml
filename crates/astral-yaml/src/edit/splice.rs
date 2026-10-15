@@ -267,12 +267,7 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
     let region = boundary.body();
     let visible: Vec<_> = root_comments
         .iter()
-        .filter(|comment| {
-            comment
-                .span
-                .into()
-                .is_none_or(|span| span.start() >= region.start() && span.end() <= region.end())
-        })
+        .filter(|comment| comment.span.into().is_none_or(|span| region.contains(span)))
         .cloned()
         .collect();
     let own_line = id == syntax.root

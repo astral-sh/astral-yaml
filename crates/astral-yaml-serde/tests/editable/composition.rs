@@ -348,8 +348,6 @@ fn typed_comment_insertions_share_the_root_header_plan() {
     assert_eq!(document.value(), &json!(["new"]));
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -old # first
     +--- # first

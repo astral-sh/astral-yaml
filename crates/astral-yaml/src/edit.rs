@@ -16,7 +16,7 @@ pub use transaction::{
     SequenceMut, ValueRef,
 };
 
-use std::borrow::Cow;
+use std::{borrow::Cow, cell::Cell};
 
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
@@ -163,6 +163,23 @@ impl CommentPosition {
             CommentPosition::After
         }
     }
+}
+
+impl Span {
+    /// Include empty spans at either boundary when checking source containment.
+    fn contains(self, other: Self) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+}
+
+/// Charge the same work budget while editing the draft and planning its source rewrites.
+fn charge_work(work: &Cell<usize>, amount: usize, span: Span) -> Result<(), Error> {
+    let remaining = work.get().checked_sub(amount).ok_or(Error {
+        span,
+        message: "editing resource limit exceeded",
+    })?;
+    work.set(remaining);
+    Ok(())
 }
 
 impl EditableDocument {

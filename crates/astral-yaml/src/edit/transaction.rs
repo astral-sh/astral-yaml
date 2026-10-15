@@ -462,11 +462,11 @@ impl<'a> Editor<'a> {
         let syntax = Layout::new(&candidate);
         let original = &self.original.source;
         let changes = Changes::between(original, &candidate, &syntax);
-        let framed = if changes.is_empty() {
-            None
-        } else {
-            super::framing::prepare(original, (&candidate).into(), &syntax)
-        };
+        if changes.is_empty() {
+            return candidate.commit(&original.text);
+        }
+
+        let framed = super::framing::prepare(original, (&candidate).into(), &syntax);
         let (source, planned) = framed.as_ref().map_or_else(
             || (original, (&candidate).into()),
             |framed| (&framed.source, framed.syntax()),

@@ -26,8 +26,6 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
         )
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,9 +1,9 @@
      --- # property
     -&a [ # open
@@ -90,8 +88,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,6 @@
     -old
     +|2+
@@ -101,8 +97,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,6 @@
     -old
     +>2+
@@ -112,8 +106,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -old
     +|2
@@ -122,8 +114,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -old
     +|2-
@@ -132,8 +122,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,6 @@
     -old
     +- |2+
@@ -143,8 +131,6 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     +
     +# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,6 @@
     -old
     +key: |2+
@@ -195,8 +181,6 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
         |editor| editor.remove_comment(&editor.root(), 0),
     );
     insta::assert_snapshot!(diffs, @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      |+
        new
@@ -206,8 +190,6 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
       ⏎
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      |+
        new
@@ -216,8 +198,6 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
     +...
      ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,6 @@
      |+
        new
@@ -227,8 +207,6 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
      ⏎
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      - |+
          new
@@ -237,8 +215,6 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
     +...
      ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      key: |+
        new
@@ -277,16 +253,12 @@ fn trailing_comments_can_reclaim_blank_document_suffixes() {
         },
     );
     insta::assert_snapshot!(diffs, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      old
     -
      ... # inline
     +# tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      old
      ...
@@ -318,8 +290,6 @@ fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
         )
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,6 @@
      ---
     -old

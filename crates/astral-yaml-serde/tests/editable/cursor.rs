@@ -6,7 +6,9 @@ use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
     Editable, Error,
-    edit::{CollectionStyle, CommentPlacement, Cursor, NodeKind, ScalarStyle, SequenceMut},
+    edit::{
+        CollectionStyle, CommentPlacement, Cursor, NodeKind, PathSegment, ScalarStyle, SequenceMut,
+    },
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
@@ -62,8 +64,6 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     assert_eq!(config.value().timeout, 60);
     assert_eq!(config.value().servers, ["primary", "backup", "tertiary"]);
     insta::assert_snapshot!(edit_diff(source, config.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -timeout: 30 # seconds
     -servers: [primary, retired]
@@ -123,8 +123,6 @@ fn optional_lookup_and_removal_distinguish_absence() {
         root.get("second")?.unwrap().set(3)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -first: 1 # removed
     -second: 2 # retained
@@ -154,8 +152,6 @@ fn insertion_returns_a_cursor_and_parents_remain_available() {
         &json!({"items": ["first", {"value": "new"}]})
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -items: [old]
     +items:
@@ -182,8 +178,6 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -first: 'old' # keep
     +first: 'it''s new' # keep
@@ -208,8 +202,6 @@ fn styles_and_comments_can_be_changed_explicitly() {
         first.remove_comment(0)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -first: old # original
     +# description
@@ -245,67 +237,42 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
     assert_eq!(document.value().timeout, 60);
 }
 
-#[test]
-fn navigation_errors_identify_the_selected_path() {
-    let mut errors = Vec::new();
-    for operation in 0..4 {
-        let mut document = Editable::<Value>::parse("items: [1]").unwrap();
-        let error = document
-            .edit(|root| {
-                match operation {
-                    0 => {
-                        root.field("missing")?;
-                    }
-                    1 => {
-                        root.field("items")?.item(3)?;
-                    }
-                    2 => {
-                        root.field("items")?.item(0)?.field("wrong")?;
-                    }
-                    _ => {
-                        root.item(0)?;
-                    }
-                }
-                Ok(())
-            })
-            .unwrap_err();
-        errors.push(error.to_string());
-        assert_eq!(document.source(), "items: [1]");
-    }
-    insta::assert_snapshot!(errors.join("\n"), @r#"
-    $["missing"]: missing mapping key at bytes 0..10
-    $["items"][3]: item index out of bounds at bytes 0..10
-    $["items"][0]["wrong"]: expected a mapping at bytes 0..10
-    $[0]: expected a sequence at bytes 0..10
-    "#);
+#[test_case(&["missing".into()], r#"$["missing"]"#, "missing mapping key"; "missing field")]
+#[test_case(&["items".into(), 3.into()], r#"$["items"][3]"#, "item index out of bounds"; "missing item")]
+#[test_case(
+    &["items".into(), 0.into(), "wrong".into()], r#"$["items"][0]["wrong"]"#, "expected a mapping";
+    "field of scalar"
+)]
+#[test_case(&[0.into()], "$[0]", "expected a sequence"; "item of mapping")]
+fn navigation_errors_identify_the_selected_path(
+    path: &[PathSegment<'_>],
+    expected_path: &str,
+    message: &str,
+) {
+    let source = "items: [1]";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let error = document.edit_at(path, |_| Ok(())).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("{expected_path}: {message} at bytes 0..10")
+    );
+    assert_eq!(document.source(), source);
 }
 
-#[test_case(0)]
-#[test_case(1)]
-#[test_case(2)]
-#[test_case(3)]
-fn ambiguous_string_keys_are_rejected_after_raw_insertions(operation: usize) {
+#[test_case(|root| root.field("name").map(|_| ()); "field lookup")]
+#[test_case(|root| root.into_mapping()?.set("name", "new").map(|_| ()); "upsert")]
+#[test_case(|root| root.into_mapping()?.remove("name").map(|_| ()); "remove")]
+#[test_case(|root| root.into_mapping()?.entry("name").map(|_| ()); "entry")]
+fn ambiguous_string_keys_are_rejected_after_raw_insertions(
+    operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
+) {
     let mut document = Editable::<Value>::parse("name: old").unwrap();
     let error = document
         .edit(|mut root| {
             let mut syntax = root.reborrow().into_syntax().into_mapping()?;
             syntax.set_yaml("other", "other")?;
             syntax.key_at(1)?.replace_yaml("'name'")?;
-            match operation {
-                0 => {
-                    root.field("name")?;
-                }
-                1 => {
-                    root.into_mapping()?.set("name", "new")?;
-                }
-                2 => {
-                    root.into_mapping()?.remove("name")?;
-                }
-                _ => {
-                    root.into_mapping()?.entry("name")?;
-                }
-            }
-            Ok(())
+            operation(root)
         })
         .unwrap_err();
     assert_eq!(error.path.as_deref(), Some(r#"$["name"]"#));
@@ -422,8 +389,6 @@ fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -services: {db: {healthcheck: {retries: 3, interval: '30s'}}}
     +services: {db: {healthcheck: {retries: 5, interval: '5s', "timeout": "10s", "options": {"enabled": false}}}}
@@ -452,8 +417,6 @@ fn sequence_views_track_lengths_and_return_borrowed_children() {
         items.into_cursor().item(1)?.field("value")?.set("last")
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -items: []
     +items: [false, {value: last}]
@@ -473,8 +436,6 @@ fn indexed_mapping_selection_supports_arbitrary_keys() {
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -{[complex, key]: old, true: other}
     +{? [changed, key]
@@ -497,16 +458,12 @@ fn raw_selected_replacement_controls_style_and_anchor(replace: bool) {
     });
     if replace {
         insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -value: &old 'old' # keep
         +value: &new "new" # keep
         "#);
     } else {
         insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -value: &old 'old' # keep
         +value: &old 'new' # keep
@@ -532,8 +489,6 @@ fn collection_views_expose_node_comments_and_style() {
         sequence.set_collection_style(CollectionStyle::Block)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,6 @@
     -mapping: {value: old} # map
     -sequence: [old] # seq

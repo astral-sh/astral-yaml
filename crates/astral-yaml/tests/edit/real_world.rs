@@ -30,8 +30,6 @@ fn openapi_server_insertion_preserves_surrounding_sections() {
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -12,7 +12,10 @@
          name: Apache 2.0
          url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -60,8 +58,6 @@ fn compose_healthcheck_edit_preserves_service_comments_and_siblings() {
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -9,8 +9,8 @@
          healthcheck:
            test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 --password="$$(cat /run/secrets/db-password)" --silent']

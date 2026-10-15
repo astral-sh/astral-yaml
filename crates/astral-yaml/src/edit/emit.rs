@@ -345,6 +345,11 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         Ok(true)
     }
 
+    fn comment_text(&mut self, text: &str) -> Result<(), Error> {
+        self.push("#")?;
+        self.push(text)
+    }
+
     fn property_comment(
         &mut self,
         comments: &mut Comments<'_, Location>,
@@ -365,8 +370,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         }
         while let Some(comment) = comments.take_header() {
             self.line(indent)?;
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
@@ -421,8 +425,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.line(indent)?;
         }
         while let Some(comment) = comments.take(CommentPlacement::Leading) {
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
@@ -438,8 +441,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             if !self.output.is_empty() {
                 self.line(indent)?;
             }
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             self.push("\n\n")?;
             self.line(indent)?;
             self.before(comments, indent)?;
@@ -480,8 +482,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
                 self.push("\n")?;
             }
             self.line(indent)?;
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             // Blank separation on both sides keeps a container comment from
             // becoming a leading comment on the following child.
             self.push("\n\n")?;
@@ -516,8 +517,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.push("\n")?;
             self.line(indent)?;
         }
-        self.push("#")?;
-        self.push(&comment.text)?;
+        self.comment_text(&comment.text)?;
         self.pending_indent = Some(indent);
         Ok(())
     }

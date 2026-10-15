@@ -116,13 +116,7 @@ impl Draft {
     }
 
     pub(super) fn charge(&self, amount: usize) -> Result<(), Error> {
-        let remaining = self
-            .work
-            .get()
-            .checked_sub(amount)
-            .ok_or_else(|| self.error("editing resource limit exceeded"))?;
-        self.work.set(remaining);
-        Ok(())
+        super::charge_work(&self.work, amount, self.diagnostic_span)
     }
 
     fn introduce(&mut self, bytes: usize) -> Result<(), Error> {

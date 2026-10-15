@@ -30,8 +30,6 @@ fn flow_conversion_uses_content_indentation_after_properties() {
         },
     );
     insta::assert_snapshot!(results, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
      outer: &mapping
     -  items: &sequence
@@ -40,8 +38,6 @@ fn flow_conversion_uses_content_indentation_after_properties() {
        untouched:   [a,b]
      copy: *sequence
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -outer: &mapping
     -  items: &sequence
@@ -78,8 +74,6 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
         },
     );
     insta::assert_snapshot!(results, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -? - {nested: &a [old]}
     +?
@@ -88,8 +82,6 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
     -outside:   [x,y]
     +outside: [x, y]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -{? [{nested: &a [old]}]: *a, outside:   [x,y]}
     +{? [{nested: &a [changed, {child: yes}]}]
@@ -107,8 +99,6 @@ fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
         editor.replace(&key, "new, key")
     });
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{"old":value, untouched:   [a,b]}
     +{"new, key":value, untouched:   [a,b]}
@@ -134,14 +124,10 @@ fn omitted_keys_retain_entries_without_value_indicators() {
         },
     );
     insta::assert_snapshot!(results, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old}
     +{: }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old, retained: untouched}
     +{: , retained: untouched}
@@ -203,8 +189,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     -items:
     -- x
@@ -212,8 +196,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +items: []
     +other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     -items:
     -- x
@@ -221,8 +203,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +items: [x]
     +other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
      outer:
     -  items:
@@ -232,8 +212,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +  other: kept
      outside : untouched
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
      outer:
     -  items:
@@ -243,8 +221,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +  other: kept
      outside : untouched
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -- items:
     -  - x
@@ -253,8 +229,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +  items: []
     +  other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -- items:
     -  - x
@@ -263,8 +237,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +  items: [x]
     +  other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     -&mapping
     -items:
@@ -274,8 +246,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +items: []
     +other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     -&mapping
     -items:
@@ -285,22 +255,16 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +items: [x]
     +other: kept
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -items:
     -- x
     +items: []
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -items:
     -- x
     +items: [x]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -items:
     -- x
@@ -308,8 +272,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +items: []
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -items:
     -- x
@@ -325,8 +287,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
         : c
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
          a: b
         -: c
@@ -339,8 +299,6 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
         a: b
         : c"}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
          a: b
         -: c
@@ -363,8 +321,6 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> Stri
         [[[a]: b]: c]
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,3 @@
         -[[[a]: b]: c]
         +[{? [{? [new, a]
@@ -379,8 +335,6 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> Stri
         outside : untouched
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,4 @@
         -outer: [[[a]: b]: c]
         +outer: [{? [{? [new, a]
@@ -395,8 +349,6 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> Stri
         [[[[a]: b]: c]: d]
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,4 @@
         -[[[[a]: b]: c]: d]
         +[{? [{? [{? [new, a]
@@ -460,46 +412,32 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
         },
     );
     insta::assert_snapshot!(diffs, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{key}
     +{key: 42}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{? key}
     +{key: 42}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -? key
     +key: 42
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -?
     +: 42
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -? key # note
     +key: 42 # note
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -{key # a colon in a comment: ⏎
     -}
     +{key: # a colon in a comment: ⏎
     +  42}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -key:  # note
     +key:  42 # note
@@ -513,8 +451,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key":"value"}
         +{next: "value"}
@@ -527,8 +463,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key":42}
         +{next: 42}
@@ -541,8 +475,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key":{}}
         +{next: {}}
@@ -555,8 +487,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key" :"value"}
         +{next: "value"}
@@ -570,8 +500,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
         -key  :  value # note
         +next  :  value # note
@@ -585,8 +513,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "next"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key":}
         +{next:}
@@ -599,8 +525,6 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     "#},
     "'next'"
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -{"key":"value"}
         +{'next':"value"}
@@ -633,8 +557,6 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -key: value
     +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
@@ -654,8 +576,6 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
         editor.set_scalar_style(&key, ScalarStyle::Plain)
     });
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -outer: {"key":"value"}
     +outer: {key: "value"}
@@ -723,39 +643,29 @@ fn explicit_keys_accept_block_style_requests() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      ? |2-
        key
     -: value
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      ? >2-
        key
     -: value
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      ? - a
        - b
     -: value
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      ? k: v
     -: value
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -? [a, b]
     -: value
@@ -764,8 +674,6 @@ fn explicit_keys_accept_block_style_requests() {
     +  - b
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -? {k: v}
     -: value
@@ -773,8 +681,6 @@ fn explicit_keys_accept_block_style_requests() {
     +  k: v
     +: updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      outer:
     -  ? [a, b]
@@ -784,8 +690,6 @@ fn explicit_keys_accept_block_style_requests() {
     +    - b
     +  : updated
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      ? |2-
        key
@@ -821,77 +725,53 @@ fn implicit_block_keys_keep_their_own_scalar_context() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old: value
     +---: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old: value
     +...: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old: value
     +a,b: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old: value
     +a[b]: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old: value}
     +{---: value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old: value}
     +{...: value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old: value}
     +{"a,b": value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{old: value}
     +{"a[b]": value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      outer:
     -  old: value
     +  ---: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      outer:
     -  old: value
     +  ...: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      outer:
     -  old: value
     +  a,b: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      outer:
     -  old: value
@@ -953,8 +833,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -- key: 'old'
     +-
@@ -963,8 +841,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +
     +    '
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -- key: ['old']
     +- key: ['new
@@ -972,8 +848,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +
     +    ']
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,6 @@
      outer:
     -  - key: [['old']]
@@ -983,8 +857,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +      ']]
      untouched : value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,6 @@
     -- - key: 'old'
     +-
@@ -994,8 +866,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +
     +      '
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -- key: ["new\n\n"]
     +- key: ['new

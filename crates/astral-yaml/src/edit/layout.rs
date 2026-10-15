@@ -41,9 +41,10 @@ impl Layout {
                     .comments
                     .iter()
                     .any(|comment| comment.placement == CommentPlacement::Inline);
-            }
-            if id != document.root && emit::block_collection(&node.kind, false) {
-                layout.flow[id.0] = !emit::block_headers_cover_comments(node, prefix_before_slot);
+                if emit::block_collection(&node.kind, false) {
+                    layout.flow[id.0] =
+                        !emit::block_headers_cover_comments(node, prefix_before_slot);
+                }
             }
             let header = node.anchor.is_some() || node.tag.is_some();
             match &node.kind {
@@ -129,7 +130,7 @@ impl Layout {
                 ScalarStyle::Plain | ScalarStyle::SingleQuoted => value.contains('\n'),
                 ScalarStyle::DoubleQuoted => false,
             },
-            _ => !self.flow(id) && emit::block_collection(kind, false),
+            _ => emit::block_collection(kind, self.flow(id)),
         }
     }
 

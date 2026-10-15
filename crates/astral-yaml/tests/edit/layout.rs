@@ -81,8 +81,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
         },
     );
     insta::assert_snapshot!(diffs, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,7 @@
      outer:
     -  key: old
@@ -93,8 +91,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
      ⏎
      # detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
      outer:
     -  key: old
@@ -106,8 +102,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     +
      # detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer:
     -  key: old
@@ -116,8 +110,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     +  ⏎
        # detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      outer:
     -  key: old
@@ -128,8 +120,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     +  # detached
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
      outer:
     -  key: old
@@ -140,8 +130,6 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
      ⏎
      # detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -- - old
     -
@@ -177,8 +165,6 @@ fn explicit_block_style_requests_still_require_representable_separation() {
         }
     }
     insta::assert_snapshot!(outcomes.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,7 @@
      outer:
     -  key: "new\n\n"
@@ -190,8 +176,6 @@ fn explicit_block_style_requests_still_require_representable_separation() {
      # detached
 
     requested style is not representable in this context
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,7 @@
      outer:
     -  key: "new\n\n"
@@ -640,8 +624,6 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
     -outer:
     -  key: old
@@ -651,8 +633,6 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     +  }
      # trailing
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -outer:
     -  key: |+
@@ -664,8 +644,6 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
     +  }
      # trailing
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
      outer:
     -  inner:
@@ -737,8 +715,6 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
         )
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,7 @@
      outer:
     -  key: old
@@ -799,8 +775,6 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
     -{outer: {key: old}} # inline
     +--- # inline
@@ -810,8 +784,6 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
     -   # root
     +# root
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -outer: {key: old}
     +outer:
@@ -820,8 +792,6 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
     -   # root
     +# root
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -[{key: old}]
     +-
@@ -885,8 +855,6 @@ fn retained_end_markers_bound_removed_suffix_comments() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
     ----
     -{outer: {key: old}} # inline
@@ -899,8 +867,6 @@ fn retained_end_markers_bound_removed_suffix_comments() {
      ⏎
     -# detached
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,8 @@
     -{outer: {key: old}} # inline
     -# trailing
@@ -913,8 +879,6 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     +
      ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,8 @@
     -{outer: {key: old}} # inline
     -# trailing
@@ -927,8 +891,6 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     +
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
     -{outer: {key: old}}
     +outer:
@@ -938,8 +900,6 @@ fn retained_end_markers_bound_removed_suffix_comments() {
      ... # inline
     -# trailing
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
     -{outer: {key: old}}
     +outer:
@@ -995,8 +955,6 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
         },
     );
     insta::assert_snapshot!(diffs, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
     -old
     -# remove
@@ -1006,8 +964,6 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     +...
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,6 @@
      outer:
     -  key: old
@@ -1018,8 +974,6 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     +...
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,6 @@
     -- - old
     -# remove
@@ -1030,8 +984,6 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     +...
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,7 @@
      outer:
     -  key: old
@@ -1120,8 +1072,6 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
         },
     );
     insta::assert_snapshot!(diffs, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,8 +1,9 @@
      outer:
     -  value: old
@@ -1136,8 +1086,6 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
      ⏎
     -# remove
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,8 +1,9 @@
      -
     -  - old
@@ -1152,8 +1100,6 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
      ⏎
     -# remove
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,9 +1,10 @@
      outer:
        inner:
@@ -1169,8 +1115,6 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
      ⏎
     -# remove
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,9 +1,8 @@
      outer:
     -  value: old

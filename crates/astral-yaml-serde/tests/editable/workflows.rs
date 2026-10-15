@@ -50,8 +50,6 @@ fn repeated_permission_updates_preserve_the_workflow() {
         assert_eq!(document.value().permissions["contents"], expected);
     }
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,7 @@
      name: ci
      ⏎
@@ -123,8 +121,6 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
         );
     }
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -8,9 +8,10 @@
          restart: always
          healthcheck:

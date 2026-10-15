@@ -63,8 +63,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -{? [item]: value}
     +{? ⏎
@@ -72,8 +70,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     +  [item]
     +  : value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -&root
     -key: value
@@ -82,8 +78,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     +  # collection
     +  value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -&root
     -- - child
@@ -92,8 +86,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     +  # collection
     +    - child
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -? - child
     +?
@@ -101,8 +93,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     +    - child
      : value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -&root
     +&root ⏎
@@ -121,8 +111,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     "},
     Target::Value
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,3 @@
         -outer:
         -  # collection
@@ -141,8 +129,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     "},
     Target::Item
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,3 @@
         --
         -  # collection
@@ -162,8 +148,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     "},
     Target::Item
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
         -&root
         +&root ⏎
@@ -183,8 +167,6 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
     "},
     Target::Key
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          ?
            # collection
@@ -216,8 +198,6 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers(
           # trailing
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,3 @@
         -outer: &inner
         -  key: value
@@ -235,8 +215,6 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers(
           # detached
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
         -outer: &inner
         -  - item
@@ -255,8 +233,6 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers(
           # trailing
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,3 @@
         -outer: !!map &inner
         -  key: value

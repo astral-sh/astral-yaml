@@ -47,8 +47,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
     ]
     .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -&mapping
     +&mapping ⏎
@@ -56,8 +54,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
        # child
        value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -&sequence
     +&sequence ⏎
@@ -65,8 +61,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
        # child
        item
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -!!map
     +!<tag:yaml.org,2002:map> ⏎
@@ -74,8 +68,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
        # child
        [item]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -!!seq
     +!<tag:yaml.org,2002:seq> ⏎
@@ -83,8 +75,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
        # child
        {key: value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -&mapping
     +&mapping ⏎
@@ -92,8 +82,6 @@ fn first_child_comments_stay_inside_property_bearing_collections() {
        # key
          - item
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -&sequence
     +&sequence ⏎

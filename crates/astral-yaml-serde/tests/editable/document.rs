@@ -32,8 +32,6 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
         Some("100")
     );
     insta::assert_snapshot!(edit_diff(&before, config.syntax().source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -timeout: 30 # seconds
     +timeout: 100 # seconds
@@ -95,8 +93,6 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     assert_eq!(value.value().value, Some(42));
     assert_eq!(value.value().tag, "tag:yaml.org,2002:int");
     insta::assert_snapshot!(edit_diff(&before, value.syntax().source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!null null
     \ No newline at end of file
@@ -121,8 +117,6 @@ fn typed_metadata_and_errors_use_the_lf_source() {
     let expected: Config = astral_yaml_serde::from_str(config.source()).unwrap();
     assert_eq!(config.value().timeout, expected.timeout);
     insta::assert_snapshot!(edit_diff(source, config.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      # café
     -timeout: 30 # seconds
@@ -156,8 +150,6 @@ fn typed_edits_preserve_carriage_returns_in_scalar_values() {
     document.edit(|mut root| root.set("new\r\nvalue")).unwrap();
     assert_eq!(document.value(), "new\r\nvalue");
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -"before\r\nafter"
     +"new\r\nvalue"
