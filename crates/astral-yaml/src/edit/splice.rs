@@ -237,34 +237,33 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     flow: bool,
 ) -> Result<Replacement, Error> {
     let document = document.into();
+    let Emission { syntax, source } = document;
+    let root = id == syntax.root;
+    let node = &syntax.nodes[id.0];
     let boundary = Boundary::new(
-        document.source,
+        &source.text,
         region,
-        id == document.root && emit::omitted(&document.nodes[id.0]),
-        document.end_marker,
+        root && emit::omitted(node),
+        source.end_marker,
     );
     render_with_comments(
         document,
         id,
         &boundary,
-        Context::value(indent, flow, if id == document.root { 0 } else { indent }),
-        &document.nodes[id.0].comments,
-        &Layout::new(Syntax {
-            nodes: document.nodes,
-            root: document.root,
-        }),
+        Context::value(indent, flow, if root { 0 } else { indent }),
+        &node.comments,
+        &Layout::new(syntax),
     )
 }
 
 pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    document: impl Into<Emission<'a, Location>>,
+    Emission { syntax, source }: Emission<'a, Location>,
     id: NodeId,
     boundary: &Boundary<'_>,
     context: Context,
     root_comments: &'a [Comment<Location>],
     layout: &Layout,
 ) -> Result<Replacement, Error> {
-    let document = document.into();
     let region = boundary.body();
     let visible: Vec<_> = root_comments
         .iter()
@@ -276,23 +275,14 @@ pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>
         })
         .cloned()
         .collect();
-    let own_line = id == document.root
-        && (emit::block_collection(&document.nodes[id.0].kind, context.in_flow())
+    let own_line = id == syntax.root
+        && (emit::block_collection(&syntax.nodes[id.0].kind, context.in_flow())
             || visible
                 .iter()
                 .any(|comment| comment.placement == CommentPlacement::Leading));
     let placement = boundary.placement(context, &visible, root_comments, own_line);
-    let fragment = emit::render(
-        Syntax {
-            nodes: document.nodes,
-            root: document.root,
-        },
-        document.options,
-        id,
-        &placement,
-        layout,
-    )?;
-    boundary.complete(fragment, document.options.max_input_bytes)
+    let fragment = emit::render(syntax, source.options, id, &placement, layout)?;
+    boundary.complete(fragment, source.options.max_input_bytes)
 }
 
 /// Skip whitespace through the last line break before the next token.

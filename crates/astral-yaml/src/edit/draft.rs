@@ -515,29 +515,15 @@ impl Candidate {
         &self.work
     }
 
-    /// Parse `output` and check it against this transaction's intended result.
-    /// Return the parsed document only if content, aliases, requested styles, and
-    /// comments are preserved.
+    /// Reparse the rendered YAML and check it against the intended edit.
     pub(super) fn commit(&self, output: &str) -> Result<EditableDocument, Error> {
-        let error = |message| Error {
-            span: self.diagnostic_span,
-            message,
-        };
-        let parsed = EditableDocument::parse_with_options(output, self.options)?;
-        let correspondence = emit::correspondence(self, &parsed)
-            .ok_or_else(|| error("emission changed YAML content or alias identity"))?;
-        for &id in &self.requested_styles {
-            let target = correspondence[id.0].expect("styled node is retained");
-            if !same_style(&self.nodes[id.0].kind, &parsed.source.nodes[target.0].kind) {
-                return Err(error(
-                    "requested style is not representable in this context",
-                ));
-            }
-        }
-        if !emit::comments_preserved(self, &parsed, &correspondence) {
-            return Err(error("emission changed comment ownership or placement"));
-        }
-        Ok(parsed)
+        emit::parse_rendered(
+            self.into(),
+            output,
+            self.options,
+            self.diagnostic_span,
+            &self.requested_styles,
+        )
     }
 }
 

@@ -293,17 +293,7 @@ impl EditableDocument {
             message,
         })?
         .apply();
-        let parsed = Self::parse_with_options(&output, self.source.options)?;
-        let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
-            span: region,
-            message: "emission changed YAML content or alias identity",
-        })?;
-        if !emit::comments_preserved(self, &parsed, &correspondence) {
-            return Err(Error {
-                span: region,
-                message: "emission changed comment ownership or placement",
-            });
-        }
+        emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?;
         Ok(output)
     }
 

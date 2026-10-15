@@ -275,28 +275,22 @@ impl Plan<'_> {
         let mut patches = root_comments
             .as_mut()
             .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
+        let emission = self.original.emission(self.candidate);
         for rewrite in &regions {
             let id = rewrite.id;
-            let rendered = if id == self.candidate.root {
-                let comments = root_comments.as_ref().expect("root comment plan");
-                splice::render_with_comments(
-                    self.original.emission(self.candidate),
-                    id,
-                    &rewrite.boundary,
-                    rewrite.context,
-                    &comments.rendered,
-                    syntax,
-                )?
+            let comments = if id == self.candidate.root {
+                &root_comments.as_ref().expect("root comment plan").rendered
             } else {
-                splice::render_with_comments(
-                    self.original.emission(self.candidate),
-                    id,
-                    &rewrite.boundary,
-                    rewrite.context,
-                    &self.candidate.nodes[id.0].comments,
-                    syntax,
-                )?
+                &self.candidate.nodes[id.0].comments
             };
+            let rendered = splice::render_with_comments(
+                emission,
+                id,
+                &rewrite.boundary,
+                rewrite.context,
+                comments,
+                syntax,
+            )?;
             patches.push((rendered.span, rendered.text));
         }
         if let Some(comments) = root_comments.as_mut() {

@@ -1,5 +1,7 @@
 use super::{Comment, CommentPosition, EditableDocument, NodeKind, layout::Layout, view::Syntax};
-use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
+use crate::{
+    CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span, comments::CommentPlacement,
+};
 use std::fmt::Write;
 
 #[cfg(test)]
@@ -21,7 +23,7 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
 /// Source ranges are selected by the splice planner before this function runs.
 pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     document: Syntax<'a, Location>,
-    options: crate::ParseOptions,
+    options: ParseOptions,
     id: NodeId,
     placement: &super::splice::Placement<'a, Location>,
     layout: &Layout,
@@ -271,7 +273,7 @@ enum ScalarPosition {
 
 struct Emitter<'a, 'layout, Location> {
     document: Syntax<'a, Location>,
-    options: crate::ParseOptions,
+    options: ParseOptions,
     layout: &'layout Layout,
     root: NodeId,
     root_comments: &'a [Comment<Location>],
@@ -1072,6 +1074,36 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
             && stream.comments().is_empty()
     });
     if matches { candidate } else { quoted(value) }
+}
+
+/// Reparse rendered YAML and require the intended content, alias targets, styles, and comments.
+pub(super) fn parse_rendered<Location: Copy>(
+    expected: Syntax<'_, Location>,
+    output: &str,
+    options: ParseOptions,
+    span: Span,
+    requested_styles: &[NodeId],
+) -> Result<EditableDocument, Error> {
+    let error = |message| Error { span, message };
+    let parsed = EditableDocument::parse_with_options(output, options)?;
+    let matched = correspondence(expected, &parsed)
+        .ok_or_else(|| error("emission changed YAML content or alias identity"))?;
+
+    for &id in requested_styles {
+        let kind = &expected.nodes[id.0].kind;
+        let preserved = matched[id.0].is_some_and(|target| {
+            super::draft::same_style(kind, &parsed.source.nodes[target.0].kind)
+        });
+        if !preserved {
+            return Err(error(
+                "requested style is not representable in this context",
+            ));
+        }
+    }
+    if !comments_preserved(expected, &parsed, &matched) {
+        return Err(error("emission changed comment ownership or placement"));
+    }
+    Ok(parsed)
 }
 
 /// Match nodes by traversal order and check that aliases reach matching targets.
