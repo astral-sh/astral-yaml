@@ -399,7 +399,7 @@ fn check_root_sequence<const N: usize>(
     }
     let mut combined = original.clone();
     combined
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             for operation in sequence {
                 operation.apply(editor)?;
             }
@@ -421,7 +421,7 @@ fn check_root_sequence<const N: usize>(
             step_content = content(&expected, expected.root());
         }
         separate
-            .edit(|editor| operation.apply(editor))
+            .edit_syntax(|editor| operation.apply(editor))
             .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
         assert_eq!(
             comments(&separate),
@@ -659,7 +659,7 @@ fn nested_edits_match_an_independent_collection_model() {
                     for combined in [false, true] {
                         let mut document = original.clone();
                         let result = if combined {
-                            document.edit(|editor| {
+                            document.edit_syntax(|editor| {
                                 for operation in sequence {
                                     operation.apply(editor)?;
                                 }
@@ -667,7 +667,7 @@ fn nested_edits_match_an_independent_collection_model() {
                             })
                         } else {
                             sequence.into_iter().try_for_each(|operation| {
-                                document.edit(|editor| operation.apply(editor))
+                                document.edit_syntax(|editor| operation.apply(editor))
                             })
                         };
                         result.unwrap_or_else(|error| {
@@ -738,7 +738,7 @@ fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
     {
         let text = format!(" added {index}");
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 let count = editor.node(&root)?.comments().len();
                 editor.insert_comment(&root, count, &text, placement)
@@ -748,7 +748,7 @@ fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
         assert_eq!(comments(&document), expected);
     }
     document
-        .edit(|editor| editor.replace(&editor.root(), "'false'"))
+        .edit_syntax(|editor| editor.replace(&editor.root(), "'false'"))
         .unwrap();
     assert_eq!(comments(&document), expected);
     assert_eq!(

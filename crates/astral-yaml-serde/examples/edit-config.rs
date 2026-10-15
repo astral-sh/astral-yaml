@@ -17,8 +17,8 @@ servers: [primary, retired]
 extra: 'retained'
 ";
     let mut config = Editable::<Config>::parse(source)?;
-    config.edit(|editor| {
-        let mut settings = editor.root_mut().into_mapping()?;
+    config.edit(|root| {
+        let mut settings = root.into_mapping()?;
         settings.field("timeout")?.set(60)?;
         settings.entry("enabled")?.or_insert(true)?;
 

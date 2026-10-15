@@ -31,7 +31,7 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
         for style in [CollectionStyle::Flow, CollectionStyle::Block] {
             let before = document.source().to_owned();
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let outer = editor.mapping_entries(&editor.root())?[0].1.clone();
                     editor.set_collection_style(&outer, style)
                 })

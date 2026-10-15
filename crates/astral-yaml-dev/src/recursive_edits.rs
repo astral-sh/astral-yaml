@@ -941,7 +941,7 @@ pub fn check_recursive_edits(data: &[u8]) {
             })
             .then(|| document.source().to_owned());
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 for operation in operations {
                     let selector = usize::from(operation[1]) * 256 + usize::from(operation[2]);
                     match Operation::from_byte(operation[0]) {

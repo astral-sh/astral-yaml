@@ -10,44 +10,20 @@ mod tests;
 pub use astral_yaml::{
     CollectionStyle, ScalarStyle,
     comments::CommentPlacement,
-    edit::{CommentPosition, Node, NodeKind},
+    edit::{CommentPosition, Node, NodeKind, PathSegment},
 };
 
-/// An editor for an [`Editable`](crate::Editable) transaction.
-///
-/// Start at [`Self::root_mut`] to edit Rust values. Use [`Self::syntax_mut`] for
-/// aliases or structural edits involving mapping keys that are not strings.
-#[derive(Debug)]
-pub struct Editor<'a, 'doc> {
-    syntax: &'a mut syntax::Editor<'doc>,
-    failure: Option<Error>,
-}
-
-impl<'a, 'doc> Editor<'a, 'doc> {
-    pub(crate) fn new(syntax: &'a mut syntax::Editor<'doc>) -> Self {
-        Self {
-            syntax,
-            failure: None,
-        }
-    }
-
-    pub(crate) fn finish(self) -> Result<(), Error> {
-        self.failure.map_or(Ok(()), Err)
-    }
-
-    /// Return a cursor at the document's root.
-    pub fn root_mut(&mut self) -> Cursor<'_, 'doc> {
-        Cursor {
-            syntax: self.syntax.root_mut(),
-            failure: &mut self.failure,
-            path: "$".to_owned(),
-        }
-    }
-
-    /// Return the syntax editor for this transaction.
-    pub fn syntax_mut(&mut self) -> &mut syntax::Editor<'doc> {
-        self.syntax
-    }
+pub(crate) fn transaction<R, E: From<Error>>(
+    editor: &mut syntax::Editor<'_>,
+    edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+) -> Result<R, E> {
+    let mut failure = None;
+    let result = edit(Cursor {
+        syntax: editor.root_mut(),
+        failure: &mut failure,
+        path: "$".to_owned(),
+    })?;
+    failure.map_or(Ok(result), |error| Err(error.into()))
 }
 
 /// A position in the YAML document being edited.
@@ -64,6 +40,38 @@ pub struct Cursor<'a, 'doc> {
 }
 
 impl<'a, 'doc> Cursor<'a, 'doc> {
+    /// Lend this position to an edit, so navigation can start here again afterwards.
+    pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
+        Cursor {
+            syntax: self.syntax.reborrow(),
+            failure: &mut *self.failure,
+            path: self.path.clone(),
+        }
+    }
+
+    /// Continue editing the selected node with the core syntax cursor.
+    /// Commit still checks the complete document and its deserialized value.
+    #[must_use]
+    pub fn into_syntax(self) -> syntax::Cursor<'a, 'doc> {
+        self.syntax
+    }
+
+    /// Select a descendant by literal mapping keys and sequence indices.
+    /// An empty path keeps the current position.
+    ///
+    /// # Errors
+    /// Returns the selection error at the first segment that cannot be followed.
+    pub fn at<'p>(
+        self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+    ) -> Result<Self, Error> {
+        path.into_iter()
+            .try_fold(self, |cursor, segment| match segment.into() {
+                PathSegment::Key(key) => cursor.field(key),
+                PathSegment::Index(index) => cursor.item(index),
+            })
+    }
+
     /// Select the value at string key `name`, or return `None` if it is absent.
     ///
     /// Keys are compared after decoding. Numeric, boolean, and application-tagged
@@ -90,8 +98,15 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Returns an error if the node is not a mapping, or the key is missing or ambiguous.
     pub fn field(self, name: &str) -> Result<Self, Error> {
         let path = format!("{}[{name:?}]", self.path);
-        self.get(name)?
-            .ok_or_else(|| context(&path, Error::new("missing mapping key")))
+        let syntax = self
+            .syntax
+            .field(name)
+            .map_err(|error| context(&path, error))?;
+        Ok(Self {
+            syntax,
+            path,
+            ..self
+        })
     }
 
     /// Select the sequence item at `index`, accounting for earlier edits.
@@ -99,19 +114,15 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a sequence or `index` is out of bounds.
     pub fn item(self, index: usize) -> Result<Self, Error> {
+        let path = format!("{}[{index}]", self.path);
         let syntax = self
             .syntax
-            .into_sequence()
-            .map_err(|error| context(&self.path, error))?;
-        let path = format!("{}[{index}]", self.path);
-        let syntax = syntax
-            .into_cursor()
             .item(index)
             .map_err(|error| context(&path, error))?;
         Ok(Self {
             syntax,
-            failure: self.failure,
             path,
+            ..self
         })
     }
 
@@ -452,6 +463,22 @@ impl<'a, 'doc> Entry<'a, 'doc> {
             path: self.path,
         })
     }
+
+    /// Edit the entry's mapping, inserting an empty mapping only if the entry is absent.
+    ///
+    /// # Errors
+    /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
+    pub fn or_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
+        self.or_insert_yaml("{}")?.into_mapping()
+    }
+
+    /// Edit the entry's sequence, inserting an empty sequence only if the entry is absent.
+    ///
+    /// # Errors
+    /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
+    pub fn or_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
+        self.or_insert_yaml("[]")?.into_sequence()
+    }
 }
 
 impl Cursor<'_, '_> {
@@ -662,7 +689,7 @@ impl<'a, 'doc> SequenceMut<'a, 'doc> {
 
 fn context(path: &str, error: impl Into<Error>) -> Error {
     let mut error = error.into();
-    error.message = format!("{path}: {}", error.message);
+    error.path = Some(path.to_owned());
     error
 }
 

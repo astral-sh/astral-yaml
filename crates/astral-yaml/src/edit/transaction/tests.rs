@@ -232,7 +232,7 @@ fn collection_rewrites_include_their_comment_context() {
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let target = editor.mapping_entries(&editor.root())?[0].1.clone();
                 editor.set_collection_style(&target, CollectionStyle::Flow)?;
                 match editor.node(&target)?.kind() {

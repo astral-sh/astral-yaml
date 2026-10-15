@@ -49,38 +49,29 @@ fn nested_layout_changes_keep_the_typed_model_current(source: &str) {
             state ^= state << 17;
             let operation = state % 8;
             document
-                .edit(|editor| {
+                .edit(|root| {
                     match operation {
                         0 => {
-                            editor
-                                .root_mut()
-                                .field("outer")?
-                                .field("value")?
-                                .set("null")?;
+                            root.field("outer")?.field("value")?.set("null")?;
                         }
                         1 => {
-                            let syntax = editor.syntax_mut();
-                            let outer = syntax.mapping_entries(&syntax.root())?[0].1.clone();
-                            let value = syntax.mapping_entries(&outer)?[0].1.clone();
-                            syntax.replace(
-                                &value,
-                                indoc! {r"
-                                    &a |+
-                                      new
+                            let yaml = indoc! {r"
+                                &a |+
+                                  new
 
-                                "},
-                            )?;
+                            "};
+                            root.at(["outer", "value"])?.replace_yaml(yaml)?;
                         }
-                        2 | 3 => editor.root_mut().field("outer")?.set_collection_style(
-                            if operation == 2 {
+                        2 | 3 => root
+                            .field("outer")?
+                            .set_collection_style(if operation == 2 {
                                 CollectionStyle::Flow
                             } else {
                                 CollectionStyle::Block
-                            },
-                        )?,
+                            })?,
                         _ => {
                             let owner = usize::from(operation == 4 || operation == 5);
-                            let mut cursor = editor.root_mut();
+                            let mut cursor = root;
                             if owner == 1 {
                                 cursor = cursor.field("outer")?;
                             }

@@ -82,40 +82,32 @@ fuzz_target!(|data: &[u8]| {
                 }
             })
         } else {
-            document.edit(|editor| {
+            document.edit(|mut root| {
                 let index = usize::from(operation >> 6);
                 match operation % 8 {
-                    0 if operation & 8 == 0 => editor.root_mut().set("false")?,
-                    0 => editor.root_mut().set(false)?,
+                    0 if operation & 8 == 0 => root.set("false")?,
+                    0 => root.set(false)?,
                     1 => {
-                        editor
-                            .root_mut()
-                            .into_sequence()?
-                            .push([1, 2])?
-                            .item(0)?
-                            .set("null")?;
+                        root.into_sequence()?.push([1, 2])?.item(0)?.set("null")?;
                     }
-                    2 => editor.root_mut().into_sequence()?.remove(index)?,
+                    2 => root.into_sequence()?.remove(index)?,
                     3 => {
-                        editor
-                            .root_mut()
-                            .into_mapping()?
+                        root.into_mapping()?
                             .set("added", [operation])?
                             .into_sequence()?
                             .push(operation)?;
                     }
                     4 => {
-                        if let Some(mut added) = editor.root_mut().get("added")? {
+                        if let Some(mut added) = root.get("added")? {
                             added.set(true)?;
                             added.append_comment(" fuzz", CommentPlacement::Inline)?;
                         }
                     }
-                    5 => editor.root_mut().item(index)?.set("replacement")?,
+                    5 => root.item(index)?.set("replacement")?,
                     6 => {
-                        editor.root_mut().into_mapping()?.remove("added")?;
+                        root.into_mapping()?.remove("added")?;
                     }
                     _ => {
-                        let mut root = editor.root_mut();
                         root.set([1, 2])?;
                         let mut items = root.into_sequence()?;
                         items.insert(index, "inserted")?;

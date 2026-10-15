@@ -29,7 +29,7 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     // Emission canonicalizes the short escapes, exceeding the source limit
     // inside the renderer, before a replacement patch can be constructed.
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let value = if nested {
                 editor.mapping_entries(&editor.root())?.remove(0).1
             } else {
@@ -166,10 +166,10 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     });
     let before = document.to_yaml();
     document
-        .edit(|editor| editor.remove_comment(&editor.root(), 2))
+        .edit_syntax(|editor| editor.remove_comment(&editor.root(), 2))
         .unwrap();
     document
-        .edit(|editor| editor.replace_comment(&editor.root(), 1, " final"))
+        .edit_syntax(|editor| editor.replace_comment(&editor.root(), 1, " final"))
         .unwrap();
     diffs.push(formatdoc! {r"
         subsequent edits
@@ -342,7 +342,7 @@ fn root_comment_placement_respects_the_document_prefix() {
     let mut document = EditableDocument::parse(source).unwrap();
     // A leading comment cannot follow an inline comment in source order.
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             editor.insert_comment(&editor.root(), 1, " leading", CommentPlacement::Leading)
         })
         .unwrap_err();
@@ -588,7 +588,7 @@ fn comment_transactions_match_an_ordered_list_model() {
         for round in 0..100 {
             let before = document.to_yaml();
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let root = editor.root();
                     for step in 0..3 {
                         state ^= state << 13;
@@ -656,7 +656,7 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
         ] {
             let mut document = EditableDocument::parse(source).unwrap();
             document
-                .edit(|editor| editor.replace(&editor.root(), fragment))
+                .edit_syntax(|editor| editor.replace(&editor.root(), fragment))
                 .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
             diffs.push(edit_diff(source, document.source()));
         }
@@ -806,7 +806,7 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
 fn edits_preserve_comments_between_headers_properties_and_content(source: &str) -> String {
     let mut document = EditableDocument::parse(source).unwrap();
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let value = editor.mapping_entries(&editor.root())?.remove(0).1;
             editor.replace_preserving_style(&value, "new")
         })

@@ -412,7 +412,9 @@ fn comment_terminators_compose_with_retained_suffixes(source: &str) {
     let mut document = EditableDocument::parse(source).unwrap();
     for _ in 0..3 {
         document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
+            .edit_syntax(|editor| {
+                editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+            })
             .unwrap();
         assert_eq!(document.source(), source);
     }

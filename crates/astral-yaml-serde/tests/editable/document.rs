@@ -117,9 +117,7 @@ fn typed_metadata_and_errors_use_the_lf_source() {
     let expected: Config = astral_yaml_serde::from_str(source).unwrap();
     assert_eq!(config.value().timeout, expected.timeout);
 
-    config
-        .edit(|editor| editor.root_mut().field("timeout")?.set(100))
-        .unwrap();
+    config.edit(|root| root.field("timeout")?.set(100)).unwrap();
     let expected: Config = astral_yaml_serde::from_str(config.source()).unwrap();
     assert_eq!(config.value().timeout, expected.timeout);
     insta::assert_snapshot!(edit_diff(source, config.source()), @"
@@ -134,7 +132,7 @@ fn typed_metadata_and_errors_use_the_lf_source() {
     let before = config.to_yaml();
     assert!(
         config
-            .edit(|editor| editor.root_mut().field("timeout")?.set("invalid"))
+            .edit(|root| root.field("timeout")?.set("invalid"))
             .is_err()
     );
     assert_eq!(config.source(), before);
@@ -155,9 +153,7 @@ fn typed_edits_preserve_carriage_returns_in_scalar_values() {
     "#};
     let mut document = Editable::<String>::parse(&source.replace('\n', "\r")).unwrap();
     assert_eq!(document.value(), "before\r\nafter");
-    document
-        .edit(|editor| editor.root_mut().set("new\r\nvalue"))
-        .unwrap();
+    document.edit(|mut root| root.set("new\r\nvalue")).unwrap();
     assert_eq!(document.value(), "new\r\nvalue");
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     --- before.yaml
@@ -184,8 +180,8 @@ impl From<Error> for ApplicationError {
 fn application_errors_preserve_their_payload_and_roll_back_both_views() {
     let source = "timeout: 30 # seconds\n";
     let mut config = Editable::<Config>::parse(source).unwrap();
-    let result: Result<(), ApplicationError> = config.try_edit(|editor| {
-        editor.root_mut().field("timeout")?.set(60)?;
+    let result: Result<(), ApplicationError> = config.try_edit(|root| {
+        root.field("timeout")?.set(60)?;
         Err(ApplicationError::Cancelled(
             "reload was cancelled".to_owned(),
         ))
@@ -198,8 +194,8 @@ fn application_errors_preserve_their_payload_and_roll_back_both_views() {
     assert_eq!(config.source(), source);
     assert_eq!(config.value().timeout.value, 30);
 
-    let result: Result<_, ApplicationError> = config.try_edit(|editor| {
-        editor.root_mut().field("timeout")?.set(60)?;
+    let result: Result<_, ApplicationError> = config.try_edit(|root| {
+        root.field("timeout")?.set(60)?;
         Ok("reloaded".to_owned())
     });
     assert_eq!(result.unwrap(), "reloaded");
@@ -210,8 +206,8 @@ fn application_errors_preserve_their_payload_and_roll_back_both_views() {
 #[test_case(true; "handled mutation error")]
 fn application_errors_wrap_failed_mutations(handled: bool) {
     let mut config = Editable::<Config>::parse("timeout: 30\n").unwrap();
-    let result: Result<(), ApplicationError> = config.try_edit(|editor| {
-        let error = editor.root_mut().field("timeout")?.set_yaml("[");
+    let result: Result<(), ApplicationError> = config.try_edit(|root| {
+        let error = root.field("timeout")?.set_yaml("[");
         if handled {
             assert!(error.is_err());
         } else {
@@ -233,11 +229,11 @@ fn application_errors_wrap_failed_mutations(handled: bool) {
 fn application_errors_wrap_commit_failures(typed: bool) {
     let source = "[&port 80, *port]\n";
     let mut ports = Editable::<Vec<u16>>::parse(source).unwrap();
-    let result: Result<(), ApplicationError> = ports.try_edit(|editor| {
+    let result: Result<(), ApplicationError> = ports.try_edit(|root| {
         if typed {
-            editor.root_mut().item(0)?.set("http")?;
+            root.item(0)?.set("http")?;
         } else {
-            editor.root_mut().into_sequence()?.remove(0)?;
+            root.into_sequence()?.remove(0)?;
         }
         Ok(())
     });
@@ -273,7 +269,7 @@ fn typed_edit_enforces_stored_limits_and_preserves_both_views() {
         },
     )
     .unwrap();
-    let result = config.edit(|editor| editor.root_mut().field("timeout")?.set(100));
+    let result = config.edit(|root| root.field("timeout")?.set(100));
     assert!(result.is_err());
     assert_eq!(config.source(), source);
     assert_eq!(config.value().timeout.value, 30);
@@ -305,7 +301,7 @@ fn explicit_limits_apply_to_initial_and_committed_typed_parsing() {
     )
     .unwrap();
     document
-        .edit(|editor| editor.root_mut().into_sequence()?.push(1).map(|_| ()))
+        .edit(|root| root.into_sequence()?.push(1).map(|_| ()))
         .unwrap();
     assert_eq!(document.syntax().options().max_depth, 128);
     assert_eq!(

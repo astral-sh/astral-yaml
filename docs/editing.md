@@ -31,8 +31,8 @@ servers: [primary]
 extra: 'retained'
 ";
     let mut config = Editable::<Config>::parse(source)?;
-    config.edit(|editor| {
-        let mut settings = editor.root_mut().into_mapping()?;
+    config.edit(|root| {
+        let mut settings = root.into_mapping()?;
         settings.field("timeout")?.set(60)?;
         settings.entry("retries")?.or_insert(3)?;
 
@@ -59,15 +59,19 @@ extra: 'retained'
 "retries": 3
 ```
 
-Collection views let you edit siblings without selecting their parent again.
-Navigate to a nested collection with a chain such as
-`editor.root_mut().field("services")?.field("db")?.into_mapping()?`.
-Each view lends a cursor for a child while retaining its own position.
+The callback starts at the root. To start at an existing field, write
+`config.edit_at(["timeout"], |mut timeout| timeout.set(60))?`.
+Paths use literal keys, so `["service.db"]` selects one key and
+`["service", "db"]` selects a nested field. Collection views let you edit
+siblings without selecting their parent again.
 
 `field()` requires a string key to exist, while `get()` returns `None` when it is
 absent. `entry(name)?.or_insert(value)?` supplies an optional default. Existing
 entries stay unchanged and do not serialize the default. Use `set(name, value)`
 on a mapping view to replace an existing value or append a new entry.
+To edit a collection that might be absent, use `entry("servers")?.or_sequence()?`
+or `entry("settings")?.or_mapping()?`. These insert an empty collection when
+needed and report an error if an existing value has the wrong type.
 
 ## Roll back a failed edit
 
@@ -80,14 +84,14 @@ use astral_yaml_serde::Editable;
 fn main() -> Result<(), astral_yaml_serde::Error> {
     let mut ports = Editable::<Vec<u16>>::parse("[80, 443] # ports\n")?;
     let before = ports.to_yaml();
-    let result = ports.edit(|editor| {
-        let mut items = editor.root_mut().into_sequence()?;
+    let result = ports.edit(|root| {
+        let mut items = root.into_sequence()?;
         items.push(8080)?;
         items.item(0)?.set("http")?;
         Ok(())
     });
 
-    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().path.as_deref(), Some("$[0]"));
     assert_eq!(ports.source(), before);
     assert_eq!(ports.value(), &[80, 443]);
     Ok(())
@@ -96,6 +100,8 @@ fn main() -> Result<(), astral_yaml_serde::Error> {
 
 Mutation failures also prevent commit when the callback handles their errors.
 Failed selections leave the transaction usable, so you can try another field.
+Deserialization errors report a path in the proposed document. If that path
+follows an alias, the byte span can point to the anchor it references.
 
 ## Use an application error
 
@@ -121,8 +127,8 @@ impl From<Error> for UpdateError {
 fn main() -> Result<(), Error> {
     let mut ports = Editable::<Vec<u16>>::parse("[80, 443]\n")?;
     let before = ports.to_yaml();
-    let result: Result<(), UpdateError> = ports.try_edit(|editor| {
-        editor.root_mut().into_sequence()?.push(8080)?;
+    let result: Result<(), UpdateError> = ports.try_edit(|root| {
+        root.into_sequence()?.push(8080)?;
         Err(UpdateError::Rejected("port is already reserved".to_owned()))
     });
 
@@ -155,8 +161,8 @@ struct Config {
 
 fn main() -> Result<(), astral_yaml_serde::Error> {
     let mut config = Editable::<Config>::parse("name: 'primary' # service\nports: [80]\n")?;
-    config.edit(|editor| {
-        let mut settings = editor.root_mut().into_mapping()?;
+    config.edit(|root| {
+        let mut settings = root.into_mapping()?;
         settings.field("name")?.set_yaml("\"backup\"")?;
         settings.field("ports")?.replace_yaml("- 8080\n- 8443\n")?;
         Ok(())

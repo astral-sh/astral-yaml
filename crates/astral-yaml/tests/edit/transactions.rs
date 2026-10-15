@@ -87,7 +87,7 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
     ");
     let before = document.to_yaml();
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let entries = editor.mapping_entries(&editor.root())?;
             editor.replace(&entries[0].1, "1000")?;
             editor.replace(&entries[1].1, "'updated'")
@@ -166,7 +166,7 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
         let mut document = EditableDocument::parse(source).unwrap();
         assert!(
             document
-                .edit(|e| e.set_scalar_style(&e.root(), style))
+                .edit_syntax(|e| e.set_scalar_style(&e.root(), style))
                 .is_err()
         );
         assert_eq!(document.source(), source);
@@ -174,7 +174,7 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
     let mut document = EditableDocument::parse("[one]").unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let item = e.sequence_items(&e.root())?.remove(0);
                 e.set_scalar_style(&item, ScalarStyle::Literal)
             })
@@ -187,19 +187,19 @@ fn edits_are_atomic_and_handles_expire() {
     let mut document = EditableDocument::parse("[1, 2]").unwrap();
     let mut stale = None;
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             stale = Some(editor.root());
             Ok(())
         })
         .unwrap();
     assert!(
         document
-            .edit(|editor| editor.insert_item(stale.as_ref().unwrap(), 0, "3"))
+            .edit_syntax(|editor| editor.insert_item(stale.as_ref().unwrap(), 0, "3"))
             .is_err()
     );
     assert!(
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 let first = editor.sequence_items(&root)?.remove(0);
                 editor.remove_item(&root, 0)?;
@@ -209,7 +209,7 @@ fn edits_are_atomic_and_handles_expire() {
     );
     assert!(
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 editor.insert_item(&root, 0, "3")?;
                 assert!(editor.remove_item(&root, 20).is_err());
@@ -224,7 +224,11 @@ fn edits_are_atomic_and_handles_expire() {
 fn aliases_cannot_be_dangled_or_silently_rebound() {
     for (source, index) in [("[&a 1, *a]", 0), ("[&a 1, &a 2, *a]", 1)] {
         let mut document = EditableDocument::parse(source).unwrap();
-        assert!(document.edit(|e| e.remove_item(&e.root(), index)).is_err());
+        assert!(
+            document
+                .edit_syntax(|e| e.remove_item(&e.root(), index))
+                .is_err()
+        );
         assert_eq!(document.source(), source);
     }
     let source = "[&a 1, *a]";
@@ -243,7 +247,7 @@ fn aliases_cannot_be_dangled_or_silently_rebound() {
     ");
     let before = document.to_yaml();
     document
-        .edit(|e| e.insert_item(&e.root(), 2, "&b [*b]"))
+        .edit_syntax(|e| e.insert_item(&e.root(), 2, "&b [*b]"))
         .unwrap();
     insta::assert_snapshot!(edit_diff(&before, document.source()), @r"
     --- before.yaml
@@ -322,7 +326,7 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
 fn invalid_operations_roll_back(source: &str, operation: usize) {
     use astral_yaml::{CollectionStyle, ScalarStyle};
     let mut document = EditableDocument::parse(source).unwrap();
-    let result = document.edit(|e| {
+    let result = document.edit_syntax(|e| {
         let root = e.root();
         match operation {
             0 => e.insert_item(&root, 0, "1").map(|_| ()),
@@ -435,7 +439,7 @@ fn local_collection_edits_leave_siblings_untouched() {
 fn inserted_nodes_can_be_edited() {
     let mut document = EditableDocument::parse("[]").unwrap();
     document
-        .edit(|e| {
+        .edit_syntax(|e| {
             let root = e.root();
             e.insert_item(&root, 0, "{a: 1}")?;
             let item = e.sequence_items(&root)?.remove(0);
@@ -469,7 +473,7 @@ fn scalar_styles_can_be_changed() {
     ] {
         let mut document = EditableDocument::parse("'hello'").unwrap();
         document
-            .edit(|e| e.set_scalar_style(&e.root(), style))
+            .edit_syntax(|e| e.set_scalar_style(&e.root(), style))
             .unwrap();
         diffs.push(formatdoc! {r"
             {style:?}
@@ -563,7 +567,11 @@ fn small_resource_limits_are_rejected() {
         },
     )
     .unwrap();
-    assert!(document.edit(|e| e.insert_item(&e.root(), 0, "1")).is_err());
+    assert!(
+        document
+            .edit_syntax(|e| e.insert_item(&e.root(), 0, "1"))
+            .is_err()
+    );
     let mut document = EditableDocument::parse_with_options(
         "[]",
         ParseOptions {
@@ -572,7 +580,11 @@ fn small_resource_limits_are_rejected() {
         },
     )
     .unwrap();
-    assert!(document.edit(|e| e.insert_item(&e.root(), 0, "1")).is_err());
+    assert!(
+        document
+            .edit_syntax(|e| e.insert_item(&e.root(), 0, "1"))
+            .is_err()
+    );
     for comment in [false, true] {
         let mut document = EditableDocument::parse_with_options(
             "[]",
@@ -584,7 +596,7 @@ fn small_resource_limits_are_rejected() {
         .unwrap();
         assert!(
             document
-                .edit(|e| {
+                .edit_syntax(|e| {
                     if comment {
                         e.insert_comment(&e.root(), 0, "long", CommentPlacement::Leading)
                     } else {
@@ -601,7 +613,7 @@ fn poisoned_transactions_reject_subsequent_mutations() {
     let mut document = EditableDocument::parse("[]").unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let root = e.root();
                 assert!(e.remove_item(&root, 0).is_err());
                 assert!(e.insert_item(&root, 0, "1").is_err());
@@ -663,7 +675,7 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     "})
     .unwrap();
     document
-        .edit(|e| e.replace(&e.root(), "'updated'"))
+        .edit_syntax(|e| e.replace(&e.root(), "'updated'"))
         .unwrap();
     insta::assert_snapshot!(edit_diff(indoc! {r"
         |
@@ -678,7 +690,7 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     ");
     let mut document = EditableDocument::parse("{a: text}").unwrap();
     document
-        .edit(|e| {
+        .edit_syntax(|e| {
             let entries = e.mapping_entries(&e.root())?;
             e.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)
         })
@@ -694,7 +706,7 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     "#);
     let mut document = EditableDocument::parse("[one]").unwrap();
     document
-        .edit(|e| {
+        .edit_syntax(|e| {
             let root = e.root();
             let item = e.sequence_items(&root)?.remove(0);
             e.set_scalar_style(&item, ScalarStyle::SingleQuoted)?;
@@ -713,7 +725,7 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     let mut document = EditableDocument::parse("[{a: 1}]").unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let item = e.sequence_items(&e.root())?.remove(0);
                 e.set_collection_style(&item, CollectionStyle::Block)
             })
@@ -730,7 +742,7 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
     let mut document = EditableDocument::parse(source).unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let entries = e.mapping_entries(&e.root())?;
                 e.insert_comment(&entries[0].1, 0, " trailing", CommentPlacement::Trailing)
             })
@@ -747,7 +759,7 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
     .unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let items = e.sequence_items(&e.root())?;
                 e.replace(&items[1], "12345")
             })
@@ -768,7 +780,7 @@ fn repeated_navigation_is_bounded() {
     .unwrap();
     assert!(
         document
-            .edit(|e| {
+            .edit_syntax(|e| {
                 let root = e.root();
                 e.node(&root)?;
                 e.node(&root)?;
@@ -855,10 +867,10 @@ fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
           second
     "};
     let mut document = EditableDocument::parse(&source.replace('\n', "\r\n")).unwrap();
-    document.edit(|_| Ok(())).unwrap();
+    document.edit_syntax(|_| Ok(())).unwrap();
     assert_eq!(document.to_yaml(), source);
 
-    let result = document.edit(|editor| {
+    let result = document.edit_syntax(|editor| {
         let value = editor.mapping_entries(&editor.root())?.remove(0).1;
         editor.replace(&value, &fragment.replace('\n', "\r"))?;
         editor.replace(&editor.root(), "[")
@@ -867,7 +879,7 @@ fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
     assert_eq!(document.source(), source);
 
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let value = editor.mapping_entries(&editor.root())?.remove(0).1;
             editor.replace(&value, &fragment.replace('\n', "\r"))
         })

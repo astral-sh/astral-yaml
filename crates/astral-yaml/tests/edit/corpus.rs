@@ -154,7 +154,7 @@ fn corpus_comment_edits_preserve_the_expected_graph() {
                 let mut expected = project(&document);
                 let context = format!("{} {operation:?} flow={flow}", fixture.file);
                 document
-                    .edit(|editor| {
+                    .edit_syntax(|editor| {
                         for (handle, node) in handles(editor).iter().zip(&mut expected) {
                             for (index, (text, placement, _)) in
                                 node.comments.iter_mut().enumerate().rev()
@@ -224,7 +224,7 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
         assert_projection(&normalized, &expected, &fixture.file);
 
         let unchanged = document.source().to_owned();
-        document.edit(|_| Ok(())).unwrap();
+        document.edit_syntax(|_| Ok(())).unwrap();
         assert_eq!(document.source(), unchanged);
 
         let positions: Vec<_> = expected
@@ -243,7 +243,7 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
             expected[positions[index]].tag = None;
         }
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let scalars: Vec<_> = handles(editor)
                     .into_iter()
                     .filter(|handle| {
@@ -284,7 +284,7 @@ fn corpus_collection_layout_changes_preserve_the_expected_graph() {
             CollectionStyle::Block,
             CollectionStyle::Flow,
         ] {
-            let result = document.edit(|editor| {
+            let result = document.edit_syntax(|editor| {
                 for handle in handles(editor) {
                     let empty = match editor.node(&handle)?.kind() {
                         NodeKind::Sequence { items, .. } => items.is_empty(),

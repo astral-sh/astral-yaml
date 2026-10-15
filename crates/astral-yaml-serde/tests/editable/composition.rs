@@ -4,7 +4,7 @@ use super::support::edit;
 use astral_yaml_dev::indoc;
 use astral_yaml_serde::{
     Editable, Error,
-    edit::{CollectionStyle, Editor, NodeKind},
+    edit::{CollectionStyle, Cursor, NodeKind},
 };
 use serde_json::{Value, json};
 
@@ -29,76 +29,52 @@ enum Operation {
 }
 
 impl Operation {
-    fn apply(self, editor: &mut Editor<'_, '_>) -> Result<(), Error> {
+    fn apply(self, mut root: Cursor<'_, '_>) -> Result<(), Error> {
         match self {
-            Self::Multiline => editor.root_mut().field("value")?.set(indoc! {r"
+            Self::Multiline => root.field("value")?.set(indoc! {r"
                 first
 
                 last
 
             "})?,
-            Self::Mapping => editor
-                .root_mut()
+            Self::Mapping => root
                 .field("value")?
                 .set(json!({"nested": ["false", null]}))?,
-            Self::Sequence => editor.root_mut().field("value")?.set([true, false])?,
-            Self::Block => editor
-                .root_mut()
-                .set_collection_style(CollectionStyle::Block)?,
-            Self::String => editor.root_mut().field("value")?.set("null")?,
-            Self::Boolean => editor.root_mut().field("value")?.set(false)?,
-            Self::Integer => editor.root_mut().field("value")?.set(i64::MIN)?,
-            Self::Null => editor.root_mut().field("value")?.set(())?,
+            Self::Sequence => root.field("value")?.set([true, false])?,
+            Self::Block => root.set_collection_style(CollectionStyle::Block)?,
+            Self::String => root.field("value")?.set("null")?,
+            Self::Boolean => root.field("value")?.set(false)?,
+            Self::Integer => root.field("value")?.set(i64::MIN)?,
+            Self::Null => root.field("value")?.set(())?,
             Self::PushString => {
-                editor
-                    .root_mut()
-                    .field("items")?
-                    .into_sequence()?
-                    .push("true")?;
+                root.field("items")?.into_sequence()?.push("true")?;
             }
             Self::PushObject => {
-                editor
-                    .root_mut()
-                    .field("items")?
+                root.field("items")?
                     .into_sequence()?
                     .push(json!({"inner": [true, null, "false"]}))?;
             }
             Self::InsertFirst => {
-                editor
-                    .root_mut()
-                    .field("items")?
-                    .into_sequence()?
-                    .insert(0, "0123")?;
+                root.field("items")?.into_sequence()?.insert(0, "0123")?;
             }
             Self::RemoveFirst => {
-                let mut items = editor.root_mut().field("items")?.into_sequence()?;
+                let mut items = root.field("items")?.into_sequence()?;
                 if !items.is_empty() {
                     items.remove(0)?;
                 }
             }
             Self::SetEntry => {
-                editor
-                    .root_mut()
-                    .field("map")?
-                    .into_mapping()?
-                    .set("true", false)?;
+                root.field("map")?.into_mapping()?.set("true", false)?;
             }
             Self::RemoveEntry => {
-                editor
-                    .root_mut()
-                    .field("map")?
-                    .into_mapping()?
-                    .remove("true")?;
+                root.field("map")?.into_mapping()?.remove("true")?;
             }
-            Self::EditSelectedEntry => editor
-                .root_mut()
+            Self::EditSelectedEntry => root
                 .field("map")?
                 .into_mapping()?
                 .set("true", "first")?
                 .set(42)?,
-            Self::Flow => editor
-                .root_mut()
-                .set_collection_style(CollectionStyle::Flow)?,
+            Self::Flow => root.set_collection_style(CollectionStyle::Flow)?,
         }
         Ok(())
     }
@@ -256,9 +232,9 @@ fn check_sequence<const N: usize>(source: &str, sequence: [Operation; N]) {
     }
     let mut combined = Editable::<Value>::parse(source).unwrap();
     combined
-        .edit(|editor| {
+        .edit(|mut root| {
             for operation in sequence {
-                operation.apply(editor)?;
+                operation.apply(root.reborrow())?;
             }
             Ok(())
         })
@@ -347,7 +323,7 @@ fn typed_root_replacements_preserve_values_and_comment_attachments() {
             };
             let expected_comments = comments(&document);
             document
-                .edit(|editor| editor.root_mut().set(value))
+                .edit(|mut root| root.set(value))
                 .unwrap_or_else(|error| panic!("{source:?}, {value:?}: {error}"));
             assert_eq!(document.value(), value, "{source:?}");
             assert_eq!(comments(&document), expected_comments, "{source:?}");
@@ -363,8 +339,7 @@ fn typed_comment_insertions_share_the_root_header_plan() {
     let source = indoc! {r"
         old # first
     "};
-    let document = edit::<Value>(source, |editor| {
-        let mut root = editor.root_mut();
+    let document = edit::<Value>(source, |mut root| {
         root.append_comment(" second", CommentPlacement::Inline)?;
         root.append_comment(" third", CommentPlacement::Inline)?;
         root.set(["new"])
@@ -391,8 +366,7 @@ fn typed_failure_discards_generated_framing() {
     "};
     let mut document = Editable::<String>::parse(source).unwrap();
     let error = document
-        .edit(|editor| {
-            let mut root = editor.root_mut();
+        .edit(|mut root| {
             root.append_comment(" second", CommentPlacement::Inline)?;
             root.append_comment(" third", CommentPlacement::Inline)?;
             root.set(["new"])

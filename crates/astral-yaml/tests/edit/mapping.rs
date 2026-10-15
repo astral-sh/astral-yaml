@@ -627,7 +627,7 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
     let mut document = EditableDocument::parse(source).unwrap();
     let replacement = format!("\"{}\"", "\\u0001".repeat(103));
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let key = editor.mapping_entries(&editor.root())?.remove(0).0;
             editor.replace(&key, &replacement)
         })

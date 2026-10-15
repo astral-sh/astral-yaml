@@ -8,7 +8,7 @@ use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::formatdoc;
 use astral_yaml_serde::{
     Editable, Error,
-    edit::{CollectionStyle, Cursor, Editor, NodeKind, ScalarStyle},
+    edit::{CollectionStyle, Cursor, NodeKind, ScalarStyle},
 };
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
@@ -40,10 +40,8 @@ impl Nested {
     }
 }
 
-fn nested<'editor, 'doc>(
-    editor: &'editor mut Editor<'_, 'doc>,
-) -> Result<Cursor<'editor, 'doc>, Error> {
-    let mut cursor = editor.root_mut().field("nested")?;
+fn nested<'editor, 'doc>(root: Cursor<'editor, 'doc>) -> Result<Cursor<'editor, 'doc>, Error> {
+    let mut cursor = root.field("nested")?;
     while matches!(cursor.node()?.kind(), NodeKind::Sequence { .. }) {
         cursor = cursor.item(0)?;
     }
@@ -52,8 +50,8 @@ fn nested<'editor, 'doc>(
 
 // A previous flow-root edit can make every enclosing sequence flow-style.
 // Explicit block requests must reopen the entire path to the nested mapping.
-fn set_nested_style(editor: &mut Editor<'_, '_>, style: CollectionStyle) -> Result<(), Error> {
-    let mut cursor = editor.root_mut().field("nested")?;
+fn set_nested_style(root: Cursor<'_, '_>, style: CollectionStyle) -> Result<(), Error> {
+    let mut cursor = root.field("nested")?;
     loop {
         cursor.set_collection_style(style)?;
         if !matches!(cursor.node()?.kind(), NodeKind::Sequence { .. }) {
@@ -70,7 +68,7 @@ struct Comments {
 }
 
 fn apply(
-    editor: &mut Editor<'_, '_>,
+    mut root: Cursor<'_, '_>,
     expected: &mut Config,
     comments: &mut Comments,
     operation: &[u8; 2],
@@ -80,50 +78,30 @@ fn apply(
     let key = ["null", "true", "01", "with: space", "two\nlines"][selector % 5];
     match operation[0] % OPERATIONS {
         0 => {
-            editor.root_mut().field("value")?.set(text)?;
+            root.field("value")?.set(text)?;
             text.clone_into(&mut expected.value);
             text.clone_into(&mut expected.copy);
         }
         1 => {
-            editor
-                .root_mut()
-                .field("items")?
-                .into_sequence()?
-                .push(text)?;
+            root.field("items")?.into_sequence()?.push(text)?;
             expected.items.push(text.to_owned());
         }
         2 => {
             let index = selector % (expected.items.len() + 1);
-            editor
-                .root_mut()
-                .field("items")?
-                .into_sequence()?
-                .insert(index, text)?;
+            root.field("items")?.into_sequence()?.insert(index, text)?;
             expected.items.insert(index, text.to_owned());
         }
         3 if !expected.items.is_empty() => {
             let index = selector % expected.items.len();
-            editor
-                .root_mut()
-                .field("items")?
-                .into_sequence()?
-                .remove(index)?;
+            root.field("items")?.into_sequence()?.remove(index)?;
             expected.items.remove(index);
         }
         4 => {
-            editor
-                .root_mut()
-                .field("map")?
-                .into_mapping()?
-                .set(key, text)?;
+            root.field("map")?.into_mapping()?.set(key, text)?;
             expected.map.insert(key.to_owned(), text.to_owned());
         }
         5 => {
-            editor
-                .root_mut()
-                .field("map")?
-                .into_mapping()?
-                .remove(key)?;
+            root.field("map")?.into_mapping()?.remove(key)?;
             expected.map.remove(key);
         }
         6 => {
@@ -134,12 +112,11 @@ fn apply(
             };
             // A flow parent cannot honor an earlier nested block-style request.
             if style == CollectionStyle::Flow {
-                set_nested_style(editor, style)?;
+                set_nested_style(root.reborrow(), style)?;
             }
-            editor.root_mut().set_collection_style(style)?;
+            root.set_collection_style(style)?;
         }
-        7 => editor
-            .root_mut()
+        7 => root
             .field("value")?
             .set_scalar_style(ScalarStyle::DoubleQuoted)?,
         8 => {
@@ -158,34 +135,29 @@ fn apply(
                 _ => CommentPlacement::Detached,
             };
             if placement == CommentPlacement::Trailing && !comments.nested.is_empty() {
-                set_nested_style(editor, CollectionStyle::Flow)?;
+                set_nested_style(root.reborrow(), CollectionStyle::Flow)?;
             }
             let index = if placement == CommentPlacement::Leading {
                 0
             } else {
                 comments.root.len()
             };
-            let syntax = editor.syntax_mut();
-            syntax.insert_comment(&syntax.root(), index, " model", placement)?;
+            root.into_syntax()
+                .insert_comment(index, " model", placement)?;
             comments
                 .root
                 .insert(index, (" model".to_owned(), placement));
         }
         9 => {
-            editor.root_mut().field("items")?.set([text])?;
+            root.field("items")?.set([text])?;
             expected.items = vec![text.to_owned()];
         }
         10 => {
-            editor
-                .root_mut()
-                .field("map")?
-                .set(BTreeMap::<String, String>::new())?;
+            root.field("map")?.set(BTreeMap::<String, String>::new())?;
             expected.map.clear();
         }
         11 => {
-            editor
-                .root_mut()
-                .field("map")?
+            root.field("map")?
                 .into_mapping()?
                 .set(key, "first")?
                 .set(text)?;
@@ -193,16 +165,16 @@ fn apply(
         }
         12 if !comments.root.is_empty() => {
             let index = selector % comments.root.len();
-            editor.root_mut().remove_comment(index)?;
+            root.remove_comment(index)?;
             comments.root.remove(index);
         }
         13 if !comments.root.is_empty() => {
             let index = selector % comments.root.len();
-            editor.root_mut().replace_comment(index, " changed")?;
+            root.replace_comment(index, " changed")?;
             " changed".clone_into(&mut comments.root[index].0);
         }
         14 => {
-            nested(editor)?
+            nested(root)?
                 .field("value")?
                 .replace_yaml(if selector % 2 == 0 {
                     "|+\n  new\n\n"
@@ -218,16 +190,16 @@ fn apply(
                 .iter()
                 .any(|(_, placement)| *placement == CommentPlacement::Trailing)
             {
-                set_nested_style(editor, CollectionStyle::Flow)?;
+                set_nested_style(root.reborrow(), CollectionStyle::Flow)?;
             }
-            nested(editor)?.append_comment(" nested", CommentPlacement::Detached)?;
+            nested(root)?.append_comment(" nested", CommentPlacement::Detached)?;
             comments
                 .nested
                 .push((" nested".to_owned(), CommentPlacement::Detached));
         }
         16 if !comments.nested.is_empty() => {
             let index = selector % comments.nested.len();
-            nested(editor)?.remove_comment(index)?;
+            nested(root)?.remove_comment(index)?;
             comments.nested.remove(index);
         }
         17 => {
@@ -243,35 +215,32 @@ fn apply(
                 CollectionStyle::Flow
             };
             if style == CollectionStyle::Block {
-                editor.root_mut().set_collection_style(style)?;
+                root.set_collection_style(style)?;
             }
-            set_nested_style(editor, style)?;
+            set_nested_style(root, style)?;
         }
         18 => {
-            nested(editor)?.field("value")?.set(text)?;
+            nested(root)?.field("value")?.set(text)?;
             text.clone_into(expected.nested.value_mut());
         }
         19 => {
-            let mut root = editor.root_mut();
             root.append_comment(" temporary", CommentPlacement::Inline)?;
             root.remove_comment(comments.root.len())?;
         }
         20 => {
             let index = selector % (expected.items.len() + 1);
-            let mut items = editor.root_mut().field("items")?.into_sequence()?;
+            let mut items = root.field("items")?.into_sequence()?;
             items.insert(index, text)?;
             items.remove(index)?;
         }
         21 => {
             // This key is outside the model's persistent key vocabulary.
-            let mut map = editor.root_mut().field("map")?.into_mapping()?;
+            let mut map = root.field("map")?.into_mapping()?;
             map.set("__temporary__", text)?;
             map.remove("__temporary__")?;
         }
         22 => {
-            editor
-                .root_mut()
-                .field("map")?
+            root.field("map")?
                 .into_mapping()?
                 .entry(key)?
                 .or_insert(text)?;
@@ -393,9 +362,15 @@ fuzz_target!(|data: &[u8]| {
             .all(|operation| matches!(operation[0] % OPERATIONS, 19..=21));
         let unchanged_source = canceled.then(|| document.source().to_owned());
         document
-            .edit(|editor| {
+            .edit(|mut root| {
                 for operation in operations.as_chunks::<2>().0 {
-                    apply(editor, &mut expected, &mut comments, operation, text)?;
+                    apply(
+                        root.reborrow(),
+                        &mut expected,
+                        &mut comments,
+                        operation,
+                        text,
+                    )?;
                 }
                 Ok(())
             })

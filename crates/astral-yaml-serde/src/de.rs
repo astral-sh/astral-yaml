@@ -75,7 +75,10 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         tag_state: TagState::Unconsumed,
         yaml_tag: false,
     })
-    .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
+    .map_err(|mut error| {
+        error.path.get_or_insert_with(|| "$".to_owned());
+        error.located(stream.node(doc.root).map_or(doc.span, |node| node.span))
+    })
 }
 
 struct Context<'s, 'de> {
@@ -634,7 +637,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
             let key = scalar.value.as_ref();
             if strings[..index].contains(&key) {
-                return Err(Error::at("duplicate mapping key", node.span));
+                let error = Error::at("duplicate mapping key", node.span);
+                return Err(error.in_path(format_args!(".key_at({index})")));
             }
 
             strings[index] = key;
@@ -651,7 +655,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));
 
         for (index, entry) in entries.iter().enumerate() {
-            let key = self.child(entry.key).key()?;
+            let key = self
+                .child(entry.key)
+                .key()
+                .map_err(|error| error.in_path(format_args!(".key_at({index})")))?;
             let unique = if let Some(keys) = &mut large_keys {
                 keys.insert(key)
             } else {
@@ -666,7 +673,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                     .stream
                     .node(entry.key)
                     .map_or(span, |key| key.span);
-                return Err(Error::at("duplicate mapping key", span));
+                let error = Error::at("duplicate mapping key", span);
+                return Err(error.in_path(format_args!(".key_at({index})")));
             }
         }
 
@@ -1067,11 +1075,13 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
                 self.check_core_tag(node, YamlType::Mapping)?;
                 let (key, _) = self.child(entries[0].key).scalar(ScalarType::String)?;
-                visitor.visit_enum(Enumeration {
-                    de: self,
-                    variant: &key.value,
-                    value: VariantValue::Node(entries[0].value),
-                })
+                visitor
+                    .visit_enum(Enumeration {
+                        de: self,
+                        variant: &key.value,
+                        value: VariantValue::Node(entries[0].value),
+                    })
+                    .map_err(|error| error.in_path(format_args!("[{:?}]", key.value)))
             }
             _ => Err(Error::at(
                 "expected an enum name or a single-entry mapping",
@@ -1166,12 +1176,15 @@ impl<'de> SeqAccess<'de> for &mut Sequence<'_, 'de> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
-        let Some(&id) = self.items.get(self.index) else {
+        let index = self.index;
+        let Some(&id) = self.items.get(index) else {
             return Ok(None);
         };
 
         self.index += 1;
-        seed.deserialize(self.de.child(id)).map(Some)
+        seed.deserialize(self.de.child(id))
+            .map(Some)
+            .map_err(|error| error.in_path(format_args!("[{index}]")))
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -1183,7 +1196,24 @@ struct Mapping<'s, 'de> {
     de: Deserializer<'s, 'de>,
     entries: &'s [Entry],
     index: usize,
-    pending: Option<NodeId>,
+    pending: Option<&'s Entry>,
+}
+
+impl Mapping<'_, '_> {
+    fn value_error(&self, entry: &Entry, error: Error) -> Error {
+        let key = self
+            .de
+            .context
+            .stream
+            .node(entry.key)
+            .expect("entry key belongs to stream");
+        if let Ok((scalar, ScalarType::String)) = self.de.scalar_value(key) {
+            error.in_path(format_args!("[{:?}]", scalar.value))
+        } else {
+            let index = self.index - 1;
+            error.in_path(format_args!(".value_at({index})"))
+        }
+    }
 }
 
 impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
@@ -1194,21 +1224,25 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
             return Err(Error::new("mapping value was not consumed"));
         }
 
-        let Some(entry) = self.entries.get(self.index) else {
+        let index = self.index;
+        let Some(entry) = self.entries.get(index) else {
             return Ok(None);
         };
 
-        self.pending = Some(entry.value);
+        self.pending = Some(entry);
         self.index += 1;
-        seed.deserialize(self.de.child(entry.key)).map(Some)
+        seed.deserialize(self.de.child(entry.key))
+            .map(Some)
+            .map_err(|error| error.in_path(format_args!(".key_at({index})")))
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
-        let id = self
+        let entry = self
             .pending
             .take()
             .ok_or_else(|| Error::new("mapping value requested before key"))?;
-        seed.deserialize(self.de.child(id))
+        seed.deserialize(self.de.child(entry.value))
+            .map_err(|error| self.value_error(entry, error))
     }
 
     fn size_hint(&self) -> Option<usize> {

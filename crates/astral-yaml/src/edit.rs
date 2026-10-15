@@ -11,7 +11,7 @@ mod splice;
 mod transaction;
 mod view;
 
-pub use transaction::{Cursor, Editor, Entry, Handle, MappingMut, SequenceMut};
+pub use transaction::{Cursor, Editor, Entry, Handle, MappingMut, PathSegment, SequenceMut};
 
 use std::borrow::Cow;
 

@@ -175,7 +175,9 @@ fn root_collection_headers_retain_inline_comments() {
         });
         let once = document.source().to_owned();
         document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
+            .edit_syntax(|editor| {
+                editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+            })
             .unwrap();
         assert_eq!(document.source(), once);
         diffs.push(edit_diff(source, document.source()));
@@ -477,7 +479,7 @@ fn replacement_does_not_reorder_an_explicitly_edited_comment_list() {
         old # inline
     "};
     let mut document = EditableDocument::parse(source).unwrap();
-    let result = document.edit(|editor| {
+    let result = document.edit_syntax(|editor| {
         let root = editor.root();
         // This explicit order cannot keep the new comment leading. Replacement
         // must preserve that request and reject it, rather than sort it away.

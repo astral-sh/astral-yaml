@@ -34,7 +34,7 @@ pub(super) fn edited(
 ) -> EditableDocument {
     let mut document = EditableDocument::parse(source).unwrap();
     document
-        .edit(operation)
+        .edit_syntax(operation)
         .unwrap_or_else(|error| panic!("{source:?}: {error}"));
     document
 }

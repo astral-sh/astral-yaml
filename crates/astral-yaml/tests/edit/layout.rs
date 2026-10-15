@@ -166,7 +166,7 @@ fn explicit_block_style_requests_still_require_representable_separation() {
             "#};
             let mut document = EditableDocument::parse(&source).unwrap();
             let result =
-                document.edit(|editor| editor.set_scalar_style(&first_leaf(editor), style));
+                document.edit_syntax(|editor| editor.set_scalar_style(&first_leaf(editor), style));
             outcomes.push(match result {
                 Ok(()) => edit_diff(&source, document.source()),
                 Err(error) => {
@@ -279,7 +279,7 @@ fn scalar_layouts_preserve_values_and_comment_owners_at_each_depth(depth: usize)
                     let mut document = EditableDocument::parse(&source).unwrap();
                     let expected_comments = comments(&document);
                     document
-                        .edit(|editor| editor.replace(&first_leaf(editor), fragment))
+                        .edit_syntax(|editor| editor.replace(&first_leaf(editor), fragment))
                         .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
                     assert_eq!(comments(&document), expected_comments);
                     let mut id = document.root();
@@ -577,13 +577,13 @@ fn nested_layout_edits_match_an_independent_model_after_each_commit() {
                     for operation in sequence {
                         model.apply(operation);
                         separate
-                            .edit(|editor| operation.apply(editor))
+                            .edit_syntax(|editor| operation.apply(editor))
                             .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
                         model.check(&separate);
                     }
                     let mut combined = original.clone();
                     combined
-                        .edit(|editor| {
+                        .edit_syntax(|editor| {
                             for operation in sequence {
                                 operation.apply(editor)?;
                             }
@@ -704,7 +704,7 @@ fn required_collection_boundaries_do_not_override_explicit_styles() {
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         let error = document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
                 editor.insert_comment(&inner, index, " added", placement)?;
                 editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)
@@ -776,7 +776,7 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
         let mut document = EditableDocument::parse(source).unwrap();
         let expected_comments = comments(&document);
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let mut pending = vec![editor.root()];
                 while let Some(handle) = pending.pop() {
                     match editor.node(&handle)?.kind() {

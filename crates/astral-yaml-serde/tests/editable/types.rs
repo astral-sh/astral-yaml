@@ -399,7 +399,7 @@ where
         let span = document.value().span;
         let mut syntax = document.syntax().clone();
         syntax
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit(|mut root| root.replace_yaml(replacement))
             .unwrap();
         assert!(
             document

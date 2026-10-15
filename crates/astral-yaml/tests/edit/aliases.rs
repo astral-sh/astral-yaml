@@ -160,7 +160,7 @@ fn invalid_alias_bindings_roll_back_the_transaction(
 ) -> &'static str {
     let mut document = EditableDocument::parse(source).unwrap();
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let target = editor.sequence_items(&editor.root())?[0].clone();
             if let Some(replacement) = replacement {
                 editor.replace(&target, replacement)

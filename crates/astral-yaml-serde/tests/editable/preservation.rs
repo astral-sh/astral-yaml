@@ -26,17 +26,15 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
     "};
     let mut diffs = Vec::new();
     for operation in 0..3 {
-        let document = edit::<Config>(source, |editor| {
+        let document = edit::<Config>(source, |mut root| {
             match operation {
                 0 => {
-                    editor.root_mut().into_mapping()?.set("enabled", true)?;
+                    root.into_mapping()?.set("enabled", true)?;
                 }
                 1 => {
-                    editor.root_mut().into_mapping()?.remove("other")?;
+                    root.into_mapping()?.remove("other")?;
                 }
-                _ => editor
-                    .root_mut()
-                    .set_collection_style(CollectionStyle::Flow)?,
+                _ => root.set_collection_style(CollectionStyle::Flow)?,
             }
             Ok(())
         });
@@ -91,8 +89,8 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
           | # header
             content
     "};
-    let document = edit::<Config>(source, |editor| {
-        editor.root_mut().into_mapping()?.set("enabled", true)?;
+    let document = edit::<Config>(source, |root| {
+        root.into_mapping()?.set("enabled", true)?;
         Ok(())
     });
     assert_eq!(
@@ -123,8 +121,8 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
     let key = "\u{1}".repeat(103);
     document
-        .edit(|editor| {
-            editor.root_mut().into_mapping()?.set(&key, true)?;
+        .edit(|root| {
+            root.into_mapping()?.set(&key, true)?;
             Ok(())
         })
         .unwrap();
@@ -146,8 +144,7 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
         --- [old]
         ...
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        let mut root = editor.root_mut();
+    let document = edit::<Vec<String>>(source, |mut root| {
         root.set(["new", "values"])?;
         root.set_collection_style(CollectionStyle::Block)
     });
@@ -168,13 +165,11 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
 
         # old
     "};
-    let mut document = edit::<String>(source, |editor| {
-        editor
-            .root_mut()
-            .append_comment(" new", CommentPlacement::Detached)
+    let mut document = edit::<String>(source, |mut root| {
+        root.append_comment(" new", CommentPlacement::Detached)
     });
     document
-        .edit(|editor| editor.root_mut().replace_comment(1, " changed"))
+        .edit(|mut root| root.replace_comment(1, " changed"))
         .unwrap();
     assert_eq!(document.value(), "value");
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
@@ -255,8 +250,7 @@ fn value_setters_can_request_multiline_scalar_styles(value: &str, style: ScalarS
         'old'
 
     "};
-    let document = edit::<String>(source, |editor| {
-        let mut root = editor.root_mut();
+    let document = edit::<String>(source, |mut root| {
         root.set(value)?;
         root.set_scalar_style(style)
     });
@@ -291,7 +285,7 @@ fn typed_root_setters_distinguish_strings_from_document_markers() {
                 ---
                 text"},
         ] {
-            let document = edit::<String>(source, |editor| editor.root_mut().set(value));
+            let document = edit::<String>(source, |mut root| root.set(value));
             assert_eq!(document.value(), value);
             if source
                 == indoc! {r"
@@ -368,8 +362,7 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
           # before content
           old
     "};
-    let document =
-        edit::<serde_json::Value>(source, |editor| editor.root_mut().field("key")?.set("new"));
+    let document = edit::<serde_json::Value>(source, |root| root.field("key")?.set("new"));
     assert_eq!(document.value()["key"], "new");
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
@@ -429,7 +422,7 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
 )]
 fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value) -> String {
     let source = "--- # keep";
-    let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(value));
+    let document = edit::<serde_json::Value>(source, |mut root| root.set(value));
     assert_eq!(document.value(), value);
     edit_diff(source, document.source())
 }
@@ -449,7 +442,7 @@ fn typed_setters_fill_empty_documents_without_consuming_markers() {
             ---
             ... # end
         "};
-        let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(&value));
+        let document = edit::<serde_json::Value>(source, |mut root| root.set(&value));
         assert_eq!(document.value(), &value);
         diffs.push(edit_diff(source, document.source()));
     }
@@ -522,11 +515,11 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
                 expected["added"] = serde_json::json!("new");
             }
             document
-                .edit(|editor| {
+                .edit(|root| {
                     if sequence {
-                        editor.root_mut().into_sequence()?.insert(0, "new")?;
+                        root.into_sequence()?.insert(0, "new")?;
                     } else {
-                        editor.root_mut().into_mapping()?.set("added", "new")?;
+                        root.into_mapping()?.set("added", "new")?;
                     }
                     Ok(())
                 })
@@ -627,11 +620,9 @@ fn typed_collection_edits_preserve_root_property_comments() {
             !!seq [old] # inline
         "},
     ] {
-        let document = edit::<Vec<String>>(source, |editor| {
-            editor
-                .root_mut()
-                .set_collection_style(CollectionStyle::Block)?;
-            editor.root_mut().into_sequence()?.push("new")?;
+        let document = edit::<Vec<String>>(source, |mut root| {
+            root.set_collection_style(CollectionStyle::Block)?;
+            root.into_sequence()?.push("new")?;
             Ok(())
         });
         assert_eq!(document.value(), &["old", "new"]);
@@ -706,8 +697,8 @@ fn typed_insertions_keep_flow_delimiter_comments() {
           old
         ] # close
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        editor.root_mut().into_sequence()?.push("new")?;
+    let document = edit::<Vec<String>>(source, |root| {
+        root.into_sequence()?.push("new")?;
         Ok(())
     });
     assert_eq!(document.value(), &["old", "new"]);
@@ -770,8 +761,8 @@ fn typed_collection_edits_retain_outside_comments(source: &str) -> String {
         outer: std::collections::BTreeMap<String, String>,
     }
 
-    let document = edit::<Config>(source, |editor| {
-        let mut outer = editor.root_mut().field("outer")?.into_mapping()?;
+    let document = edit::<Config>(source, |root| {
+        let mut outer = root.field("outer")?.into_mapping()?;
         outer.set_collection_style(CollectionStyle::Flow)?;
         outer.set("added", "new")?;
         Ok(())
@@ -795,8 +786,8 @@ fn typed_collection_edits_use_document_comment_boundaries() {
         ] # close
         ...
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        let mut root = editor.root_mut().into_sequence()?;
+    let document = edit::<Vec<String>>(source, |root| {
+        let mut root = root.into_sequence()?;
         root.set_collection_style(CollectionStyle::Block)?;
         root.push("new")?;
         Ok(())
@@ -855,8 +846,8 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
           old
         # tail
     "};
-    let document = edit::<String>(source, |editor| {
-        editor.root_mut().set_scalar_style(ScalarStyle::Literal)
+    let document = edit::<String>(source, |mut root| {
+        root.set_scalar_style(ScalarStyle::Literal)
     });
     assert_eq!(document.value(), "old");
     let diff = edit_diff(source, document.source());

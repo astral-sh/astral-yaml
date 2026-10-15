@@ -9,6 +9,34 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// One step in an edit path. Strings are literal mapping keys, not path expressions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PathSegment<'a> {
+    Key(&'a str),
+    Index(usize),
+}
+
+impl<'a> From<&'a str> for PathSegment<'a> {
+    fn from(key: &'a str) -> Self {
+        Self::Key(key)
+    }
+}
+
+impl From<usize> for PathSegment<'_> {
+    fn from(index: usize) -> Self {
+        Self::Index(index)
+    }
+}
+
+impl<Segment> From<&Segment> for PathSegment<'_>
+where
+    Segment: Copy + Into<Self>,
+{
+    fn from(segment: &Segment) -> Self {
+        (*segment).into()
+    }
+}
+
 /// A selected node in an edit transaction.
 ///
 /// Navigation consumes the cursor and never follows aliases. Convert a collection
@@ -25,8 +53,25 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
         Self { editor, handle }
     }
 
-    fn reborrow(&mut self) -> Cursor<'_, 'doc> {
+    /// Lend this position to an edit, so navigation can start here again afterwards.
+    pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
         Cursor::new(self.editor, self.handle.clone())
+    }
+
+    /// Select a descendant by literal mapping keys and sequence indices.
+    /// An empty path keeps the current position.
+    ///
+    /// # Errors
+    /// Returns the selection error at the first segment that cannot be followed.
+    pub fn at<'p>(
+        self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+    ) -> Result<Self, Error> {
+        path.into_iter()
+            .try_fold(self, |cursor, segment| match segment.into() {
+                PathSegment::Key(key) => cursor.field(key),
+                PathSegment::Index(index) => cursor.item(index),
+            })
     }
 
     fn mutate<R>(
@@ -178,10 +223,22 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
         self.mutate(|cursor| {
             let index = cursor.node()?.comments().len();
-            cursor
-                .editor
-                .insert_comment(&cursor.handle, index, text, placement)
+            cursor.insert_comment(index, text, placement)
         })
+    }
+
+    /// Insert a comment at `index`, or append when `index` is the number of comments.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid index, text with a line break, or an editing limit.
+    pub fn insert_comment(
+        &mut self,
+        index: usize,
+        text: &str,
+        placement: CommentPlacement,
+    ) -> Result<(), Error> {
+        self.editor
+            .insert_comment(&self.handle, index, text, placement)
     }
 
     /// Replace a comment's text, keeping its placement.
@@ -468,6 +525,22 @@ impl<'a, 'doc> Entry<'a, 'doc> {
                 Ok(Cursor::new(cursor.editor, handle))
             }
         }
+    }
+
+    /// Edit the entry's mapping, inserting an empty mapping only if the entry is absent.
+    ///
+    /// # Errors
+    /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
+    pub fn or_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
+        self.or_insert_yaml("{}")?.into_mapping()
+    }
+
+    /// Edit the entry's sequence, inserting an empty sequence only if the entry is absent.
+    ///
+    /// # Errors
+    /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
+    pub fn or_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
+        self.or_insert_yaml("[]")?.into_sequence()
     }
 }
 

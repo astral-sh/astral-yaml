@@ -72,7 +72,7 @@ fn flow_delimiter_comments_survive_collection_edits() {
         });
         let committed = document.to_yaml();
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let target = collection(editor, nested);
                 editor.set_collection_style(&target, CollectionStyle::Flow)
             })

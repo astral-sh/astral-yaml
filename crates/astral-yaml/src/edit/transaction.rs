@@ -8,7 +8,7 @@ use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::Comment
 use std::sync::Arc;
 
 mod cursor;
-pub use cursor::{Cursor, Entry, MappingMut, SequenceMut};
+pub use cursor::{Cursor, Entry, MappingMut, PathSegment, SequenceMut};
 
 #[cfg(test)]
 mod tests;
@@ -40,7 +40,7 @@ pub struct Editor<'a> {
 }
 
 impl EditableDocument {
-    /// Edit the document and return the callback's result.
+    /// Edit the document starting at its root, and return the callback's result.
     ///
     /// The output is parsed and checked against the requested changes before it
     /// replaces the document. Any failure leaves the document unchanged. A failed
@@ -51,7 +51,7 @@ impl EditableDocument {
     /// represented in YAML, or a resource limit is exceeded.
     pub fn edit<R>(
         &mut self,
-        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
     ) -> Result<R, Error> {
         self.try_edit(edit)
     }
@@ -62,6 +62,53 @@ impl EditableDocument {
     /// # Errors
     /// Propagates callback and edit errors, leaving the document unchanged.
     pub fn try_edit<R, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit_syntax(|editor| edit(editor.root_mut()))
+    }
+
+    /// Edit the node at `path`. Keys are literal strings and indices are zero-based.
+    /// An empty path selects the root. Missing nodes are not created implicitly.
+    ///
+    /// # Errors
+    /// Returns a selection error without calling `edit`, or an error from the edit.
+    pub fn edit_at<'p, R>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit_at(path, edit)
+    }
+
+    /// Like [`Self::edit_at`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates selection, callback, and edit errors, leaving the document unchanged.
+    pub fn try_edit_at<'p, R, E: From<Error>>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit(|root| edit(root.at(path)?))
+    }
+
+    /// Edit with node handles, for example to revisit a node after inserting a sibling.
+    ///
+    /// # Errors
+    /// Propagates callback and edit errors, leaving the document unchanged.
+    pub fn edit_syntax<R>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit_syntax(edit)
+    }
+
+    /// Like [`Self::edit_syntax`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates callback and edit errors, leaving the document unchanged.
+    pub fn try_edit_syntax<R, E: From<Error>>(
         &mut self,
         edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
     ) -> Result<R, E> {

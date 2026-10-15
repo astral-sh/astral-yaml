@@ -9,9 +9,9 @@ fn collection_views_allow_repeated_edits_and_nested_defaults() {
     )
     .unwrap();
     let lengths = document
-        .edit(|editor| {
-            let mut health = editor
-                .root_mut()
+        .edit(|mut root| {
+            let mut health = root
+                .reborrow()
                 .field("services")?
                 .field("db")?
                 .field("healthcheck")?
@@ -25,11 +25,7 @@ fn collection_views_allow_repeated_edits_and_nested_defaults() {
             occupied.or_insert_yaml("[")?;
             let vacant = health.entry("nested")?;
             assert!(!vacant.is_occupied());
-            vacant
-                .or_insert_yaml("{}")?
-                .into_mapping()?
-                .entry("yes")?
-                .or_insert_yaml("true")?;
+            vacant.or_mapping()?.entry("yes")?.or_insert_yaml("true")?;
             let mapping_len = health.len();
             assert!(!health.is_empty());
             assert!(health.get("absent")?.is_none());
@@ -41,7 +37,7 @@ fn collection_views_allow_repeated_edits_and_nested_defaults() {
                 .field("timeout")?
                 .set_scalar_style(ScalarStyle::SingleQuoted)?;
 
-            let mut items = editor.root_mut().field("items")?.into_sequence()?;
+            let mut items = root.field("items")?.into_sequence()?;
             assert!(items.is_empty());
             items
                 .push_yaml("first")?
@@ -76,8 +72,8 @@ fn decoded_string_lookup_and_arbitrary_keys_share_the_same_mapping() {
         "{'a.b/c': one, !!str true: two, ! false: three, 1: numeric, !custom name: tagged, ? [x] : complex}",
     ).unwrap();
     let values = document
-        .edit(|editor| {
-            let mut mapping = editor.root_mut().into_mapping()?;
+        .edit(|root| {
+            let mut mapping = root.into_mapping()?;
             mapping.field("a.b/c")?.set_yaml("updated")?;
             mapping.field("true")?.set_yaml("string")?;
             mapping.field("false")?.set_yaml("also-string")?;
@@ -110,15 +106,15 @@ fn decoded_string_lookup_and_arbitrary_keys_share_the_same_mapping() {
 fn view_comments_styles_and_node_inspection() {
     let mut document = EditableDocument::parse("{mapping: {a: one}, sequence: [two]}").unwrap();
     let shapes = document
-        .edit(|editor| {
-            let mut mapping = editor.root_mut().field("mapping")?.into_mapping()?;
+        .edit(|mut root| {
+            let mut mapping = root.reborrow().field("mapping")?.into_mapping()?;
             mapping.set_collection_style(CollectionStyle::Flow)?;
             mapping.append_comment(" first", CommentPlacement::Leading)?;
             mapping.replace_comment(0, " temporary")?;
             let mapping_comments = mapping.node()?.comments().len();
             mapping.remove_comment(0)?;
             mapping.append_comment(" mapping", CommentPlacement::Leading)?;
-            let mut sequence = editor.root_mut().field("sequence")?.into_sequence()?;
+            let mut sequence = root.field("sequence")?.into_sequence()?;
             sequence.set_collection_style(CollectionStyle::Flow)?;
             sequence.append_comment(" second", CommentPlacement::Leading)?;
             sequence.replace_comment(0, " temporary")?;
@@ -165,19 +161,19 @@ enum Navigation {
 fn navigation_errors_are_recoverable(source: &str, operation: Navigation) {
     let mut document = EditableDocument::parse(source).unwrap();
     document
-        .edit(|editor| {
+        .edit(|mut root| {
             let result = match operation {
-                Navigation::Field => editor.root_mut().field("a").map(|_| ()),
-                Navigation::Get => editor.root_mut().get("a").map(|_| ()),
-                Navigation::Item => editor.root_mut().item(0).map(|_| ()),
-                Navigation::Mapping => editor.root_mut().into_mapping().map(|_| ()),
-                Navigation::Sequence => editor.root_mut().into_sequence().map(|_| ()),
-                Navigation::Entry => editor.root_mut().into_mapping()?.entry("a").map(|_| ()),
-                Navigation::Key => editor.root_mut().into_mapping()?.key_at(0).map(|_| ()),
-                Navigation::Value => editor.root_mut().into_mapping()?.value_at(0).map(|_| ()),
+                Navigation::Field => root.reborrow().field("a").map(|_| ()),
+                Navigation::Get => root.reborrow().get("a").map(|_| ()),
+                Navigation::Item => root.reborrow().item(0).map(|_| ()),
+                Navigation::Mapping => root.reborrow().into_mapping().map(|_| ()),
+                Navigation::Sequence => root.reborrow().into_sequence().map(|_| ()),
+                Navigation::Entry => root.reborrow().into_mapping()?.entry("a").map(|_| ()),
+                Navigation::Key => root.reborrow().into_mapping()?.key_at(0).map(|_| ()),
+                Navigation::Value => root.reborrow().into_mapping()?.value_at(0).map(|_| ()),
             };
             assert!(result.is_err());
-            editor.root_mut().set_yaml("recovered")
+            root.set_yaml("recovered")
         })
         .unwrap();
     assert_eq!(document.source(), "recovered");
@@ -203,37 +199,31 @@ enum Mutation {
 #[test_case("[]", Mutation::RemoveItem; "invalid removal index")]
 fn handled_mutation_errors_still_prevent_commit(source: &str, operation: Mutation) {
     let mut document = EditableDocument::parse(source).unwrap();
-    let result = document.edit(|editor| {
+    let result = document.edit(|mut root| {
         let result = match operation {
-            Mutation::Set => editor
-                .root_mut()
+            Mutation::Set => root
+                .reborrow()
                 .into_mapping()?
                 .set_yaml("a", "[")
                 .map(|_| ()),
-            Mutation::Remove => editor.root_mut().into_mapping()?.remove("a").map(|_| ()),
-            Mutation::Entry => editor
-                .root_mut()
+            Mutation::Remove => root.reborrow().into_mapping()?.remove("a").map(|_| ()),
+            Mutation::Entry => root
+                .reborrow()
                 .into_mapping()?
                 .entry("a")?
                 .or_insert_yaml("[")
                 .map(|_| ()),
-            Mutation::Insert => editor
-                .root_mut()
-                .into_sequence()?
-                .push_yaml("[")
-                .map(|_| ()),
-            Mutation::Bounds => editor
-                .root_mut()
+            Mutation::Insert => root.reborrow().into_sequence()?.push_yaml("[").map(|_| ()),
+            Mutation::Bounds => root
+                .reborrow()
                 .into_sequence()?
                 .insert_yaml(1, "valid")
                 .map(|_| ()),
-            Mutation::RemoveItem => editor.root_mut().into_sequence()?.remove(0),
+            Mutation::RemoveItem => root.reborrow().into_sequence()?.remove(0),
         };
         assert!(result.is_err());
         assert!(
-            editor
-                .root_mut()
-                .append_comment("cannot commit", CommentPlacement::Leading)
+            root.append_comment("cannot commit", CommentPlacement::Leading)
                 .is_err()
         );
         Ok(())
@@ -246,7 +236,7 @@ fn handled_mutation_errors_still_prevent_commit(source: &str, operation: Mutatio
 fn selection_and_insertion_handles_refer_to_the_exact_node() {
     let mut document = EditableDocument::parse("{sequence: []}").unwrap();
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let root = editor.root();
             let (_, sequence) = editor.mapping_entry(&root, 0)?.unwrap();
             let item = editor.insert_item(&sequence, 0, "first")?;
@@ -273,9 +263,9 @@ fn selection_and_insertion_handles_refer_to_the_exact_node() {
 #[test]
 fn cursor_from_deleted_or_foreign_handle_is_rejected() {
     let mut document = EditableDocument::parse("[a]").unwrap();
-    let foreign = document.edit(|editor| Ok(editor.root())).unwrap();
+    let foreign = document.edit_syntax(|editor| Ok(editor.root())).unwrap();
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             assert!(editor.cursor_mut(&foreign).is_err());
             let root = editor.root();
             let item = editor.sequence_item(&root, 0)?.unwrap();
@@ -290,13 +280,10 @@ fn cursor_from_deleted_or_foreign_handle_is_rejected() {
 fn empty_mapping_and_removal_lengths() {
     let mut document = EditableDocument::parse("{}").unwrap();
     document
-        .edit(|editor| {
-            let mut mapping = editor.root_mut().into_mapping()?;
+        .edit(|root| {
+            let mut mapping = root.into_mapping()?;
             assert!(mapping.is_empty());
-            mapping
-                .set_yaml("a", "[]")?
-                .into_sequence()?
-                .push_yaml("one")?;
+            mapping.entry("a")?.or_sequence()?.push_yaml("one")?;
             assert_eq!(mapping.len(), 1);
             assert!(mapping.remove("a")?);
             assert_eq!(mapping.len(), 0);
@@ -351,8 +338,8 @@ fn mapping_length_does_not_change_after_failed_insertion(operation: MappingInser
     let mut document = EditableDocument::parse("{a: one}").unwrap();
     assert!(
         document
-            .edit(|editor| {
-                let mut mapping = editor.root_mut().into_mapping()?;
+            .edit(|root| {
+                let mut mapping = root.into_mapping()?;
                 let result = match operation {
                     MappingInsertion::Upsert => mapping.set_yaml("b", "["),
                     MappingInsertion::Default => mapping.entry("b")?.or_insert_yaml("["),
@@ -368,6 +355,26 @@ fn mapping_length_does_not_change_after_failed_insertion(operation: MappingInser
     assert_eq!(document.source(), "{a: one}");
 }
 
+#[test]
+fn scoped_edits_use_literal_keys_and_current_indices() {
+    use PathSegment::{Index, Key};
+
+    let mut document = EditableDocument::parse("service.db: [80, 443] # public\n").unwrap();
+    document
+        .edit_at(["service.db"], |ports| {
+            let mut ports = ports.into_sequence()?;
+            ports.insert_yaml(0, "3000")?;
+            ports.into_cursor().at([1])?.set_yaml("8080")
+        })
+        .unwrap();
+    document
+        .edit_at([Key("service.db"), Index(2)], |mut port| {
+            port.set_yaml("8443")
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.source(), @"service.db: [3000, 8080, 8443] # public");
+}
+
 #[derive(Clone, Copy)]
 enum SequenceMutation {
     Insert,
@@ -380,8 +387,8 @@ fn sequence_length_does_not_change_after_failed_mutations(operation: SequenceMut
     let mut document = EditableDocument::parse("[one]").unwrap();
     assert!(
         document
-            .edit(|editor| {
-                let mut sequence = editor.root_mut().into_sequence()?;
+            .edit(|root| {
+                let mut sequence = root.into_sequence()?;
                 let result = match operation {
                     SequenceMutation::Insert => sequence.insert_yaml(2, "valid").map(|_| ()),
                     SequenceMutation::Remove => sequence.remove(1),

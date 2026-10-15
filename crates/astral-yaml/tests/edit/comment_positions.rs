@@ -236,11 +236,11 @@ fn invalid_comment_boundaries_poison_the_transaction() {
         other: [three]
     "};
     let mut document = EditableDocument::parse(source).unwrap();
-    let foreign = document.edit(|editor| Ok(editor.root())).unwrap();
+    let foreign = document.edit_syntax(|editor| Ok(editor.root())).unwrap();
     let mut errors = Vec::new();
     for case in 0..6 {
         let error = document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 let entries = editor.mapping_entries(&root)?;
                 let items = entries[0].1.clone();

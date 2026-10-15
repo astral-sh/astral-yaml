@@ -20,6 +20,7 @@ struct Workflow {
 fn repeated_permission_updates_preserve_the_workflow() {
     let source = include_str!("../../../../fixtures/real-world/compose-ci.yaml");
     let mut document = Editable::<Workflow>::parse(source).unwrap();
+    let path = ["permissions", "contents"];
     for (text, expected) in [
         ("write", Permission::Write),
         ("read", Permission::Read),
@@ -28,13 +29,7 @@ fn repeated_permission_updates_preserve_the_workflow() {
         for repeat in [false, true] {
             let before = document.source().to_owned();
             document
-                .edit(|editor| {
-                    editor
-                        .root_mut()
-                        .field("permissions")?
-                        .field("contents")?
-                        .set(text)
-                })
+                .edit_at(path.as_slice(), |mut contents| contents.set(text))
                 .unwrap();
             assert_eq!(document.value().permissions["contents"], expected);
             if repeat {
@@ -48,13 +43,7 @@ fn repeated_permission_updates_preserve_the_workflow() {
         let before = document.source().to_owned();
         assert!(
             document
-                .edit(|editor| {
-                    editor
-                        .root_mut()
-                        .field("permissions")?
-                        .field("contents")?
-                        .set("admin")
-                })
+                .edit_at(path, |mut contents| contents.set("admin"))
                 .is_err()
         );
         assert_eq!(document.source(), before);
@@ -100,13 +89,8 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
     let mut document = Editable::<Compose>::parse(source).unwrap();
     for retries in [3, 7, 5] {
         document
-            .edit(|editor| {
-                let mut health = editor
-                    .root_mut()
-                    .field("services")?
-                    .field("db")?
-                    .field("healthcheck")?
-                    .into_mapping()?;
+            .edit_at(["services", "db", "healthcheck"], |health| {
+                let mut health = health.into_mapping()?;
                 health.field("retries")?.set("temporary")?;
                 health.field("retries")?.set(retries)?;
                 health.field("interval")?.set("5s")?;
@@ -126,15 +110,10 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
         let before = document.source().to_owned();
         assert!(
             document
-                .edit(|editor| {
-                    editor
-                        .root_mut()
-                        .field("services")?
-                        .field("db")?
-                        .field("healthcheck")?
-                        .field("retries")?
-                        .set(-1)
-                })
+                .edit_at(
+                    ["services", "db", "healthcheck", "retries"],
+                    |mut retries| retries.set(-1)
+                )
                 .is_err()
         );
         assert_eq!(document.source(), before);
@@ -159,4 +138,24 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
            - db-password
          volumes:
     "#);
+}
+
+#[test]
+fn a_commit_error_identifies_the_alias_use_instead_of_the_edit_path() {
+    #[derive(Deserialize)]
+    struct Config {
+        default: String,
+        ports: Vec<u16>,
+    }
+
+    let source = "default: &port 80\nports: [*port]\n";
+    let mut config = Editable::<Config>::parse(source).unwrap();
+    let error = config
+        .edit_at(["default"], |mut default| default.set("http"))
+        .unwrap_err();
+
+    insta::assert_snapshot!(error, @r#"$["ports"][0]: expected an integer at bytes 15..19"#);
+    assert_eq!(config.source(), source);
+    assert_eq!(config.value().default, "80");
+    assert_eq!(config.value().ports, [80]);
 }

@@ -255,7 +255,7 @@ fn generated_boundaries_obey_the_output_limit_and_roll_back() {
     )
     .unwrap();
     let error = document
-        .edit(|editor| editor.replace(&editor.root(), "- a"))
+        .edit_syntax(|editor| editor.replace(&editor.root(), "- a"))
         .unwrap_err();
     assert_eq!(document.source(), source);
     insta::assert_snapshot!(error.message, @"emitted YAML exceeds input byte limit");
@@ -301,7 +301,7 @@ fn root_inline_comments_can_use_additional_marker_lines() {
         let mut document = EditableDocument::parse(source).unwrap();
         for text in [" added 1", " added 2", " added 3"] {
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let root = editor.root();
                     let index = editor.node(&root)?.comments().len();
                     editor.insert_comment(&root, index, text, CommentPlacement::Inline)
