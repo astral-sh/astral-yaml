@@ -1,4 +1,4 @@
-use test_case::test_case;
+use test_case::{test_case, test_matrix};
 
 use super::support::{edit, edit_syntax};
 use astral_yaml_dev::{edit_diff, indoc};
@@ -115,27 +115,19 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
 #[test]
 fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let source = indoc! {r"
-        existing: 1
-    "};
-    let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
     let key = "\u{1}".repeat(103);
-    document
-        .edit(|root| {
-            root.into_mapping()?.set(&key, true)?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<serde_json::Value>("existing: 1\n", |root| {
+        root.into_mapping()?.set(&key, true)?;
+        Ok(())
+    });
     assert_eq!(document.value()[&key], true);
     assert_eq!(document.value()["existing"], 1);
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-     existing: 1
-    +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
-    +: true
-    "#);
+
+    let escaped = r"\U00000001".repeat(103);
+    assert_eq!(
+        document.source(),
+        format!("existing: 1\n? \"{escaped}\"\n: true\n")
+    );
 }
 
 #[test]
@@ -183,175 +175,38 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
     ");
 }
 
-#[test_case(
-    indoc! {r"
-        first
-        second"},
-    ScalarStyle::Plain
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,4 @@
-        -'old'
-        +first
-        +
-        +  second
-         ⏎
-    ");
-    "plain"
-)]
-#[test_case(
-    indoc! {r"
-        first
-        second"},
-    ScalarStyle::SingleQuoted
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,4 @@
-        -'old'
-        +'first
-        +
-        +  second'
-         ⏎
-    ");
-    "single quoted"
-)]
-#[test_case(
-    "\n",
-    ScalarStyle::Literal
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,2 @@
-        -'old'
-        -
-        +|2+
-        +  ⏎
-    ");
-    "literal"
-)]
-#[test_case(
-    "\n",
-    ScalarStyle::Folded
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,2 @@
-        -'old'
-        -
-        +>2+
-        +  ⏎
-    ");
-    "folded"
-)]
-fn value_setters_can_request_multiline_scalar_styles(value: &str, style: ScalarStyle) -> String {
-    let source = indoc! {r"
-        'old'
-
-    "};
-    let document = edit::<String>(source, |mut root| {
+#[test_case("first\nsecond", ScalarStyle::Plain, "first\n\n  second\n\n"; "plain")]
+#[test_case("first\nsecond", ScalarStyle::SingleQuoted, "'first\n\n  second'\n\n"; "single quoted")]
+#[test_case("\n", ScalarStyle::Literal, "|2+\n  \n"; "literal")]
+#[test_case("\n", ScalarStyle::Folded, ">2+\n  \n"; "folded")]
+fn value_setters_can_request_multiline_scalar_styles(
+    value: &str,
+    style: ScalarStyle,
+    expected: &str,
+) {
+    let document = edit::<String>("'old'\n\n", |mut root| {
         root.set(value)?;
         root.set_scalar_style(style)
     });
     assert_eq!(document.value(), value);
-    edit_diff(source, document.source())
+    assert_eq!(document.source(), expected);
 }
 
-#[test]
-fn typed_root_setters_distinguish_strings_from_document_markers() {
-    // Document markers: https://yaml.org/spec/1.2.2/#912-document-markers
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            old
-        "},
-        indoc! {r"
-            --- old
-        "},
-        r"  old
-",
-        "\u{feff}old\n",
-        indoc! {r"
-            &a old
-        "},
-    ] {
-        for value in [
-            "---",
-            "...",
-            "--- text",
-            "... text",
-            indoc! {r"
-                ---
-                text"},
-        ] {
-            let document = edit::<String>(source, |mut root| root.set(value));
-            assert_eq!(document.value(), value);
-            if source
-                == indoc! {r"
-                    old
-                "}
-                || value == "---"
-            {
-                diffs.push(edit_diff(source, document.source()));
-            }
-        }
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"---"
+// Document markers: https://yaml.org/spec/1.2.2/#912-document-markers
+#[test_matrix(
+    ["", "--- ", "  ", "\u{feff}", "&a "],
+    ["---", "...", "--- text", "... text", "---\ntext"]
+)]
+fn typed_root_setters_distinguish_strings_from_document_markers(prefix: &str, value: &str) {
+    let document = edit::<String>(&format!("{prefix}old\n"), |mut root| root.set(value));
 
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"..."
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"--- text"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"... text"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"---\ntext"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    ---- old
-    +--- ---
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -  old
-    +  ---
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -﻿old
-    +﻿"---"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -&a old
-    +&a ---
-    "#);
+    let expected = match prefix {
+        "" | "\u{feff}" => format!("{value:?}"),
+        "  " => value.replace('\n', "\n\n    "),
+        _ => value.replace('\n', "\n\n  "),
+    };
+    assert_eq!(document.source(), format!("{prefix}{expected}\n"));
+    assert_eq!(document.value(), value);
 }
 
 #[test]

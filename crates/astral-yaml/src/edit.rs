@@ -376,6 +376,11 @@ impl<Location> Node<Location> {
 }
 
 impl<Location> Comment<Location> {
+    /// The text, placement, and position compared across edits, independent of source spans.
+    fn attachment(&self) -> (&str, CommentPlacement, CommentPosition) {
+        (&self.text, self.placement, self.position)
+    }
+
     /// Return the comment text, excluding `#` and the line break.
     #[must_use]
     pub fn text(&self) -> &str {

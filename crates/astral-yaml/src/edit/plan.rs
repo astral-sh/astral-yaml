@@ -85,9 +85,10 @@ fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
     // Provenance controls rewrite boundaries, not whether the final state
     // changed. Removing and reinserting identical attachments is a no-op.
     old.len() == new.len()
-        && old.iter().zip(new).all(|(old, new)| {
-            old.text == new.text && old.placement == new.placement && old.position == new.position
-        })
+        && old
+            .iter()
+            .map(Comment::attachment)
+            .eq(new.iter().map(Comment::attachment))
 }
 
 /// Return whether only existing comments outside the node's span have changed.
@@ -101,26 +102,12 @@ fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
         .comments
         .iter()
         .filter(|comment| body(comment.span))
-        .map(|comment| {
-            (
-                Some(comment.span),
-                &comment.text,
-                comment.placement,
-                comment.position,
-            )
-        });
+        .map(|comment| (Some(comment.span), comment.attachment()));
     let new_body = new
         .comments
         .iter()
         .filter(|comment| comment.span.is_some_and(body))
-        .map(|comment| {
-            (
-                comment.span,
-                &comment.text,
-                comment.placement,
-                comment.position,
-            )
-        });
+        .map(|comment| (comment.span, comment.attachment()));
     old_body.eq(new_body)
 }
 

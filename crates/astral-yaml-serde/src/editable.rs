@@ -61,8 +61,12 @@ impl<T: DeserializeOwned> Editable<T> {
     /// does not contain exactly one document, cannot be deserialized as `T`, or
     /// exceeds a resource limit.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
-        let syntax = EditableDocument::parse_with_options(source, options)?;
-        let value = from_stream(&parse_with_options(syntax.source(), syntax.options())?)?;
+        Self::from_syntax(EditableDocument::parse_with_options(source, options)?)
+    }
+
+    fn from_syntax(syntax: EditableDocument) -> Result<Self, Error> {
+        let stream = parse_with_options(syntax.source(), syntax.options())?;
+        let value = from_stream(&stream)?;
         Ok(Self { value, syntax })
     }
 
@@ -147,10 +151,7 @@ impl<T: DeserializeOwned> Editable<T> {
         let result = syntax
             .try_edit_syntax(|editor| edit(editor).map_err(EditError))
             .map_err(|error: EditError<E>| error.0)?;
-        let stream = parse_with_options(syntax.source(), syntax.options()).map_err(Error::from)?;
-        let value = from_stream(&stream)?;
-        self.syntax = syntax;
-        self.value = value;
+        *self = Self::from_syntax(syntax)?;
         Ok(result)
     }
 }

@@ -238,15 +238,10 @@ impl Draft {
         let parent = self.parent(id);
         let document = self.fragment(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
-        // Attaching resets the root's style request and membership. Retire its previous
-        // descendants afterwards. They cannot refer to imported slots.
+        // Retired slots keep their syntax. Attaching reuses the root's ID and
+        // restores its membership, but leaves its former descendants retired.
+        self.retire(removed);
         self.attach(document, parent, Some((id, preserve)));
-        self.retire(
-            removed
-                .into_iter()
-                .filter(|&removed| removed != id)
-                .collect(),
-        );
         Ok(())
     }
 
@@ -266,16 +261,6 @@ impl Draft {
             _ => Err(Error {
                 span: self.diagnostic_span,
                 message: "expected a mapping",
-            }),
-        }
-    }
-
-    fn scalar_style_mut(&mut self, id: NodeId) -> Result<&mut ScalarStyle, Error> {
-        match &mut self.slots[id.0].node.kind {
-            NodeKind::Scalar { style, .. } => Ok(style),
-            _ => Err(Error {
-                span: self.diagnostic_span,
-                message: "expected a scalar",
             }),
         }
     }
@@ -348,12 +333,18 @@ impl Draft {
     }
 
     pub(super) fn set_scalar_style(&mut self, id: NodeId, style: ScalarStyle) -> Result<(), Error> {
-        let before = *self.scalar_style_mut(id)?;
-        let node = self.node(id);
-        if emit::meaning(node, before) != emit::meaning(node, style) {
+        let node = &mut self.slots[id.0].node;
+        let NodeKind::Scalar {
+            value,
+            style: current,
+        } = &mut node.kind
+        else {
+            return Err(self.error("expected a scalar"));
+        };
+        if !emit::same_scalar_type(value, node.tag.as_deref(), *current, style) {
             return Err(self.error("requested style changes the scalar type"));
         }
-        *self.scalar_style_mut(id)? = style;
+        *current = style;
         self.membership_mut(id).requested_style = true;
         Ok(())
     }
@@ -531,22 +522,13 @@ fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<S
     if let Some(anchor) = &old.anchor {
         replacement.anchor = Some(anchor.clone());
     }
-    let compatible = match (&old.kind, &replacement.kind) {
-        (
-            NodeKind::Scalar {
-                style: previous, ..
-            },
-            NodeKind::Scalar { style, .. },
-        ) => emit::meaning(replacement, *previous) == emit::meaning(replacement, *style),
-        _ => true,
-    };
     match (&old.kind, &mut replacement.kind) {
         (
             NodeKind::Scalar {
                 style: previous, ..
             },
-            NodeKind::Scalar { style, .. },
-        ) if compatible => {
+            NodeKind::Scalar { value, style },
+        ) if emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) => {
             *style = *previous;
         }
         (

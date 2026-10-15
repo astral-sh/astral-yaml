@@ -1135,8 +1135,7 @@ pub(super) fn correspondence<'a, Location: 'a>(
                     style: right_style,
                 },
             ) => {
-                let kind = meaning(left, *left_style);
-                if kind != meaning(right, *right_style) || a != b {
+                if a != b || !same_scalar_type(a, left.tag.as_deref(), *left_style, *right_style) {
                     return None;
                 }
             }
@@ -1215,21 +1214,26 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
     first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
-pub(super) fn meaning<Location>(
-    node: &super::Node<Location>,
-    style: ScalarStyle,
-) -> crate::schema::ScalarType {
+/// Only a change to or from plain style can affect implicit scalar resolution.
+pub(super) fn same_scalar_type(
+    value: &str,
+    tag: Option<&str>,
+    before: ScalarStyle,
+    after: ScalarStyle,
+) -> bool {
     use crate::schema::{ScalarType, classify};
-    match node.tag.as_deref() {
-        Some("!" | "tag:yaml.org,2002:str") => return ScalarType::String,
-        Some("tag:yaml.org,2002:null") => return ScalarType::Null,
-        Some("tag:yaml.org,2002:bool") => return ScalarType::Bool,
-        Some("tag:yaml.org,2002:int") => return ScalarType::Int,
-        Some("tag:yaml.org,2002:float") => return ScalarType::Float,
-        _ => {}
+    use ScalarStyle::Plain;
+    if before == after || (before != Plain && after != Plain) {
+        return true;
     }
-    match &node.kind {
-        NodeKind::Scalar { value, .. } if style == ScalarStyle::Plain => classify(value),
-        _ => ScalarType::String,
-    }
+    matches!(
+        tag,
+        Some(
+            "!" | "tag:yaml.org,2002:str"
+                | "tag:yaml.org,2002:null"
+                | "tag:yaml.org,2002:bool"
+                | "tag:yaml.org,2002:int"
+                | "tag:yaml.org,2002:float"
+        )
+    ) || classify(value) == ScalarType::String
 }
