@@ -26,21 +26,21 @@ impl Error {
     }
 
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            path: None,
-            span: None,
-        }
+        Self::at(message, None)
     }
 
     // Deserialization discovers the path from leaf to root as it returns the error.
-    pub(crate) fn in_path(mut self, segment: fmt::Arguments<'_>) -> Self {
+    pub(crate) fn in_path(self, segment: fmt::Arguments<'_>) -> Self {
+        self.with_path_prefix(format_args!("${segment}"))
+    }
+
+    pub(crate) fn with_path_prefix(mut self, prefix: impl fmt::Display) -> Self {
         let suffix = self
             .path
             .as_deref()
             .and_then(|path| path.strip_prefix('$'))
             .unwrap_or("");
-        self.path = Some(format!("${segment}{suffix}"));
+        self.path = Some(format!("{prefix}{suffix}"));
         self
     }
 }

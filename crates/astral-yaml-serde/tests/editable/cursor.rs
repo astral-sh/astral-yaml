@@ -5,8 +5,8 @@ use test_case::test_case;
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
-    Editable,
-    edit::{CollectionStyle, CommentPlacement, NodeKind, ScalarStyle},
+    Editable, Error,
+    edit::{CollectionStyle, CommentPlacement, Cursor, NodeKind, ScalarStyle, SequenceMut},
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
@@ -379,88 +379,75 @@ impl Serialize for FailsSerialization {
     }
 }
 
-#[test_case(0, "$: serialization failed")]
-#[test_case(1, "$: unterminated flow sequence")]
-#[test_case(2, "$[\"items\"]: item index out of bounds")]
-#[test_case(3, "$[\"items\"]: comment text contains a line break")]
-#[test_case(4, "$[\"items\"][0]: comment index out of bounds")]
-#[test_case(5, "$[\"items\"]: item index out of bounds")]
-#[test_case(6, "$: comment index out of bounds")]
-#[test_case(7, "$: expected a scalar")]
-#[test_case(8, "$[\"items\"][0]: expected a collection")]
-#[test_case(9, "$[\"items\"]: serialization failed")]
-#[test_case(10, "$[\"missing\"]: serialization failed")]
-#[test_case(11, "$[\"missing\"]: serialization failed")]
-#[test_case(12, "$[\"missing\"]: unterminated flow sequence")]
-fn caught_mutation_errors_still_roll_back_the_transaction(operation: usize, expected: &str) {
-    let source = indoc! {r"
-        items: [old]
-    "};
+fn items<'a, 'doc>(root: Cursor<'a, 'doc>) -> Result<SequenceMut<'a, 'doc>, Error> {
+    root.field("items")?.into_sequence()
+}
+
+const ITEMS: &str = r#"$["items"]"#;
+const ITEM: &str = r#"$["items"][0]"#;
+const EMPTY: &str = r#"$["empty"]"#;
+const MISSING: &str = r#"$["missing"]"#;
+
+#[test_case(|mut root| root.set(FailsSerialization),
+    "$", "serialization failed"; "set value")]
+#[test_case(|mut root| root.set_yaml("["),
+    "$", "unterminated flow sequence"; "set YAML")]
+#[test_case(|mut root| root.replace_yaml("["),
+    "$", "unterminated flow sequence"; "replace YAML")]
+#[test_case(|root| items(root)?.insert(3, "new").map(|_| ()),
+    ITEMS, "item index out of bounds"; "insert out of bounds")]
+#[test_case(|root| items(root)?.remove(4),
+    ITEMS, "item index out of bounds"; "remove out of bounds")]
+#[test_case(|root| items(root)?.append_comment("bad\ncomment", CommentPlacement::Inline),
+    ITEMS, "comment text contains a line break"; "append comment")]
+#[test_case(|root| {
+    let mut sequence = items(root)?;
+    let mut item = sequence.item(0)?;
+    item.set_scalar_style(ScalarStyle::Plain)?;
+    item.remove_comment(0)
+}, ITEM, "comment index out of bounds"; "remove absent comment")]
+#[test_case(|mut root| root.replace_comment(0, " absent"),
+    "$", "comment index out of bounds"; "replace absent comment")]
+#[test_case(|mut root| root.set_scalar_style(ScalarStyle::Plain),
+    "$", "expected a scalar"; "style on a mapping")]
+#[test_case(|root| items(root)?.item(0)?.set_collection_style(CollectionStyle::Block),
+    ITEM, "expected a collection"; "style on a scalar")]
+#[test_case(|root| items(root)?.push(FailsSerialization).map(|_| ()),
+    ITEMS, "serialization failed"; "serialize appended value")]
+#[test_case(|root| root.field("empty")?.into_sequence()?.insert(0, FailsSerialization).map(|_| ()),
+    EMPTY, "serialization failed"; "serialize inserted value")]
+#[test_case(|root| root.field("empty")?.into_sequence()?.push_yaml("[").map(|_| ()),
+    EMPTY, "unterminated flow sequence"; "append YAML")]
+#[test_case(|root| root.into_mapping()?.set("missing", FailsSerialization).map(|_| ()),
+    MISSING, "serialization failed"; "serialize mapping value")]
+#[test_case(|root| root.into_mapping()?.set_yaml("missing", "[").map(|_| ()),
+    MISSING, "unterminated flow sequence"; "set mapping YAML")]
+#[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert(FailsSerialization).map(|_| ()),
+    MISSING, "serialization failed"; "serialize vacant entry")]
+#[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert_yaml("[").map(|_| ()),
+    MISSING, "unterminated flow sequence"; "fill vacant entry with YAML")]
+fn caught_mutation_errors_still_roll_back_the_transaction(
+    operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
+    path: &str,
+    message: &str,
+) {
+    let source = "items: [old]\nempty: []\n";
     let mut document = Editable::<Value>::parse(source).unwrap();
-    let error = document
+    let mut caught = None;
+    let result = document
         .edit(|mut root| {
             root.reborrow().field("items")?.item(0)?.set("changed")?;
-            let result = match operation {
-                0 => root.set(FailsSerialization),
-                1 => root.set_yaml("["),
-                2 => root
-                    .reborrow()
-                    .field("items")?
-                    .into_sequence()?
-                    .insert(3, "invalid index")
-                    .map(|_| ()),
-                3 => root.reborrow().field("items")?.append_comment(
-                    indoc! {r"
-                        bad
-                        comment"},
-                    CommentPlacement::Inline,
-                ),
-                4 => root
-                    .reborrow()
-                    .field("items")?
-                    .item(0)?
-                    .set_scalar_style(ScalarStyle::Plain)
-                    .and_then(|()| root.reborrow().field("items")?.item(0)?.remove_comment(0)),
-                5 => root.reborrow().field("items")?.into_sequence()?.remove(4),
-                6 => root.replace_comment(0, " absent"),
-                7 => root.set_scalar_style(ScalarStyle::Plain),
-                8 => root
-                    .reborrow()
-                    .field("items")?
-                    .item(0)?
-                    .set_collection_style(CollectionStyle::Block),
-                9 => root
-                    .reborrow()
-                    .field("items")?
-                    .into_sequence()?
-                    .push(FailsSerialization)
-                    .map(|_| ()),
-                10 => root
-                    .reborrow()
-                    .into_mapping()?
-                    .set("missing", FailsSerialization)
-                    .map(|_| ()),
-                11 => root
-                    .reborrow()
-                    .into_mapping()?
-                    .entry("missing")?
-                    .or_insert(FailsSerialization)
-                    .map(|_| ()),
-                _ => root
-                    .reborrow()
-                    .into_mapping()?
-                    .set_yaml("missing", "[")
-                    .map(|_| ()),
-            };
-            let error = result.unwrap_err();
+            let error = operation(root.reborrow()).unwrap_err();
+            assert_eq!(error.path.as_deref(), Some(path));
+            assert_eq!(error.message, message);
             assert_eq!(root.set(42).unwrap_err(), error);
+            caught = Some(error);
             Ok(())
         })
         .unwrap_err();
-    let (path, message) = expected.split_once(": ").unwrap();
-    assert_eq!(error.path.as_deref(), Some(path));
-    assert_eq!(error.message, message);
+    assert_eq!(Some(result), caught);
     assert_eq!(document.source(), source);
+    assert_eq!(document.value()["items"][0], "old");
 }
 
 #[test]
@@ -631,45 +618,6 @@ fn wrong_kind_conversions_are_recoverable_navigation_errors() {
     -value: old
     +value: new
     ");
-}
-
-#[test_case(0; "replace YAML")]
-#[test_case(1; "insert serialization")]
-#[test_case(2; "append YAML")]
-#[test_case(3; "default YAML")]
-fn caught_fragment_and_serialization_failures_prevent_commit(operation: usize) {
-    let source = "items: []\n";
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    let error = document
-        .edit(|mut root| {
-            let result = match operation {
-                0 => root.replace_yaml("["),
-                1 => root
-                    .reborrow()
-                    .field("items")?
-                    .into_sequence()?
-                    .insert(0, FailsSerialization)
-                    .map(|_| ()),
-                2 => root
-                    .reborrow()
-                    .field("items")?
-                    .into_sequence()?
-                    .push_yaml("[")
-                    .map(|_| ()),
-                _ => root
-                    .reborrow()
-                    .into_mapping()?
-                    .entry("missing")?
-                    .or_insert_yaml("[")
-                    .map(|_| ()),
-            };
-            let error = result.unwrap_err();
-            assert_eq!(root.set(42).unwrap_err(), error);
-            Ok(())
-        })
-        .unwrap_err();
-    assert!(error.path.is_some());
-    assert_eq!(document.source(), source);
 }
 
 #[test]

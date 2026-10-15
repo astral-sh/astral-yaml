@@ -1,7 +1,7 @@
 use test_case::test_case;
 
 use super::support::{edit, edit_syntax};
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
     Editable, Tagged,
     edit::{CollectionStyle, CommentPlacement, ScalarStyle},
@@ -378,273 +378,88 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
     ");
 }
 
-#[test_case(
-    &serde_json::json!("new")
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +new
-        \ No newline at end of file
-    ");
-    "scalar"
-)]
-#[test_case(
-    &serde_json::json!(["new"])
-    => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +["new"]
-        \ No newline at end of file
-    "#);
-    "sequence"
-)]
-#[test_case(
-    &serde_json::json!({"key": "new"})
-    => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +{"key": "new"}
-        \ No newline at end of file
-    "#);
-    "mapping"
-)]
-fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value) -> String {
+#[test_case(&serde_json::json!("new"), "new"; "scalar")]
+#[test_case(&serde_json::json!(["new"]), r#"["new"]"#; "sequence")]
+#[test_case(&serde_json::json!({"key": "new"}), r#"{"key": "new"}"#; "mapping")]
+fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value, yaml: &str) {
     let source = "--- # keep";
     let document = edit::<serde_json::Value>(source, |mut root| root.set(value));
+    assert_eq!(document.source(), format!("{source}\n{yaml}"));
     assert_eq!(document.value(), value);
-    edit_diff(source, document.source())
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn typed_setters_fill_empty_documents_without_consuming_markers() {
-    let mut diffs = Vec::new();
-    for value in [
-        serde_json::json!("new"),
-        serde_json::json!(["a", "b"]),
-        serde_json::json!({"a": "b"}),
-    ] {
-        let source = indoc! {r"
-            # config
-            %YAML 1.2
-            ---
-            ... # end
-        "};
-        let document = edit::<serde_json::Value>(source, |mut root| root.set(&value));
-        assert_eq!(document.value(), &value);
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +new
-     ... # end
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +["a", "b"]
-     ... # end
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +{"a": "b"}
-     ... # end
-    "#);
+#[test_case(&serde_json::json!("new"), "new"; "scalar")]
+#[test_case(&serde_json::json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
+#[test_case(&serde_json::json!({"a": "b"}), r#"{"a": "b"}"#; "mapping")]
+fn typed_setters_fill_empty_documents_without_consuming_markers(
+    value: &serde_json::Value,
+    yaml: &str,
+) {
+    let prefix = "# config\n%YAML 1.2\n---\n";
+    let suffix = "... # end\n";
+    let source = format!("{prefix}{suffix}");
+    let document = edit::<serde_json::Value>(&source, |mut root| root.set(value));
+    assert_eq!(document.source(), format!("{prefix}{yaml}\n{suffix}"));
+    assert_eq!(document.value(), value);
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
+#[test_case(false, "-", ""; "mapping strip")]
+#[test_case(false, "", ""; "mapping clip")]
+#[test_case(false, "+", "  \n"; "mapping keep")]
+#[test_case(true, "-", ""; "sequence strip")]
+#[test_case(true, "", ""; "sequence clip")]
+#[test_case(true, "+", "  \n"; "sequence keep")]
+fn unrelated_collection_edits_preserve_chomping_around_detached_comments(
+    sequence: bool,
+    chomp: &str,
+    trailing: &str,
+) {
     // Chomping: https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
-    let mut diffs = Vec::new();
-    for chomp in ["-", "", "+"] {
-        for sequence in [false, true] {
-            let source = if sequence {
-                formatdoc! {r"
-                    - old
+    let (first, indicator) = if sequence {
+        ("- old", "-")
+    } else {
+        ("a: old", "b:")
+    };
+    let prefix = format!("{first}\n\n# detached\n\n{indicator} ");
+    let source = format!("{prefix}|{chomp}\n  text\n\n");
+    let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
+    let mut expected = document.value().clone();
 
-                    # detached
-
-                    - |{chomp}
-                      text
-
-                "}
-            } else {
-                formatdoc! {r"
-                    a: old
-
-                    # detached
-
-                    b: |{chomp}
-                      text
-
-                "}
-            };
-            let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
-            let mut expected = document.value().clone();
-            if sequence {
-                expected
-                    .as_array_mut()
-                    .unwrap()
-                    .insert(0, serde_json::json!("new"));
-            } else {
-                expected["added"] = serde_json::json!("new");
-            }
-            document
-                .edit(|root| {
-                    if sequence {
-                        root.into_sequence()?.insert(0, "new")?;
-                    } else {
-                        root.into_mapping()?.set("added", "new")?;
-                    }
-                    Ok(())
-                })
-                .unwrap();
-            assert_eq!(document.value(), &expected);
-            diffs.push(edit_diff(&source, document.source()));
-        }
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,6 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |-
-    +b: |2-
-       text
-    -
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,7 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |-
-    +- |2-
-       text
-    -
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,6 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |
-    +b: |2
-       text
-    -
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,7 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |
-    +- |2
-       text
-    -
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,7 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |+
-    +b: |2+
-       text
-    -
-    +  ⏎
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,8 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |+
-    +- |2+
-       text
-    -
-    +  ⏎
-    "#);
+    let block = format!("{prefix}|2{chomp}\n  text\n{trailing}");
+    let yaml = if sequence {
+        document
+            .edit(|root| root.into_sequence()?.insert(0, "new").map(|_| ()))
+            .unwrap();
+        expected
+            .as_array_mut()
+            .unwrap()
+            .insert(0, serde_json::json!("new"));
+        format!("- \"new\"\n{block}")
+    } else {
+        document
+            .edit(|root| root.into_mapping()?.set("added", "new").map(|_| ()))
+            .unwrap();
+        expected["added"] = serde_json::json!("new");
+        format!("{block}\"added\": \"new\"\n")
+    };
+    assert_eq!(document.source(), yaml);
+    assert_eq!(document.value(), &expected);
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn typed_collection_edits_preserve_root_property_comments() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            &root [old] # inline
-        "},
-        indoc! {r"
-            !!seq [old] # inline
-        "},
-    ] {
-        let document = edit::<Vec<String>>(source, |mut root| {
-            root.set_collection_style(CollectionStyle::Block)?;
-            root.into_sequence()?.push("new")?;
-            Ok(())
-        });
-        assert_eq!(document.value(), &["old", "new"]);
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -&root [old] # inline
-    +&root # inline
-    +- old
-    +- "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -!!seq [old] # inline
-    +!<tag:yaml.org,2002:seq> # inline
-    +- old
-    +- "new"
-    "#);
+#[test_case("&root", "&root"; "anchor")]
+#[test_case("!!seq", "!<tag:yaml.org,2002:seq>"; "tag")]
+fn typed_collection_edits_preserve_root_property_comments(property: &str, emitted: &str) {
+    let source = format!("{property} [old] # inline\n");
+    let document = edit::<Vec<String>>(&source, |mut root| {
+        root.set_collection_style(CollectionStyle::Block)?;
+        root.into_sequence()?.push("new")?;
+        Ok(())
+    });
+    assert_eq!(
+        document.source(),
+        format!("{emitted} # inline\n- old\n- \"new\"\n")
+    );
+    assert_eq!(document.value(), &["old", "new"]);
 }
 
 #[test]

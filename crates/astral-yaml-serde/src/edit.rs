@@ -3,6 +3,7 @@
 use crate::{Error, to_string};
 use astral_yaml::{Span, edit as syntax};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{borrow::Cow, fmt};
 
 #[cfg(test)]
 mod tests;
@@ -18,11 +19,11 @@ pub(crate) fn transaction<R, E: From<Error>>(
     edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
 ) -> Result<R, E> {
     let mut failure = None;
-    let result = edit(Cursor {
-        syntax: editor.root_mut(),
+    let context = EditContext {
         failure: &mut failure,
-        path: "$".to_owned(),
-    })?;
+        path: Cow::Borrowed("$"),
+    };
+    let result = edit(context.cursor(editor.root_mut()))?;
     failure.map_or(Ok(result), |error| Err(error.into()))
 }
 
@@ -35,18 +36,13 @@ pub(crate) fn transaction<R, E: From<Error>>(
 #[derive(Debug)]
 pub struct Cursor<'a, 'doc, State = ()> {
     syntax: syntax::Cursor<'a, 'doc, State>,
-    failure: &'a mut Option<Error>,
-    path: String,
+    context: EditContext<'a>,
 }
 
 impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Lend this position to an edit, so navigation can start here again afterwards.
     pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
-        Cursor {
-            syntax: self.syntax.reborrow(),
-            failure: &mut *self.failure,
-            path: self.path.clone(),
-        }
+        self.context.reborrow().cursor(self.syntax.reborrow())
     }
 
     /// Continue editing the selected node with the core syntax cursor.
@@ -80,16 +76,9 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping or more than one key matches.
     pub fn get(self, name: &str) -> Result<Option<Self>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let syntax = self
-            .syntax
-            .get(name)
-            .map_err(|error| context(&path, error))?;
-        Ok(syntax.map(|syntax| Self {
-            syntax,
-            failure: self.failure,
-            path,
-        }))
+        self.context
+            .at(format_args!("[{name:?}]"))
+            .optional(self.syntax.get(name))
     }
 
     /// Select the required value at the literal string key `name`.
@@ -97,16 +86,9 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping, or the key is missing or ambiguous.
     pub fn field(self, name: &str) -> Result<Self, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let syntax = self
-            .syntax
-            .field(name)
-            .map_err(|error| context(&path, error))?;
-        Ok(Self {
-            syntax,
-            path,
-            ..self
-        })
+        self.context
+            .at(format_args!("[{name:?}]"))
+            .select(self.syntax.field(name))
     }
 
     /// Select the sequence item at `index`, accounting for earlier edits.
@@ -114,16 +96,9 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a sequence or `index` is out of bounds.
     pub fn item(self, index: usize) -> Result<Self, Error> {
-        let path = format!("{}[{index}]", self.path);
-        let syntax = self
-            .syntax
-            .item(index)
-            .map_err(|error| context(&path, error))?;
-        Ok(Self {
-            syntax,
-            path,
-            ..self
-        })
+        self.context
+            .at(format_args!("[{index}]"))
+            .select(self.syntax.item(index))
     }
 
     /// Borrow the selected mapping for repeated edits.
@@ -131,15 +106,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the selected node is not a mapping or an editing limit is exceeded.
     pub fn into_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
-        let syntax = self
-            .syntax
-            .into_mapping()
-            .map_err(|error| context(&self.path, error))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: self.path,
-        })
+        self.context.select(self.syntax.into_mapping())
     }
 
     /// Borrow the selected sequence for repeated edits.
@@ -147,15 +114,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the selected node is not a sequence or an editing limit is exceeded.
     pub fn into_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
-        let syntax = self
-            .syntax
-            .into_sequence()
-            .map_err(|error| context(&self.path, error))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: self.path,
-        })
+        self.context.select(self.syntax.into_sequence())
     }
 
     /// Deserialize the selected value, including pending edits.
@@ -169,7 +128,8 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Returns an error if the value cannot be deserialized as `T`, an alias target
     /// was removed, or a resource limit is exceeded.
     pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
-        crate::de::from_edit_value(self.syntax.value()).map_err(|error| context(&self.path, error))
+        self.context
+            .with_path(crate::de::from_edit_value(self.syntax.value()))
     }
 
     /// Read the selected value as `T`, transform it, and replace it using [`Self::set`].
@@ -186,9 +146,9 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
         &mut self,
         transform: impl FnOnce(T) -> T,
     ) -> Result<(), Error> {
-        let value = mutate(self.failure, &self.path, || {
-            crate::de::from_edit_value(self.syntax.value())
-        })?;
+        let value = self
+            .context
+            .mutate(|| crate::de::from_edit_value(self.syntax.value()))?;
         self.set(transform(value))
     }
 
@@ -200,7 +160,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
-        let yaml = mutate(self.failure, &self.path, || to_string(&value))?;
+        let yaml = self.context.mutate(|| to_string(&value))?;
         self.set_yaml(&yaml)
     }
 
@@ -210,7 +170,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid or an editing limit is exceeded.
     pub fn set_yaml(&mut self, yaml: &str) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || self.syntax.set_yaml(yaml))
+        self.context.mutate(|| self.syntax.set_yaml(yaml))
     }
 
     /// Replace the selected node with YAML, using the fragment's style and anchor.
@@ -219,7 +179,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid or an editing limit is exceeded.
     pub fn replace_yaml(&mut self, yaml: &str) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || self.syntax.replace_yaml(yaml))
+        self.context.mutate(|| self.syntax.replace_yaml(yaml))
     }
 
     /// Request a style for the selected scalar.
@@ -227,9 +187,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a scalar or the style changes its YAML type.
     pub fn set_scalar_style(&mut self, style: ScalarStyle) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.set_scalar_style(style)
-        })
+        self.context.mutate(|| self.syntax.set_scalar_style(style))
     }
 }
 
@@ -245,16 +203,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn get(&mut self, name: &str) -> Result<Option<Cursor<'_, 'doc>>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let syntax = self
-            .syntax
-            .get(name)
-            .map_err(|error| context(&path, error))?;
-        Ok(syntax.map(|syntax| Cursor {
-            syntax,
-            failure: &mut *self.failure,
-            path,
-        }))
+        self.context
+            .child(format_args!("[{name:?}]"))
+            .optional(self.syntax.get(name))
     }
 
     /// Select the required value at string key `name`.
@@ -262,9 +213,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is missing or ambiguous, or an editing limit is exceeded.
     pub fn field(&mut self, name: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        self.get(name)?
-            .ok_or_else(|| context(&path, Error::new("missing mapping key")))
+        let context = self.context.child(format_args!("[{name:?}]"));
+        let syntax = context.with_path(self.syntax.get(name))?;
+        context.select(syntax.ok_or_else(|| Error::new("missing mapping key")))
     }
 
     /// Select an occupied or vacant entry at string key `name`.
@@ -272,16 +223,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn entry(&mut self, name: &str) -> Result<Entry<'_, 'doc>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let syntax = self
-            .syntax
-            .entry(name)
-            .map_err(|error| context(&path, error))?;
-        Ok(Entry {
-            syntax,
-            failure: self.failure,
-            path,
-        })
+        let context = self.context.child(format_args!("[{name:?}]"));
+        let syntax = context.with_path(self.syntax.entry(name))?;
+        Ok(Entry { syntax, context })
     }
 
     /// Set the value at string key `name`, appending the entry if absent.
@@ -290,9 +234,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails, the key is ambiguous, or an editing limit is exceeded.
     pub fn set(&mut self, name: &str, value: impl Serialize) -> Result<Cursor<'_, 'doc>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let yaml = mutate(self.failure, &path, || to_string(&value))?;
-        self.set_yaml(name, &yaml)
+        let mut context = self.context.child(format_args!("[{name:?}]"));
+        let yaml = context.mutate(|| to_string(&value))?;
+        context.edit(|| self.syntax.set_yaml(name, &yaml))
     }
 
     /// Set a YAML value at string key `name`, appending the entry if absent.
@@ -301,13 +245,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid, the key is ambiguous, or an editing limit is exceeded.
     pub fn set_yaml(&mut self, name: &str, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        let syntax = mutate(self.failure, &path, || self.syntax.set_yaml(name, yaml))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path,
-        })
+        self.context
+            .child(format_args!("[{name:?}]"))
+            .edit(|| self.syntax.set_yaml(name, yaml))
     }
 
     /// Remove the entry at string key `name`, including its comments.
@@ -316,8 +256,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn remove(&mut self, name: &str) -> Result<bool, Error> {
-        let path = format!("{}[{name:?}]", self.path);
-        mutate(self.failure, &path, || self.syntax.remove(name))
+        self.context
+            .child(format_args!("[{name:?}]"))
+            .mutate(|| self.syntax.remove(name))
     }
 
     /// Select the key at `index`, including keys that are not strings.
@@ -325,15 +266,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn key_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = self
-            .syntax
-            .key_at(index)
-            .map_err(|error| context(&self.path, error))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: format!("{}[entry {index}].key", self.path),
-        })
+        let syntax = self.context.with_path(self.syntax.key_at(index))?;
+        let context = self.context.child(format_args!("[entry {index}].key"));
+        Ok(context.cursor(syntax))
     }
 
     /// Select the value of the entry at `index`, including entries with non-string keys.
@@ -341,15 +276,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn value_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = self
-            .syntax
-            .value_at(index)
-            .map_err(|error| context(&self.path, error))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: format!("{}[entry {index}].value", self.path),
-        })
+        let syntax = self.context.with_path(self.syntax.value_at(index))?;
+        let context = self.context.child(format_args!("[entry {index}].value"));
+        Ok(context.cursor(syntax))
     }
 }
 
@@ -362,15 +291,8 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if an editing limit is exceeded.
     pub fn get(&mut self, index: usize) -> Result<Option<Cursor<'_, 'doc>>, Error> {
-        let syntax = self
-            .syntax
-            .get(index)
-            .map_err(|error| context(&self.path, error))?;
-        Ok(syntax.map(|syntax| Cursor {
-            syntax,
-            failure: &mut *self.failure,
-            path: format!("{}[{index}]", self.path),
-        }))
+        let syntax = self.context.with_path(self.syntax.get(index))?;
+        Ok(syntax.map(|syntax| self.context.child(format_args!("[{index}]")).cursor(syntax)))
     }
 
     /// Select the required item at `index`, accounting for earlier edits.
@@ -378,9 +300,10 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn item(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let path = format!("{}[{index}]", self.path);
-        self.get(index)?
-            .ok_or_else(|| context(&path, Error::new("item index out of bounds")))
+        let syntax = self.context.with_path(self.syntax.get(index))?;
+        self.context
+            .child(format_args!("[{index}]"))
+            .select(syntax.ok_or_else(|| Error::new("item index out of bounds")))
     }
 
     /// Append a serialized value and return a cursor to the new item.
@@ -388,8 +311,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn push(&mut self, value: impl Serialize) -> Result<Cursor<'_, 'doc>, Error> {
-        let yaml = mutate(self.failure, &self.path, || to_string(&value))?;
-        self.push_yaml(&yaml)
+        self.insert(self.len(), value)
     }
 
     /// Append a YAML fragment and return a cursor to the new item.
@@ -397,13 +319,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid or an editing limit is exceeded.
     pub fn push_yaml(&mut self, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let index = self.len();
-        let syntax = mutate(self.failure, &self.path, || self.syntax.push_yaml(yaml))?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: format!("{}[{index}]", self.path),
-        })
+        self.insert_yaml(self.len(), yaml)
     }
 
     /// Insert a serialized value before `index` and return a cursor to it.
@@ -416,7 +332,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
         index: usize,
         value: impl Serialize,
     ) -> Result<Cursor<'_, 'doc>, Error> {
-        let yaml = mutate(self.failure, &self.path, || to_string(&value))?;
+        let yaml = self.context.mutate(|| to_string(&value))?;
         self.insert_yaml(index, &yaml)
     }
 
@@ -425,14 +341,10 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid, `index` exceeds the length, or an editing limit is exceeded.
     pub fn insert_yaml(&mut self, index: usize, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = mutate(self.failure, &self.path, || {
-            self.syntax.insert_yaml(index, yaml)
-        })?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: format!("{}[{index}]", self.path),
-        })
+        let syntax = self
+            .context
+            .mutate(|| self.syntax.insert_yaml(index, yaml))?;
+        Ok(self.context.child(format_args!("[{index}]")).cursor(syntax))
     }
 
     /// Remove the item at `index`, including its comments. Later indices shift down.
@@ -440,7 +352,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn remove(&mut self, index: usize) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || self.syntax.remove(index))
+        self.context.mutate(|| self.syntax.remove(index))
     }
 }
 
@@ -448,8 +360,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
 #[derive(Debug)]
 pub struct Entry<'a, 'doc> {
     syntax: syntax::Entry<'a, 'doc>,
-    failure: &'a mut Option<Error>,
-    path: String,
+    context: EditContext<'a>,
 }
 
 impl<'a, 'doc> Entry<'a, 'doc> {
@@ -464,11 +375,11 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
-    pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
+    pub fn or_insert(mut self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
         if self.is_occupied() {
             return self.or_insert_yaml("");
         }
-        let yaml = mutate(self.failure, &self.path, || to_string(&value))?;
+        let yaml = self.context.mutate(|| to_string(&value))?;
         self.or_insert_yaml(&yaml)
     }
 
@@ -478,14 +389,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if the fragment is invalid or an editing limit is exceeded.
     pub fn or_insert_yaml(self, yaml: &str) -> Result<Cursor<'a, 'doc>, Error> {
-        let syntax = mutate(self.failure, &self.path, || {
-            self.syntax.or_insert_yaml(yaml)
-        })?;
-        Ok(Cursor {
-            syntax,
-            failure: self.failure,
-            path: self.path,
-        })
+        self.context.edit(|| self.syntax.or_insert_yaml(yaml))
     }
 
     /// Edit the entry's mapping, inserting an empty mapping only if the entry is absent.
@@ -512,9 +416,7 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if an editing limit is exceeded.
     pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
-        self.syntax
-            .node()
-            .map_err(|error| context(&self.path, error))
+        self.context.with_path(self.syntax.node())
     }
 
     /// Request block or flow style for this collection. Empty collections use flow style.
@@ -522,9 +424,8 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if the node is not a collection or an editing limit is exceeded.
     pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.set_collection_style(style)
-        })
+        self.context
+            .mutate(|| self.syntax.set_collection_style(style))
     }
 
     /// Append a comment. `text` is everything after `#`, including any leading space.
@@ -533,9 +434,8 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if `text` contains a line break or an editing limit is exceeded.
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.append_comment(text, placement)
-        })
+        self.context
+            .mutate(|| self.syntax.append_comment(text, placement))
     }
 
     /// Replace the comment at `index`, keeping its placement.
@@ -543,9 +443,8 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or `text` contains a line break.
     pub fn replace_comment(&mut self, index: usize, text: &str) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.replace_comment(index, text)
-        })
+        self.context
+            .mutate(|| self.syntax.replace_comment(index, text))
     }
 
     /// Remove the comment at `index`.
@@ -553,9 +452,7 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.remove_comment(index)
-        })
+        self.context.mutate(|| self.syntax.remove_comment(index))
     }
 }
 
@@ -575,36 +472,83 @@ impl<'a, 'doc, Kind> Cursor<'a, 'doc, syntax::Collection<Kind>> {
     /// Return a cursor at this collection, allowing navigation or replacement.
     #[must_use]
     pub fn into_cursor(self) -> Cursor<'a, 'doc> {
-        Cursor {
-            syntax: self.syntax.into_cursor(),
+        self.context.cursor(self.syntax.into_cursor())
+    }
+}
+
+/// The path of this edit and the first mutation error in the transaction.
+/// Navigation and reads report their path without recording a failure.
+#[derive(Debug)]
+struct EditContext<'a> {
+    failure: &'a mut Option<Error>,
+    path: Cow<'a, str>,
+}
+
+impl<'a> EditContext<'a> {
+    fn reborrow(&mut self) -> EditContext<'_> {
+        EditContext {
+            path: Cow::Borrowed(&self.path),
             failure: self.failure,
-            path: self.path,
         }
     }
-}
 
-fn context(path: &str, error: impl Into<Error>) -> Error {
-    let mut error = error.into();
-    let suffix = error
-        .path
-        .as_deref()
-        .and_then(|path| path.strip_prefix('$'))
-        .unwrap_or("");
-    error.path = Some(format!("{path}{suffix}"));
-    error
-}
+    fn at(self, segment: fmt::Arguments<'_>) -> Self {
+        Self {
+            path: format!("{}{segment}", self.path).into(),
+            ..self
+        }
+    }
 
-fn mutate<R, E: Into<Error>>(
-    failure: &mut Option<Error>,
-    path: &str,
-    operation: impl FnOnce() -> Result<R, E>,
-) -> Result<R, Error> {
-    if let Some(error) = failure.as_ref() {
-        return Err(error.clone());
+    fn child(&mut self, segment: fmt::Arguments<'_>) -> EditContext<'_> {
+        self.reborrow().at(segment)
     }
-    let result = operation().map_err(|error| context(path, error));
-    if let Err(error) = &result {
-        *failure = Some(error.clone());
+
+    fn cursor<'doc, State>(
+        self,
+        syntax: syntax::Cursor<'a, 'doc, State>,
+    ) -> Cursor<'a, 'doc, State> {
+        Cursor {
+            syntax,
+            context: self,
+        }
     }
-    result
+
+    fn select<'doc, State>(
+        self,
+        result: Result<syntax::Cursor<'a, 'doc, State>, impl Into<Error>>,
+    ) -> Result<Cursor<'a, 'doc, State>, Error> {
+        let syntax = self.with_path(result)?;
+        Ok(self.cursor(syntax))
+    }
+
+    fn optional<'doc>(
+        self,
+        result: Result<Option<syntax::Cursor<'a, 'doc>>, astral_yaml::Error>,
+    ) -> Result<Option<Cursor<'a, 'doc>>, Error> {
+        let syntax = self.with_path(result)?;
+        Ok(syntax.map(|syntax| self.cursor(syntax)))
+    }
+
+    fn edit<'doc>(
+        mut self,
+        operation: impl FnOnce() -> Result<syntax::Cursor<'a, 'doc>, astral_yaml::Error>,
+    ) -> Result<Cursor<'a, 'doc>, Error> {
+        let syntax = self.mutate(operation)?;
+        Ok(self.cursor(syntax))
+    }
+
+    fn with_path<T>(&self, result: Result<T, impl Into<Error>>) -> Result<T, Error> {
+        result.map_err(|error| error.into().with_path_prefix(&self.path))
+    }
+
+    fn mutate<T, E: Into<Error>>(
+        &mut self,
+        operation: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, Error> {
+        if let Some(error) = self.failure.as_ref() {
+            return Err(error.clone());
+        }
+        self.with_path(operation())
+            .inspect_err(|error| *self.failure = Some(error.clone()))
+    }
 }
