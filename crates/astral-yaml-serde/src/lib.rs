@@ -1,6 +1,8 @@
 //! Serialize and deserialize YAML 1.2 with Serde.
 //! Enable `editable` for YAML editing.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod commented;
 mod comments;
 mod de;

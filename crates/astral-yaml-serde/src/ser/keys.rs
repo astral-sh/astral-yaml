@@ -60,11 +60,13 @@ impl Key {
         // For most quoted keys, skipping the opening quote avoids reading
         // across separately written bytes.
         let prefix = bytes
-            .get(1..5)
-            .or_else(|| bytes.get(..4))
-            .map_or(0, |bytes| u32::from_ne_bytes(bytes.try_into().unwrap()));
+            .get(1..)
+            .and_then(<[u8]>::first_chunk)
+            .or_else(|| bytes.first_chunk())
+            .copied()
+            .map_or(0, u32::from_ne_bytes);
         // This only filters candidates: equal signatures still compare every byte.
-        let signature = (u64::from(prefix) << 32) ^ u64::try_from(bytes.len()).unwrap();
+        let signature = (u64::from(prefix) << 32) ^ bytes.len() as u64;
         Self {
             identity,
             signature,
@@ -90,10 +92,10 @@ impl Keys {
     #[inline]
     pub(super) fn insert(&mut self, output: &str, range: Range<usize>) -> Result<u64, Error> {
         let source = &output.as_bytes()[range.clone()];
-        if source.first() == Some(&b'"') {
+        if let (Some(b'"'), Some(end)) = (source.first(), NonZeroUsize::new(range.end)) {
             let identity = Identity::Output {
                 start: range.start,
-                end: NonZeroUsize::new(range.end).unwrap(),
+                end,
             };
             let key = Key::new(identity, source);
             self.push(key);

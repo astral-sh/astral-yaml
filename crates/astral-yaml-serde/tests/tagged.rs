@@ -343,6 +343,7 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
         "!bad tag",
         "!bad\n---\n",
         "!x> null #",
+        "!x> first\n---\n!<!y",
     ] {
         let value = Tagged {
             tag: tag.to_owned(),

@@ -765,10 +765,7 @@ impl Key<'_> {
         match self {
             Self::Null => output.push_str("n;"),
             Self::Bool(value) => output.push_str(if *value { "b1;" } else { "b0;" }),
-            Self::String(value) => {
-                let quoted = crate::to_string(value).expect("strings serialize without errors");
-                output.push_str(quoted.strip_suffix('\n').unwrap());
-            }
+            Self::String(value) => crate::ser::write_quoted(output, value),
             Self::Integer(negative, magnitude) => {
                 write!(output, "i{}{magnitude};", if *negative { '-' } else { '+' })
                     .expect("String write");

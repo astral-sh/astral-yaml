@@ -1,5 +1,8 @@
 mod keys;
+mod quoted;
 mod tag;
+
+pub(crate) use quoted::write_quoted;
 
 use crate::{Error, schema::YamlType, tagged, with::yaml_tag};
 use serde::{
@@ -64,146 +67,7 @@ impl Serializer {
     fn quoted(&mut self, value: &str) {
         self.tagged = false;
         self.yaml_tag = false;
-        if value.len() >= 64 {
-            self.output.reserve(value.len() + 3);
-            self.output.push('"');
-            self.quoted_long(value);
-            self.output.push('"');
-            return;
-        }
-
-        // Check eight bytes at a time without alignment requirements. The last
-        // word overlaps its predecessor when the length is not a multiple of eight.
-        #[allow(clippy::needless_bitwise_bool)]
-        let escaped = if value.len() >= 8 {
-            let mut chunks = value.as_bytes().chunks_exact(8);
-            let mut escaped = chunks.by_ref().fold(false, |escaped, chunk| {
-                escaped | Self::word_needs_escape(u64::from_ne_bytes(chunk.try_into().unwrap()))
-            });
-
-            if !chunks.remainder().is_empty() {
-                let last = &value.as_bytes()[value.len() - 8..];
-                escaped |= Self::word_needs_escape(u64::from_ne_bytes(last.try_into().unwrap()));
-            }
-
-            escaped
-        } else if value.len() >= 4 {
-            let first = u32::from_ne_bytes(value.as_bytes()[..4].try_into().unwrap());
-            let last = u32::from_ne_bytes(value.as_bytes()[value.len() - 4..].try_into().unwrap());
-            Self::word_needs_escape(u64::from(first) | (u64::from(last) << 32))
-        } else {
-            value.bytes().fold(false, |escaped, byte| {
-                escaped | !(b' '..=b'~').contains(&byte) | (byte == b'"') | (byte == b'\\')
-            })
-        };
-
-        if self.output.is_empty() {
-            self.output.reserve(value.len() + 3);
-        }
-
-        self.output.push('"');
-
-        if escaped {
-            self.escaped(value);
-        } else {
-            self.output.push_str(value);
-        }
-
-        self.output.push('"');
-    }
-
-    #[inline]
-    fn word_needs_escape(word: u64) -> bool {
-        const ONES: u64 = 0x0101_0101_0101_0101;
-        const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
-        const SPACES: u64 = 0x2020_2020_2020_2020;
-
-        // High bits detect non-ASCII bytes. Adding one detects DEL. Subtracting spaces
-        // detects controls. Carries and borrows cannot hide the first offending byte,
-        // and printable ASCII causes neither.
-        let non_printable = word | word.wrapping_add(ONES) | word.wrapping_sub(SPACES);
-
-        // XOR turns quotes and backslashes into zero bytes. The zero-byte test
-        // sets a high bit if either character occurs anywhere in the word.
-        let quotes = word ^ u64::from_ne_bytes([b'"'; 8]);
-        let slashes = word ^ u64::from_ne_bytes([b'\\'; 8]);
-        let escaped_quotes = quotes.wrapping_sub(ONES) & !quotes;
-        let escaped_slashes = slashes.wrapping_sub(ONES) & !slashes;
-
-        (non_printable | escaped_quotes | escaped_slashes) & HIGH_BITS != 0
-    }
-
-    #[inline(never)]
-    fn quoted_long(&mut self, value: &str) {
-        // Quotes, backslashes, and line breaks use memchr below. Other controls
-        // and non-ASCII text use the full escape scanner.
-        #[allow(clippy::needless_bitwise_bool)]
-        let unusual = value.bytes().fold(false, |unusual, byte| {
-            unusual | (!(b' '..=b'~').contains(&byte) & (byte != b'\n'))
-        });
-
-        if unusual {
-            self.escaped(value);
-        } else {
-            let mut start = 0;
-            for index in memchr::memchr3_iter(b'"', b'\\', b'\n', value.as_bytes()) {
-                self.output.push_str(&value[start..index]);
-                self.output.push_str(match value.as_bytes()[index] {
-                    b'"' => "\\\"",
-                    b'\\' => "\\\\",
-                    _ => "\\n",
-                });
-                start = index + 1;
-            }
-            self.output.push_str(&value[start..]);
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn escaped(&mut self, mut value: &str) {
-        const ESCAPE: [bool; 256] = {
-            let mut escape = [false; 256];
-            let mut byte = 0;
-
-            while byte < escape.len() {
-                escape[byte] =
-                    byte < 0x20 || matches!(byte, 0x22 | 0x5c | 0x7f | 0xc2 | 0xe2 | 0xef);
-                byte += 1;
-            }
-
-            escape
-        };
-
-        // Copy runs of text until a possible escape. The non-ASCII characters escaped
-        // below start with C2, E2, or EF. Stopping at those leading bytes or at ASCII
-        // preserves UTF-8 character boundaries.
-        while let Some(index) = value.bytes().position(|byte| ESCAPE[usize::from(byte)]) {
-            self.output.push_str(&value[..index]);
-            let c = value[index..].chars().next().unwrap();
-
-            match c {
-                '"' => self.output.push_str("\\\""),
-                '\\' => self.output.push_str("\\\\"),
-                '\n' => self.output.push_str("\\n"),
-                '\r' => self.output.push_str("\\r"),
-                '\t' => self.output.push_str("\\t"),
-                c if c.is_control()
-                    || matches!(
-                        c,
-                        '\u{85}' | '\u{2028}' | '\u{2029}' | '\u{feff}' | '\u{fffe}' | '\u{ffff}'
-                    ) =>
-                {
-                    // Writing to a String cannot fail.
-                    write!(self.output, "\\u{:04X}", u32::from(c)).expect("String write");
-                }
-                c => self.output.push(c),
-            }
-
-            value = &value[index + c.len_utf8()..];
-        }
-
-        self.output.push_str(value);
+        write_quoted(&mut self.output, value);
     }
 
     #[inline]
