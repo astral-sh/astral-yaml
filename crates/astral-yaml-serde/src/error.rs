@@ -12,16 +12,16 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn located(mut self, span: Span) -> Self {
-        self.span.get_or_insert(span);
+    pub(crate) fn located(mut self, span: impl Into<Option<Span>>) -> Self {
+        self.span = self.span.or(span.into());
         self
     }
 
-    pub(crate) fn at(message: impl Into<String>, span: Span) -> Self {
+    pub(crate) fn at(message: impl Into<String>, span: impl Into<Option<Span>>) -> Self {
         Self {
             message: message.into(),
             path: None,
-            span: Some(span),
+            span: span.into(),
         }
     }
 

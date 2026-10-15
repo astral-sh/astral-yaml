@@ -1,6 +1,6 @@
-use super::{Editor, Handle};
+use super::{Draft, Editor, Handle};
 use crate::{
-    CollectionStyle, Error, ScalarStyle, Span,
+    CollectionStyle, Error, NodeId, ScalarStyle, Span,
     comments::CommentPlacement,
     edit::{Node, NodeKind, emit::quoted},
     schema::{ScalarType, classify},
@@ -46,6 +46,37 @@ where
 pub struct Cursor<'a, 'doc> {
     editor: &'a mut Editor<'doc>,
     handle: Handle,
+}
+
+/// A read-only view of a selected value, including pending edits.
+///
+/// Start at [`Self::root`] and follow node IDs in the syntax, including alias
+/// targets outside the selected subtree. Source spans refer to the original
+/// document and are absent on newly inserted nodes.
+#[derive(Clone, Copy, Debug)]
+pub struct ValueRef<'a> {
+    draft: &'a Draft,
+    root: NodeId,
+}
+
+impl<'a> ValueRef<'a> {
+    /// Return the ID of the selected node.
+    #[must_use]
+    pub fn root(self) -> NodeId {
+        self.root
+    }
+
+    /// Read a node by its ID in this transaction.
+    ///
+    /// # Errors
+    /// Returns an error if the node was removed or the work limit is exceeded.
+    pub fn node(self, id: NodeId) -> Result<&'a Node<Option<Span>>, Error> {
+        self.draft.charge(1)?;
+        if !self.draft.contains(id) {
+            return Err(self.draft.error("node is no longer in the document"));
+        }
+        Ok(self.draft.node(id))
+    }
 }
 
 impl<'a, 'doc> Cursor<'a, 'doc> {
@@ -94,6 +125,15 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Returns an error if the transaction's work limit is exceeded.
     pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
         self.editor.node(&self.handle)
+    }
+
+    /// Borrow the selected value and the nodes it references, including pending edits.
+    #[must_use]
+    pub fn value(&self) -> ValueRef<'_> {
+        ValueRef {
+            draft: &self.editor.draft,
+            root: self.handle.id,
+        }
     }
 
     fn field_index(&self, name: &str) -> Result<Option<(usize, Handle)>, Error> {

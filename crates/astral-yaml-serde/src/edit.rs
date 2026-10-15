@@ -2,7 +2,7 @@
 
 use crate::{Error, to_string};
 use astral_yaml::{Span, edit as syntax};
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[cfg(test)]
 mod tests;
@@ -31,7 +31,7 @@ pub(crate) fn transaction<R, E: From<Error>>(
 /// Navigation consumes the cursor and does not follow aliases. Convert to a
 /// [`MappingMut`] or [`SequenceMut`] to perform repeated edits of one collection.
 /// A failed mutation prevents the transaction from committing, even if its error
-/// is handled. Navigation errors can be handled without preventing a commit.
+/// is handled. Navigation and read errors can be handled without preventing a commit.
 #[derive(Debug)]
 pub struct Cursor<'a, 'doc> {
     syntax: syntax::Cursor<'a, 'doc>,
@@ -156,6 +156,40 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
             failure: self.failure,
             path: self.path,
         })
+    }
+
+    /// Deserialize the selected value, including pending edits.
+    ///
+    /// The result can borrow from this cursor, including decoded scalar text. Reading
+    /// an alias follows it to its current target. An error does not prevent commit.
+    /// Source spans refer to the original document. Reads that require a source span
+    /// for a newly inserted node or comment fail until the edit commits.
+    ///
+    /// # Errors
+    /// Returns an error if the value cannot be deserialized as `T`, an alias target
+    /// was removed, or a resource limit is exceeded.
+    pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
+        crate::de::from_edit_value(self.syntax.value()).map_err(|error| context(&self.path, error))
+    }
+
+    /// Read the selected value as `T`, transform it, and replace it using [`Self::set`].
+    ///
+    /// For example, `retries.update(|n: u32| n + 1)?` increments a retry count.
+    /// Prefer updating a field over round-tripping a struct that omits other fields.
+    /// Updating an alias reads its target but replaces the alias at this position.
+    /// As with other mutations, an error prevents the transaction from committing.
+    ///
+    /// # Errors
+    /// Returns an error if reading or replacing the value fails. The transform runs
+    /// only after the value is successfully read.
+    pub fn update<T: DeserializeOwned + Serialize>(
+        &mut self,
+        transform: impl FnOnce(T) -> T,
+    ) -> Result<(), Error> {
+        let value = mutate(self.failure, &self.path, || {
+            crate::de::from_edit_value(self.syntax.value())
+        })?;
+        self.set(transform(value))
     }
 
     /// Replace the selected node with a serialized Rust value.
@@ -689,7 +723,12 @@ impl<'a, 'doc> SequenceMut<'a, 'doc> {
 
 fn context(path: &str, error: impl Into<Error>) -> Error {
     let mut error = error.into();
-    error.path = Some(path.to_owned());
+    let suffix = error
+        .path
+        .as_deref()
+        .and_then(|path| path.strip_prefix('$'))
+        .unwrap_or("");
+    error.path = Some(format!("{path}{suffix}"));
     error
 }
 

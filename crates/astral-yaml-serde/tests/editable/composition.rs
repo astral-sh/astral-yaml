@@ -231,14 +231,15 @@ fn check_sequence<const N: usize>(source: &str, sequence: [Operation; N]) {
         operation.model(&mut expected);
     }
     let mut combined = Editable::<Value>::parse(source).unwrap();
-    combined
+    let pending = combined
         .edit(|mut root| {
             for operation in sequence {
                 operation.apply(root.reborrow())?;
             }
-            Ok(())
+            root.read::<Value>()
         })
         .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}, combined: {error}"));
+    assert_eq!(pending, expected, "{source:?}, {sequence:?}");
     assert_eq!(combined.value(), &expected, "{source:?}, {sequence:?}");
     check_alias(&combined);
 

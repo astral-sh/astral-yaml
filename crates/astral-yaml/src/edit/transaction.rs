@@ -8,7 +8,7 @@ use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::Comment
 use std::sync::Arc;
 
 mod cursor;
-pub use cursor::{Cursor, Entry, MappingMut, PathSegment, SequenceMut};
+pub use cursor::{Cursor, Entry, MappingMut, PathSegment, SequenceMut, ValueRef};
 
 #[cfg(test)]
 mod tests;

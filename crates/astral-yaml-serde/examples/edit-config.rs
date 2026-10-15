@@ -19,7 +19,9 @@ extra: 'retained'
     let mut config = Editable::<Config>::parse(source)?;
     config.edit(|root| {
         let mut settings = root.into_mapping()?;
-        settings.field("timeout")?.set(60)?;
+        settings
+            .field("timeout")?
+            .update(|seconds: u64| seconds + 30)?;
         settings.entry("enabled")?.or_insert(true)?;
 
         let mut servers = settings.field("servers")?.into_sequence()?;

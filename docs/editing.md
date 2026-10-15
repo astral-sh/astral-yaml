@@ -33,7 +33,7 @@ extra: 'retained'
     let mut config = Editable::<Config>::parse(source)?;
     config.edit(|root| {
         let mut settings = root.into_mapping()?;
-        settings.field("timeout")?.set(60)?;
+        settings.field("timeout")?.update(|seconds: u64| seconds + 30)?;
         settings.entry("retries")?.or_insert(3)?;
 
         let mut servers = settings.field("servers")?.into_sequence()?;
@@ -64,6 +64,30 @@ The callback starts at the root. To start at an existing field, write
 Paths use literal keys, so `["service.db"]` selects one key and
 `["service", "db"]` selects a nested field. Collection views let you edit
 siblings without selecting their parent again.
+
+`update()` reads the current value, transforms it, and writes the result at the
+selected position. Update the field itself to preserve surrounding YAML, including
+fields your Rust type doesn't model. For a conditional edit, read the pending
+value directly:
+
+```rust
+use astral_yaml_serde::{Editable, Error};
+
+fn main() -> Result<(), Error> {
+    let mut servers = Editable::<Vec<String>>::parse("['primary', 'retired'] # failover\n")?;
+    servers.edit_at([1], |mut server| {
+        if server.read::<&str>()? == "retired" {
+            server.set("backup")?;
+        }
+        Ok(())
+    })?;
+    assert_eq!(servers.source(), "['primary', 'backup'] # failover\n");
+    Ok(())
+}
+```
+
+Reads see earlier edits in the same transaction. Reading an alias follows its
+target, while setting or updating that position replaces the alias itself.
 
 `field()` requires a string key to exist, while `get()` returns `None` when it is
 absent. `entry(name)?.or_insert(value)?` supplies an optional default. Existing
@@ -99,7 +123,7 @@ fn main() -> Result<(), astral_yaml_serde::Error> {
 ```
 
 Mutation failures also prevent commit when the callback handles their errors.
-Failed selections leave the transaction usable, so you can try another field.
+Failed selections and reads leave the transaction usable, so you can try another field.
 Deserialization errors report a path in the proposed document. If that path
 follows an alias, the byte span can point to the anchor it references.
 
