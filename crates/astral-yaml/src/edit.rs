@@ -12,7 +12,8 @@ mod transaction;
 mod view;
 
 pub use transaction::{
-    Cursor, Editor, Entry, Handle, MappingMut, PathSegment, SequenceMut, ValueRef,
+    Collection, Cursor, Editor, Entry, Handle, Mapping, MappingMut, PathSegment, Sequence,
+    SequenceMut, ValueRef,
 };
 
 use std::borrow::Cow;

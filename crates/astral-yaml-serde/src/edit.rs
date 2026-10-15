@@ -33,8 +33,8 @@ pub(crate) fn transaction<R, E: From<Error>>(
 /// A failed mutation prevents the transaction from committing, even if its error
 /// is handled. Navigation and read errors can be handled without preventing a commit.
 #[derive(Debug)]
-pub struct Cursor<'a, 'doc> {
-    syntax: syntax::Cursor<'a, 'doc>,
+pub struct Cursor<'a, 'doc, State = ()> {
+    syntax: syntax::Cursor<'a, 'doc, State>,
     failure: &'a mut Option<Error>,
     path: String,
 }
@@ -135,7 +135,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
             .syntax
             .into_mapping()
             .map_err(|error| context(&self.path, error))?;
-        Ok(MappingMut {
+        Ok(Cursor {
             syntax,
             failure: self.failure,
             path: self.path,
@@ -151,7 +151,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
             .syntax
             .into_sequence()
             .map_err(|error| context(&self.path, error))?;
-        Ok(SequenceMut {
+        Ok(Cursor {
             syntax,
             failure: self.failure,
             path: self.path,
@@ -237,12 +237,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
 ///
 /// Child selections borrow the view. Their cursors can replace the selected child
 /// while the mapping itself remains available for later edits.
-#[derive(Debug)]
-pub struct MappingMut<'a, 'doc> {
-    syntax: syntax::MappingMut<'a, 'doc>,
-    failure: &'a mut Option<Error>,
-    path: String,
-}
+pub type MappingMut<'a, 'doc> = Cursor<'a, 'doc, syntax::Collection<syntax::Mapping>>;
 
 impl<'doc> MappingMut<'_, 'doc> {
     /// Select the value at string key `name`, or return `None` if absent.
@@ -359,12 +354,7 @@ impl<'doc> MappingMut<'_, 'doc> {
 }
 
 /// A sequence selected for repeated edits.
-#[derive(Debug)]
-pub struct SequenceMut<'a, 'doc> {
-    syntax: syntax::SequenceMut<'a, 'doc>,
-    failure: &'a mut Option<Error>,
-    path: String,
-}
+pub type SequenceMut<'a, 'doc> = Cursor<'a, 'doc, syntax::Collection<syntax::Sequence>>;
 
 impl<'doc> SequenceMut<'_, 'doc> {
     /// Select the item at `index`, or return `None` if it is absent.
@@ -515,7 +505,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     }
 }
 
-impl Cursor<'_, '_> {
+impl<State> Cursor<'_, '_, State> {
     /// Return the selected node, including pending edits.
     /// Spans refer to the original source. Inserted nodes have no source span.
     ///
@@ -569,8 +559,8 @@ impl Cursor<'_, '_> {
     }
 }
 
-impl<'a, 'doc> MappingMut<'a, 'doc> {
-    /// Return the number of entries, accounting for pending edits.
+impl<'a, 'doc, Kind> Cursor<'a, 'doc, syntax::Collection<Kind>> {
+    /// Return the number of entries or items, accounting for pending edits.
     #[must_use]
     pub fn len(&self) -> usize {
         self.syntax.len()
@@ -590,134 +580,6 @@ impl<'a, 'doc> MappingMut<'a, 'doc> {
             failure: self.failure,
             path: self.path,
         }
-    }
-
-    /// Return the selected node, including pending edits.
-    /// Spans refer to the original source. Inserted nodes have no source span.
-    ///
-    /// # Errors
-    /// Returns an error if an editing limit is exceeded.
-    pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
-        self.syntax
-            .node()
-            .map_err(|error| context(&self.path, error))
-    }
-
-    /// Request block or flow style for this collection. Empty collections use flow style.
-    ///
-    /// # Errors
-    /// Returns an error if an editing limit is exceeded.
-    pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.set_collection_style(style)
-        })
-    }
-
-    /// Append a comment. `text` is everything after `#`, including any leading space.
-    /// The transaction fails if the placement would change the comment's owner.
-    ///
-    /// # Errors
-    /// Returns an error if `text` contains a line break or an editing limit is exceeded.
-    pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.append_comment(text, placement)
-        })
-    }
-
-    /// Replace the comment at `index`, keeping its placement.
-    ///
-    /// # Errors
-    /// Returns an error if `index` is out of bounds or `text` contains a line break.
-    pub fn replace_comment(&mut self, index: usize, text: &str) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.replace_comment(index, text)
-        })
-    }
-
-    /// Remove the comment at `index`.
-    ///
-    /// # Errors
-    /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
-    pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.remove_comment(index)
-        })
-    }
-}
-
-impl<'a, 'doc> SequenceMut<'a, 'doc> {
-    /// Return the number of items, accounting for pending edits.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.syntax.len()
-    }
-
-    /// Return whether the collection is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.syntax.is_empty()
-    }
-
-    /// Return a cursor at this collection, allowing navigation or replacement.
-    #[must_use]
-    pub fn into_cursor(self) -> Cursor<'a, 'doc> {
-        Cursor {
-            syntax: self.syntax.into_cursor(),
-            failure: self.failure,
-            path: self.path,
-        }
-    }
-
-    /// Return the selected node, including pending edits.
-    /// Spans refer to the original source. Inserted nodes have no source span.
-    ///
-    /// # Errors
-    /// Returns an error if an editing limit is exceeded.
-    pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
-        self.syntax
-            .node()
-            .map_err(|error| context(&self.path, error))
-    }
-
-    /// Request block or flow style for this collection. Empty collections use flow style.
-    ///
-    /// # Errors
-    /// Returns an error if an editing limit is exceeded.
-    pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.set_collection_style(style)
-        })
-    }
-
-    /// Append a comment. `text` is everything after `#`, including any leading space.
-    /// The transaction fails if the placement would change the comment's owner.
-    ///
-    /// # Errors
-    /// Returns an error if `text` contains a line break or an editing limit is exceeded.
-    pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.append_comment(text, placement)
-        })
-    }
-
-    /// Replace the comment at `index`, keeping its placement.
-    ///
-    /// # Errors
-    /// Returns an error if `index` is out of bounds or `text` contains a line break.
-    pub fn replace_comment(&mut self, index: usize, text: &str) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.replace_comment(index, text)
-        })
-    }
-
-    /// Remove the comment at `index`.
-    ///
-    /// # Errors
-    /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
-    pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
-        mutate(self.failure, &self.path, || {
-            self.syntax.remove_comment(index)
-        })
     }
 }
 

@@ -3,7 +3,7 @@
 use test_case::test_case;
 
 use super::support::edit;
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
     Editable,
     edit::{CollectionStyle, CommentPlacement, NodeKind, ScalarStyle},
@@ -11,41 +11,11 @@ use astral_yaml_serde::{
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
 
-#[test_case(
-    indoc! {r"
-        !custom name: old
-    "},
-    "name";
-    "plain tagged key"
-)]
-#[test_case(
-    indoc! {r"
-        !custom 'name': old
-    "},
-    "name";
-    "quoted tagged key"
-)]
-#[test_case(
-    indoc! {r"
-        !custom true: old
-    "},
-    "true";
-    "tagged boolean"
-)]
-#[test_case(
-    indoc! {r"
-        !custom 'true': old
-    "},
-    "true";
-    "quoted tagged boolean"
-)]
-#[test_case(
-    indoc! {r"
-        !<tag:example.org,2026:key> name: old
-    "},
-    "name";
-    "global tagged key"
-)]
+#[test_case("!custom name: old\n", "name"; "plain tagged key")]
+#[test_case("!custom 'name': old\n", "name"; "quoted tagged key")]
+#[test_case("!custom true: old\n", "true"; "tagged boolean")]
+#[test_case("!custom 'true': old\n", "true"; "quoted tagged boolean")]
+#[test_case("!<tag:example.org,2026:key> name: old\n", "name"; "global tagged key")]
 fn string_fields_do_not_match_application_tagged_keys(source: &str, name: &str) {
     // Node equality includes tags: https://yaml.org/spec/1.2.2/#3213-node-comparison
     let mut document = Editable::<
@@ -141,232 +111,36 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     assert_eq!(yaml.as_ptr(), pointer);
 }
 
-#[test]
-fn rust_values_never_interpret_strings_as_yaml() {
-    let source = indoc! {r"
-        old
-    "};
-    let mut diffs = Vec::new();
-    for (name, value) in [
-        ("string", json!("false")),
-        ("boolean", json!(false)),
-        ("sequence", json!(["a", "b"])),
-        ("mapping", json!({"a": 1})),
-        ("null", Value::Null),
-        ("YAML-looking string", json!("[a, b] # still a string")),
-        ("empty string", json!("")),
-        (
-            "escaped string",
-            json!(indoc! {r"
-                it's a
-                new line"}),
-        ),
-    ] {
-        let document = edit::<Value>(source, |mut root| root.set(&value));
-        assert_eq!(document.value(), &value);
-        diffs.push(formatdoc! {r"
-            {name}
-            {}", edit_diff(source, document.source())});
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"false"
-
-    boolean
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +false
-
-    sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +["a", "b"]
-
-    mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +{"a": 1}
-
-    null
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +null
-
-    YAML-looking string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"[a, b] # still a string"
-
-    empty string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +""
-
-    escaped string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -old
-    +it's a
-    +
-    +  new line
-    "#);
+#[test_case(&json!("false"), r#""false""#; "string")]
+#[test_case(&json!(false), "false"; "boolean")]
+#[test_case(&json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
+#[test_case(&json!({"a": 1}), r#"{"a": 1}"#; "mapping")]
+#[test_case(&Value::Null, "null"; "null")]
+#[test_case(&json!("[a, b] # still a string"), r#""[a, b] # still a string""#; "YAML-looking string")]
+#[test_case(&json!(""), r#""""#; "empty string")]
+#[test_case(&json!("it's a\nnew line"), "it's a\n\n  new line"; "multiline string")]
+fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
+    let document = edit::<Value>("old\n", |mut root| root.set(value));
+    assert_eq!(document.value(), value);
+    assert_eq!(document.source(), format!("{yaml}\n"));
 }
 
-#[test_case(
-    "'it''s': old",
-    "it's"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -'it''s': old
-        \ No newline at end of file
-        +'it''s': new
-        \ No newline at end of file
-    ");
-    "escaped quote"
-)]
-#[test_case(
-    "'a.b/[0]': old",
-    "a.b/[0]"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -'a.b/[0]': old
-        \ No newline at end of file
-        +'a.b/[0]': new
-        \ No newline at end of file
-    ");
-    "path punctuation"
-)]
-#[test_case(
-    "é: old",
-    "é"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -é: old
-        \ No newline at end of file
-        +é: new
-        \ No newline at end of file
-    ");
-    "unicode"
-)]
-#[test_case(
-    "!!str true: old",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -!!str true: old
-        \ No newline at end of file
-        +!!str true: new
-        \ No newline at end of file
-    ");
-    "core string tag"
-)]
-#[test_case(
-    "! true: old",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -! true: old
-        \ No newline at end of file
-        +! true: new
-        \ No newline at end of file
-    ");
-    "non specific tag"
-)]
-#[test_case(
-    "{true: ignored, 'true': old}",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{true: ignored, 'true': old}
-        \ No newline at end of file
-        +{true: ignored, 'true': new}
-        \ No newline at end of file
-    ");
-    "boolean spelling"
-)]
-#[test_case(
-    "{1: ignored, '1': old}",
-    "1"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{1: ignored, '1': old}
-        \ No newline at end of file
-        +{1: ignored, '1': new}
-        \ No newline at end of file
-    ");
-    "integer spelling"
-)]
-#[test_case(
-    "{!!int '1': ignored, '1': old}",
-    "1"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{!!int '1': ignored, '1': old}
-        \ No newline at end of file
-        +{!!int '1': ignored, '1': new}
-        \ No newline at end of file
-    ");
-    "explicit integer spelling"
-)]
-#[test_case(
-    "{[complex, key]: ignored, name: old}",
-    "name"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{[complex, key]: ignored, name: old}
-        \ No newline at end of file
-        +{[complex, key]: ignored, name: new}
-        \ No newline at end of file
-    ");
-    "complex sibling key"
-)]
-fn fields_use_literal_decoded_string_keys(source: &str, name: &str) -> String {
-    let mut document = Editable::<IgnoredAny>::parse(source).unwrap();
-    document
-        .edit(|root| {
-            let mut field = root.field(name)?;
-            assert!(
-                matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old")
-            );
-            field.set("new")
-        })
-        .unwrap_or_else(|error| panic!("{source}: {error}"));
-    edit_diff(source, document.source())
+#[test_case("'it''s': old", "it's"; "escaped quote")]
+#[test_case("'a.b/[0]': old", "a.b/[0]"; "path punctuation")]
+#[test_case("é: old", "é"; "unicode")]
+#[test_case("!!str true: old", "true"; "core string tag")]
+#[test_case("! true: old", "true"; "non specific tag")]
+#[test_case("{true: ignored, 'true': old}", "true"; "boolean spelling")]
+#[test_case("{1: ignored, '1': old}", "1"; "integer spelling")]
+#[test_case("{!!int '1': ignored, '1': old}", "1"; "explicit integer spelling")]
+#[test_case("{[complex, key]: ignored, name: old}", "name"; "complex sibling key")]
+fn fields_use_literal_decoded_string_keys(source: &str, name: &str) {
+    let document = edit::<IgnoredAny>(source, |root| {
+        let mut field = root.field(name)?;
+        assert!(matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old"));
+        field.set("new")
+    });
+    assert_eq!(document.source(), source.replace("old", "new"));
 }
 
 #[test]

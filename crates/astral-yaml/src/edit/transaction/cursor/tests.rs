@@ -419,7 +419,6 @@ fn failed_mutation_preparation_poisoning(operation: Preparation) {
     let mut editor = Editor::new(&document);
     let mut mapping = editor.root_mut().into_mapping().unwrap();
     mapping
-        .cursor
         .editor
         .draft
         .charge(document.options().max_nodes - 1)
