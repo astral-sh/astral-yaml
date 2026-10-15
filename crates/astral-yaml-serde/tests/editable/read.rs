@@ -93,10 +93,13 @@ fn reads_borrow_decoded_text_and_only_offer_spans_for_existing_syntax() {
 
 #[test]
 fn reads_report_a_dangling_alias_without_preventing_repair() {
-    let mut document = Editable::<Value>::parse("default: &value old\ncopy: *value\n").unwrap();
+    let source = "default: &value {nested: old}\ncopy: *value\n";
+    let mut document = Editable::<Value>::parse(source).unwrap();
     let error = document
         .edit(|root| {
             let mut fields = root.into_mapping()?;
+            // The target has this key, but navigation stops at the alias.
+            assert!(fields.field("copy")?.field("nested").is_err());
             fields.remove("default")?;
             let mut copy = fields.field("copy")?;
             let error = copy.read::<&str>().unwrap_err();
@@ -104,7 +107,7 @@ fn reads_report_a_dangling_alias_without_preventing_repair() {
             Ok(error)
         })
         .unwrap();
-    insta::assert_snapshot!(error, @r#"$["copy"]: node is no longer in the document at bytes 0..32"#);
+    insta::assert_snapshot!(error, @r#"$["copy"]: node is no longer in the document at bytes 0..42"#);
 }
 
 #[test]

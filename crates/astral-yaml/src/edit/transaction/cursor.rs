@@ -119,13 +119,9 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping, the key is ambiguous, or
     /// the work limit is exceeded.
-    pub fn get(mut self, name: &str) -> Result<Option<Self>, Error> {
-        if let Some((_, handle)) = self.field_index(name)? {
-            self.handle = handle;
-            Ok(Some(self))
-        } else {
-            Ok(None)
-        }
+    pub fn get(self, name: &str) -> Result<Option<Self>, Error> {
+        let field = self.editor.string_field(&self.handle, name)?;
+        Ok(field.map(|(_, handle)| Self { handle, ..self }))
     }
 
     /// Select the value at string key `name`, requiring the key to exist.
@@ -133,12 +129,12 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping, the key is missing or
     /// ambiguous, or the work limit is exceeded.
-    pub fn field(mut self, name: &str) -> Result<Self, Error> {
+    pub fn field(self, name: &str) -> Result<Self, Error> {
         let (_, handle) = self
-            .field_index(name)?
+            .editor
+            .string_field(&self.handle, name)?
             .ok_or_else(|| self.editor.error("missing mapping key"))?;
-        self.handle = handle;
-        Ok(self)
+        Ok(Self { handle, ..self })
     }
 
     /// Select the sequence item at `index`, accounting for earlier edits.
@@ -159,10 +155,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping or the work limit is exceeded.
     pub fn into_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
-        let NodeKind::Mapping { entries, .. } = self.node()?.kind() else {
-            return Err(self.editor.error("expected a mapping"));
-        };
-        let len = entries.len();
+        let len = self.editor.entry_ids(&self.handle)?.len();
         Ok(self.into_collection(len))
     }
 
@@ -171,10 +164,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a sequence or the work limit is exceeded.
     pub fn into_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
-        let NodeKind::Sequence { items, .. } = self.node()?.kind() else {
-            return Err(self.editor.error("expected a sequence"));
-        };
-        let len = items.len();
+        let len = self.editor.item_ids(&self.handle)?.len();
         Ok(self.into_collection(len))
     }
 
@@ -222,20 +212,6 @@ impl<'doc, State> Cursor<'_, 'doc, State> {
         Cursor::new(self.editor, self.handle.clone())
     }
 
-    fn mutate<R>(
-        &mut self,
-        operation: impl FnOnce(&mut Self) -> Result<R, Error>,
-    ) -> Result<R, Error> {
-        if let Some(error) = &self.editor.failure {
-            return Err(error.clone());
-        }
-        let result = operation(self);
-        if let Err(error) = &result {
-            self.editor.failure = Some(error.clone());
-        }
-        result
-    }
-
     /// Return the selected node, including pending edits.
     ///
     /// # Errors
@@ -253,23 +229,6 @@ impl<'doc, State> Cursor<'_, 'doc, State> {
         }
     }
 
-    fn field_index(&self, name: &str) -> Result<Option<(usize, Handle)>, Error> {
-        let NodeKind::Mapping { entries, .. } = self.node()?.kind() else {
-            return Err(self.editor.error("expected a mapping"));
-        };
-        self.editor.draft.charge(entries.len())?;
-        let mut found = None;
-        for (index, &(key, value)) in entries.iter().enumerate() {
-            if string_key(self.editor.draft.node(key)) == Some(name) {
-                if found.is_some() {
-                    return Err(self.editor.error("ambiguous mapping key"));
-                }
-                found = Some((index, self.editor.handle(value)));
-            }
-        }
-        Ok(found)
-    }
-
     /// Request block or flow style. Empty collections always use flow style.
     ///
     /// # Errors
@@ -284,9 +243,9 @@ impl<'doc, State> Cursor<'_, 'doc, State> {
     /// Returns an error if `text` contains a line break or an editing limit is exceeded.
     /// Commit fails if the placement cannot preserve comment ownership.
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
-        self.mutate(|cursor| {
-            let index = cursor.node()?.comments().len();
-            cursor.insert_comment(index, text, placement)
+        self.editor.mutate(|editor| {
+            let index = editor.node(&self.handle)?.comments().len();
+            editor.insert_comment(&self.handle, index, text, placement)
         })
     }
 
@@ -318,6 +277,35 @@ impl<'doc, State> Cursor<'_, 'doc, State> {
     /// Returns an error if the index is out of bounds or an editing limit is exceeded.
     pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
         self.editor.remove_comment(&self.handle, index)
+    }
+}
+
+impl Editor<'_> {
+    fn string_field(&self, mapping: &Handle, name: &str) -> Result<Option<(usize, Handle)>, Error> {
+        let entries = self.entry_ids(mapping)?;
+        self.draft.charge(entries.len())?;
+        let mut found = None;
+        for (index, &(key, value)) in entries.iter().enumerate() {
+            if string_key(self.draft.node(key)) == Some(name) {
+                if found.is_some() {
+                    return Err(self.error("ambiguous mapping key"));
+                }
+                found = Some((index, self.handle(value)));
+            }
+        }
+        Ok(found)
+    }
+
+    fn append_string_entry(
+        &mut self,
+        mapping: &Handle,
+        len: &mut usize,
+        name: &str,
+        yaml: &str,
+    ) -> Result<Handle, Error> {
+        let (_, value) = self.insert_entry(mapping, *len, &quoted(name), yaml)?;
+        *len += 1;
+        Ok(value)
     }
 }
 
@@ -404,11 +392,7 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the index is out of bounds or the work limit is exceeded.
     pub fn key_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let (key, _) = self
-            .editor
-            .mapping_entry(&self.handle, index)?
-            .ok_or_else(|| self.editor.error("entry index out of bounds"))?;
-        Ok(Cursor::new(self.editor, key))
+        self.entry_at(index, |(key, _)| key)
     }
 
     /// Borrow the value at `index`, including entries with non-string keys.
@@ -416,11 +400,20 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the index is out of bounds or the work limit is exceeded.
     pub fn value_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let (_, value) = self
-            .editor
-            .mapping_entry(&self.handle, index)?
+        self.entry_at(index, |(_, value)| value)
+    }
+
+    fn entry_at(
+        &mut self,
+        index: usize,
+        select: impl FnOnce((NodeId, NodeId)) -> NodeId,
+    ) -> Result<Cursor<'_, 'doc>, Error> {
+        let entries = self.editor.entry_ids(&self.handle)?;
+        let &entry = entries
+            .get(index)
             .ok_or_else(|| self.editor.error("entry index out of bounds"))?;
-        Ok(Cursor::new(self.editor, value))
+        let handle = self.editor.handle(select(entry));
+        Ok(Cursor::new(self.editor, handle))
     }
 
     /// Select a string entry for inserting a default if it is absent.
@@ -428,7 +421,7 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or the work limit is exceeded.
     pub fn entry(&mut self, name: &str) -> Result<Entry<'_, 'doc>, Error> {
-        let state = if let Some((_, handle)) = self.field_index(name)? {
+        let state = if let Some((_, handle)) = self.editor.string_field(&self.handle, name)? {
             EntryState::Occupied(Cursor::new(self.editor, handle))
         } else {
             EntryState::Vacant {
@@ -448,19 +441,12 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// Returns an error if the key is ambiguous, the fragment is invalid, or an
     /// editing limit is exceeded.
     pub fn set_yaml(&mut self, name: &str, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let handle = self.mutate(|cursor| {
-            if let Some((_, handle)) = cursor.field_index(name)? {
-                cursor.editor.replace_preserving_style(&handle, yaml)?;
+        let handle = self.editor.mutate(|editor| {
+            if let Some((_, handle)) = editor.string_field(&self.handle, name)? {
+                editor.replace_preserving_style(&handle, yaml)?;
                 Ok(handle)
             } else {
-                let (_, handle) = cursor.editor.insert_entry(
-                    &cursor.handle,
-                    cursor.state.len,
-                    &quoted(name),
-                    yaml,
-                )?;
-                cursor.state.len += 1;
-                Ok(handle)
+                editor.append_string_entry(&self.handle, &mut self.state.len, name, yaml)
             }
         })?;
         Ok(Cursor::new(self.editor, handle))
@@ -471,12 +457,12 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn remove(&mut self, name: &str) -> Result<bool, Error> {
-        self.mutate(|cursor| {
-            let Some((index, _)) = cursor.field_index(name)? else {
+        self.editor.mutate(|editor| {
+            let Some((index, _)) = editor.string_field(&self.handle, name)? else {
                 return Ok(false);
             };
-            cursor.editor.remove_entry(&cursor.handle, index)?;
-            cursor.state.len -= 1;
+            editor.remove_entry(&self.handle, index)?;
+            self.state.len -= 1;
             Ok(true)
         })
     }
@@ -563,11 +549,9 @@ impl<'a, 'doc> Entry<'a, 'doc> {
         match self.state {
             EntryState::Occupied(cursor) => Ok(cursor),
             EntryState::Vacant { cursor, name, len } => {
-                let (_, handle) =
-                    cursor
-                        .editor
-                        .insert_entry(&cursor.handle, *len, &quoted(&name), yaml)?;
-                *len += 1;
+                let handle = cursor
+                    .editor
+                    .append_string_entry(&cursor.handle, len, &name, yaml)?;
                 Ok(Cursor::new(cursor.editor, handle))
             }
         }

@@ -133,10 +133,7 @@ impl<'a> Editor<'a> {
     }
 
     fn error(&self, message: &'static str) -> Error {
-        Error {
-            span: self.original.source.nodes[self.original.source.root.0].span,
-            message,
-        }
+        self.draft.error(message)
     }
 
     fn id(&self, handle: &Handle) -> Result<NodeId, Error> {
@@ -154,21 +151,25 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn mutate<R>(
+    fn mutate_node<R>(
         &mut self,
         handle: &Handle,
         operation: impl FnOnce(&mut Draft, NodeId) -> Result<R, Error>,
     ) -> Result<R, Error> {
+        self.mutate(|editor| {
+            let id = editor.id(handle)?;
+            operation(&mut editor.draft, id)
+        })
+    }
+
+    fn mutate<R>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<R, Error>,
+    ) -> Result<R, Error> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = self
-            .id(handle)
-            .and_then(|id| operation(&mut self.draft, id));
-        if let Err(error) = &result {
-            self.failure = Some(error.clone());
-        }
-        result
+        operation(self).inspect_err(|error| self.failure = Some(error.clone()))
     }
 
     /// Return a handle to the document's root.
@@ -205,9 +206,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` is invalid or does not refer to a sequence.
     pub fn sequence_items(&self, handle: &Handle) -> Result<Vec<Handle>, Error> {
-        let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a sequence"));
-        };
+        let items = self.item_ids(handle)?;
         self.draft.charge(items.len())?;
         Ok(items.iter().map(|&id| self.handle(id)).collect())
     }
@@ -217,10 +216,15 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` is invalid or does not refer to a sequence.
     pub fn sequence_item(&self, handle: &Handle, index: usize) -> Result<Option<Handle>, Error> {
-        let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a sequence"));
-        };
+        let items = self.item_ids(handle)?;
         Ok(items.get(index).map(|&id| self.handle(id)))
+    }
+
+    fn item_ids(&self, sequence: &Handle) -> Result<&[NodeId], Error> {
+        match self.node(sequence)?.kind() {
+            NodeKind::Sequence { items, .. } => Ok(items),
+            _ => Err(self.error("expected a sequence")),
+        }
     }
 
     /// Return handles to the mapping keys and values at `handle`, in their current order.
@@ -229,9 +233,7 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` is invalid or does not refer to a mapping.
     pub fn mapping_entries(&self, handle: &Handle) -> Result<Vec<(Handle, Handle)>, Error> {
-        let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a mapping"));
-        };
+        let entries = self.entry_ids(handle)?;
         self.draft.charge(entries.len())?;
         Ok(entries
             .iter()
@@ -249,12 +251,17 @@ impl<'a> Editor<'a> {
         handle: &Handle,
         index: usize,
     ) -> Result<Option<(Handle, Handle)>, Error> {
-        let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a mapping"));
-        };
+        let entries = self.entry_ids(handle)?;
         Ok(entries
             .get(index)
             .map(|&(key, value)| (self.handle(key), self.handle(value))))
+    }
+
+    fn entry_ids(&self, mapping: &Handle) -> Result<&[(NodeId, NodeId)], Error> {
+        match self.node(mapping)?.kind() {
+            NodeKind::Mapping { entries, .. } => Ok(entries),
+            _ => Err(self.error("expected a mapping")),
+        }
     }
 
     /// Replace `handle`'s node with the parsed `yaml`, keeping its outer comments.
@@ -267,7 +274,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
     /// single document within the resource limits.
     pub fn replace(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
-        self.replace_impl(handle, yaml, false)
+        self.mutate_node(handle, |draft, id| draft.replace(id, yaml, false))
     }
 
     /// Like [`Self::replace`], but keep the node's anchor and compatible style.
@@ -280,11 +287,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
     /// single document within the resource limits.
     pub fn replace_preserving_style(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
-        self.replace_impl(handle, yaml, true)
-    }
-
-    fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
+        self.mutate_node(handle, |draft, id| draft.replace(id, yaml, true))
     }
 
     /// Parse `yaml` and insert it into `sequence` before `index`.
@@ -299,7 +302,7 @@ impl<'a> Editor<'a> {
         index: usize,
         yaml: &str,
     ) -> Result<Handle, Error> {
-        let child = self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))?;
+        let child = self.mutate_node(sequence, |draft, id| draft.insert_item(id, index, yaml))?;
         Ok(self.handle(child))
     }
 
@@ -309,7 +312,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `sequence` is invalid or not a sequence, or `index` is
     /// out of bounds.
     pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(sequence, |draft, id| draft.remove_item(id, index))
+        self.mutate_node(sequence, |draft, id| draft.remove_item(id, index))
     }
 
     /// Parse `key` and `value` and insert an entry into `mapping` before `index`.
@@ -325,7 +328,7 @@ impl<'a> Editor<'a> {
         key: &str,
         value: &str,
     ) -> Result<(Handle, Handle), Error> {
-        let (key, value) = self.mutate(mapping, |draft, id| {
+        let (key, value) = self.mutate_node(mapping, |draft, id| {
             draft.insert_entry(id, index, key, value)
         })?;
         Ok((self.handle(key), self.handle(value)))
@@ -338,7 +341,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `mapping` is invalid or not a mapping, or `index` is
     /// out of bounds.
     pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(mapping, |draft, id| draft.remove_entry(id, index))
+        self.mutate_node(mapping, |draft, id| draft.remove_entry(id, index))
     }
 
     /// Request a style for the scalar at `handle`.
@@ -349,7 +352,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid, the node is not a scalar, or the style
     /// changes its YAML type.
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.set_scalar_style(id, style))
+        self.mutate_node(handle, |draft, id| draft.set_scalar_style(id, style))
     }
 
     /// Request block or flow style for the collection at `handle`.
@@ -362,7 +365,7 @@ impl<'a> Editor<'a> {
         handle: &Handle,
         style: CollectionStyle,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
+        self.mutate_node(handle, |draft, id| draft.set_collection_style(id, style))
     }
 
     /// Insert a comment at `index` in the node's own comment list.
@@ -383,7 +386,7 @@ impl<'a> Editor<'a> {
         text: &str,
         placement: CommentPlacement,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| {
+        self.mutate_node(handle, |draft, id| {
             draft.insert_comment(id, index, text, placement, None)
         })
     }
@@ -425,7 +428,7 @@ impl<'a> Editor<'a> {
         position: CommentPosition<Handle>,
     ) -> Result<(), Error> {
         let position = position.try_map(|child| self.id(&child));
-        self.mutate(handle, |draft, id| {
+        self.mutate_node(handle, |draft, id| {
             draft.insert_comment(id, index, text, placement, Some(position?))
         })
     }
@@ -440,7 +443,7 @@ impl<'a> Editor<'a> {
         index: usize,
         text: &str,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.replace_comment(id, index, text))
+        self.mutate_node(handle, |draft, id| draft.replace_comment(id, index, text))
     }
 
     /// Remove the node's comment at `index`.
@@ -448,11 +451,11 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` or `index` is invalid.
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.remove_comment(id, index))
+        self.mutate_node(handle, |draft, id| draft.remove_comment(id, index))
     }
 
-    fn finish(mut self) -> Result<EditableDocument, Error> {
-        if let Some(error) = self.failure.take() {
+    fn finish(self) -> Result<EditableDocument, Error> {
+        if let Some(error) = self.failure {
             return Err(error);
         }
         let candidate = self.draft.freeze()?;

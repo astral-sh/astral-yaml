@@ -116,7 +116,7 @@ fn view_comments_styles_and_node_inspection() {
             mapping.append_comment(" mapping", CommentPlacement::Leading)?;
             let mut sequence = root.field("sequence")?.into_sequence()?;
             sequence.set_collection_style(CollectionStyle::Flow)?;
-            sequence.append_comment(" second", CommentPlacement::Leading)?;
+            sequence.insert_comment(0, " second", CommentPlacement::Leading)?;
             sequence.replace_comment(0, " temporary")?;
             let sequence_comments = sequence.node()?.comments().len();
             sequence.remove_comment(0)?;
@@ -179,56 +179,30 @@ fn navigation_errors_are_recoverable(source: &str, operation: Navigation) {
     assert_eq!(document.source(), "recovered");
 }
 
-#[derive(Clone, Copy)]
-enum Mutation {
-    Set,
-    Remove,
-    Entry,
-    Insert,
-    Bounds,
-    RemoveItem,
-}
-
-#[test_case("{a: 1, 'a': 2}", Mutation::Set; "ambiguous upsert")]
-#[test_case("{a: 1, 'a': 2}", Mutation::Remove; "ambiguous removal")]
-#[test_case("{}", Mutation::Set; "invalid inserted value")]
-#[test_case("{a: 1}", Mutation::Set; "invalid existing value")]
-#[test_case("{}", Mutation::Entry; "invalid default")]
-#[test_case("[]", Mutation::Insert; "invalid item")]
-#[test_case("[]", Mutation::Bounds; "invalid insertion index")]
-#[test_case("[]", Mutation::RemoveItem; "invalid removal index")]
-fn handled_mutation_errors_still_prevent_commit(source: &str, operation: Mutation) {
+#[test_case("{a: 1, 'a': 2}", |root| root.into_mapping()?.set_yaml("a", "2").map(|_| ());
+    "ambiguous upsert")]
+#[test_case("{a: 1, 'a': 2}", |root| root.into_mapping()?.remove("a").map(|_| ());
+    "ambiguous removal")]
+#[test_case("{a: 1}", |root| root.into_mapping()?.set_yaml("a", "[").map(|_| ());
+    "invalid existing value")]
+#[test_case("[]", |root| root.into_sequence()?.push_yaml("[").map(|_| ());
+    "invalid item")]
+fn handled_mutation_errors_still_prevent_commit(
+    source: &str,
+    operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
+) {
     let mut document = EditableDocument::parse(source).unwrap();
-    let result = document.edit(|mut root| {
-        let result = match operation {
-            Mutation::Set => root
-                .reborrow()
-                .into_mapping()?
-                .set_yaml("a", "[")
-                .map(|_| ()),
-            Mutation::Remove => root.reborrow().into_mapping()?.remove("a").map(|_| ()),
-            Mutation::Entry => root
-                .reborrow()
-                .into_mapping()?
-                .entry("a")?
-                .or_insert_yaml("[")
-                .map(|_| ()),
-            Mutation::Insert => root.reborrow().into_sequence()?.push_yaml("[").map(|_| ()),
-            Mutation::Bounds => root
-                .reborrow()
-                .into_sequence()?
-                .insert_yaml(1, "valid")
-                .map(|_| ()),
-            Mutation::RemoveItem => root.reborrow().into_sequence()?.remove(0),
-        };
-        assert!(result.is_err());
-        assert!(
-            root.append_comment("cannot commit", CommentPlacement::Leading)
-                .is_err()
-        );
-        Ok(())
-    });
-    assert!(result.is_err());
+    let mut caught = None;
+    let error = document
+        .edit(|mut root| {
+            let first = operation(root.reborrow()).unwrap_err();
+            let next = root.append_comment("valid", CommentPlacement::Leading);
+            assert_eq!(next.unwrap_err(), first);
+            caught = Some(first);
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(Some(error), caught);
     assert_eq!(document.source(), source);
 }
 

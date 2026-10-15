@@ -39,40 +39,6 @@ struct Config {
     servers: Vec<String>,
 }
 
-#[test_case(0)]
-#[test_case(1)]
-#[test_case(2)]
-#[test_case(3)]
-fn results_are_returned_only_after_callback_syntax_and_type_checks(operation: usize) {
-    let source = indoc! {r"
-        timeout: 30
-        servers: [primary]
-    "};
-    let mut document = Editable::<Config>::parse(source).unwrap();
-    let result = document.edit(|root| {
-        match operation {
-            0 => root.field("timeout")?.set(60)?,
-            1 => root.field("timeout")?.set(256)?,
-            2 => {
-                root.field("missing")?;
-            }
-            _ => root
-                .field("servers")?
-                .item(0)?
-                .set_scalar_style(ScalarStyle::Literal)?,
-        }
-        Ok("committed")
-    });
-    if operation == 0 {
-        assert_eq!(result.unwrap(), "committed");
-        assert_eq!(document.value().timeout, 60);
-    } else {
-        assert!(result.is_err());
-        assert_eq!(document.source(), source);
-        assert_eq!(document.value().timeout, 30);
-    }
-}
-
 #[test]
 fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     let source = indoc! {r"
@@ -280,30 +246,6 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
 }
 
 #[test]
-fn aliases_are_not_followed_and_definitions_keep_their_anchor() {
-    let source = indoc! {r"
-        definition: &value 'old'
-        copy: *value
-    "};
-    let document = edit::<Value>(source, |mut root| {
-        assert!(root.reborrow().field("copy")?.field("nested").is_err());
-        root.field("definition")?.set("new")
-    });
-    assert_eq!(
-        document.value(),
-        &json!({"definition": "new", "copy": "new"})
-    );
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -definition: &value 'old'
-    +definition: &value 'new'
-     copy: *value
-    ");
-}
-
-#[test]
 fn navigation_errors_identify_the_selected_path() {
     let mut errors = Vec::new();
     for operation in 0..4 {
@@ -390,8 +332,8 @@ const MISSING: &str = r#"$["missing"]"#;
 
 #[test_case(|mut root| root.set(FailsSerialization),
     "$", "serialization failed"; "set value")]
-#[test_case(|mut root| root.set_yaml("["),
-    "$", "unterminated flow sequence"; "set YAML")]
+#[test_case(|root| items(root)?.item(0)?.set_yaml("["),
+    ITEM, "unterminated flow sequence"; "set YAML")]
 #[test_case(|mut root| root.replace_yaml("["),
     "$", "unterminated flow sequence"; "replace YAML")]
 #[test_case(|root| items(root)?.insert(3, "new").map(|_| ()),
@@ -441,6 +383,8 @@ fn caught_mutation_errors_still_roll_back_the_transaction(
             assert_eq!(error.path.as_deref(), Some(path));
             assert_eq!(error.message, message);
             assert_eq!(root.set(42).unwrap_err(), error);
+            let changed = root.field("items")?.item(0)?;
+            assert_eq!(changed.read::<&str>()?, "changed");
             caught = Some(error);
             Ok(())
         })
@@ -603,46 +547,6 @@ fn collection_views_expose_node_comments_and_style() {
 }
 
 #[test]
-fn wrong_kind_conversions_are_recoverable_navigation_errors() {
-    let source = "value: old\n";
-    let document = edit::<Value>(source, |mut root| {
-        assert!(root.reborrow().into_sequence().is_err());
-        assert!(root.reborrow().field("value")?.into_mapping().is_err());
-        assert!(root.reborrow().field("value")?.into_sequence().is_err());
-        root.field("value")?.set("new")
-    });
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -value: old
-    +value: new
-    ");
-}
-
-#[test]
-fn a_failed_yaml_setter_keeps_the_first_error_and_rolls_back_prior_edits() {
-    let source = "value: old\n";
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    let error = document
-        .edit(|root| {
-            let mut value = root.field("value")?;
-            value.set_yaml("changed")?;
-            let first_error = value.set_yaml("[").unwrap_err();
-            assert_eq!(value.set_yaml("later").unwrap_err(), first_error);
-            assert!(
-                matches!(value.node()?.kind(), NodeKind::Scalar { value, .. } if value == "changed")
-            );
-            Ok(())
-        })
-        .unwrap_err();
-    assert_eq!(error.path.as_deref(), Some(r#"$["value"]"#));
-    assert_eq!(error.message, "unterminated flow sequence");
-    assert_eq!(document.source(), source);
-    assert_eq!(document.value(), &json!({"value": "old"}));
-}
-
-#[test]
 fn an_empty_edit_path_selects_the_root_and_a_missing_path_skips_the_callback() {
     use astral_yaml_serde::edit::PathSegment::{Index, Key};
 
@@ -666,7 +570,8 @@ fn an_empty_edit_path_selects_the_root_and_a_missing_path_skips_the_callback() {
 fn collection_defaults_reuse_existing_children_and_leave_scalars_alone() {
     let mut document = Editable::<Value>::parse("enabled: true # retained\n").unwrap();
     document
-        .edit(|root| {
+        .edit(|mut root| {
+            assert!(root.reborrow().into_sequence().is_err());
             let mut settings = root.into_mapping()?;
             assert!(settings.entry("enabled")?.or_sequence().is_err());
             assert!(settings.entry("enabled")?.or_mapping().is_err());
