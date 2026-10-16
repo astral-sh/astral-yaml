@@ -11,9 +11,14 @@ mod splice;
 mod transaction;
 mod view;
 
-pub use transaction::{Editor, Handle};
+pub use transaction::{
+    Collection, Cursor, Editor, Entry, Handle, Mapping, MappingMut, PathSegment, Sequence,
+    SequenceMut, ValueRef,
+};
 
-use std::borrow::Cow;
+pub use crate::edit_path;
+
+use std::{borrow::Cow, cell::Cell};
 
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
@@ -162,6 +167,23 @@ impl CommentPosition {
     }
 }
 
+impl Span {
+    /// Include empty spans at either boundary when checking source containment.
+    fn contains(self, other: Self) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+}
+
+/// Charge the same work budget while editing the draft and planning its source rewrites.
+fn charge_work(work: &Cell<usize>, amount: usize, span: Span) -> Result<(), Error> {
+    let remaining = work.get().checked_sub(amount).ok_or(Error {
+        span,
+        message: "editing resource limit exceeded",
+    })?;
+    work.set(remaining);
+    Ok(())
+}
+
 impl EditableDocument {
     /// Parse `source` as an editable YAML document.
     ///
@@ -290,17 +312,7 @@ impl EditableDocument {
             message,
         })?
         .apply();
-        let parsed = Self::parse_with_options(&output, self.source.options)?;
-        let correspondence = emit::correspondence(self, &parsed).ok_or(Error {
-            span: region,
-            message: "emission changed YAML content or alias identity",
-        })?;
-        if !emit::comments_preserved(self, &parsed, &correspondence) {
-            return Err(Error {
-                span: region,
-                message: "emission changed comment ownership or placement",
-            });
-        }
+        emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?;
         Ok(output)
     }
 
@@ -383,6 +395,11 @@ impl<Location> Node<Location> {
 }
 
 impl<Location> Comment<Location> {
+    /// The text, placement, and position compared across edits, independent of source spans.
+    fn attachment(&self) -> (&str, CommentPlacement, CommentPosition) {
+        (&self.text, self.placement, self.position)
+    }
+
     /// Return the comment text, excluding `#` and the line break.
     #[must_use]
     pub fn text(&self) -> &str {

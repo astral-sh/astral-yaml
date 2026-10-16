@@ -1,6 +1,31 @@
-use crate::{Error, edit::Editor, from_str};
-use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
-use serde::de::DeserializeOwned;
+use crate::{
+    Error,
+    edit::{self, Cursor, PathSegment},
+    from_stream,
+};
+use astral_yaml::{
+    ParseOptions,
+    edit::{EditableDocument, Editor as SyntaxEditor},
+    parse_with_options,
+};
+use serde::{Serialize, de::DeserializeOwned};
+
+/// A YAML document you can edit without defining a Rust type for the whole document.
+///
+/// Read and write selected values using Rust types, or edit YAML fragments directly.
+/// Parsing and edits still check the document using Serde's YAML rules, including
+/// duplicate-key checks and alias limits. For application tags, use [`Editable<T>`]
+/// with an appropriate type, or edit the syntax with [`EditableDocument`].
+///
+/// ```
+/// use astral_yaml_serde::{EditableYaml, edit::edit_path};
+///
+/// let mut doc = EditableYaml::parse("servers: [{host: 'old'}]\n")?;
+/// doc.set_at(edit_path!["servers", 0, "host"], "new")?;
+/// assert_eq!(doc.source(), "servers: [{host: 'new'}]\n");
+/// # Ok::<(), astral_yaml_serde::Error>(())
+/// ```
+pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 
 /// A YAML document and its deserialized value, kept in sync by edits.
 ///
@@ -20,7 +45,7 @@ use serde::de::DeserializeOwned;
 /// struct Config { timeout: u64 }
 ///
 /// let mut config = Editable::<Config>::parse("timeout: 30 # seconds\n")?;
-/// config.edit(|e| e.root_mut().field("timeout")?.set(60))?;
+/// config.set_at(["timeout"], 60)?;
 /// assert_eq!(config.value().timeout, 60);
 /// assert_eq!(config.to_yaml(), "timeout: 60 # seconds\n");
 /// # Ok::<(), astral_yaml_serde::Error>(())
@@ -41,12 +66,29 @@ impl<T: DeserializeOwned> Editable<T> {
     /// Returns an error if `source` is invalid YAML, does not contain exactly one
     /// document, cannot be deserialized as `T`, or exceeds a resource limit.
     pub fn parse(source: &str) -> Result<Self, Error> {
-        let syntax = EditableDocument::parse(source)?;
-        let value = from_str(syntax.source())?;
+        Self::parse_with_options(source, ParseOptions::default())
+    }
+
+    /// Like [`Self::parse`], but use the given parser limits for loading and edits.
+    /// The input byte limit applies before line endings are normalized. These
+    /// options do not change Serde's separate alias-expansion limits.
+    ///
+    /// # Errors
+    /// Returns an error if the options are invalid, `source` is invalid YAML or
+    /// does not contain exactly one document, cannot be deserialized as `T`, or
+    /// exceeds a resource limit.
+    pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
+        let syntax = EditableDocument::parse_with_options(source, options)?;
+        let value = Self::deserialize_syntax(&syntax)?;
         Ok(Self { value, syntax })
     }
 
-    /// Edit the document and return the callback's result.
+    fn deserialize_syntax(syntax: &EditableDocument) -> Result<T, Error> {
+        let stream = parse_with_options(syntax.source(), syntax.options())?;
+        from_stream(&stream)
+    }
+
+    /// Edit the document starting at its root, and return the callback's result.
     ///
     /// Changes are committed only if the output is valid YAML and deserializes as
     /// `T`. Any failure leaves the source and value unchanged. A failed mutation
@@ -58,19 +100,64 @@ impl<T: DeserializeOwned> Editable<T> {
     /// duplicate keys, or exceeds a resource limit.
     pub fn edit<R>(
         &mut self,
-        edit: impl FnOnce(&mut Editor<'_, '_>) -> Result<R, Error>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
     ) -> Result<R, Error> {
-        let mut syntax = self.syntax.clone();
-        let result = syntax.try_edit(|syntax| {
-            let mut editor = Editor::new(syntax);
-            let result = edit(&mut editor)?;
-            editor.finish()?;
-            Ok::<_, Error>(result)
-        })?;
-        let value = from_str(syntax.source())?;
-        self.syntax = syntax;
-        self.value = value;
-        Ok(result)
+        self.try_edit(edit)
+    }
+
+    /// Like [`Self::edit`], but allow the callback to return an application error.
+    /// The callback's result is returned only after the changes are committed.
+    ///
+    /// # Errors
+    /// Propagates callback, edit, and deserialization errors, leaving the source
+    /// and value unchanged.
+    pub fn try_edit<R, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit_syntax(|editor| edit::transaction(editor, edit))
+    }
+
+    /// Set the value at an existing path, retaining its anchor and compatible style.
+    ///
+    /// Keys are literal strings, indices are zero-based, and an empty path selects the root.
+    /// Use [`edit_path!`](crate::edit::edit_path) to mix keys and indices. To add a missing
+    /// mapping entry, use [`MappingMut::set`](crate::edit::MappingMut::set) instead.
+    ///
+    /// # Errors
+    /// Returns a selection, serialization, or edit error without changing the source or value.
+    pub fn set_at<'p>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        value: impl Serialize,
+    ) -> Result<(), Error> {
+        self.edit_at(path, |mut node| node.set(value))
+    }
+
+    /// Edit the node at `path`. Keys are literal strings and indices are zero-based.
+    /// An empty path selects the root. Missing nodes are not created implicitly.
+    /// The complete document must still deserialize as `T` for the edit to commit.
+    ///
+    /// # Errors
+    /// Returns a selection error without calling `edit`, or an error from the edit.
+    pub fn edit_at<'p, R>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit_at(path, edit)
+    }
+
+    /// Like [`Self::edit_at`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates selection, callback, and deserialization errors without committing.
+    pub fn try_edit_at<'p, R, E: From<Error>>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit(|root| edit(root.at(path)?))
     }
 
     /// Edit the document using YAML fragments and node handles.
@@ -83,7 +170,35 @@ impl<T: DeserializeOwned> Editable<T> {
         &mut self,
         edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, astral_yaml::Error>,
     ) -> Result<R, Error> {
-        self.edit(|editor| Ok(edit(editor.syntax_mut())?))
+        self.try_edit_syntax(|editor| edit(editor).map_err(Error::from))
+    }
+
+    /// Like [`Self::edit_syntax`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates callback, edit, and deserialization errors without committing.
+    pub fn try_edit_syntax<R, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        let (result, value) = self
+            .syntax
+            .try_edit_syntax_with_validation(
+                |editor| edit(editor).map_err(EditError),
+                |syntax| Self::deserialize_syntax(syntax).map_err(|error| EditError(error.into())),
+            )
+            .map_err(|error: EditError<E>| error.0)?;
+        self.value = value;
+        Ok(result)
+    }
+}
+
+/// Bridge syntax errors without requiring applications to convert them separately.
+struct EditError<E>(E);
+
+impl<E: From<Error>> From<astral_yaml::Error> for EditError<E> {
+    fn from(error: astral_yaml::Error) -> Self {
+        Self(Error::from(error).into())
     }
 }
 

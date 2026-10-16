@@ -1,6 +1,6 @@
 use test_case::test_case;
 
-use crate::CollectionStyle;
+use crate::comments::CommentPlacement;
 use crate::edit::{
     draft::{Candidate, same_style},
     framing::RootLayout,
@@ -9,6 +9,7 @@ use crate::edit::{
     splice,
     view::Syntax,
 };
+use crate::{CollectionStyle, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc};
 
 use super::{EditableDocument, Editor, Layout, NodeKind, Span};
@@ -40,26 +41,24 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
 
     // A broken planning or rendering pass must not change the draft against
     // which commit is checked. Deliberately corrupt only the rendering copy.
-    let candidate = editor.draft.clone().freeze().unwrap();
+    let candidate = editor.draft.freeze().unwrap();
     let mut planned = Syntax::from(&candidate).nodes.to_vec();
     planned[value.id.0].kind = NodeKind::Scalar {
         value: "incorrect".to_owned(),
-        style: crate::ScalarStyle::Plain,
+        style: ScalarStyle::Plain,
     };
     let planned = Syntax {
         nodes: &planned,
         root: document.source.root,
     };
-    let source_index = document.source.clone();
-    let output = plan(&source_index, &candidate, planned)
+    let source = &document.source;
+    let output = plan(source, &candidate, planned)
         .render(&Layout::new(planned))
         .unwrap();
     let error = candidate.commit(&output).unwrap_err();
     insta::assert_snapshot!(
-        format!("{}\nCommit: {}", edit_diff(source, &output), error.message),
+        format!("{}\nCommit: {}", edit_diff(&source.text, &output), error.message),
         @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -value: old
     +value: incorrect
@@ -93,12 +92,12 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     let mut editor = Editor::new(&document);
     editor.replace(&editor.handle(first), "new_a").unwrap();
     editor.replace(&editor.handle(last), "new_c").unwrap();
-    let candidate = editor.draft.clone().freeze().unwrap();
+    let candidate = editor.draft.freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = document.source.clone();
-    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
+    let source = &document.source;
+    let layout = RootLayout::new(source, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&source_index, &candidate, (&candidate).into())
+        plan(source, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap()
             .iter()
@@ -112,61 +111,69 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
 }
 
 #[test]
-fn empty_transactions_do_not_require_rewrite_work() {
-    let document = EditableDocument::parse("one").unwrap();
-    let editor = Editor::new(&document);
-    let candidate = editor.draft.clone().freeze().unwrap();
-    candidate.work().set(0);
-    let syntax = Layout::new(&candidate);
-    let source_index = document.source.clone();
-    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
-    assert!(
-        plan(&source_index, &candidate, (&candidate).into())
-            .rewrite_regions(&layout, &syntax)
-            .unwrap()
-            .is_empty()
-    );
+fn an_exhausted_work_budget_allows_an_empty_commit_but_not_a_rewrite() {
+    let options = ParseOptions {
+        max_nodes: 1,
+        ..ParseOptions::default()
+    };
+    let mut document = EditableDocument::parse_with_options("one", options).unwrap();
+    document
+        .edit(|root| {
+            root.node()?; // Spend the entire work budget on a read.
+            Ok(())
+        })
+        .unwrap();
+
+    let error = document
+        .edit(|mut root| {
+            // Changing the style spends the budget. Only commit should fail.
+            root.set_scalar_style(ScalarStyle::SingleQuoted).unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "editing resource limit exceeded");
+    assert_eq!(document.source(), "one");
 }
 
 #[test]
-fn outer_comment_plans_obey_work_and_output_limits() {
+fn inserting_outer_comments_obeys_the_output_limit() {
     let source = indoc! {r"
                 # old
         value
     "};
-    let mut document = EditableDocument::parse(source).unwrap();
-    document.source.options.max_input_bytes = source.len();
-    let mut editor = Editor::new(&document);
-    for index in 0..3 {
-        editor
-            .insert_comment(
-                &editor.root(),
-                index,
-                " new",
-                crate::comments::CommentPlacement::Leading,
-            )
-            .unwrap();
-    }
-    let region = document.source.nodes[document.source.root.0].span;
-    let candidate = editor.draft.clone().freeze().unwrap();
-    let syntax = Layout::new(&candidate);
-    let source_index = document.source.clone();
-    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
-    assert_eq!(
-        plan(&source_index, &candidate, (&candidate).into())
-            .root_comments(Some(region), &layout)
-            .unwrap_err()
-            .message,
-        "emitted YAML exceeds input byte limit"
-    );
-    candidate.work().set(0);
-    assert_eq!(
-        plan(&source_index, &candidate, (&candidate).into())
-            .root_comments(Some(region), &layout)
-            .unwrap_err()
-            .message,
-        "editing resource limit exceeded"
-    );
+    let options = ParseOptions {
+        max_input_bytes: source.len(),
+        ..ParseOptions::default()
+    };
+    let mut document = EditableDocument::parse_with_options(source, options).unwrap();
+    let error = document
+        .edit(|mut root| {
+            for index in 0..3 {
+                root.insert_comment(index, " new", CommentPlacement::Leading)?;
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "emitted YAML exceeds input byte limit");
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn rewriting_only_an_outer_comment_obeys_the_work_limit() {
+    let source = "# old\nvalue\n";
+    let options = ParseOptions {
+        max_nodes: 2,
+        ..ParseOptions::default()
+    };
+    let mut document = EditableDocument::parse_with_options(source, options).unwrap();
+    let error = document
+        .edit(|mut root| {
+            root.replace_comment(0, " new").unwrap(); // Spend the budget before commit.
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "editing resource limit exceeded");
+    assert_eq!(document.source(), source);
 }
 
 #[test_case("one", "one", true)]
@@ -232,20 +239,18 @@ fn collection_rewrites_include_their_comment_context() {
     ] {
         let mut document = EditableDocument::parse(source).unwrap();
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let target = editor.mapping_entries(&editor.root())?[0].1.clone();
                 editor.set_collection_style(&target, CollectionStyle::Flow)?;
                 match editor.node(&target)?.kind() {
-                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                    _ => editor.insert_entry(&target, 1, "added", "new"),
+                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
+                    _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
                 }
             })
             .unwrap();
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer:
     -# detached
@@ -254,8 +259,6 @@ fn collection_rewrites_include_their_comment_context() {
     -  key: old
     +  {key: old, added: new}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer:
        # detached
@@ -263,31 +266,23 @@ fn collection_rewrites_include_their_comment_context() {
     -    key: old
     +  {key: old, added: new}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     -outer:
      # leading
     -  {key: old}
     +outer: {key: old, added: new}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     -outer:
      # leading
     -  [old]
     +outer: [old, new]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -outer:
     -  [old] # inline
     +outer: [old, new] # inline
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer:
     -# detached
@@ -320,12 +315,12 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             "},
         )
         .unwrap();
-    let candidate = editor.draft.clone().freeze().unwrap();
+    let candidate = editor.draft.freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = document.source.clone();
-    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
+    let source = &document.source;
+    let layout = RootLayout::new(source, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&source_index, &candidate, (&candidate).into())
+        plan(source, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap()
             .iter()
@@ -358,16 +353,10 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
         let mut editor = Editor::new(&document);
         let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
         let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
-        let before = editor.draft.clone().freeze().unwrap();
         let multiline_before =
-            Layout::new(&before).multiline(value.id, editor.node(&value).unwrap().kind());
+            Layout::new(&document.source).multiline(value.id, editor.node(&value).unwrap().kind());
         editor
-            .insert_comment(
-                &inner,
-                0,
-                " detached",
-                crate::comments::CommentPlacement::Detached,
-            )
+            .insert_comment(&inner, 0, " detached", CommentPlacement::Detached)
             .unwrap();
         let candidate = editor.draft.clone().freeze().unwrap();
         let layout = Layout::new(&candidate);
@@ -380,8 +369,6 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
     }
     insta::assert_snapshot!(results.join("\n"), @r#"
     Scalar multiline: false -> false
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
     -outer:
     -  value: old
@@ -392,8 +379,6 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
      # trailing
 
     Scalar multiline: true -> false
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,5 @@
     -outer:
     -  value: |-
@@ -420,10 +405,10 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     editor.replace(&value, "new").unwrap();
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
-    let source_index = document.source.clone();
-    let layout = RootLayout::new(&source_index, (&candidate).into(), &syntax);
+    let source = &document.source;
+    let layout = RootLayout::new(source, (&candidate).into(), &syntax);
     assert_eq!(
-        plan(&source_index, &candidate, (&candidate).into())
+        plan(source, &candidate, (&candidate).into())
             .rewrite_regions(&layout, &syntax)
             .unwrap()
             .iter()

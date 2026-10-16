@@ -7,6 +7,11 @@ use super::{
 use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
 use std::sync::Arc;
 
+mod cursor;
+pub use cursor::{
+    Collection, Cursor, Entry, Mapping, MappingMut, PathSegment, Sequence, SequenceMut, ValueRef,
+};
+
 #[cfg(test)]
 mod tests;
 
@@ -37,7 +42,7 @@ pub struct Editor<'a> {
 }
 
 impl EditableDocument {
-    /// Edit the document and return the callback's result.
+    /// Edit the document starting at its root, and return the callback's result.
     ///
     /// The output is parsed and checked against the requested changes before it
     /// replaces the document. Any failure leaves the document unchanged. A failed
@@ -48,7 +53,7 @@ impl EditableDocument {
     /// represented in YAML, or a resource limit is exceeded.
     pub fn edit<R>(
         &mut self,
-        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
     ) -> Result<R, Error> {
         self.try_edit(edit)
     }
@@ -60,13 +65,94 @@ impl EditableDocument {
     /// Propagates callback and edit errors, leaving the document unchanged.
     pub fn try_edit<R, E: From<Error>>(
         &mut self,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit_syntax(|editor| edit(editor.root_mut()))
+    }
+
+    /// Set the YAML value at an existing path, retaining its anchor and compatible style.
+    ///
+    /// Keys are literal strings, indices are zero-based, and an empty path selects the root.
+    /// Use [`edit_path!`](crate::edit::edit_path) to mix keys and indices. To add a missing
+    /// mapping entry, use [`MappingMut::set_yaml`](super::MappingMut::set_yaml) instead.
+    ///
+    /// # Errors
+    /// Returns a selection or edit error without changing the document.
+    pub fn set_yaml_at<'p>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        yaml: &str,
+    ) -> Result<(), Error> {
+        self.edit_at(path, |mut node| node.set_yaml(yaml))
+    }
+
+    /// Edit the node at `path`. Keys are literal strings and indices are zero-based.
+    /// An empty path selects the root. Missing nodes are not created implicitly.
+    ///
+    /// # Errors
+    /// Returns a selection error without calling `edit`, or an error from the edit.
+    pub fn edit_at<'p, R>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit_at(path, edit)
+    }
+
+    /// Like [`Self::edit_at`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates selection, callback, and edit errors, leaving the document unchanged.
+    pub fn try_edit_at<'p, R, E: From<Error>>(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
+        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
+    ) -> Result<R, E> {
+        self.try_edit(|root| edit(root.at(path)?))
+    }
+
+    /// Edit with node handles, for example to revisit a node after inserting a sibling.
+    ///
+    /// # Errors
+    /// Propagates callback and edit errors, leaving the document unchanged.
+    pub fn edit_syntax<R>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.try_edit_syntax(edit)
+    }
+
+    /// Like [`Self::edit_syntax`], but allow the callback to return an application error.
+    ///
+    /// # Errors
+    /// Propagates callback and edit errors, leaving the document unchanged.
+    pub fn try_edit_syntax<R, E: From<Error>>(
+        &mut self,
         edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
     ) -> Result<R, E> {
+        self.try_edit_syntax_with_validation(edit, |_| Ok(()))
+            .map(|(result, ())| result)
+    }
+
+    /// Edit with node handles, then validate the resulting document before committing.
+    ///
+    /// The validation callback runs after the output is parsed and checked against
+    /// the requested changes. Return the edit and validation callbacks' results after
+    /// committing. Any failure leaves the original document unchanged.
+    ///
+    /// # Errors
+    /// Propagates callback, edit, and validation errors.
+    pub fn try_edit_syntax_with_validation<R, V, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
+        validate: impl FnOnce(&Self) -> Result<V, E>,
+    ) -> Result<(R, V), E> {
         let mut editor = Editor::new(self);
         let result = edit(&mut editor)?;
         let candidate = editor.finish()?;
+        let validated = validate(&candidate)?;
         *self = candidate;
-        Ok(result)
+        Ok((result, validated))
     }
 }
 
@@ -81,10 +167,7 @@ impl<'a> Editor<'a> {
     }
 
     fn error(&self, message: &'static str) -> Error {
-        Error {
-            span: self.original.source.nodes[self.original.source.root.0].span,
-            message,
-        }
+        self.draft.error(message)
     }
 
     fn id(&self, handle: &Handle) -> Result<NodeId, Error> {
@@ -102,27 +185,46 @@ impl<'a> Editor<'a> {
         }
     }
 
-    fn mutate(
+    fn mutate_node<R>(
         &mut self,
         handle: &Handle,
-        operation: impl FnOnce(&mut Draft, NodeId) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        operation: impl FnOnce(&mut Draft, NodeId) -> Result<R, Error>,
+    ) -> Result<R, Error> {
+        self.mutate(|editor| {
+            let id = editor.id(handle)?;
+            operation(&mut editor.draft, id)
+        })
+    }
+
+    fn mutate<R>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<R, Error>,
+    ) -> Result<R, Error> {
         if let Some(error) = &self.failure {
             return Err(error.clone());
         }
-        let result = self
-            .id(handle)
-            .and_then(|id| operation(&mut self.draft, id));
-        if let Err(error) = &result {
-            self.failure = Some(error.clone());
-        }
-        result
+        operation(self).inspect_err(|error| self.failure = Some(error.clone()))
     }
 
     /// Return a handle to the document's root.
     #[must_use]
     pub fn root(&self) -> Handle {
         self.handle(self.draft.root())
+    }
+
+    /// Return a cursor to the document's root.
+    pub fn root_mut(&mut self) -> Cursor<'_, 'a> {
+        let handle = self.root();
+        Cursor::new(self, handle)
+    }
+
+    /// Return a cursor to a node selected by a handle.
+    ///
+    /// # Errors
+    /// Returns an error if the handle is invalid or the work limit is exceeded.
+    pub fn cursor_mut(&mut self, handle: &Handle) -> Result<Cursor<'_, 'a>, Error> {
+        self.id(handle)?;
+        Ok(Cursor::new(self, handle.clone()))
     }
 
     /// Return the node for `handle`, including pending edits.
@@ -138,11 +240,25 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` is invalid or does not refer to a sequence.
     pub fn sequence_items(&self, handle: &Handle) -> Result<Vec<Handle>, Error> {
-        let NodeKind::Sequence { items, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a sequence"));
-        };
+        let items = self.item_ids(handle)?;
         self.draft.charge(items.len())?;
         Ok(items.iter().map(|&id| self.handle(id)).collect())
+    }
+
+    /// Return the item at `index`, or `None` if the index is out of bounds.
+    ///
+    /// # Errors
+    /// Returns an error if `handle` is invalid or does not refer to a sequence.
+    pub fn sequence_item(&self, handle: &Handle, index: usize) -> Result<Option<Handle>, Error> {
+        let items = self.item_ids(handle)?;
+        Ok(items.get(index).map(|&id| self.handle(id)))
+    }
+
+    fn item_ids(&self, sequence: &Handle) -> Result<&[NodeId], Error> {
+        match self.node(sequence)?.kind() {
+            NodeKind::Sequence { items, .. } => Ok(items),
+            _ => Err(self.error("expected a sequence")),
+        }
     }
 
     /// Return handles to the mapping keys and values at `handle`, in their current order.
@@ -151,14 +267,35 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` is invalid or does not refer to a mapping.
     pub fn mapping_entries(&self, handle: &Handle) -> Result<Vec<(Handle, Handle)>, Error> {
-        let NodeKind::Mapping { entries, .. } = &self.node(handle)?.kind else {
-            return Err(self.error("expected a mapping"));
-        };
+        let entries = self.entry_ids(handle)?;
         self.draft.charge(entries.len())?;
         Ok(entries
             .iter()
             .map(|&(key, value)| (self.handle(key), self.handle(value)))
             .collect())
+    }
+
+    /// Return the key and value at `index`, or `None` if the index is out of bounds.
+    /// Keys can be any kind of YAML node.
+    ///
+    /// # Errors
+    /// Returns an error if `handle` is invalid or does not refer to a mapping.
+    pub fn mapping_entry(
+        &self,
+        handle: &Handle,
+        index: usize,
+    ) -> Result<Option<(Handle, Handle)>, Error> {
+        let entries = self.entry_ids(handle)?;
+        Ok(entries
+            .get(index)
+            .map(|&(key, value)| (self.handle(key), self.handle(value))))
+    }
+
+    fn entry_ids(&self, mapping: &Handle) -> Result<&[(NodeId, NodeId)], Error> {
+        match self.node(mapping)?.kind() {
+            NodeKind::Mapping { entries, .. } => Ok(entries),
+            _ => Err(self.error("expected a mapping")),
+        }
     }
 
     /// Replace `handle`'s node with the parsed `yaml`, keeping its outer comments.
@@ -171,7 +308,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
     /// single document within the resource limits.
     pub fn replace(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
-        self.replace_impl(handle, yaml, false)
+        self.mutate_node(handle, |draft, id| draft.replace(id, yaml, false))
     }
 
     /// Like [`Self::replace`], but keep the node's anchor and compatible style.
@@ -184,11 +321,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid or `yaml` cannot be parsed as a
     /// single document within the resource limits.
     pub fn replace_preserving_style(&mut self, handle: &Handle, yaml: &str) -> Result<(), Error> {
-        self.replace_impl(handle, yaml, true)
-    }
-
-    fn replace_impl(&mut self, handle: &Handle, yaml: &str, preserve: bool) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.replace(id, yaml, preserve))
+        self.mutate_node(handle, |draft, id| draft.replace(id, yaml, true))
     }
 
     /// Parse `yaml` and insert it into `sequence` before `index`.
@@ -202,8 +335,9 @@ impl<'a> Editor<'a> {
         sequence: &Handle,
         index: usize,
         yaml: &str,
-    ) -> Result<(), Error> {
-        self.mutate(sequence, |draft, id| draft.insert_item(id, index, yaml))
+    ) -> Result<Handle, Error> {
+        let child = self.mutate_node(sequence, |draft, id| draft.insert_item(id, index, yaml))?;
+        Ok(self.handle(child))
     }
 
     /// Remove the item at `index` from `sequence`, including its descendants' comments.
@@ -212,7 +346,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `sequence` is invalid or not a sequence, or `index` is
     /// out of bounds.
     pub fn remove_item(&mut self, sequence: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(sequence, |draft, id| draft.remove_item(id, index))
+        self.mutate_node(sequence, |draft, id| draft.remove_item(id, index))
     }
 
     /// Parse `key` and `value` and insert an entry into `mapping` before `index`.
@@ -227,10 +361,11 @@ impl<'a> Editor<'a> {
         index: usize,
         key: &str,
         value: &str,
-    ) -> Result<(), Error> {
-        self.mutate(mapping, |draft, id| {
+    ) -> Result<(Handle, Handle), Error> {
+        let (key, value) = self.mutate_node(mapping, |draft, id| {
             draft.insert_entry(id, index, key, value)
-        })
+        })?;
+        Ok((self.handle(key), self.handle(value)))
     }
 
     /// Remove the entry at `index` from `mapping`, including its key, value, and
@@ -240,7 +375,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `mapping` is invalid or not a mapping, or `index` is
     /// out of bounds.
     pub fn remove_entry(&mut self, mapping: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(mapping, |draft, id| draft.remove_entry(id, index))
+        self.mutate_node(mapping, |draft, id| draft.remove_entry(id, index))
     }
 
     /// Request a style for the scalar at `handle`.
@@ -251,7 +386,7 @@ impl<'a> Editor<'a> {
     /// Returns an error if `handle` is invalid, the node is not a scalar, or the style
     /// changes its YAML type.
     pub fn set_scalar_style(&mut self, handle: &Handle, style: ScalarStyle) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.set_scalar_style(id, style))
+        self.mutate_node(handle, |draft, id| draft.set_scalar_style(id, style))
     }
 
     /// Request block or flow style for the collection at `handle`.
@@ -264,7 +399,7 @@ impl<'a> Editor<'a> {
         handle: &Handle,
         style: CollectionStyle,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.set_collection_style(id, style))
+        self.mutate_node(handle, |draft, id| draft.set_collection_style(id, style))
     }
 
     /// Insert a comment at `index` in the node's own comment list.
@@ -285,7 +420,7 @@ impl<'a> Editor<'a> {
         text: &str,
         placement: CommentPlacement,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| {
+        self.mutate_node(handle, |draft, id| {
             draft.insert_comment(id, index, text, placement, None)
         })
     }
@@ -327,7 +462,7 @@ impl<'a> Editor<'a> {
         position: CommentPosition<Handle>,
     ) -> Result<(), Error> {
         let position = position.try_map(|child| self.id(&child));
-        self.mutate(handle, |draft, id| {
+        self.mutate_node(handle, |draft, id| {
             draft.insert_comment(id, index, text, placement, Some(position?))
         })
     }
@@ -342,7 +477,7 @@ impl<'a> Editor<'a> {
         index: usize,
         text: &str,
     ) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.replace_comment(id, index, text))
+        self.mutate_node(handle, |draft, id| draft.replace_comment(id, index, text))
     }
 
     /// Remove the node's comment at `index`.
@@ -350,22 +485,22 @@ impl<'a> Editor<'a> {
     /// # Errors
     /// Returns an error if `handle` or `index` is invalid.
     pub fn remove_comment(&mut self, handle: &Handle, index: usize) -> Result<(), Error> {
-        self.mutate(handle, |draft, id| draft.remove_comment(id, index))
+        self.mutate_node(handle, |draft, id| draft.remove_comment(id, index))
     }
 
-    fn finish(mut self) -> Result<EditableDocument, Error> {
-        if let Some(error) = self.failure.take() {
+    fn finish(self) -> Result<EditableDocument, Error> {
+        if let Some(error) = self.failure {
             return Err(error);
         }
         let candidate = self.draft.freeze()?;
         let syntax = Layout::new(&candidate);
         let original = &self.original.source;
         let changes = Changes::between(original, &candidate, &syntax);
-        let framed = if changes.is_empty() {
-            None
-        } else {
-            super::framing::prepare(original, (&candidate).into(), &syntax)
-        };
+        if changes.is_empty() {
+            return candidate.commit(&original.text);
+        }
+
+        let framed = super::framing::prepare(original, (&candidate).into(), &syntax);
         let (source, planned) = framed.as_ref().map_or_else(
             || (original, (&candidate).into()),
             |framed| (&framed.source, framed.syntax()),

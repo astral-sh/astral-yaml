@@ -219,7 +219,7 @@ impl Case {
             }
         }
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let handles = super::handles(editor);
                 let owner = &handles[self.slot.index()];
                 if matches!(edit, Edit::Fragment) {
@@ -312,7 +312,7 @@ fn a_nested_suffix_then_inline_comment_requires_a_closing_delimiter() {
             let source = slot.source(&body);
             let mut document = EditableDocument::parse(&source).unwrap();
             let error = document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let owner = super::handles(editor)[slot.index()].clone();
                     editor.set_collection_style(&owner, CollectionStyle::Block)
                 })

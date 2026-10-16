@@ -136,7 +136,7 @@ fn failed_mutations_leave_the_tree_and_membership_unchanged() {
     type Operation = fn(&mut Draft) -> Result<(), Error>;
     let cases: &[(&str, &str, Operation)] = &[
         ("invalid mapping value", "{}", |draft| {
-            draft.insert_entry(draft.root(), 0, "key", "[")
+            draft.insert_entry(draft.root(), 0, "key", "[").map(|_| ())
         }),
         ("replacement removal budget", "[a, b]", |draft| {
             draft.work.set(2);

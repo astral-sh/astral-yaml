@@ -102,38 +102,28 @@ fn root_edits_create_missing_document_boundaries() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
      # leading
     -old
     +---
     +- new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -old # inline
     +--- # inline
     +- new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old
     \ No newline at end of file
     +---
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -old
     +---
     +...
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -old
     +---
@@ -141,8 +131,6 @@ fn root_edits_create_missing_document_boundaries() {
      ⏎
      # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -[ # open
     -  old
@@ -151,8 +139,6 @@ fn root_edits_create_missing_document_boundaries() {
     +- new
     +... # close
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -&a # property
     -[ # open
@@ -164,8 +150,6 @@ fn root_edits_create_missing_document_boundaries() {
     +... # close
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -&a # property
     -[ # open
@@ -177,8 +161,6 @@ fn root_edits_create_missing_document_boundaries() {
     +... # close
      ... # end
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      ﻿
      # leading
@@ -219,21 +201,15 @@ fn inserted_comments_can_create_document_boundaries() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     +# added
     +---
      - old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     +--- # added
      - old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
      ---
     +...
@@ -255,7 +231,7 @@ fn generated_boundaries_obey_the_output_limit_and_roll_back() {
     )
     .unwrap();
     let error = document
-        .edit(|editor| editor.replace(&editor.root(), "- a"))
+        .edit_syntax(|editor| editor.replace(&editor.root(), "- a"))
         .unwrap_err();
     assert_eq!(document.source(), source);
     insta::assert_snapshot!(error.message, @"emitted YAML exceeds input byte limit");
@@ -272,8 +248,6 @@ fn nested_edits_leave_sufficient_root_framing_unchanged() {
         editor.replace(&items[0], "new")
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
      # prefix
     -[old, keep]
@@ -301,7 +275,7 @@ fn root_inline_comments_can_use_additional_marker_lines() {
         let mut document = EditableDocument::parse(source).unwrap();
         for text in [" added 1", " added 2", " added 3"] {
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let root = editor.root();
                     let index = editor.node(&root)?.comments().len();
                     editor.insert_comment(&root, index, text, CommentPlacement::Inline)
@@ -311,8 +285,6 @@ fn root_inline_comments_can_use_additional_marker_lines() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -old # first
     +--- # first
@@ -320,8 +292,6 @@ fn root_inline_comments_can_use_additional_marker_lines() {
     +... # added 2
     +... # added 3
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     ---- old # first
     +---  # first
@@ -329,8 +299,6 @@ fn root_inline_comments_can_use_additional_marker_lines() {
     +... # added 2
     +... # added 3
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      &a [ # open
     -  old
@@ -347,8 +315,6 @@ fn root_inline_comments_can_use_additional_marker_lines() {
         value: [old] # first
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         -value: [old] # first
         +value: [ # first
@@ -361,8 +327,6 @@ fn root_inline_comments_can_use_additional_marker_lines() {
         value: &a old # first
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         -value: &a old # first
         +value: &a # first
@@ -391,8 +355,6 @@ fn detached_suffix_comments_follow_inserted_root_content() {
     });
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,5 @@
      ---
     -...
@@ -411,8 +373,6 @@ fn detached_suffix_comments_follow_inserted_root_content() {
         ] # close
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          # child
         -[ # open
@@ -432,8 +392,6 @@ fn detached_suffix_comments_follow_inserted_root_content() {
         } # close
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          # child
         -{ # open

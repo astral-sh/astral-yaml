@@ -35,16 +35,12 @@ fn omitted_final_values_keep_collection_suffix_comments() {
     ]
     .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -outer: {empty:,
     +outer: {empty: ,
        # trailing
        }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -outer: {? : ,
     -
@@ -53,8 +49,6 @@ fn omitted_final_values_keep_collection_suffix_comments() {
        # detached
        }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      [{empty: ,
     -  # trailing
@@ -62,8 +56,6 @@ fn omitted_final_values_keep_collection_suffix_comments() {
     +    # trailing
     +    }]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -outer: {empty:
     +outer: {
@@ -112,16 +104,12 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
     ]
     .map(normalize);
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -outer: {key: old
     +outer: {key: old,
        # trailing
        }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -outer: [old
     -
@@ -130,8 +118,6 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
        # detached
        ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -[one, {key: old
     -  # trailing
@@ -144,8 +130,6 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
     +    # detached
     +    }]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer: [ # opening
     -  old
@@ -153,8 +137,6 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
        # trailing
        ] # closing
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer: {
     +  ⏎

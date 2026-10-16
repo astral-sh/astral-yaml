@@ -25,11 +25,11 @@ fn openapi_server_insertion_preserves_surrounding_sections() {
     let source = include_str!("../../../../fixtures/real-world/openapi-petstore.yaml");
     let diff = edit(source, |editor| {
         let servers = mapping_value(editor, &["servers"]);
-        editor.insert_item(&servers, 1, "url: https://staging.example.com/v2")
+        editor
+            .insert_item(&servers, 1, "url: https://staging.example.com/v2")
+            .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -12,7 +12,10 @@
          name: Apache 2.0
          url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -53,11 +53,11 @@ fn compose_healthcheck_edit_preserves_service_comments_and_siblings() {
     let diff = edit(source, |editor| {
         let healthcheck = mapping_value(editor, &["services", "db", "healthcheck"]);
         editor.remove_entry(&healthcheck, 2)?;
-        editor.insert_entry(&healthcheck, 3, "timeout", "5s")
+        editor
+            .insert_entry(&healthcheck, 3, "timeout", "5s")
+            .map(|_| ())
     });
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -9,8 +9,8 @@
          healthcheck:
            test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 --password="$$(cat /run/secrets/db-password)" --silent']

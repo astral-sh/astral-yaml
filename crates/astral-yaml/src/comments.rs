@@ -438,7 +438,7 @@ impl Lines {
         let mut blanks = 0;
 
         loop {
-            charge(budget, Span::new(start, start).unwrap())?;
+            charge(budget, Span { start, end: start })?;
             let end = start
                 + memchr::memchr2(b'\r', b'\n', &bytes[start..]).unwrap_or(bytes.len() - start);
             let column_start = start

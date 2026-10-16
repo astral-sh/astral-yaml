@@ -325,7 +325,7 @@ impl RootComments {
             .filter_map(|comment| comment.span.map(|span| (span.start(), comment)))
             .collect();
         for comment in &original.nodes[original.root.0].comments {
-            if region.is_some_and(|region| contains(region, comment.span)) {
+            if region.is_some_and(|region| region.contains(comment.span)) {
                 continue;
             }
             match retained.get(&comment.span.start()) {
@@ -425,7 +425,7 @@ impl InlineLayout {
             .enumerate()
             .filter_map(|(index, comment)| {
                 (comment.placement == CommentPlacement::Inline
-                    && comment.span.is_none_or(|span| contains(body, span)))
+                    && comment.span.is_none_or(|span| body.contains(span)))
                 .then_some(index)
             })
             .collect::<Vec<_>>();
@@ -485,7 +485,7 @@ impl InlineLayout {
             // not remain outside the rewrite when it becomes an opening one.
             moved.extend(root.comments.iter().filter_map(|comment| {
                 let span = comment.span?;
-                (comment.placement == CommentPlacement::Inline && contains(body, span))
+                (comment.placement == CommentPlacement::Inline && body.contains(span))
                     .then_some(span.start())
             }));
         }
@@ -495,7 +495,7 @@ impl InlineLayout {
             moved.extend(root.comments[first..].iter().filter_map(|comment| {
                 comment
                     .span
-                    .filter(|&span| contains(body, span))
+                    .filter(|&span| body.contains(span))
                     .map(Span::start)
             }));
         }
@@ -531,7 +531,7 @@ fn removed_inline_comments(
         .iter()
         .filter_map(|comment| {
             (comment.placement == CommentPlacement::Inline
-                && contains(body, comment.span)
+                && body.contains(comment.span)
                 && !retained.contains(&comment.span))
             .then_some(comment.span.start())
         })
@@ -562,7 +562,7 @@ fn end_slots(
     let mut next = None;
     for (index, comment) in root.comments.iter().enumerate().rev() {
         following[index] = next;
-        if let Some(span) = comment.span.filter(|&span| !contains(body, span)) {
+        if let Some(span) = comment.span.filter(|&span| !body.contains(span)) {
             next = Some(span);
         }
     }
@@ -589,7 +589,7 @@ fn end_slots(
                 slots.push(EndSlot::Missing(at));
             }
         }
-        if let Some(span) = comment.span.filter(|&span| !contains(body, span)) {
+        if let Some(span) = comment.span.filter(|&span| !body.contains(span)) {
             previous = span.end();
         }
     }
@@ -614,7 +614,7 @@ fn occupied_markers(
         .iter()
         .filter_map(|comment| {
             let span = comment.span?;
-            if comment.placement != CommentPlacement::Inline || contains(body, span) {
+            if comment.placement != CommentPlacement::Inline || body.contains(span) {
                 return None;
             }
             let index = markers.partition_point(|marker| marker.end() <= span.start());
@@ -686,7 +686,7 @@ impl RootLayout {
                 (matches!(kind, RootKind::BlockCollection { .. })
                     && comment.placement == CommentPlacement::Detached
                     && comment.position == CommentPosition::After
-                    && contains(body, span)
+                    && body.contains(span)
                     && splice::indent(&original.text, span.start()) > indent)
                     .then_some(span.start())
             })
@@ -773,7 +773,7 @@ impl RootLayout {
         {
             return None;
         }
-        if !contains(self.body, span) {
+        if !self.body.contains(span) {
             return Some(span);
         }
         if comment.placement == CommentPlacement::Leading && self.inline.start.is_some() {
@@ -821,10 +821,6 @@ pub(super) fn root_region(original: &Source, layout: &RootLayout, mut region: Sp
     region
 }
 
-fn contains(region: Span, span: Span) -> bool {
-    span.start() >= region.start() && span.end() <= region.end()
-}
-
 fn comment_anchor(
     original: &Source,
     region: Span,
@@ -832,7 +828,7 @@ fn comment_anchor(
     anchor: LocatedComment<'_>,
     before: bool,
 ) -> Option<Anchor> {
-    if contains(region, anchor.span) {
+    if region.contains(anchor.span) {
         return None;
     }
     let breaks = outer_comment_breaks(comment, anchor.comment, before)?;
@@ -1116,8 +1112,6 @@ mod tests {
             before.rendered.len(), after.rendered.len(), edit_diff(source, &framed.text),
         ), @"
         Retained headers: 6 -> 3
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,6 @@
         +---
          &a [ # open

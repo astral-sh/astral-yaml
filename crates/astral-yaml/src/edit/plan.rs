@@ -85,15 +85,16 @@ fn same_comments(old: &[Comment], new: &[Comment<Option<Span>>]) -> bool {
     // Provenance controls rewrite boundaries, not whether the final state
     // changed. Removing and reinserting identical attachments is a no-op.
     old.len() == new.len()
-        && old.iter().zip(new).all(|(old, new)| {
-            old.text == new.text && old.placement == new.placement && old.position == new.position
-        })
+        && old
+            .iter()
+            .map(Comment::attachment)
+            .eq(new.iter().map(Comment::attachment))
 }
 
 /// Return whether only existing comments outside the node's span have changed.
 /// New comments require a layout decision and cannot use this shortcut.
 fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
-    let body = |span: Span| span.start() >= old.span.start() && span.end() <= old.span.end();
+    let body = |span| old.span.contains(span);
     if new.comments.iter().any(|comment| comment.span.is_none()) {
         return false;
     }
@@ -101,26 +102,12 @@ fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
         .comments
         .iter()
         .filter(|comment| body(comment.span))
-        .map(|comment| {
-            (
-                Some(comment.span),
-                &comment.text,
-                comment.placement,
-                comment.position,
-            )
-        });
+        .map(|comment| (Some(comment.span), comment.attachment()));
     let new_body = new
         .comments
         .iter()
         .filter(|comment| comment.span.is_some_and(body))
-        .map(|comment| {
-            (
-                comment.span,
-                &comment.text,
-                comment.placement,
-                comment.position,
-            )
-        });
+        .map(|comment| (comment.span, comment.attachment()));
     old_body.eq(new_body)
 }
 
@@ -133,31 +120,21 @@ impl Plan<'_> {
     }
 
     fn charge(&self, amount: usize) -> Result<(), Error> {
-        let remaining = self
-            .work
-            .get()
-            .checked_sub(amount)
-            .ok_or_else(|| self.error("editing resource limit exceeded"))?;
-        self.work.set(remaining);
-        Ok(())
+        let span = self.original.nodes[self.original.root.0].span;
+        super::charge_work(self.work, amount, span)
     }
 
-    fn ancestor(&self, ancestor: NodeId, mut node: NodeId) -> bool {
-        loop {
-            if ancestor == node {
-                return true;
-            }
-            let Some(parent) = self.parents[node.0] else {
-                return false;
-            };
-            node = parent;
-        }
+    /// Walk from a node to the root, including the node itself.
+    fn ancestors(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        std::iter::successors(Some(id), |id| self.parents[id.0])
     }
 
     fn body_region(&self, id: NodeId, layout: &RootLayout, scopes: &Scopes<'_>) -> Span {
         let mut region = scopes.body(id);
-        if id == self.candidate.root && emit::has_inline_header(&self.candidate.nodes[id.0], false)
-        {
+        if id != self.candidate.root {
+            return region;
+        }
+        if emit::has_inline_header(&self.candidate.nodes[id.0], false) {
             // A root's inline comment must move with its content
             // when the emitted layout puts it on a header. Framing
             // comments on other lines remain outside the rewrite.
@@ -172,10 +149,7 @@ impl Plan<'_> {
                 }
             }
         }
-        if id == self.candidate.root {
-            region = super::framing::root_region(self.original, layout, region);
-        }
-        region
+        super::framing::root_region(self.original, layout, region)
     }
 
     pub(super) fn rewrite_regions(
@@ -183,54 +157,42 @@ impl Plan<'_> {
         layout: &RootLayout,
         syntax: &Layout,
     ) -> Result<Vec<Rewrite<'_>>, Error> {
+        if self.changes.roots.is_empty() {
+            return Ok(Vec::new());
+        }
         let scopes = Scopes::new(self.original, self.candidate, syntax);
         let mut ids: Vec<_> = self.changes.roots.iter().copied().collect();
-        if (!ids.is_empty() && layout.needs_suffix_context())
+        if layout.needs_suffix_context()
             || (layout.needs_scalar_boundary(self.candidate)
-                && syntax
-                    .tail(self.candidate.root)
-                    .is_some_and(|tail| ids.iter().any(|&id| self.ancestor(id, tail))))
+                && syntax.tail(self.candidate.root).is_some_and(|tail| {
+                    self.ancestors(tail)
+                        .any(|id| self.changes.roots.contains(&id))
+                }))
         {
             ids.push(self.candidate.root);
         }
         loop {
-            if !ids.is_empty() {
-                self.charge(self.original.nodes.len())?;
-            }
+            self.charge(self.original.nodes.len())?;
             let roots: HashSet<_> = ids.into_iter().map(|id| scopes.select(id)).collect();
             ids = roots
                 .iter()
                 .copied()
-                .filter(|&id| {
-                    let mut current = self.parents[id.0];
-                    while let Some(parent) = current {
-                        if roots.contains(&parent) {
-                            return false;
-                        }
-                        current = self.parents[parent.0];
-                    }
-                    true
-                })
+                .filter(|&id| !self.ancestors(id).skip(1).any(|id| roots.contains(&id)))
                 .collect();
-            let regions: Vec<_> = ids
+            let mut rewrites: Vec<_> = ids
                 .iter()
                 .map(|&id| {
-                    let region = self.body_region(id, layout, &scopes);
-                    (id, region)
-                })
-                .collect();
-
-            let mut rewrites: Vec<_> = regions
-                .into_iter()
-                .map(|(id, span)| Rewrite {
-                    id,
-                    context: scopes.context(id, span),
-                    boundary: Boundary::new(
-                        &self.original.text,
-                        span,
-                        id == self.candidate.root && emit::omitted(&self.candidate.nodes[id.0]),
-                        self.original.end_marker,
-                    ),
+                    let span = self.body_region(id, layout, &scopes);
+                    Rewrite {
+                        id,
+                        context: scopes.context(id, span),
+                        boundary: Boundary::new(
+                            &self.original.text,
+                            span,
+                            id == self.candidate.root && emit::omitted(&self.candidate.nodes[id.0]),
+                            self.original.end_marker,
+                        ),
+                    }
                 })
                 .collect();
             rewrites.sort_by_key(|rewrite| rewrite.boundary.reserved().start());
@@ -240,15 +202,15 @@ impl Plan<'_> {
                 return Ok(rewrites);
             };
             let (left, right) = (pair[0].id, pair[1].id);
-            let mut parent = left;
-            while !self.ancestor(parent, right) {
-                parent = self.parents[parent.0].expect("common document root");
-            }
+            let parent = self
+                .ancestors(left)
+                .find(|&parent| self.ancestors(right).any(|id| id == parent))
+                .expect("common document root");
             ids.push(parent);
         }
     }
 
-    pub(super) fn root_comments(
+    fn root_comments(
         &self,
         region: Option<Span>,
         layout: &RootLayout,
@@ -275,28 +237,22 @@ impl Plan<'_> {
         let mut patches = root_comments
             .as_mut()
             .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
+        let emission = self.original.emission(self.candidate);
         for rewrite in &regions {
             let id = rewrite.id;
-            let rendered = if id == self.candidate.root {
-                let comments = root_comments.as_ref().expect("root comment plan");
-                splice::render_with_comments(
-                    self.original.emission(self.candidate),
-                    id,
-                    &rewrite.boundary,
-                    rewrite.context,
-                    &comments.rendered,
-                    syntax,
-                )?
+            let comments = if id == self.candidate.root {
+                &root_comments.as_ref().expect("root comment plan").rendered
             } else {
-                splice::render_with_comments(
-                    self.original.emission(self.candidate),
-                    id,
-                    &rewrite.boundary,
-                    rewrite.context,
-                    &self.candidate.nodes[id.0].comments,
-                    syntax,
-                )?
+                &self.candidate.nodes[id.0].comments
             };
+            let rendered = splice::render_with_comments(
+                emission,
+                id,
+                &rewrite.boundary,
+                rewrite.context,
+                comments,
+                syntax,
+            )?;
             patches.push((rendered.span, rendered.text));
         }
         if let Some(comments) = root_comments.as_mut() {

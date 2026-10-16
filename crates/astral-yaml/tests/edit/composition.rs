@@ -399,7 +399,7 @@ fn check_root_sequence<const N: usize>(
     }
     let mut combined = original.clone();
     combined
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             for operation in sequence {
                 operation.apply(editor)?;
             }
@@ -421,7 +421,7 @@ fn check_root_sequence<const N: usize>(
             step_content = content(&expected, expected.root());
         }
         separate
-            .edit(|editor| operation.apply(editor))
+            .edit_syntax(|editor| operation.apply(editor))
             .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
         assert_eq!(
             comments(&separate),
@@ -521,8 +521,10 @@ impl NestedOperation {
         let children = editor.sequence_items(items)?;
         let entries = editor.mapping_entries(mapping)?;
         match self {
-            Self::PrependItem => editor.insert_item(items, 0, "'true'"),
-            Self::AppendItem => editor.insert_item(items, children.len(), "'null'"),
+            Self::PrependItem => editor.insert_item(items, 0, "'true'").map(|_| ()),
+            Self::AppendItem => editor
+                .insert_item(items, children.len(), "'null'")
+                .map(|_| ()),
             Self::RemoveFirstItem if !children.is_empty() => editor.remove_item(items, 0),
             Self::RemoveLastItem if !children.is_empty() => {
                 editor.remove_item(items, children.len() - 1)
@@ -534,10 +536,12 @@ impl NestedOperation {
                 editor.set_scalar_style(children.last().unwrap(), ScalarStyle::DoubleQuoted)
             }
             Self::FlowItems => editor.set_collection_style(items, CollectionStyle::Flow),
-            Self::PrependEntry => {
-                editor.insert_entry(mapping, 0, "[left, right]", "{inner: [new]}")
-            }
-            Self::AppendEntry => editor.insert_entry(mapping, entries.len(), "'0123'", "'---'"),
+            Self::PrependEntry => editor
+                .insert_entry(mapping, 0, "[left, right]", "{inner: [new]}")
+                .map(|_| ()),
+            Self::AppendEntry => editor
+                .insert_entry(mapping, entries.len(), "'0123'", "'---'")
+                .map(|_| ()),
             Self::RemoveFirstEntry if !entries.is_empty() => editor.remove_entry(mapping, 0),
             Self::ReplaceLastValue if !entries.is_empty() => {
                 editor.replace(&entries.last().unwrap().1, "'false'")
@@ -655,7 +659,7 @@ fn nested_edits_match_an_independent_collection_model() {
                     for combined in [false, true] {
                         let mut document = original.clone();
                         let result = if combined {
-                            document.edit(|editor| {
+                            document.edit_syntax(|editor| {
                                 for operation in sequence {
                                     operation.apply(editor)?;
                                 }
@@ -663,7 +667,7 @@ fn nested_edits_match_an_independent_collection_model() {
                             })
                         } else {
                             sequence.into_iter().try_for_each(|operation| {
-                                document.edit(|editor| operation.apply(editor))
+                                document.edit_syntax(|editor| operation.apply(editor))
                             })
                         };
                         result.unwrap_or_else(|error| {
@@ -734,7 +738,7 @@ fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
     {
         let text = format!(" added {index}");
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 let count = editor.node(&root)?.comments().len();
                 editor.insert_comment(&root, count, &text, placement)
@@ -744,7 +748,7 @@ fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
         assert_eq!(comments(&document), expected);
     }
     document
-        .edit(|editor| editor.replace(&editor.root(), "'false'"))
+        .edit_syntax(|editor| editor.replace(&editor.root(), "'false'"))
         .unwrap();
     assert_eq!(comments(&document), expected);
     assert_eq!(

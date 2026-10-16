@@ -4,6 +4,8 @@
 //! owned values. Scalar resolution is separate from syntax parsing.
 //! Enable the `editable` feature for owned, source-preserving editing.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 pub mod comments;
 #[cfg(feature = "editable")]
 pub mod edit;

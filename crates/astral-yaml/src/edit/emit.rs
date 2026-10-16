@@ -1,5 +1,7 @@
 use super::{Comment, CommentPosition, EditableDocument, NodeKind, layout::Layout, view::Syntax};
-use crate::{CollectionStyle, Error, NodeId, ScalarStyle, Span, comments::CommentPlacement};
+use crate::{
+    CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span, comments::CommentPlacement,
+};
 use std::fmt::Write;
 
 #[cfg(test)]
@@ -21,7 +23,7 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
 /// Source ranges are selected by the splice planner before this function runs.
 pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     document: Syntax<'a, Location>,
-    options: crate::ParseOptions,
+    options: ParseOptions,
     id: NodeId,
     placement: &super::splice::Placement<'a, Location>,
     layout: &Layout,
@@ -36,8 +38,7 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
         at_column_zero: placement.at_column_zero,
         output: String::new(),
         work: options.max_nodes,
-        pending_indent: None,
-        trailing_block_scalar: false,
+        ending: EmitterEnding::Token,
     };
     match placement.before {
         super::splice::Separator::None => {}
@@ -50,12 +51,10 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     }
     Ok(Fragment {
         text: emitter.output,
-        ending: if emitter.trailing_block_scalar {
-            Ending::BlockScalar
-        } else if emitter.pending_indent.is_some() {
-            Ending::Comment
-        } else {
-            Ending::Token
+        ending: match emitter.ending {
+            EmitterEnding::Token => Ending::Token,
+            EmitterEnding::Comment { .. } => Ending::Comment,
+            EmitterEnding::BlockScalar => Ending::BlockScalar,
         },
     })
 }
@@ -140,31 +139,41 @@ impl Context {
 /// Pass it through the node's indicators, properties, and content to keep
 /// interleaved leading and inline comments in order.
 struct Comments<'a, Location> {
-    remaining: std::slice::Iter<'a, Comment<Location>>,
+    remaining: &'a [Comment<Location>],
 }
 
 impl<'a, Location> Comments<'a, Location> {
     fn at_opening(&self) -> bool {
         self.remaining
-            .as_slice()
             .first()
             .is_some_and(|comment| comment.position == CommentPosition::Opening)
     }
 
     fn next_is(&self, placement: CommentPlacement) -> bool {
         self.remaining
-            .as_slice()
             .first()
             .is_some_and(|comment| comment.placement == placement)
     }
 
     fn take(&mut self, placement: CommentPlacement) -> Option<&'a Comment<Location>> {
-        self.next_is(placement)
-            .then(|| self.remaining.next().expect("next comment"))
+        self.take_if(|comment| comment.placement == placement)
+    }
+
+    fn take_if(
+        &mut self,
+        matches: impl FnOnce(&Comment<Location>) -> bool,
+    ) -> Option<&'a Comment<Location>> {
+        let (next, rest) = self.remaining.split_first()?;
+        if matches(next) {
+            self.remaining = rest;
+            Some(next)
+        } else {
+            None
+        }
     }
 
     fn has_prefix(&self) -> bool {
-        self.remaining.as_slice().iter().any(|comment| {
+        self.remaining.iter().any(|comment| {
             matches!(
                 comment.position,
                 CommentPosition::Before | CommentPosition::Header
@@ -173,29 +182,29 @@ impl<'a, Location> Comments<'a, Location> {
     }
 
     fn take_header(&mut self) -> Option<&'a Comment<Location>> {
-        self.remaining
-            .as_slice()
-            .first()
-            .is_some_and(|comment| {
-                comment.position == CommentPosition::Header
-                    && comment.placement != CommentPlacement::Inline
-            })
-            .then(|| self.remaining.next().expect("header comment"))
+        self.take_if(|comment| {
+            comment.position == CommentPosition::Header
+                && comment.placement != CommentPlacement::Inline
+        })
+    }
+
+    fn take_detached_prefix(&mut self) -> Option<&'a Comment<Location>> {
+        self.take_if(|comment| {
+            comment.position == CommentPosition::Before
+                && comment.placement == CommentPlacement::Detached
+        })
     }
 
     fn needs_value_line(&self, properties: usize) -> bool {
         self.remaining
-            .as_slice()
             .first()
             .is_some_and(|comment| comment.position == CommentPosition::Before)
             || self
                 .remaining
-                .as_slice()
                 .iter()
                 .any(|comment| comment.placement == CommentPlacement::Leading)
             || self
                 .remaining
-                .as_slice()
                 .iter()
                 .filter(|comment| {
                     comment.placement == CommentPlacement::Inline
@@ -212,7 +221,6 @@ impl<'a, Location> Comments<'a, Location> {
         self.has_prefix()
             || self
                 .remaining
-                .as_slice()
                 .iter()
                 .filter(|comment| comment.placement == CommentPlacement::Inline)
                 .count()
@@ -228,24 +236,17 @@ pub(super) fn block_headers_cover_comments<Location>(
     prefix_before_slot: bool,
 ) -> bool {
     let mut comments = Comments {
-        remaining: node.comments.iter(),
+        remaining: &node.comments,
     };
     if prefix_before_slot {
         while comments.take(CommentPlacement::Leading).is_some() {}
     }
     comments.take(CommentPlacement::Inline);
     while comments
-        .remaining
-        .as_slice()
-        .first()
-        .is_some_and(|comment| {
-            comment.placement == CommentPlacement::Leading
-                || (comment.position == CommentPosition::Before
-                    && comment.placement == CommentPlacement::Detached)
-        })
-    {
-        comments.remaining.next();
-    }
+        .take(CommentPlacement::Leading)
+        .or_else(|| comments.take_detached_prefix())
+        .is_some()
+    {}
     for _ in node.tag.iter().chain(node.anchor.iter()) {
         if comments.take(CommentPlacement::Inline).is_some() {
             while comments.take(CommentPlacement::Leading).is_some() {}
@@ -254,6 +255,7 @@ pub(super) fn block_headers_cover_comments<Location>(
     }
     !comments
         .remaining
+        .iter()
         .any(|comment| comment.placement == CommentPlacement::Inline)
 }
 
@@ -266,9 +268,16 @@ enum ScalarPosition {
     FlowKey,
 }
 
+enum EmitterEnding {
+    Token,
+    // A comment terminator is materialized only when following syntax needs it.
+    Comment { indent: usize },
+    BlockScalar,
+}
+
 struct Emitter<'a, 'layout, Location> {
     document: Syntax<'a, Location>,
-    options: crate::ParseOptions,
+    options: ParseOptions,
     layout: &'layout Layout,
     root: NodeId,
     root_comments: &'a [Comment<Location>],
@@ -276,9 +285,7 @@ struct Emitter<'a, 'layout, Location> {
     at_column_zero: bool,
     output: String,
     work: usize,
-    // A comment terminator is materialized only when following syntax needs it.
-    pending_indent: Option<usize>,
-    trailing_block_scalar: bool,
+    ending: EmitterEnding,
 }
 
 impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
@@ -291,7 +298,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
 
     fn push(&mut self, text: &str) -> Result<(), Error> {
         if !text.is_empty() {
-            if let Some(indent) = self.pending_indent.take() {
+            if let EmitterEnding::Comment { indent } = self.ending {
                 self.line(indent)?;
             }
         }
@@ -304,14 +311,16 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             return Err(self.error("emitted YAML exceeds input byte limit"));
         }
         if text.bytes().any(|byte| !byte.is_ascii_whitespace()) {
-            self.trailing_block_scalar = false;
+            self.ending = EmitterEnding::Token;
         }
         self.output.push_str(text);
         Ok(())
     }
 
     fn line(&mut self, indent: usize) -> Result<(), Error> {
-        self.pending_indent = None;
+        if matches!(self.ending, EmitterEnding::Comment { .. }) {
+            self.ending = EmitterEnding::Token;
+        }
         if let Some(index) = self
             .output
             .rfind('\n')
@@ -340,6 +349,11 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         Ok(true)
     }
 
+    fn comment_text(&mut self, text: &str) -> Result<(), Error> {
+        self.push("#")?;
+        self.push(text)
+    }
+
     fn property_comment(
         &mut self,
         comments: &mut Comments<'_, Location>,
@@ -360,8 +374,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         }
         while let Some(comment) = comments.take_header() {
             self.line(indent)?;
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
@@ -382,7 +395,6 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         // Document suffixes can remain outside the root's closing delimiter.
         let closing_inline = comments
             .remaining
-            .as_slice()
             .last()
             .is_some_and(|comment| comment.placement == CommentPlacement::Inline);
         if (comments.at_opening()
@@ -403,7 +415,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             &self.document.nodes[id.0].comments
         };
         Comments {
-            remaining: comments.iter(),
+            remaining: comments,
         }
     }
 
@@ -417,8 +429,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.line(indent)?;
         }
         while let Some(comment) = comments.take(CommentPlacement::Leading) {
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             self.line(indent)?;
         }
         Ok(())
@@ -430,23 +441,12 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         indent: usize,
     ) -> Result<(), Error> {
         self.before(comments, indent)?;
-        while comments
-            .remaining
-            .as_slice()
-            .first()
-            .is_some_and(|comment| {
-                comment.position == CommentPosition::Before
-                    && comment.placement == CommentPlacement::Detached
-            })
-        {
-            let comment = comments.remaining.next().expect("detached prefix comment");
+        while let Some(comment) = comments.take_detached_prefix() {
             if !self.output.is_empty() {
                 self.line(indent)?;
             }
-            self.push("#")?;
-            self.push(&comment.text)?;
-            self.push("\n")?;
-            self.push("\n")?;
+            self.comment_text(&comment.text)?;
+            self.push("\n\n")?;
             self.line(indent)?;
             self.before(comments, indent)?;
         }
@@ -478,24 +478,18 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         child: NodeId,
         indent: usize,
     ) -> Result<(), Error> {
-        while comments
-            .remaining
-            .as_slice()
-            .first()
-            .is_some_and(|comment| comment.position == CommentPosition::BeforeChild(child))
+        while let Some(comment) =
+            comments.take_if(|comment| comment.position == CommentPosition::BeforeChild(child))
         {
-            let comment = comments.remaining.next().expect("comment before child");
             self.line(indent)?;
-            if !self.trailing_block_scalar {
+            if !matches!(self.ending, EmitterEnding::BlockScalar) {
                 self.push("\n")?;
             }
             self.line(indent)?;
-            self.push("#")?;
-            self.push(&comment.text)?;
+            self.comment_text(&comment.text)?;
             // Blank separation on both sides keeps a container comment from
             // becoming a leading comment on the following child.
-            self.push("\n")?;
-            self.push("\n")?;
+            self.push("\n\n")?;
             self.line(indent)?;
         }
         Ok(())
@@ -503,12 +497,12 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
 
     fn after(
         &mut self,
-        comments: Comments<'_, Location>,
+        comments: &[Comment<Location>],
         indent: usize,
         suffix: &str,
     ) -> Result<(), Error> {
         self.push(suffix)?;
-        for comment in comments.remaining {
+        for comment in comments {
             self.comment(comment, indent)?;
         }
         Ok(())
@@ -516,7 +510,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
 
     fn comment(&mut self, comment: &Comment<Location>, indent: usize) -> Result<(), Error> {
         if comment.placement == CommentPlacement::Inline
-            && self.pending_indent.is_none()
+            && !matches!(self.ending, EmitterEnding::Comment { .. })
             && !self.output.ends_with('\n')
         {
             self.push(" ")?;
@@ -527,9 +521,8 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.push("\n")?;
             self.line(indent)?;
         }
-        self.push("#")?;
-        self.push(&comment.text)?;
-        self.pending_indent = Some(indent);
+        self.comment_text(&comment.text)?;
+        self.ending = EmitterEnding::Comment { indent };
         Ok(())
     }
 
@@ -543,26 +536,19 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         indent: usize,
         mut needs_separator: bool,
     ) -> Result<(), Error> {
-        while comments
-            .remaining
-            .as_slice()
-            .first()
-            .is_some_and(|comment| {
-                id != self.document.root
-                    || comment.span.into().is_some_and(|span| {
-                        self.document.nodes[id.0]
-                            .span
-                            .into()
-                            .is_some_and(|node| span.end() <= node.end())
-                    })
-            })
-        {
-            let Some(comment) = comments
-                .take(CommentPlacement::Trailing)
-                .or_else(|| comments.take(CommentPlacement::Detached))
-            else {
-                break;
-            };
+        let node_span = self.document.nodes[id.0].span.into();
+        while let Some(comment) = comments.take_if(|comment| {
+            let full_line = matches!(
+                comment.placement,
+                CommentPlacement::Trailing | CommentPlacement::Detached
+            );
+            let inside = comment
+                .span
+                .into()
+                .zip(node_span)
+                .is_some_and(|(comment, node)| comment.end() <= node.end());
+            full_line && (id != self.document.root || inside)
+        }) {
             // Close the last entry before emitting a collection-owned suffix.
             // In particular, an omitted value otherwise starts at the closing
             // delimiter and captures the intervening comments as its prefix.
@@ -679,7 +665,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             NodeKind::Scalar { style, .. } => context.scalar_indent(*style),
             _ => indent,
         };
-        self.after(comments, suffix_indent, suffix)
+        self.after(comments.remaining, suffix_indent, suffix)
     }
 
     fn sequence(
@@ -808,7 +794,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.inline(comments)?;
             self.push("\n")?;
             self.push(body)?;
-            self.trailing_block_scalar = true;
+            self.ending = EmitterEnding::BlockScalar;
             return Ok(());
         }
         self.push(&text)
@@ -937,7 +923,7 @@ fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
     })
 }
 
-fn quoted(value: &str) -> String {
+pub(super) fn quoted(value: &str) -> String {
     let mut result = String::from("\"");
     for character in value.chars() {
         match character {
@@ -1094,6 +1080,36 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
     if matches { candidate } else { quoted(value) }
 }
 
+/// Reparse rendered YAML and require the intended content, alias targets, styles, and comments.
+pub(super) fn parse_rendered<Location: Copy>(
+    expected: Syntax<'_, Location>,
+    output: &str,
+    options: ParseOptions,
+    span: Span,
+    requested_styles: &[NodeId],
+) -> Result<EditableDocument, Error> {
+    let error = |message| Error { span, message };
+    let parsed = EditableDocument::parse_with_options(output, options)?;
+    let matched = correspondence(expected, &parsed)
+        .ok_or_else(|| error("emission changed YAML content or alias identity"))?;
+
+    for &id in requested_styles {
+        let kind = &expected.nodes[id.0].kind;
+        let preserved = matched[id.0].is_some_and(|target| {
+            super::draft::same_style(kind, &parsed.source.nodes[target.0].kind)
+        });
+        if !preserved {
+            return Err(error(
+                "requested style is not representable in this context",
+            ));
+        }
+    }
+    if !comments_preserved(expected, &parsed, &matched) {
+        return Err(error("emission changed comment ownership or placement"));
+    }
+    Ok(parsed)
+}
+
 /// Match nodes by traversal order and check that aliases reach matching targets.
 /// Node IDs can differ between trees. Alias targets are compared without expansion.
 pub(super) fn correspondence<'a, Location: 'a>(
@@ -1123,8 +1139,7 @@ pub(super) fn correspondence<'a, Location: 'a>(
                     style: right_style,
                 },
             ) => {
-                let kind = meaning(left, *left_style);
-                if kind != meaning(right, *right_style) || a != b {
+                if a != b || !same_scalar_type(a, left.tag.as_deref(), *left_style, *right_style) {
                     return None;
                 }
             }
@@ -1203,21 +1218,26 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
     first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
-pub(super) fn meaning<Location>(
-    node: &super::Node<Location>,
-    style: ScalarStyle,
-) -> crate::schema::ScalarType {
+/// Only a change to or from plain style can affect implicit scalar resolution.
+pub(super) fn same_scalar_type(
+    value: &str,
+    tag: Option<&str>,
+    before: ScalarStyle,
+    after: ScalarStyle,
+) -> bool {
     use crate::schema::{ScalarType, classify};
-    match node.tag.as_deref() {
-        Some("!" | "tag:yaml.org,2002:str") => return ScalarType::String,
-        Some("tag:yaml.org,2002:null") => return ScalarType::Null,
-        Some("tag:yaml.org,2002:bool") => return ScalarType::Bool,
-        Some("tag:yaml.org,2002:int") => return ScalarType::Int,
-        Some("tag:yaml.org,2002:float") => return ScalarType::Float,
-        _ => {}
+    use ScalarStyle::Plain;
+    if before == after || (before != Plain && after != Plain) {
+        return true;
     }
-    match &node.kind {
-        NodeKind::Scalar { value, .. } if style == ScalarStyle::Plain => classify(value),
-        _ => ScalarType::String,
-    }
+    matches!(
+        tag,
+        Some(
+            "!" | "tag:yaml.org,2002:str"
+                | "tag:yaml.org,2002:null"
+                | "tag:yaml.org,2002:bool"
+                | "tag:yaml.org,2002:int"
+                | "tag:yaml.org,2002:float"
+        )
+    ) || classify(value) == ScalarType::String
 }

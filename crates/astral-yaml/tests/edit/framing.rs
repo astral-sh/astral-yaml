@@ -34,8 +34,6 @@ fn descendant_inline_comments_are_separate_from_document_markers() {
         },
     );
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
      # root
     ---- {key: value}
@@ -43,16 +41,12 @@ fn descendant_inline_comments_are_separate_from_document_markers() {
     +{? key # added
     +  : value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- [item]
     +--- ⏎
     +[item # added
     +  ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     ---- &root {key: value}
     +--- ⏎
@@ -89,16 +83,12 @@ fn leading_comments_remain_adjacent_across_document_markers() {
         |editor| editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading),
     );
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     +# added
      ---
     -
      {key: value}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      %YAML 1.2
     +# added
@@ -106,8 +96,6 @@ fn leading_comments_remain_adjacent_across_document_markers() {
     -
      key: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     +# added
     +# retained
@@ -159,8 +147,6 @@ fn suffix_boundaries_preserve_detached_comments() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,6 @@
      # prefix
      --- old
@@ -170,8 +156,6 @@ fn suffix_boundaries_preserve_detached_comments() {
     +
      # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      # prefix
     ---- old
@@ -181,8 +165,6 @@ fn suffix_boundaries_preserve_detached_comments() {
     -...
      # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,6 @@
      # prefix
      --- old
@@ -192,8 +174,6 @@ fn suffix_boundaries_preserve_detached_comments() {
       \t ⏎
        # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,5 @@
      # prefix
     ---- old
@@ -203,8 +183,6 @@ fn suffix_boundaries_preserve_detached_comments() {
       \t ⏎
        # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,6 @@
      # prefix
      --- old
@@ -214,8 +192,6 @@ fn suffix_boundaries_preserve_detached_comments() {
     +
      # gap
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      # prefix
     ---- old
@@ -237,8 +213,6 @@ fn suffix_boundaries_preserve_detached_comments() {
           # tail
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,6 +1,6 @@
          # config
          %YAML 1.2
@@ -259,8 +233,6 @@ fn suffix_boundaries_preserve_detached_comments() {
         ... # end
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,5 @@
          # config
          %TAG !e! tag:example.com,2026:
@@ -281,8 +253,6 @@ fn suffix_boundaries_preserve_detached_comments() {
           # tail
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,6 +1,5 @@
          # config
          ---
@@ -334,32 +304,24 @@ fn inserted_roots_are_separated_from_end_markers() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      ---
     +new
      ... # end
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      ---
     +[a, b]
      ... # end
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      ---
     +{a: b}
      ... # end
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      ---
     +- a
@@ -367,16 +329,12 @@ fn inserted_roots_are_separated_from_end_markers() {
      ... # end
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      ---
     +a: b
      ... # end
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      ---
     +|2
@@ -412,7 +370,9 @@ fn comment_terminators_compose_with_retained_suffixes(source: &str) {
     let mut document = EditableDocument::parse(source).unwrap();
     for _ in 0..3 {
         document
-            .edit(|editor| editor.set_collection_style(&editor.root(), CollectionStyle::Block))
+            .edit_syntax(|editor| {
+                editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+            })
             .unwrap();
         assert_eq!(document.source(), source);
     }
@@ -452,8 +412,8 @@ fn detached_comment_gaps_survive_collection_mutations() {
             diffs.push(edit(source, |editor| {
                 let root = editor.root();
                 match (sequence, operation) {
-                    (true, 0) => editor.insert_item(&root, 0, "new"),
-                    (false, 0) => editor.insert_entry(&root, 0, "added", "new"),
+                    (true, 0) => editor.insert_item(&root, 0, "new").map(|_| ()),
+                    (false, 0) => editor.insert_entry(&root, 0, "added", "new").map(|_| ()),
                     (true, 1) => editor.remove_item(&root, 1),
                     (false, 1) => editor.remove_entry(&root, 1),
                     (true, 2) => editor.replace(
@@ -479,9 +439,9 @@ fn detached_comment_gaps_survive_collection_mutations() {
                         // imported collection before committing it.
                         editor.replace(&root, source)?;
                         if sequence {
-                            editor.insert_item(&root, 0, "new")
+                            editor.insert_item(&root, 0, "new").map(|_| ())
                         } else {
-                            editor.insert_entry(&root, 0, "added", "new")
+                            editor.insert_entry(&root, 0, "added", "new").map(|_| ())
                         }
                     }
                 }
@@ -489,8 +449,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,8 @@
     +added: new
      a: old
@@ -503,8 +461,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,3 @@
      a: old
      ⏎
@@ -514,8 +470,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -  text
     -
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,7 @@
     -a: old
     +a: new
@@ -529,8 +483,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     +  other
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,11 @@
     +added: new
      a: old
@@ -546,8 +498,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,8 @@
     +- new
      - old
@@ -560,8 +510,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,3 @@
      - old
      ⏎
@@ -571,8 +519,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -  text
     -
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,7 @@
     -- old
     +- new
@@ -586,8 +532,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     +  other
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,11 @@
     +- new
      - old
@@ -616,8 +560,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     "},
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -2,5 +2,4 @@
          ⏎
          # detached
@@ -638,8 +580,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     "},
     true
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -2,5 +2,4 @@
          ⏎
          # detached
@@ -679,8 +619,6 @@ fn new_detached_comments_share_the_following_comment_gap() {
         editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Detached)
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,7 +1,10 @@
      a: old
      ⏎
@@ -708,8 +646,6 @@ fn new_detached_comments_share_the_following_comment_gap() {
     "},
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,6 +1,6 @@
         -a: |+
         +a: |2+
@@ -734,8 +670,6 @@ fn new_detached_comments_share_the_following_comment_gap() {
     "},
     true
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,6 +1,6 @@
         -- |+
         +- |2+
@@ -793,15 +727,11 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
      ---
      ...
     +# added
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     ---- # header
     -... # end
@@ -809,8 +739,6 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
     +... ⏎
     +# added
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      ---
      ⏎
@@ -823,8 +751,6 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
 #[test_case(
     "--- # header"
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         ---- # header
         \ No newline at end of file
@@ -839,8 +765,6 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
         ---
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         ----
         +--- # added
@@ -854,8 +778,6 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
         --- old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         ---- old
         +---  # added
@@ -888,8 +810,6 @@ fn block_roots_can_use_the_document_marker_for_inline_comments(source: &str) -> 
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,4 @@
         +# added
          ---
@@ -904,8 +824,6 @@ fn block_roots_can_use_the_document_marker_for_inline_comments(source: &str) -> 
         key: old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,3 @@
         +# added
          --- # header
@@ -920,8 +838,6 @@ fn block_roots_can_use_the_document_marker_for_inline_comments(source: &str) -> 
         ... # end
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,4 @@
          ---
          ⏎
@@ -997,16 +913,12 @@ fn root_omission_retains_comments_at_document_boundaries() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
      # prefix
      ---
     -old
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
      # prefix
     ---- old
@@ -1014,8 +926,6 @@ fn root_omission_retains_comments_at_document_boundaries() {
     +--- ⏎
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,3 @@
      # prefix
     ---- |-
@@ -1024,16 +934,12 @@ fn root_omission_retains_comments_at_document_boundaries() {
     +--- ⏎
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     ----
     -old # inline
     +--- # inline
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
      ---
     -old
@@ -1041,8 +947,6 @@ fn root_omission_retains_comments_at_document_boundaries() {
      ...
     +# tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
      ---
     -old
@@ -1051,8 +955,6 @@ fn root_omission_retains_comments_at_document_boundaries() {
      # gap
     -...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     ----
      # leading
@@ -1071,8 +973,6 @@ fn root_omission_retains_comments_at_document_boundaries() {
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,3 @@
         ----
         -[ # open
@@ -1094,8 +994,6 @@ fn root_omission_retains_comments_at_document_boundaries() {
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,3 @@
         ----
         -{ # open
@@ -1138,22 +1036,16 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     +  |2-
        old
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     +  >2-
        old
      # tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -old
     -  # tail
@@ -1161,8 +1053,6 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
     +  old
     +# tail
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -old
     -  # tail
@@ -1188,8 +1078,6 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
     });
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -4,4 +4,4 @@
      |
        old
@@ -1205,8 +1093,6 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
         # trailing
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,2 @@
         -[] # old
         +[] # new
@@ -1222,8 +1108,6 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
         # detached
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
         -value # old
         +value # new
@@ -1240,8 +1124,6 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
         ...
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,3 @@
         ---- &root {key: value} # old
         +--- &root {key: value} # new

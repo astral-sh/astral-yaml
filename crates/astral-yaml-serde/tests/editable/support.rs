@@ -1,9 +1,9 @@
-use astral_yaml_serde::{Editable, Error, edit::Editor};
+use astral_yaml_serde::{Editable, Error, edit::Cursor};
 use serde::de::DeserializeOwned;
 
 pub(super) fn edit<T: DeserializeOwned>(
     source: &str,
-    operation: impl FnOnce(&mut Editor<'_, '_>) -> Result<(), Error>,
+    operation: impl FnOnce(Cursor<'_, '_>) -> Result<(), Error>,
 ) -> Editable<T> {
     let mut document = Editable::parse(source).unwrap();
     document

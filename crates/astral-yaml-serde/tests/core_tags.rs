@@ -136,9 +136,9 @@ fn tag_mismatch_errors_retain_the_node_span() {
     }
 
     insta::assert_snapshot!(output, @r#"
-    "!!int '42'": tag does not match requested type at bytes 0..10
-    "!<tag:yaml.org,2002:int> 42": tag does not match requested type at bytes 0..27
-    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": tag does not match requested type at bytes 32..41
+    "!!int '42'": $: tag does not match requested type at bytes 0..10
+    "!<tag:yaml.org,2002:int> 42": $: tag does not match requested type at bytes 0..27
+    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": $: tag does not match requested type at bytes 32..41
     "#);
 }
 

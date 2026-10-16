@@ -3,49 +3,22 @@
 use test_case::test_case;
 
 use super::support::edit;
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
-    Editable,
-    edit::{CollectionStyle, CommentPlacement, NodeKind, ScalarStyle},
+    Editable, EditableYaml, Error,
+    edit::{
+        CollectionStyle, CommentPlacement, Cursor, NodeKind, PathSegment, ScalarStyle, SequenceMut,
+        edit_path,
+    },
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
 
-#[test_case(
-    indoc! {r"
-        !custom name: old
-    "},
-    "name";
-    "plain tagged key"
-)]
-#[test_case(
-    indoc! {r"
-        !custom 'name': old
-    "},
-    "name";
-    "quoted tagged key"
-)]
-#[test_case(
-    indoc! {r"
-        !custom true: old
-    "},
-    "true";
-    "tagged boolean"
-)]
-#[test_case(
-    indoc! {r"
-        !custom 'true': old
-    "},
-    "true";
-    "quoted tagged boolean"
-)]
-#[test_case(
-    indoc! {r"
-        !<tag:example.org,2026:key> name: old
-    "},
-    "name";
-    "global tagged key"
-)]
+#[test_case("!custom name: old\n", "name"; "plain tagged key")]
+#[test_case("!custom 'name': old\n", "name"; "quoted tagged key")]
+#[test_case("!custom true: old\n", "true"; "tagged boolean")]
+#[test_case("!custom 'true': old\n", "true"; "quoted tagged boolean")]
+#[test_case("!<tag:example.org,2026:key> name: old\n", "name"; "global tagged key")]
 fn string_fields_do_not_match_application_tagged_keys(source: &str, name: &str) {
     // Node equality includes tags: https://yaml.org/spec/1.2.2/#3213-node-comparison
     let mut document = Editable::<
@@ -53,10 +26,10 @@ fn string_fields_do_not_match_application_tagged_keys(source: &str, name: &str) 
     >::parse(source)
     .unwrap();
     document
-        .edit(|editor| {
-            assert!(editor.root_mut().get(name)?.is_none(), "{source:?}");
-            assert!(editor.root_mut().field(name).is_err());
-            assert!(!editor.root_mut().remove_field(name)?);
+        .edit(|mut root| {
+            assert!(root.reborrow().get(name)?.is_none(), "{source:?}");
+            assert!(root.reborrow().field(name).is_err());
+            assert!(!root.into_mapping()?.remove(name)?);
             Ok(())
         })
         .unwrap();
@@ -69,41 +42,6 @@ struct Config {
     servers: Vec<String>,
 }
 
-#[test_case(0)]
-#[test_case(1)]
-#[test_case(2)]
-#[test_case(3)]
-fn results_are_returned_only_after_callback_syntax_and_type_checks(operation: usize) {
-    let source = indoc! {r"
-        timeout: 30
-        servers: [primary]
-    "};
-    let mut document = Editable::<Config>::parse(source).unwrap();
-    let result = document.edit(|e| {
-        match operation {
-            0 => e.root_mut().field("timeout")?.set(60)?,
-            1 => e.root_mut().field("timeout")?.set(256)?,
-            2 => {
-                e.root_mut().field("missing")?;
-            }
-            _ => e
-                .root_mut()
-                .field("servers")?
-                .item(0)?
-                .set_scalar_style(ScalarStyle::Literal)?,
-        }
-        Ok("committed")
-    });
-    if operation == 0 {
-        assert_eq!(result.unwrap(), "committed");
-        assert_eq!(document.value().timeout, 60);
-    } else {
-        assert!(result.is_err());
-        assert_eq!(document.source(), source);
-        assert_eq!(document.value().timeout, 30);
-    }
-}
-
 #[test]
 fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     let source = indoc! {r"
@@ -113,11 +51,13 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     "};
     let mut config = Editable::<Config>::parse(source).unwrap();
     let result = config
-        .edit(|e| {
-            e.root_mut().field("timeout")?.set(60)?;
-            e.root_mut().field("servers")?.item(1)?.set("backup")?;
-            e.root_mut().field("servers")?.push("tertiary")?;
-            e.root_mut().set_entry("enabled", true)?;
+        .edit(|root| {
+            let mut settings = root.into_mapping()?;
+            settings.field("timeout")?.set(60)?;
+            let mut servers = settings.field("servers")?.into_sequence()?;
+            servers.item(1)?.set("backup")?;
+            servers.push("tertiary")?;
+            settings.set("enabled", true)?;
             Ok("committed")
         })
         .unwrap();
@@ -125,8 +65,6 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     assert_eq!(config.value().timeout, 60);
     assert_eq!(config.value().servers, ["primary", "backup", "tertiary"]);
     insta::assert_snapshot!(edit_diff(source, config.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -timeout: 30 # seconds
     -servers: [primary, retired]
@@ -140,232 +78,36 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     assert_eq!(yaml.as_ptr(), pointer);
 }
 
-#[test]
-fn rust_values_never_interpret_strings_as_yaml() {
-    let source = indoc! {r"
-        old
-    "};
-    let mut diffs = Vec::new();
-    for (name, value) in [
-        ("string", json!("false")),
-        ("boolean", json!(false)),
-        ("sequence", json!(["a", "b"])),
-        ("mapping", json!({"a": 1})),
-        ("null", Value::Null),
-        ("YAML-looking string", json!("[a, b] # still a string")),
-        ("empty string", json!("")),
-        (
-            "escaped string",
-            json!(indoc! {r"
-                it's a
-                new line"}),
-        ),
-    ] {
-        let document = edit::<Value>(source, |e| e.root_mut().set(&value));
-        assert_eq!(document.value(), &value);
-        diffs.push(formatdoc! {r"
-            {name}
-            {}", edit_diff(source, document.source())});
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"false"
-
-    boolean
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +false
-
-    sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +["a", "b"]
-
-    mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +{"a": 1}
-
-    null
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +null
-
-    YAML-looking string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"[a, b] # still a string"
-
-    empty string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +""
-
-    escaped string
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -old
-    +it's a
-    +
-    +  new line
-    "#);
+#[test_case(&json!("false"), r#""false""#; "string")]
+#[test_case(&json!(false), "false"; "boolean")]
+#[test_case(&json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
+#[test_case(&json!({"a": 1}), r#"{"a": 1}"#; "mapping")]
+#[test_case(&Value::Null, "null"; "null")]
+#[test_case(&json!("[a, b] # still a string"), r#""[a, b] # still a string""#; "YAML-looking string")]
+#[test_case(&json!(""), r#""""#; "empty string")]
+#[test_case(&json!("it's a\nnew line"), "it's a\n\n  new line"; "multiline string")]
+fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
+    let document = edit::<Value>("old\n", |mut root| root.set(value));
+    assert_eq!(document.value(), value);
+    assert_eq!(document.source(), format!("{yaml}\n"));
 }
 
-#[test_case(
-    "'it''s': old",
-    "it's"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -'it''s': old
-        \ No newline at end of file
-        +'it''s': new
-        \ No newline at end of file
-    ");
-    "escaped quote"
-)]
-#[test_case(
-    "'a.b/[0]': old",
-    "a.b/[0]"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -'a.b/[0]': old
-        \ No newline at end of file
-        +'a.b/[0]': new
-        \ No newline at end of file
-    ");
-    "path punctuation"
-)]
-#[test_case(
-    "é: old",
-    "é"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -é: old
-        \ No newline at end of file
-        +é: new
-        \ No newline at end of file
-    ");
-    "unicode"
-)]
-#[test_case(
-    "!!str true: old",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -!!str true: old
-        \ No newline at end of file
-        +!!str true: new
-        \ No newline at end of file
-    ");
-    "core string tag"
-)]
-#[test_case(
-    "! true: old",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -! true: old
-        \ No newline at end of file
-        +! true: new
-        \ No newline at end of file
-    ");
-    "non specific tag"
-)]
-#[test_case(
-    "{true: ignored, 'true': old}",
-    "true"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{true: ignored, 'true': old}
-        \ No newline at end of file
-        +{true: ignored, 'true': new}
-        \ No newline at end of file
-    ");
-    "boolean spelling"
-)]
-#[test_case(
-    "{1: ignored, '1': old}",
-    "1"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{1: ignored, '1': old}
-        \ No newline at end of file
-        +{1: ignored, '1': new}
-        \ No newline at end of file
-    ");
-    "integer spelling"
-)]
-#[test_case(
-    "{!!int '1': ignored, '1': old}",
-    "1"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{!!int '1': ignored, '1': old}
-        \ No newline at end of file
-        +{!!int '1': ignored, '1': new}
-        \ No newline at end of file
-    ");
-    "explicit integer spelling"
-)]
-#[test_case(
-    "{[complex, key]: ignored, name: old}",
-    "name"
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{[complex, key]: ignored, name: old}
-        \ No newline at end of file
-        +{[complex, key]: ignored, name: new}
-        \ No newline at end of file
-    ");
-    "complex sibling key"
-)]
-fn fields_use_literal_decoded_string_keys(source: &str, name: &str) -> String {
-    let mut document = Editable::<IgnoredAny>::parse(source).unwrap();
-    document
-        .edit(|e| {
-            let mut field = e.root_mut().field(name)?;
-            assert!(
-                matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old")
-            );
-            field.set("new")
-        })
-        .unwrap_or_else(|error| panic!("{source}: {error}"));
-    edit_diff(source, document.source())
+#[test_case("'it''s': old", "it's"; "escaped quote")]
+#[test_case("'a.b/[0]': old", "a.b/[0]"; "path punctuation")]
+#[test_case("é: old", "é"; "unicode")]
+#[test_case("!!str true: old", "true"; "core string tag")]
+#[test_case("! true: old", "true"; "non specific tag")]
+#[test_case("{true: ignored, 'true': old}", "true"; "boolean spelling")]
+#[test_case("{1: ignored, '1': old}", "1"; "integer spelling")]
+#[test_case("{!!int '1': ignored, '1': old}", "1"; "explicit integer spelling")]
+#[test_case("{[complex, key]: ignored, name: old}", "name"; "complex sibling key")]
+fn fields_use_literal_decoded_string_keys(source: &str, name: &str) {
+    let document = edit::<IgnoredAny>(source, |root| {
+        let mut field = root.field(name)?;
+        assert!(matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old"));
+        field.set("new")
+    });
+    assert_eq!(document.source(), source.replace("old", "new"));
 }
 
 #[test]
@@ -374,16 +116,14 @@ fn optional_lookup_and_removal_distinguish_absence() {
         first: 1 # removed
         second: 2 # retained
     "};
-    let document = edit::<Value>(source, |e| {
-        let mut root = e.root_mut();
-        assert!(root.reborrow().get("absent")?.is_none());
-        assert!(!root.remove_field("absent")?);
-        assert!(root.remove_field("first")?);
-        root.reborrow().get("second")?.unwrap().set(3)
+    let document = edit::<Value>(source, |root| {
+        let mut root = root.into_mapping()?;
+        assert!(root.get("absent")?.is_none());
+        assert!(!root.remove("absent")?);
+        assert!(root.remove("first")?);
+        root.get("second")?.unwrap().set(3)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1 @@
     -first: 1 # removed
     -second: 2 # retained
@@ -392,19 +132,17 @@ fn optional_lookup_and_removal_distinguish_absence() {
 }
 
 #[test]
-fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
+fn insertion_returns_a_cursor_and_parents_remain_available() {
     let source = indoc! {r"
         items: [old]
     "};
-    let document = edit::<Value>(source, |e| {
-        let mut items = e.root_mut().field("items")?;
+    let document = edit::<Value>(source, |root| {
+        let mut items = root.field("items")?.into_sequence()?;
         items
-            .reborrow()
             .insert(0, "first")?
             .set_scalar_style(ScalarStyle::SingleQuoted)?;
-        items.remove_item(1)?;
+        items.remove(1)?;
         items
-            .reborrow()
             .push(json!({"value": "old"}))?
             .field("value")?
             .set("new")?;
@@ -415,8 +153,6 @@ fn insertion_returns_a_cursor_and_parents_can_be_reborrowed() {
         &json!({"items": ["first", {"value": "new"}]})
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     -items: [old]
     +items:
@@ -431,18 +167,18 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
         first: 'old' # keep
         last: true
     "};
-    let document = edit::<Value>(source, |e| {
-        e.root_mut().set_entry("first", "it's new")?;
-        e.root_mut().set_entry("added", ["initial"])?;
-        e.root_mut()
-            .set_entry("added", ["one"])?
+    let document = edit::<Value>(source, |root| {
+        let mut settings = root.into_mapping()?;
+        settings.set("first", "it's new")?;
+        settings.set("added", ["initial"])?;
+        settings
+            .set("added", ["one"])?
+            .into_sequence()?
             .push("two")?
             .append_comment(" added", CommentPlacement::Inline)?;
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -first: 'old' # keep
     +first: 'it''s new' # keep
@@ -458,8 +194,8 @@ fn styles_and_comments_can_be_changed_explicitly() {
         first: old # original
         last: retained
     "};
-    let document = edit::<Value>(source, |e| {
-        let mut first = e.root_mut().field("first")?;
+    let document = edit::<Value>(source, |root| {
+        let mut first = root.field("first")?;
         first.set("new")?;
         first.set_scalar_style(ScalarStyle::SingleQuoted)?;
         first.replace_comment(0, " updated")?;
@@ -467,8 +203,6 @@ fn styles_and_comments_can_be_changed_explicitly() {
         first.remove_comment(0)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -first: old # original
     +# description
@@ -483,107 +217,67 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
         timeout: 30
         servers: [primary]
     "};
-    let mut document = edit::<Config>(source, |e| {
-        e.root_mut().field("timeout")?.set("temporarily invalid")?;
-        e.root_mut().field("timeout")?.set(60)?;
-        e.root_mut().field("servers")?.set(["old"])?;
-        e.root_mut().field("servers")?.item(0)?.set("new")
+    let mut document = edit::<Config>(source, |root| {
+        let mut settings = root.into_mapping()?;
+        let mut timeout = settings.field("timeout")?;
+        timeout.set("temporarily invalid")?;
+        timeout.set(60)?;
+        let mut servers = settings.field("servers")?;
+        servers.set(["old"])?;
+        servers.item(0)?.set("new")
     });
     assert_eq!(document.value().timeout, 60);
     assert_eq!(document.value().servers, ["new"]);
     let before = document.to_yaml();
     assert!(
         document
-            .edit(|e| e.root_mut().field("timeout")?.set(256))
+            .edit(|root| root.field("timeout")?.set(256))
             .is_err()
     );
     assert_eq!(document.source(), before);
     assert_eq!(document.value().timeout, 60);
 }
 
-#[test]
-fn aliases_are_not_followed_and_definitions_keep_their_anchor() {
-    let source = indoc! {r"
-        definition: &value 'old'
-        copy: *value
-    "};
-    let document = edit::<Value>(source, |e| {
-        assert!(e.root_mut().field("copy")?.field("nested").is_err());
-        e.root_mut().field("definition")?.set("new")
-    });
+#[test_case(&["missing".into()], r#"$["missing"]"#, "missing mapping key"; "missing field")]
+#[test_case(&["items".into(), 3.into()], r#"$["items"][3]"#, "item index out of bounds"; "missing item")]
+#[test_case(
+    &["items".into(), 0.into(), "wrong".into()], r#"$["items"][0]["wrong"]"#, "expected a mapping";
+    "field of scalar"
+)]
+#[test_case(&[0.into()], "$[0]", "expected a sequence"; "item of mapping")]
+fn navigation_errors_identify_the_selected_path(
+    path: &[PathSegment<'_>],
+    expected_path: &str,
+    message: &str,
+) {
+    let source = "items: [1]";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let error = document.edit_at(path, |_| Ok(())).unwrap_err();
     assert_eq!(
-        document.value(),
-        &json!({"definition": "new", "copy": "new"})
+        error.to_string(),
+        format!("{expected_path}: {message} at bytes 0..10")
     );
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-    -definition: &value 'old'
-    +definition: &value 'new'
-     copy: *value
-    ");
+    assert_eq!(document.source(), source);
 }
 
-#[test]
-fn navigation_errors_identify_the_selected_path() {
-    let mut errors = Vec::new();
-    for operation in 0..4 {
-        let mut document = Editable::<Value>::parse("items: [1]").unwrap();
-        let error = document
-            .edit(|e| {
-                match operation {
-                    0 => {
-                        e.root_mut().field("missing")?;
-                    }
-                    1 => {
-                        e.root_mut().field("items")?.item(3)?;
-                    }
-                    2 => {
-                        e.root_mut().field("items")?.item(0)?.field("wrong")?;
-                    }
-                    _ => {
-                        e.root_mut().item(0)?;
-                    }
-                }
-                Ok(())
-            })
-            .unwrap_err();
-        errors.push(error.to_string());
-        assert_eq!(document.source(), "items: [1]");
-    }
-    insta::assert_snapshot!(errors.join("\n"), @r#"
-    $["missing"]: missing mapping key
-    $["items"][3]: item index out of bounds
-    $["items"][0]: expected a mapping at bytes 0..10
-    $: expected a sequence at bytes 0..10
-    "#);
-}
-
-#[test_case(0)]
-#[test_case(1)]
-#[test_case(2)]
-fn ambiguous_string_keys_are_rejected_after_raw_insertions(operation: usize) {
+#[test_case(|root| root.field("name").map(|_| ()); "field lookup")]
+#[test_case(|root| root.into_mapping()?.set("name", "new").map(|_| ()); "upsert")]
+#[test_case(|root| root.into_mapping()?.remove("name").map(|_| ()); "remove")]
+#[test_case(|root| root.into_mapping()?.entry("name").map(|_| ()); "entry")]
+fn ambiguous_string_keys_are_rejected_after_raw_insertions(
+    operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
+) {
     let mut document = Editable::<Value>::parse("name: old").unwrap();
     let error = document
-        .edit(|e| {
-            let syntax = e.syntax_mut();
-            syntax.insert_entry(&syntax.root(), 1, "'name'", "other")?;
-            match operation {
-                0 => {
-                    e.root_mut().field("name")?;
-                }
-                1 => {
-                    e.root_mut().set_entry("name", "new")?;
-                }
-                _ => {
-                    e.root_mut().remove_field("name")?;
-                }
-            }
-            Ok(())
+        .edit(|mut root| {
+            let mut syntax = root.reborrow().into_syntax().into_mapping()?;
+            syntax.set_yaml("other", "other")?;
+            syntax.key_at(1)?.replace_yaml("'name'")?;
+            operation(root)
         })
         .unwrap_err();
-    assert!(error.message.contains("ambiguous mapping key"));
+    assert_eq!(error.path.as_deref(), Some(r#"$["name"]"#));
+    assert_eq!(error.message, "ambiguous mapping key");
     assert_eq!(document.source(), "name: old");
 }
 
@@ -595,87 +289,299 @@ impl Serialize for FailsSerialization {
     }
 }
 
+fn items<'a, 'doc>(root: Cursor<'a, 'doc>) -> Result<SequenceMut<'a, 'doc>, Error> {
+    root.field("items")?.into_sequence()
+}
+
+const ITEMS: &str = r#"$["items"]"#;
+const ITEM: &str = r#"$["items"][0]"#;
+const EMPTY: &str = r#"$["empty"]"#;
+const MISSING: &str = r#"$["missing"]"#;
+
+#[test_case(|mut root| root.set(FailsSerialization),
+    "$", "serialization failed"; "set value")]
+#[test_case(|root| items(root)?.item(0)?.set_yaml("["),
+    ITEM, "unterminated flow sequence"; "set YAML")]
+#[test_case(|mut root| root.replace_yaml("["),
+    "$", "unterminated flow sequence"; "replace YAML")]
+#[test_case(|root| items(root)?.insert(3, "new").map(|_| ()),
+    ITEMS, "item index out of bounds"; "insert out of bounds")]
+#[test_case(|root| items(root)?.remove(4),
+    ITEMS, "item index out of bounds"; "remove out of bounds")]
+#[test_case(|root| items(root)?.append_comment("bad\ncomment", CommentPlacement::Inline),
+    ITEMS, "comment text contains a line break"; "append comment")]
+#[test_case(|root| {
+    let mut sequence = items(root)?;
+    let mut item = sequence.item(0)?;
+    item.set_scalar_style(ScalarStyle::Plain)?;
+    item.remove_comment(0)
+}, ITEM, "comment index out of bounds"; "remove absent comment")]
+#[test_case(|mut root| root.replace_comment(0, " absent"),
+    "$", "comment index out of bounds"; "replace absent comment")]
+#[test_case(|mut root| root.set_scalar_style(ScalarStyle::Plain),
+    "$", "expected a scalar"; "style on a mapping")]
+#[test_case(|root| items(root)?.item(0)?.set_collection_style(CollectionStyle::Block),
+    ITEM, "expected a collection"; "style on a scalar")]
+#[test_case(|root| items(root)?.push(FailsSerialization).map(|_| ()),
+    ITEMS, "serialization failed"; "serialize appended value")]
+#[test_case(|root| root.field("empty")?.into_sequence()?.insert(0, FailsSerialization).map(|_| ()),
+    EMPTY, "serialization failed"; "serialize inserted value")]
+#[test_case(|root| root.field("empty")?.into_sequence()?.push_yaml("[").map(|_| ()),
+    EMPTY, "unterminated flow sequence"; "append YAML")]
+#[test_case(|root| root.into_mapping()?.set("missing", FailsSerialization).map(|_| ()),
+    MISSING, "serialization failed"; "serialize mapping value")]
+#[test_case(|root| root.into_mapping()?.set_yaml("missing", "[").map(|_| ()),
+    MISSING, "unterminated flow sequence"; "set mapping YAML")]
+#[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert(FailsSerialization).map(|_| ()),
+    MISSING, "serialization failed"; "serialize vacant entry")]
+#[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert_yaml("[").map(|_| ()),
+    MISSING, "unterminated flow sequence"; "fill vacant entry with YAML")]
+fn caught_mutation_errors_still_roll_back_the_transaction(
+    operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
+    path: &str,
+    message: &str,
+) {
+    let source = "items: [old]\nempty: []\n";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let mut caught = None;
+    let result = document
+        .edit(|mut root| {
+            root.reborrow().field("items")?.item(0)?.set("changed")?;
+            let error = operation(root.reborrow()).unwrap_err();
+            assert_eq!(error.path.as_deref(), Some(path));
+            assert_eq!(error.message, message);
+            assert_eq!(root.set(42).unwrap_err(), error);
+            let changed = root.field("items")?.item(0)?;
+            assert_eq!(changed.read::<&str>()?, "changed");
+            caught = Some(error);
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(Some(result), caught);
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value()["items"][0], "old");
+}
+
 #[test]
-fn caught_mutation_errors_still_roll_back_the_transaction() {
-    let mut errors = Vec::new();
-    for operation in 0..13 {
-        let source = indoc! {r"
-            items: [old]
-        "};
-        let mut document = Editable::<Value>::parse(source).unwrap();
-        let error = document
-            .edit(|e| {
-                e.root_mut().field("items")?.item(0)?.set("changed")?;
-                let result = match operation {
-                    0 => e.root_mut().set(FailsSerialization),
-                    1 => e.root_mut().push("wrong kind").map(|_| ()),
-                    2 => e
-                        .root_mut()
-                        .field("items")?
-                        .insert(3, "invalid index")
-                        .map(|_| ()),
-                    3 => e.root_mut().field("items")?.append_comment(
-                        indoc! {r"
-                            bad
-                            comment"},
-                        CommentPlacement::Inline,
-                    ),
-                    4 => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_scalar_style(ScalarStyle::Plain)
-                        .and_then(|()| e.root_mut().field("items")?.item(0)?.remove_comment(0)),
-                    5 => e.root_mut().remove_item(0),
-                    6 => e.root_mut().replace_comment(0, " absent"),
-                    7 => e.root_mut().set_scalar_style(ScalarStyle::Plain),
-                    8 => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_collection_style(CollectionStyle::Block),
-                    9 => e
-                        .root_mut()
-                        .field("items")?
-                        .push(FailsSerialization)
-                        .map(|_| ()),
-                    10 => e
-                        .root_mut()
-                        .set_entry("missing", FailsSerialization)
-                        .map(|_| ()),
-                    11 => e
-                        .root_mut()
-                        .field("items")?
-                        .remove_field("wrong kind")
-                        .map(|_| ()),
-                    _ => e
-                        .root_mut()
-                        .field("items")?
-                        .item(0)?
-                        .set_entry("wrong kind", true)
-                        .map(|_| ()),
-                };
-                let error = result.unwrap_err();
-                assert_eq!(e.root_mut().set(42).unwrap_err(), error);
-                Ok(())
-            })
-            .unwrap_err();
-        errors.push(error.message);
-        assert_eq!(document.source(), source);
-    }
-    insta::assert_snapshot!(errors.join("\n"), @r#"
-    $: serialization failed
-    $: expected a sequence
-    $["items"]: item index out of bounds
-    $["items"]: comment text contains a line break
-    $["items"][0]: comment index out of bounds
-    $: expected a sequence
-    $: comment index out of bounds
-    $: expected a scalar
-    $["items"][0]: expected a collection
-    $["items"]: serialization failed
-    $: serialization failed
-    $["items"]: expected a mapping
-    $["items"][0]: expected a mapping
+fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
+    let source = "services: {db: {healthcheck: {retries: 3, interval: '30s'}}}\n";
+    let document = edit::<Value>(source, |root| {
+        let mut health = root.field("services")?.field("db")?.field("healthcheck")?;
+        let missing = health.reborrow().field("missing").unwrap_err();
+        let mut health = health.into_mapping()?;
+        assert_eq!(health.len(), 2);
+        assert!(!health.is_empty());
+        assert_eq!(health.field("missing").unwrap_err(), missing);
+        health.field("retries")?.set(5)?;
+        health.field("interval")?.set("5s")?;
+        assert!(health.entry("retries")?.is_occupied());
+        health.entry("retries")?.or_insert(FailsSerialization)?;
+        health.entry("interval")?.or_insert_yaml("[invalid")?;
+        assert!(!health.entry("timeout")?.is_occupied());
+        health.entry("timeout")?.or_insert("10s")?;
+        health.entry("timeout")?.or_insert("unused")?;
+        let mut options = health.entry("options")?.or_mapping()?;
+        assert!(options.is_empty());
+        options.entry("enabled")?.or_insert(true)?;
+        options.into_cursor().field("enabled")?.set(false)?;
+        assert_eq!(health.len(), 4);
+        Ok(())
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    @@ -1 +1 @@
+    -services: {db: {healthcheck: {retries: 3, interval: '30s'}}}
+    +services: {db: {healthcheck: {retries: 5, interval: '5s', "timeout": "10s", "options": {"enabled": false}}}}
     "#);
+}
+
+#[test]
+fn sequence_views_track_lengths_and_return_borrowed_children() {
+    let source = "items: []\n";
+    let document = edit::<Value>(source, |root| {
+        let mut items = root.field("items")?.into_sequence()?;
+        assert!(items.is_empty());
+        assert!(items.get(0)?.is_none());
+        assert!(items.item(0).is_err());
+        items.push("first")?;
+        items
+            .push_yaml("{value: old}")?
+            .field("value")?
+            .set("new")?;
+        items.insert_yaml(1, "true")?;
+        items.get(0)?.unwrap().set("changed")?;
+        items.item(1)?.set(false)?;
+        assert_eq!(items.len(), 3);
+        items.remove(0)?;
+        assert_eq!(items.len(), 2);
+        items.into_cursor().item(1)?.field("value")?.set("last")
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    @@ -1 +1 @@
+    -items: []
+    +items: [false, {value: last}]
+    "#);
+}
+
+#[test]
+fn indexed_mapping_selection_supports_arbitrary_keys() {
+    let source = "{[complex, key]: old, true: other}\n";
+    let document = edit::<IgnoredAny>(source, |root| {
+        let mut mapping = root.into_mapping()?;
+        assert!(mapping.key_at(2).is_err());
+        assert!(mapping.value_at(2).is_err());
+        mapping.key_at(0)?.item(0)?.set("changed")?;
+        mapping.value_at(0)?.set("new")?;
+        mapping.key_at(1)?.set(false)?;
+        Ok(())
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    @@ -1 +1,2 @@
+    -{[complex, key]: old, true: other}
+    +{? [changed, key]
+    +  : new, false: other}
+    ");
+}
+
+#[test_case(false)]
+#[test_case(true)]
+fn raw_selected_replacement_controls_style_and_anchor(replace: bool) {
+    // Anchors identify serialization occurrences: https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
+    let source = "value: &old 'old' # keep\n";
+    let document = edit::<Value>(source, |root| {
+        let mut value = root.field("value")?;
+        if replace {
+            value.replace_yaml("&new \"new\"")
+        } else {
+            value.set_yaml("&new \"new\"")
+        }
+    });
+    if replace {
+        insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+        @@ -1 +1 @@
+        -value: &old 'old' # keep
+        +value: &new "new" # keep
+        "#);
+    } else {
+        insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+        @@ -1 +1 @@
+        -value: &old 'old' # keep
+        +value: &old 'new' # keep
+        ");
+    }
+}
+
+#[test]
+fn collection_views_expose_node_comments_and_style() {
+    let source = "mapping: {value: old} # map\nsequence: [old] # seq\n";
+    let document = edit::<Value>(source, |mut root| {
+        let mut mapping = root.reborrow().field("mapping")?.into_mapping()?;
+        assert!(matches!(mapping.node()?.kind(), NodeKind::Mapping { .. }));
+        mapping.replace_comment(0, " replaced")?;
+        mapping.remove_comment(0)?;
+        mapping.append_comment(" mapping", CommentPlacement::Leading)?;
+        mapping.set_collection_style(CollectionStyle::Block)?;
+        let mut sequence = root.field("sequence")?.into_sequence()?;
+        assert!(matches!(sequence.node()?.kind(), NodeKind::Sequence { .. }));
+        sequence.replace_comment(0, " replaced")?;
+        sequence.remove_comment(0)?;
+        sequence.append_comment(" sequence", CommentPlacement::Leading)?;
+        sequence.set_collection_style(CollectionStyle::Block)
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    @@ -1,2 +1,6 @@
+    -mapping: {value: old} # map
+    -sequence: [old] # seq
+    +# mapping
+    +mapping:
+    +  value: old
+    +# sequence
+    +sequence:
+    +  - old
+    ");
+}
+
+#[test]
+fn an_empty_edit_path_selects_the_root_and_a_missing_path_skips_the_callback() {
+    let mut document = EditableYaml::parse("services.db: [[80]] # public\n").unwrap();
+    document
+        .edit_at(edit_path![], |root| {
+            root.at(edit_path!["services.db", 0, 0])?.set(8080)
+        })
+        .unwrap();
+    let source = document.to_yaml();
+    let error = document
+        .edit_at(edit_path!["services.db", 1], |_| -> Result<(), _> {
+            panic!("a failed selection must not call the edit callback")
+        })
+        .unwrap_err();
+    insta::assert_snapshot!(error, @r#"$["services.db"][1]: item index out of bounds at bytes 0..21"#);
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn collection_defaults_reuse_existing_children_and_leave_scalars_alone() {
+    let mut document = Editable::<Value>::parse("enabled: true # retained\n").unwrap();
+    document
+        .edit(|mut root| {
+            assert!(root.reborrow().into_sequence().is_err());
+            let mut settings = root.into_mapping()?;
+            assert!(settings.ensure_sequence("enabled").is_err());
+            assert!(settings.ensure_mapping("enabled").is_err());
+
+            settings.ensure_mapping("services")?.set("web", 80)?;
+            let mut services = settings.ensure_mapping("services")?;
+            services.ensure_sequence("ports")?.push(443)?;
+            services.ensure_sequence("ports")?.push(8443)?;
+            Ok(())
+        })
+        .unwrap();
+    insta::assert_snapshot!(document.source(), @r#"
+    enabled: true # retained
+    "services": {"web": 80, "ports": [443, 8443]}
+    "#);
+}
+
+#[test]
+fn optional_lookup_distinguishes_an_absent_field_from_the_wrong_parent_kind() {
+    let mut document = Editable::<Value>::parse("port: 80").unwrap();
+    document
+        .edit(|mut root| {
+            assert!(root.reborrow().get("missing")?.is_none());
+            let mut port = root.get("port")?.expect("port is present");
+            let error = port.reborrow().get("nested").unwrap_err();
+            assert_eq!(error.path.as_deref(), Some(r#"$["port"]["nested"]"#));
+            port.set(8080)
+        })
+        .unwrap();
+    assert_eq!(document.source(), "port: 8080");
+}
+
+#[test]
+fn a_commit_error_at_a_complex_key_identifies_the_mapping_entry() {
+    use std::collections::BTreeMap;
+
+    let source = "{? [1, 2] : 80}";
+    let mut document = Editable::<BTreeMap<Vec<u8>, u16>>::parse(source).unwrap();
+    let error = document
+        .edit(|root| root.into_mapping()?.value_at(0)?.set("http"))
+        .unwrap_err();
+    assert_eq!(error.path.as_deref(), Some("$.value_at(0)"));
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn handling_a_core_cursor_mutation_error_still_rolls_back_the_typed_edit() {
+    let source = "port: 80 # retained\n";
+    let mut document = Editable::<Value>::parse(source).unwrap();
+    let result = document.edit(|root| {
+        let mut fields = root.into_mapping()?;
+        let mut port = fields.field("port")?.into_syntax();
+        port.set_yaml("81")?;
+        assert!(port.replace_yaml("[").is_err());
+        assert_eq!(fields.len(), 1);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value()["port"], 80);
 }

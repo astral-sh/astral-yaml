@@ -67,6 +67,16 @@ mod astral {
         });
     }
 
+    #[divan::bench]
+    fn deserialize_parsed_services_128(bencher: Bencher) {
+        let source = services_fixture();
+        let stream = astral_yaml::parse(&source).unwrap();
+
+        bencher.bench_local(|| {
+            black_box(astral_yaml_serde::from_stream::<ServiceConfig>(black_box(&stream)).unwrap());
+        });
+    }
+
     #[divan::bench(args = FIXTURES.iter().map(|&(name, _)| name))]
     fn deserialize_spanned(bencher: Bencher, name: &str) {
         let source = fixture(name);
@@ -130,7 +140,7 @@ mod editable {
         bencher.bench_local(|| {
             let mut document = Editable::<Value>::parse(SOURCE).unwrap();
             document
-                .edit(|editor| editor.root_mut().field("timeout")?.set(60))
+                .edit(|root| root.field("timeout")?.set(60))
                 .unwrap();
             black_box(document);
         });
@@ -141,8 +151,8 @@ mod editable {
         bencher.bench_local(|| {
             let mut document = Editable::<Value>::parse(SOURCE).unwrap();
             document
-                .edit(|editor| {
-                    editor.root_mut().set_entry("enabled", true)?;
+                .edit(|root| {
+                    root.into_mapping()?.set("enabled", true)?;
                     Ok(())
                 })
                 .unwrap();

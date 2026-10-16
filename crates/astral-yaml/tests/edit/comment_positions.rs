@@ -104,8 +104,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
         },
     );
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -- !local
     -  # property
@@ -113,8 +111,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
     +  # property edited
        item
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     -# leading
     -[ # opening
@@ -124,8 +120,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
     +[ # opening edited
     +  item] # closing edited
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      - one
      ⏎
@@ -134,8 +128,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
      ⏎
      - two
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,6 @@
     -# detached
      ⏎
@@ -146,8 +138,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
      ---
      key: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,7 @@
     -# detached
      ⏎
@@ -169,8 +159,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
         - three
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,6 @@
         +- zero
          - one
@@ -189,8 +177,6 @@ fn reinsertion_retains_headers_and_collection_gaps() {
         three: 3
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,6 @@
         +zero: 0
          one: 1
@@ -236,11 +222,11 @@ fn invalid_comment_boundaries_poison_the_transaction() {
         other: [three]
     "};
     let mut document = EditableDocument::parse(source).unwrap();
-    let foreign = document.edit(|editor| Ok(editor.root())).unwrap();
+    let foreign = document.edit_syntax(|editor| Ok(editor.root())).unwrap();
     let mut errors = Vec::new();
     for case in 0..6 {
         let error = document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let root = editor.root();
                 let entries = editor.mapping_entries(&root)?;
                 let items = entries[0].1.clone();
@@ -292,8 +278,6 @@ fn querying_a_missing_comment_does_not_poison_the_transaction() {
         editor.replace(&editor.root(), "new")
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -old
     +new

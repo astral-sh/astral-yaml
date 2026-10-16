@@ -66,13 +66,13 @@ fn flow_delimiter_comments_survive_collection_edits() {
         let mut document = edited(source, |editor| {
             let target = collection(editor, nested);
             match editor.node(&target)?.kind() {
-                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new"),
-                _ => editor.insert_entry(&target, 1, "added", "new"),
+                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
+                _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
             }
         });
         let committed = document.to_yaml();
         document
-            .edit(|editor| {
+            .edit_syntax(|editor| {
                 let target = collection(editor, nested);
                 editor.set_collection_style(&target, CollectionStyle::Flow)
             })
@@ -81,40 +81,30 @@ fn flow_delimiter_comments_survive_collection_edits() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      [ # open
     -  old
     -] # close
     +  old, new] # close
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      { # open
     -  key: old
     -} # close
     +  key: old, added: new} # close
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      outer: [ # open
     -  old
     -  ] # close
     +  old, new] # close
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      outer: { # open
     -  key: old
     -  } # close
     +  key: old, added: new} # close
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      &a [ # open
     -  *a
@@ -130,8 +120,6 @@ fn flow_delimiter_comments_survive_collection_edits() {
           ] # close
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,2 @@
          outer: [ # open
         -  old
@@ -146,8 +134,6 @@ fn flow_delimiter_comments_survive_collection_edits() {
           } # close
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,2 @@
          outer: { # open
         -  key: old
@@ -162,8 +148,6 @@ fn flow_delimiter_comments_survive_collection_edits() {
           {key: old}
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,2 @@
         -outer:
          # leading
@@ -180,8 +164,6 @@ fn flow_delimiter_comments_survive_collection_edits() {
           key: old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          outer:
         -# detached
@@ -217,8 +199,6 @@ fn rewrite_context_is_selected_after_all_mutations() {
         editor.set_collection_style(&target, CollectionStyle::Flow)
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -outer:   [old]
     +outer:   [old, new]
@@ -246,8 +226,6 @@ fn retained_opening_comments_merge_with_fragment_prefixes() {
     });
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -[ # open
     -  old

@@ -34,10 +34,13 @@ impl ser::Serializer for TagSerializer {
         // expanded tag also rejects strings that inject additional YAML.
         let spelling = format!("!<{tag}>");
         let stream = astral_yaml::parse(&spelling).map_err(|_| Error::new("invalid YAML tag"))?;
-        let node = stream.node(stream.documents()[0].root).unwrap();
-        if stream.documents().len() != 1
-            || node.tag.as_ref().map(|property| property.value.as_ref()) != Some(tag)
-        {
+        let expanded_tag = match stream.documents() {
+            [document] => stream
+                .node(document.root)
+                .and_then(|node| node.tag.as_ref()),
+            _ => None,
+        };
+        if expanded_tag.is_none_or(|property| property.value != tag) {
             return Err(Error::new("invalid YAML tag"));
         }
 

@@ -10,8 +10,6 @@ use astral_yaml_dev::{edit_diff, indoc};
     "},
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,3 @@
         -&old [before]
         +&old ⏎
@@ -26,8 +24,6 @@ use astral_yaml_dev::{edit_diff, indoc};
     "},
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,3 @@
         -[before]
         +&fragment ⏎
@@ -43,8 +39,6 @@ use astral_yaml_dev::{edit_diff, indoc};
     "},
     true
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,5 @@
         -definition: &old [before]
         +definition:
@@ -96,8 +90,6 @@ fn retained_aliases_follow_anchor_changes_outside_the_definition() {
         },
     );
     insta::assert_snapshot!(diffs, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -definition: &old before
     -first: *old # keep
@@ -107,14 +99,10 @@ fn retained_aliases_follow_anchor_changes_outside_the_definition() {
     +second: *new
      untouched:   [a,b]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -{definition: &old before, first: *old, second: *old, untouched:   [a,b]}
     +{definition: &new after, first: *new, second: *new, untouched:   [a,b]}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -definition: &old before
     -? *old
@@ -160,7 +148,7 @@ fn invalid_alias_bindings_roll_back_the_transaction(
 ) -> &'static str {
     let mut document = EditableDocument::parse(source).unwrap();
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let target = editor.sequence_items(&editor.root())?[0].clone();
             if let Some(replacement) = replacement {
                 editor.replace(&target, replacement)
@@ -190,8 +178,6 @@ fn alias_bindings_only_need_to_be_complete_at_the_end_of_mutation() {
         editor.replace(&target, "&retained changed")
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,2 @@
     -- &old before
     -- *old

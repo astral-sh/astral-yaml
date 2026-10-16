@@ -7,7 +7,6 @@ use astral_yaml::{
     NodeId,
     edit::{EditableDocument, NodeKind},
 };
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use astral_yaml_serde::{Editable, Spanned, from_str};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -21,43 +20,6 @@ enum Shape {
     Mapping(BTreeMap<String, u8>),
 }
 
-fn kind_changes() -> [(&'static str, &'static str, &'static str, Shape); 6] {
-    [
-        ("sequence to scalar", "[1, 2]", "3", Shape::Scalar(3)),
-        (
-            "scalar to sequence",
-            "1",
-            indoc! {r"
-                - 2
-                - 3"},
-            Shape::Sequence(vec![2, 3]),
-        ),
-        ("mapping to scalar", "{one: 1}", "2", Shape::Scalar(2)),
-        (
-            "scalar to mapping",
-            "1",
-            "two: 2",
-            Shape::Mapping(BTreeMap::from([("two".to_owned(), 2)])),
-        ),
-        (
-            "sequence to mapping",
-            indoc! {r"
-                - 1
-                - 2"},
-            "{three: 3}",
-            Shape::Mapping(BTreeMap::from([("three".to_owned(), 3)])),
-        ),
-        (
-            "mapping to sequence",
-            indoc! {r"
-                one: 1
-                two: 2"},
-            "[3, 4]",
-            Shape::Sequence(vec![3, 4]),
-        ),
-    ]
-}
-
 fn assert_shape(
     actual: &Spanned<Shape>,
     syntax: &EditableDocument,
@@ -68,433 +30,131 @@ fn assert_shape(
     assert_eq!(actual.span, syntax.node(node).unwrap().span());
 }
 
-#[test]
-fn root_kind_changes_refresh_the_untagged_variant_and_span() {
-    let mut diffs = Vec::new();
-    for (name, before, replacement, expected) in kind_changes() {
-        let source = formatdoc! {r"
-            {before}
-        "};
-        let document = edit_syntax::<Spanned<Shape>>(&source, |editor| {
-            editor.replace(&editor.root(), replacement)
-        });
-
-        assert_shape(
-            document.value(),
-            document.syntax(),
-            document.syntax().root(),
-            &expected,
-        );
-        diffs.push(formatdoc! {r"
-            {name}
-            {}",
-            edit_diff(&source, document.syntax().source())
-        });
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    sequence to scalar
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -[1, 2]
-    +3
-
-    scalar to sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,2 @@
-    -1
-    +- 2
-    +- 3
-
-    mapping to scalar
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -{one: 1}
-    +2
-
-    scalar to mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -1
-    +two: 2
-
-    sequence to mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1 @@
-    -- 1
-    -- 2
-    +{three: 3}
-
-    mapping to sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1 @@
-    -one: 1
-    -two: 2
-    +[3, 4]
-    ");
-}
-
 #[derive(Debug, Deserialize)]
 struct ShapeConfig {
     value: Spanned<Shape>,
     untouched: String,
 }
 
-#[test]
-fn nested_kind_changes_refresh_the_variant_and_preserve_siblings() {
-    let mut diffs = Vec::new();
-    for (name, before, replacement, expected) in kind_changes() {
-        let source = formatdoc! {r"
-            # config
-            value:
-              {}
-            untouched: keep # sibling
-        ",
-            before.replace('\n', "\n  ")
-        };
-        let document = edit_syntax::<ShapeConfig>(&source, |editor| {
-            let entries = editor.mapping_entries(&editor.root())?;
-            editor.replace(&entries[0].1, replacement)
-        });
+fn replace_root<T: DeserializeOwned>(source: &str, replacement: &str) -> Editable<T> {
+    edit_syntax(source, |editor| editor.replace(&editor.root(), replacement))
+}
 
-        let syntax = document.syntax();
-        let NodeKind::Mapping { entries, .. } = syntax.node(syntax.root()).unwrap().kind() else {
-            panic!("expected a mapping");
-        };
-        assert_shape(&document.value().value, syntax, entries[0].1, &expected);
-        assert_eq!(document.value().untouched, "keep");
-        diffs.push(formatdoc! {r"
-            {name}
-            {}",
-            edit_diff(&source, document.syntax().source())
-        });
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    sequence to scalar
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,3 @@
-     # config
-    -value:
-    -  [1, 2]
-    +value: 3
-     untouched: keep # sibling
+#[test_case("[1, 2]", "3", " 3", &Shape::Scalar(3); "sequence to scalar")]
+#[test_case(
+    "1", "- 2\n- 3", "\n  - 2\n  - 3",
+    &Shape::Sequence(vec![2, 3]); "scalar to sequence"
+)]
+#[test_case("{one: 1}", "2", " 2", &Shape::Scalar(2); "mapping to scalar")]
+#[test_case(
+    "1", "two: 2", "\n  two: 2",
+    &Shape::Mapping(BTreeMap::from([("two".into(), 2)])); "scalar to mapping"
+)]
+#[test_case(
+    "- 1\n- 2", "{three: 3}", " {three: 3}",
+    &Shape::Mapping(BTreeMap::from([("three".into(), 3)])); "sequence to mapping"
+)]
+#[test_case(
+    "one: 1\ntwo: 2", "[3, 4]", " [3, 4]",
+    &Shape::Sequence(vec![3, 4]); "mapping to sequence"
+)]
+fn kind_changes_refresh_the_variant_and_span(
+    before: &str,
+    replacement: &str,
+    nested: &str,
+    expected: &Shape,
+) {
+    let document = replace_root::<Spanned<Shape>>(&format!("{before}\n"), replacement);
+    let syntax = document.syntax();
+    assert_shape(document.value(), syntax, syntax.root(), expected);
+    assert_eq!(document.source(), format!("{replacement}\n"));
 
-    scalar to sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     value:
-    -  1
-    +  - 2
-    +  - 3
-     untouched: keep # sibling
+    let prefix = "# config\nvalue:";
+    let suffix = "\nuntouched: keep # sibling\n";
+    let source = format!("{prefix}\n  {}{suffix}", before.replace('\n', "\n  "));
+    let document = edit_syntax::<ShapeConfig>(&source, |editor| {
+        let entries = editor.mapping_entries(&editor.root())?;
+        editor.replace(&entries[0].1, replacement)
+    });
 
-    mapping to scalar
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,3 @@
-     # config
-    -value:
-    -  {one: 1}
-    +value: 2
-     untouched: keep # sibling
-
-    scalar to mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,4 @@
-     # config
-     value:
-    -  1
-    +  two: 2
-     untouched: keep # sibling
-
-    sequence to mapping
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,3 @@
-     # config
-    -value:
-    -  - 1
-    -  - 2
-    +value: {three: 3}
-     untouched: keep # sibling
-
-    mapping to sequence
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,5 +1,3 @@
-     # config
-    -value:
-    -  one: 1
-    -  two: 2
-    +value: [3, 4]
-     untouched: keep # sibling
-    ");
+    let syntax = document.syntax();
+    let NodeKind::Mapping { entries, .. } = syntax.node(syntax.root()).unwrap().kind() else {
+        panic!("expected a mapping");
+    };
+    assert_shape(&document.value().value, syntax, entries[0].1, expected);
+    assert_eq!(document.value().untouched, "keep");
+    assert_eq!(document.source(), format!("{prefix}{nested}{suffix}"));
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
-#[test_case(
-    "null",
-    "true",
-    &json!(true)
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -null # value
-        +true # value
-    ");
-    "null to boolean"
-)]
-#[test_case(
-    "true",
-    "42",
-    &json!(42)
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -true # value
-        +42 # value
-    ");
-    "boolean to integer"
-)]
-#[test_case(
-    "42",
-    "1.5",
-    &json!(1.5)
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -42 # value
-        +1.5 # value
-    ");
-    "integer to float"
-)]
-#[test_case(
-    "1.5",
-    "'text'",
-    &json!("text")
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -1.5 # value
-        +'text' # value
-    ");
-    "float to string"
-)]
-#[test_case(
-    "'text'",
-    "null",
-    &Value::Null
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -'text' # value
-        +null # value
-    ");
-    "string to null"
-)]
-fn scalar_type_changes_refresh_the_typed_value(
-    before: &str,
-    replacement: &str,
-    expected: &serde_json::Value,
-) -> String {
-    let source = formatdoc! {r"
-        {before} # value
-    "};
-    let document = edit_syntax::<Value>(&source, |editor| {
-        editor.replace(&editor.root(), replacement)
-    });
-
+#[test_case("null", "true", &json!(true); "null to boolean")]
+#[test_case("true", "42", &json!(42); "boolean to integer")]
+#[test_case("42", "1.5", &json!(1.5); "integer to float")]
+#[test_case("1.5", "'text'", &json!("text"); "float to string")]
+#[test_case("'text'", "null", &Value::Null; "string to null")]
+fn scalar_type_changes_refresh_the_typed_value(before: &str, replacement: &str, expected: &Value) {
+    let document = replace_root::<Value>(&format!("{before} # value\n"), replacement);
     assert_eq!(document.value(), expected);
-    edit_diff(&source, document.syntax().source())
+    assert_eq!(document.source(), format!("{replacement} # value\n"));
 }
 
-#[test_case(
-    "null",
-    "[]",
-    Some(&Shape::Sequence(Vec::new()))
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -null # nullable
-        +[] # nullable
-    ");
-    "null to sequence"
-)]
-#[test_case(
-    "[]",
-    "null",
-    None
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -[] # nullable
-        +null # nullable
-    ");
-    "sequence to null"
-)]
-#[test_case(
-    "null",
-    "{}",
-    Some(&Shape::Mapping(BTreeMap::new()))
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -null # nullable
-        +{} # nullable
-    ");
-    "null to mapping"
-)]
-#[test_case(
-    "{}",
-    "null",
-    None
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1 @@
-        -{} # nullable
-        +null # nullable
-    ");
-    "mapping to null"
-)]
+#[test_case("null", "[]", Some(&Shape::Sequence(Vec::new())); "null to sequence")]
+#[test_case("[]", "null", None; "sequence to null")]
+#[test_case("null", "{}", Some(&Shape::Mapping(BTreeMap::new())); "null to mapping")]
+#[test_case("{}", "null", None; "mapping to null")]
 fn null_and_empty_collections_can_replace_each_other(
     before: &str,
     replacement: &str,
     expected: Option<&Shape>,
-) -> String {
-    let source = formatdoc! {r"
-        {before} # nullable
-    "};
-    let document = edit_syntax::<Option<Shape>>(&source, |editor| {
-        editor.replace(&editor.root(), replacement)
-    });
-
+) {
+    let document = replace_root::<Option<Shape>>(&format!("{before} # nullable\n"), replacement);
     assert_eq!(document.value().as_ref(), expected);
-    edit_diff(&source, document.syntax().source())
+    assert_eq!(document.source(), format!("{replacement} # nullable\n"));
 }
 
-fn assert_rejected_kind_changes<T>(source: &str, expected: &T, replacements: &[&str])
-where
-    T: Debug + DeserializeOwned + PartialEq,
+#[test_case("1 # scalar\n", &1u8, ["[2, 3]", "{two: 2}"]; "scalar")]
+#[test_case("[1, 2] # sequence\n", &vec![1u8, 2], ["3", "{three: 3}"]; "sequence")]
+#[test_case(
+    "one: 1 # mapping\n", &BTreeMap::from([("one".to_owned(), 1u8)]),
+    ["2", "[2, 3]"]; "mapping"
+)]
+fn incompatible_kind_changes_roll_back_source_value_and_span<T>(
+    source: &str,
+    expected: &T,
+    replacements: [&str; 2],
+) where
+    T: DeserializeOwned + Debug + PartialEq,
 {
+    let mut document = Editable::<Spanned<T>>::parse(source).unwrap();
+    let span = document.value().span;
     for replacement in replacements {
-        let mut document = Editable::<Spanned<T>>::parse(source).unwrap();
-        let span = document.value().span;
         let mut syntax = document.syntax().clone();
         syntax
-            .edit(|editor| editor.replace(&editor.root(), replacement))
+            .edit(|mut root| root.replace_yaml(replacement))
             .unwrap();
+
         assert!(
             document
                 .edit_syntax(|editor| editor.replace(&editor.root(), replacement))
                 .is_err()
         );
-        assert_eq!(document.syntax().source(), source);
+        assert_eq!(document.source(), source);
         assert_eq!(&document.value().value, expected);
         assert_eq!(document.value().span, span);
     }
 }
 
-#[test]
-fn incompatible_kind_changes_roll_back_source_value_and_span() {
-    assert_rejected_kind_changes(
-        indoc! {r"
-            1 # scalar
-        "},
-        &1u8,
-        &["[2, 3]", "{two: 2}"],
+#[test_case("- 2\n- 3", "---\n"; "block sequence")]
+#[test_case("[2, 3]", ""; "flow sequence")]
+#[test_case("two: 2", "---\n"; "block mapping")]
+#[test_case("{two: 2}", ""; "flow mapping")]
+fn kind_changes_create_boundaries_for_outer_comments(replacement: &str, marker: &str) {
+    let expected = from_str::<Shape>(replacement).unwrap();
+    let document = replace_root::<Spanned<Shape>>("# attached\n1\n", replacement);
+    let syntax = document.syntax();
+    assert_shape(document.value(), syntax, syntax.root(), &expected);
+    assert_eq!(
+        document.source(),
+        format!("# attached\n{marker}{replacement}\n")
     );
-    assert_rejected_kind_changes(
-        indoc! {r"
-            [1, 2] # sequence
-        "},
-        &vec![1u8, 2],
-        &["3", "{three: 3}"],
-    );
-    assert_rejected_kind_changes(
-        indoc! {r"
-            one: 1 # mapping
-        "},
-        &BTreeMap::from([("one".to_owned(), 1u8)]),
-        &["2", "[2, 3]"],
-    );
-}
-
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn kind_changes_create_boundaries_for_outer_comments() {
-    let mut diffs = Vec::new();
-    let source = indoc! {r"
-        # attached
-        1
-    "};
-    for replacement in [
-        indoc! {r"
-            - 2
-            - 3"},
-        "[2, 3]",
-        "two: 2",
-        "{two: 2}",
-    ] {
-        let expected = from_str::<Shape>(replacement).unwrap();
-        let document = edit_syntax::<Spanned<Shape>>(source, |editor| {
-            editor.replace(&editor.root(), replacement)
-        });
-        assert_eq!(document.value().value, expected);
-        let syntax = document.syntax();
-        assert_eq!(
-            document.value().span,
-            syntax.node(syntax.root()).unwrap().span()
-        );
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,4 @@
-     # attached
-    -1
-    +---
-    +- 2
-    +- 3
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-     # attached
-    -1
-    +[2, 3]
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,3 @@
-     # attached
-    -1
-    +---
-    +two: 2
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,2 +1,2 @@
-     # attached
-    -1
-    +{two: 2}
-    ");
 }

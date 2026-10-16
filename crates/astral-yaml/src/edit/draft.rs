@@ -116,13 +116,7 @@ impl Draft {
     }
 
     pub(super) fn charge(&self, amount: usize) -> Result<(), Error> {
-        let remaining = self
-            .work
-            .get()
-            .checked_sub(amount)
-            .ok_or_else(|| self.error("editing resource limit exceeded"))?;
-        self.work.set(remaining);
-        Ok(())
+        super::charge_work(&self.work, amount, self.diagnostic_span)
     }
 
     fn introduce(&mut self, bytes: usize) -> Result<(), Error> {
@@ -238,15 +232,10 @@ impl Draft {
         let parent = self.parent(id);
         let document = self.fragment(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
-        // Attaching resets the root's style request and membership. Retire its previous
-        // descendants afterwards. They cannot refer to imported slots.
+        // Retired slots keep their syntax. Attaching reuses the root's ID and
+        // restores its membership, but leaves its former descendants retired.
+        self.retire(removed);
         self.attach(document, parent, Some((id, preserve)));
-        self.retire(
-            removed
-                .into_iter()
-                .filter(|&removed| removed != id)
-                .collect(),
-        );
         Ok(())
     }
 
@@ -270,22 +259,12 @@ impl Draft {
         }
     }
 
-    fn scalar_style_mut(&mut self, id: NodeId) -> Result<&mut ScalarStyle, Error> {
-        match &mut self.slots[id.0].node.kind {
-            NodeKind::Scalar { style, .. } => Ok(style),
-            _ => Err(Error {
-                span: self.diagnostic_span,
-                message: "expected a scalar",
-            }),
-        }
-    }
-
     pub(super) fn insert_item(
         &mut self,
         id: NodeId,
         index: usize,
         yaml: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<NodeId, Error> {
         let items = self.sequence_items_mut(id)?;
         if index > items.len() {
             return Err(self.error("item index out of bounds"));
@@ -293,7 +272,7 @@ impl Draft {
         let document = self.fragment(yaml, Some(id), self.available())?;
         let child = self.attach(document, Some(id), None);
         self.sequence_items_mut(id)?.insert(index, child);
-        Ok(())
+        Ok(child)
     }
 
     pub(super) fn remove_item(&mut self, id: NodeId, index: usize) -> Result<(), Error> {
@@ -315,7 +294,7 @@ impl Draft {
         index: usize,
         key: &str,
         value: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(NodeId, NodeId), Error> {
         let entries = self.mapping_entries_mut(id)?;
         if index > entries.len() {
             return Err(self.error("entry index out of bounds"));
@@ -331,7 +310,7 @@ impl Draft {
         let key = self.attach(key, Some(id), None);
         let value = self.attach(value, Some(id), None);
         self.mapping_entries_mut(id)?.insert(index, (key, value));
-        Ok(())
+        Ok((key, value))
     }
 
     pub(super) fn remove_entry(&mut self, id: NodeId, index: usize) -> Result<(), Error> {
@@ -348,12 +327,18 @@ impl Draft {
     }
 
     pub(super) fn set_scalar_style(&mut self, id: NodeId, style: ScalarStyle) -> Result<(), Error> {
-        let before = *self.scalar_style_mut(id)?;
-        let node = self.node(id);
-        if emit::meaning(node, before) != emit::meaning(node, style) {
+        let node = &mut self.slots[id.0].node;
+        let NodeKind::Scalar {
+            value,
+            style: current,
+        } = &mut node.kind
+        else {
+            return Err(self.error("expected a scalar"));
+        };
+        if !emit::same_scalar_type(value, node.tag.as_deref(), *current, style) {
             return Err(self.error("requested style changes the scalar type"));
         }
-        *self.scalar_style_mut(id)? = style;
+        *current = style;
         self.membership_mut(id).requested_style = true;
         Ok(())
     }
@@ -515,29 +500,15 @@ impl Candidate {
         &self.work
     }
 
-    /// Parse `output` and check it against this transaction's intended result.
-    /// Return the parsed document only if content, aliases, requested styles, and
-    /// comments are preserved.
+    /// Reparse the rendered YAML and check it against the intended edit.
     pub(super) fn commit(&self, output: &str) -> Result<EditableDocument, Error> {
-        let error = |message| Error {
-            span: self.diagnostic_span,
-            message,
-        };
-        let parsed = EditableDocument::parse_with_options(output, self.options)?;
-        let correspondence = emit::correspondence(self, &parsed)
-            .ok_or_else(|| error("emission changed YAML content or alias identity"))?;
-        for &id in &self.requested_styles {
-            let target = correspondence[id.0].expect("styled node is retained");
-            if !same_style(&self.nodes[id.0].kind, &parsed.source.nodes[target.0].kind) {
-                return Err(error(
-                    "requested style is not representable in this context",
-                ));
-            }
-        }
-        if !emit::comments_preserved(self, &parsed, &correspondence) {
-            return Err(error("emission changed comment ownership or placement"));
-        }
-        Ok(parsed)
+        emit::parse_rendered(
+            self.into(),
+            output,
+            self.options,
+            self.diagnostic_span,
+            &self.requested_styles,
+        )
     }
 }
 
@@ -545,22 +516,13 @@ fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<S
     if let Some(anchor) = &old.anchor {
         replacement.anchor = Some(anchor.clone());
     }
-    let compatible = match (&old.kind, &replacement.kind) {
-        (
-            NodeKind::Scalar {
-                style: previous, ..
-            },
-            NodeKind::Scalar { style, .. },
-        ) => emit::meaning(replacement, *previous) == emit::meaning(replacement, *style),
-        _ => true,
-    };
     match (&old.kind, &mut replacement.kind) {
         (
             NodeKind::Scalar {
                 style: previous, ..
             },
-            NodeKind::Scalar { style, .. },
-        ) if compatible => {
+            NodeKind::Scalar { value, style },
+        ) if emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) => {
             *style = *previous;
         }
         (

@@ -53,16 +53,13 @@ impl<'a> From<&'a Source> for Syntax<'a, Span> {
 }
 
 impl Source {
-    pub(super) fn emission<'a>(
+    pub(super) fn emission<'a, Location>(
         &'a self,
-        syntax: Syntax<'a, Option<Span>>,
-    ) -> Emission<'a, Option<Span>> {
+        syntax: Syntax<'a, Location>,
+    ) -> Emission<'a, Location> {
         Emission {
-            nodes: syntax.nodes,
-            root: syntax.root,
-            source: &self.text,
-            options: self.options,
-            end_marker: self.end_marker,
+            syntax,
+            source: self,
         }
     }
 }

@@ -1,7 +1,7 @@
-use test_case::test_case;
+use test_case::{test_case, test_matrix};
 
 use super::support::{edit, edit_syntax};
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
     Editable, Tagged,
     edit::{CollectionStyle, CommentPlacement, ScalarStyle},
@@ -26,17 +26,15 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
     "};
     let mut diffs = Vec::new();
     for operation in 0..3 {
-        let document = edit::<Config>(source, |editor| {
+        let document = edit::<Config>(source, |mut root| {
             match operation {
                 0 => {
-                    editor.root_mut().set_entry("enabled", true)?;
+                    root.into_mapping()?.set("enabled", true)?;
                 }
                 1 => {
-                    editor.root_mut().remove_field("other")?;
+                    root.into_mapping()?.remove("other")?;
                 }
-                _ => editor
-                    .root_mut()
-                    .set_collection_style(CollectionStyle::Flow)?,
+                _ => root.set_collection_style(CollectionStyle::Flow)?,
             }
             Ok(())
         });
@@ -47,8 +45,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
         diffs.push(edit_diff(source, document.source()));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,5 @@
     -plain: &empty
     -tagged: !custom
@@ -58,8 +54,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
      other: keep
     +"enabled": true
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     -plain: &empty
     -tagged: !custom
@@ -68,8 +62,6 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
      copy: *empty
     -other: keep
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1 @@
     -plain: &empty
     -tagged: !custom
@@ -91,8 +83,8 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
           | # header
             content
     "};
-    let document = edit::<Config>(source, |editor| {
-        editor.root_mut().set_entry("enabled", true)?;
+    let document = edit::<Config>(source, |root| {
+        root.into_mapping()?.set("enabled", true)?;
         Ok(())
     });
     assert_eq!(
@@ -102,8 +94,6 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
         "}
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      text: &text # anchor
     -  | # header
@@ -117,27 +107,19 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
 #[test]
 fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let source = indoc! {r"
-        existing: 1
-    "};
-    let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
     let key = "\u{1}".repeat(103);
-    document
-        .edit(|editor| {
-            editor.root_mut().set_entry(&key, true)?;
-            Ok(())
-        })
-        .unwrap();
+    let document = edit::<serde_json::Value>("existing: 1\n", |root| {
+        root.into_mapping()?.set(&key, true)?;
+        Ok(())
+    });
     assert_eq!(document.value()[&key], true);
     assert_eq!(document.value()["existing"], 1);
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-     existing: 1
-    +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
-    +: true
-    "#);
+
+    let escaped = r"\U00000001".repeat(103);
+    assert_eq!(
+        document.source(),
+        format!("existing: 1\n? \"{escaped}\"\n: true\n")
+    );
 }
 
 #[test]
@@ -146,15 +128,12 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
         --- [old]
         ...
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        let mut root = editor.root_mut();
+    let document = edit::<Vec<String>>(source, |mut root| {
         root.set(["new", "values"])?;
         root.set_collection_style(CollectionStyle::Block)
     });
     assert_eq!(document.value().as_slice(), ["new", "values"]);
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     ---- [old]
     +--- ⏎
@@ -168,18 +147,14 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
 
         # old
     "};
-    let mut document = edit::<String>(source, |editor| {
-        editor
-            .root_mut()
-            .append_comment(" new", CommentPlacement::Detached)
+    let mut document = edit::<String>(source, |mut root| {
+        root.append_comment(" new", CommentPlacement::Detached)
     });
     document
-        .edit(|editor| editor.root_mut().replace_comment(1, " changed"))
+        .edit(|mut root| root.replace_comment(1, " changed"))
         .unwrap();
     assert_eq!(document.value(), "value");
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      value
      ⏎
@@ -188,176 +163,38 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
     ");
 }
 
-#[test_case(
-    indoc! {r"
-        first
-        second"},
-    ScalarStyle::Plain
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,4 @@
-        -'old'
-        +first
-        +
-        +  second
-         ⏎
-    ");
-    "plain"
-)]
-#[test_case(
-    indoc! {r"
-        first
-        second"},
-    ScalarStyle::SingleQuoted
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,4 @@
-        -'old'
-        +'first
-        +
-        +  second'
-         ⏎
-    ");
-    "single quoted"
-)]
-#[test_case(
-    "\n",
-    ScalarStyle::Literal
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,2 @@
-        -'old'
-        -
-        +|2+
-        +  ⏎
-    ");
-    "literal"
-)]
-#[test_case(
-    "\n",
-    ScalarStyle::Folded
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1,2 +1,2 @@
-        -'old'
-        -
-        +>2+
-        +  ⏎
-    ");
-    "folded"
-)]
-fn value_setters_can_request_multiline_scalar_styles(value: &str, style: ScalarStyle) -> String {
-    let source = indoc! {r"
-        'old'
-
-    "};
-    let document = edit::<String>(source, |editor| {
-        let mut root = editor.root_mut();
+#[test_case("first\nsecond", ScalarStyle::Plain, "first\n\n  second\n\n"; "plain")]
+#[test_case("first\nsecond", ScalarStyle::SingleQuoted, "'first\n\n  second'\n\n"; "single quoted")]
+#[test_case("\n", ScalarStyle::Literal, "|2+\n  \n"; "literal")]
+#[test_case("\n", ScalarStyle::Folded, ">2+\n  \n"; "folded")]
+fn value_setters_can_request_multiline_scalar_styles(
+    value: &str,
+    style: ScalarStyle,
+    expected: &str,
+) {
+    let document = edit::<String>("'old'\n\n", |mut root| {
         root.set(value)?;
         root.set_scalar_style(style)
     });
     assert_eq!(document.value(), value);
-    edit_diff(source, document.source())
+    assert_eq!(document.source(), expected);
 }
 
-#[test]
-fn typed_root_setters_distinguish_strings_from_document_markers() {
-    // Document markers: https://yaml.org/spec/1.2.2/#912-document-markers
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            old
-        "},
-        indoc! {r"
-            --- old
-        "},
-        r"  old
-",
-        "\u{feff}old\n",
-        indoc! {r"
-            &a old
-        "},
-    ] {
-        for value in [
-            "---",
-            "...",
-            "--- text",
-            "... text",
-            indoc! {r"
-                ---
-                text"},
-        ] {
-            let document = edit::<String>(source, |editor| editor.root_mut().set(value));
-            assert_eq!(document.value(), value);
-            if source
-                == indoc! {r"
-                    old
-                "}
-                || value == "---"
-            {
-                diffs.push(edit_diff(source, document.source()));
-            }
-        }
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"---"
+// Document markers: https://yaml.org/spec/1.2.2/#912-document-markers
+#[test_matrix(
+    ["", "--- ", "  ", "\u{feff}", "&a "],
+    ["---", "...", "--- text", "... text", "---\ntext"]
+)]
+fn typed_root_setters_distinguish_strings_from_document_markers(prefix: &str, value: &str) {
+    let document = edit::<String>(&format!("{prefix}old\n"), |mut root| root.set(value));
 
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"..."
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"--- text"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"... text"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -old
-    +"---\ntext"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    ---- old
-    +--- ---
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -  old
-    +  ---
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -﻿old
-    +﻿"---"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1 @@
-    -&a old
-    +&a ---
-    "#);
+    let expected = match prefix {
+        "" | "\u{feff}" => format!("{value:?}"),
+        "  " => value.replace('\n', "\n\n    "),
+        _ => value.replace('\n', "\n\n  "),
+    };
+    assert_eq!(document.source(), format!("{prefix}{expected}\n"));
+    assert_eq!(document.value(), value);
 }
 
 #[test]
@@ -368,13 +205,10 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
           # before content
           old
     "};
-    let document =
-        edit::<serde_json::Value>(source, |editor| editor.root_mut().field("key")?.set("new"));
+    let document = edit::<serde_json::Value>(source, |root| root.field("key")?.set("new"));
     assert_eq!(document.value()["key"], "new");
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      key: # header
        &a # anchor
@@ -385,275 +219,88 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
     ");
 }
 
-#[test_case(
-    &serde_json::json!("new")
-    => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +new
-        \ No newline at end of file
-    ");
-    "scalar"
-)]
-#[test_case(
-    &serde_json::json!(["new"])
-    => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +["new"]
-        \ No newline at end of file
-    "#);
-    "sequence"
-)]
-#[test_case(
-    &serde_json::json!({"key": "new"})
-    => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
-        @@ -1 +1,2 @@
-        ---- # keep
-        \ No newline at end of file
-        +--- # keep
-        +{"key": "new"}
-        \ No newline at end of file
-    "#);
-    "mapping"
-)]
-fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value) -> String {
+#[test_case(&serde_json::json!("new"), "new"; "scalar")]
+#[test_case(&serde_json::json!(["new"]), r#"["new"]"#; "sequence")]
+#[test_case(&serde_json::json!({"key": "new"}), r#"{"key": "new"}"#; "mapping")]
+fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value, yaml: &str) {
     let source = "--- # keep";
-    let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(value));
+    let document = edit::<serde_json::Value>(source, |mut root| root.set(value));
+    assert_eq!(document.source(), format!("{source}\n{yaml}"));
     assert_eq!(document.value(), value);
-    edit_diff(source, document.source())
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn typed_setters_fill_empty_documents_without_consuming_markers() {
-    let mut diffs = Vec::new();
-    for value in [
-        serde_json::json!("new"),
-        serde_json::json!(["a", "b"]),
-        serde_json::json!({"a": "b"}),
-    ] {
-        let source = indoc! {r"
-            # config
-            %YAML 1.2
-            ---
-            ... # end
-        "};
-        let document = edit::<serde_json::Value>(source, |editor| editor.root_mut().set(&value));
-        assert_eq!(document.value(), &value);
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +new
-     ... # end
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +["a", "b"]
-     ... # end
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,4 +1,5 @@
-     # config
-     %YAML 1.2
-     ---
-    +{"a": "b"}
-     ... # end
-    "#);
+#[test_case(&serde_json::json!("new"), "new"; "scalar")]
+#[test_case(&serde_json::json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
+#[test_case(&serde_json::json!({"a": "b"}), r#"{"a": "b"}"#; "mapping")]
+fn typed_setters_fill_empty_documents_without_consuming_markers(
+    value: &serde_json::Value,
+    yaml: &str,
+) {
+    let prefix = "# config\n%YAML 1.2\n---\n";
+    let suffix = "... # end\n";
+    let source = format!("{prefix}{suffix}");
+    let document = edit::<serde_json::Value>(&source, |mut root| root.set(value));
+    assert_eq!(document.source(), format!("{prefix}{yaml}\n{suffix}"));
+    assert_eq!(document.value(), value);
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn unrelated_collection_edits_preserve_chomping_around_detached_comments() {
+#[test_case(false, "-", ""; "mapping strip")]
+#[test_case(false, "", ""; "mapping clip")]
+#[test_case(false, "+", "  \n"; "mapping keep")]
+#[test_case(true, "-", ""; "sequence strip")]
+#[test_case(true, "", ""; "sequence clip")]
+#[test_case(true, "+", "  \n"; "sequence keep")]
+fn unrelated_collection_edits_preserve_chomping_around_detached_comments(
+    sequence: bool,
+    chomp: &str,
+    trailing: &str,
+) {
     // Chomping: https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
-    let mut diffs = Vec::new();
-    for chomp in ["-", "", "+"] {
-        for sequence in [false, true] {
-            let source = if sequence {
-                formatdoc! {r"
-                    - old
+    let (first, indicator) = if sequence {
+        ("- old", "-")
+    } else {
+        ("a: old", "b:")
+    };
+    let prefix = format!("{first}\n\n# detached\n\n{indicator} ");
+    let source = format!("{prefix}|{chomp}\n  text\n\n");
+    let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
+    let mut expected = document.value().clone();
 
-                    # detached
-
-                    - |{chomp}
-                      text
-
-                "}
-            } else {
-                formatdoc! {r"
-                    a: old
-
-                    # detached
-
-                    b: |{chomp}
-                      text
-
-                "}
-            };
-            let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
-            let mut expected = document.value().clone();
-            if sequence {
-                expected
-                    .as_array_mut()
-                    .unwrap()
-                    .insert(0, serde_json::json!("new"));
-            } else {
-                expected["added"] = serde_json::json!("new");
-            }
-            document
-                .edit(|editor| {
-                    if sequence {
-                        editor.root_mut().insert(0, "new")?;
-                    } else {
-                        editor.root_mut().set_entry("added", "new")?;
-                    }
-                    Ok(())
-                })
-                .unwrap();
-            assert_eq!(document.value(), &expected);
-            diffs.push(edit_diff(&source, document.source()));
-        }
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,6 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |-
-    +b: |2-
-       text
-    -
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,7 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |-
-    +- |2-
-       text
-    -
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,6 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |
-    +b: |2
-       text
-    -
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,7 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |
-    +- |2
-       text
-    -
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -2,6 +2,7 @@
-     ⏎
-     # detached
-     ⏎
-    -b: |+
-    +b: |2+
-       text
-    -
-    +  ⏎
-    +"added": "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1,7 +1,8 @@
-    +- "new"
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |+
-    +- |2+
-       text
-    -
-    +  ⏎
-    "#);
+    let block = format!("{prefix}|2{chomp}\n  text\n{trailing}");
+    let yaml = if sequence {
+        document
+            .edit(|root| root.into_sequence()?.insert(0, "new").map(|_| ()))
+            .unwrap();
+        expected
+            .as_array_mut()
+            .unwrap()
+            .insert(0, serde_json::json!("new"));
+        format!("- \"new\"\n{block}")
+    } else {
+        document
+            .edit(|root| root.into_mapping()?.set("added", "new").map(|_| ()))
+            .unwrap();
+        expected["added"] = serde_json::json!("new");
+        format!("{block}\"added\": \"new\"\n")
+    };
+    assert_eq!(document.source(), yaml);
+    assert_eq!(document.value(), &expected);
 }
 
-#[test]
-#[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
-fn typed_collection_edits_preserve_root_property_comments() {
-    let mut diffs = Vec::new();
-    for source in [
-        indoc! {r"
-            &root [old] # inline
-        "},
-        indoc! {r"
-            !!seq [old] # inline
-        "},
-    ] {
-        let document = edit::<Vec<String>>(source, |editor| {
-            editor
-                .root_mut()
-                .set_collection_style(CollectionStyle::Block)?;
-            editor.root_mut().push("new")?;
-            Ok(())
-        });
-        assert_eq!(document.value(), &["old", "new"]);
-        diffs.push(edit_diff(source, document.source()));
-    }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -&root [old] # inline
-    +&root # inline
-    +- old
-    +- "new"
-
-    --- before.yaml
-    +++ after.yaml
-    @@ -1 +1,3 @@
-    -!!seq [old] # inline
-    +!<tag:yaml.org,2002:seq> # inline
-    +- old
-    +- "new"
-    "#);
+#[test_case("&root", "&root"; "anchor")]
+#[test_case("!!seq", "!<tag:yaml.org,2002:seq>"; "tag")]
+fn typed_collection_edits_preserve_root_property_comments(property: &str, emitted: &str) {
+    let source = format!("{property} [old] # inline\n");
+    let document = edit::<Vec<String>>(&source, |mut root| {
+        root.set_collection_style(CollectionStyle::Block)?;
+        root.into_sequence()?.push("new")?;
+        Ok(())
+    });
+    assert_eq!(
+        document.source(),
+        format!("{emitted} # inline\n- old\n- \"new\"\n")
+    );
+    assert_eq!(document.value(), &["old", "new"]);
 }
 
 #[test]
@@ -684,8 +331,6 @@ fn commented_fragments_refresh_the_typed_view() {
         ])
     );
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,8 @@
     -a: old
     +# leading
@@ -706,15 +351,13 @@ fn typed_insertions_keep_flow_delimiter_comments() {
           old
         ] # close
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        editor.root_mut().push("new")?;
+    let document = edit::<Vec<String>>(source, |root| {
+        root.into_sequence()?.push("new")?;
         Ok(())
     });
     assert_eq!(document.value(), &["old", "new"]);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
      [ # open
     -  old
@@ -732,8 +375,6 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         unknown: keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,5 @@
          outer:
         -# detached
@@ -753,8 +394,6 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         unknown: keep
     "}
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,3 @@
         -outer:
          # leading
@@ -770,10 +409,10 @@ fn typed_collection_edits_retain_outside_comments(source: &str) -> String {
         outer: std::collections::BTreeMap<String, String>,
     }
 
-    let document = edit::<Config>(source, |editor| {
-        let mut outer = editor.root_mut().field("outer")?;
+    let document = edit::<Config>(source, |root| {
+        let mut outer = root.field("outer")?.into_mapping()?;
         outer.set_collection_style(CollectionStyle::Flow)?;
-        outer.reborrow().set_entry("added", "new")?;
+        outer.set("added", "new")?;
         Ok(())
     });
     assert_eq!(
@@ -795,8 +434,8 @@ fn typed_collection_edits_use_document_comment_boundaries() {
         ] # close
         ...
     "};
-    let document = edit::<Vec<String>>(source, |editor| {
-        let mut root = editor.root_mut();
+    let document = edit::<Vec<String>>(source, |root| {
+        let mut root = root.into_sequence()?;
         root.set_collection_style(CollectionStyle::Block)?;
         root.push("new")?;
         Ok(())
@@ -804,8 +443,6 @@ fn typed_collection_edits_use_document_comment_boundaries() {
     assert_eq!(document.value(), &["old", "new"]);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @r#"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,4 @@
     ----
     -[ # open
@@ -838,8 +475,6 @@ fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
     assert_eq!(document.value(), &None);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
     ----
      # leading
@@ -855,14 +490,12 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
           old
         # tail
     "};
-    let document = edit::<String>(source, |editor| {
-        editor.root_mut().set_scalar_style(ScalarStyle::Literal)
+    let document = edit::<String>(source, |mut root| {
+        root.set_scalar_style(ScalarStyle::Literal)
     });
     assert_eq!(document.value(), "old");
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     +  |2-
        old

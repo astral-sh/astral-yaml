@@ -29,7 +29,7 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     // Emission canonicalizes the short escapes, exceeding the source limit
     // inside the renderer, before a replacement patch can be constructed.
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let value = if nested {
                 editor.mapping_entries(&editor.root())?.remove(0).1
             } else {
@@ -49,8 +49,6 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     "},
     CommentPlacement::Leading
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,4 @@
         +# first
          # old
@@ -66,8 +64,6 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     "},
     CommentPlacement::Trailing
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,2 +1,4 @@
          value
         +# first
@@ -84,8 +80,6 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     "},
     CommentPlacement::Detached
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,5 @@
          value
          ⏎
@@ -103,8 +97,6 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     "},
     CommentPlacement::Leading
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,3 +1,5 @@
         +# first
          # old
@@ -123,8 +115,6 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     "},
     CommentPlacement::Detached
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,6 @@
          value
          ...
@@ -166,10 +156,10 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     });
     let before = document.to_yaml();
     document
-        .edit(|editor| editor.remove_comment(&editor.root(), 2))
+        .edit_syntax(|editor| editor.remove_comment(&editor.root(), 2))
         .unwrap();
     document
-        .edit(|editor| editor.replace_comment(&editor.root(), 1, " final"))
+        .edit_syntax(|editor| editor.replace_comment(&editor.root(), 1, " final"))
         .unwrap();
     diffs.push(formatdoc! {r"
         subsequent edits
@@ -178,8 +168,6 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     });
     insta::assert_snapshot!(diffs.join("\n"), @"
     initial edits
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
     -  # old
     -value
@@ -189,8 +177,6 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     +changed
 
     subsequent edits
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,3 @@
        # first
     -  # renamed
@@ -248,24 +234,18 @@ fn block_roots_can_move_off_a_document_marker_line() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- old
     +--- ⏎
     +- new
     +- values
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- [old]
     +--- ⏎
     +- new
     +- values
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ----
     \ No newline at end of file
@@ -274,8 +254,6 @@ fn block_roots_can_move_off_a_document_marker_line() {
     +- values
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,5 @@
      %YAML 1.2
     ---- old
@@ -284,30 +262,22 @@ fn block_roots_can_move_off_a_document_marker_line() {
     +- values
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     ---- [old]
     +--- ⏎
     +- old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     ---- {old: value}
     +--- ⏎
     +old: value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- &anchor [old]
     +--- ⏎
     +&anchor ⏎
     +- old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- !!map {old: value}
     +--- ⏎
@@ -327,8 +297,6 @@ fn root_comment_placement_respects_the_document_prefix() {
         editor.insert_comment(&editor.root(), 0, " leading", CommentPlacement::Leading)
     });
     insta::assert_snapshot!(diff, @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      %YAML 1.2
     +# leading
@@ -342,7 +310,7 @@ fn root_comment_placement_respects_the_document_prefix() {
     let mut document = EditableDocument::parse(source).unwrap();
     // A leading comment cannot follow an inline comment in source order.
     let error = document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             editor.insert_comment(&editor.root(), 1, " leading", CommentPlacement::Leading)
         })
         .unwrap_err();
@@ -359,8 +327,6 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::SingleQuoted
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,3 @@
         -"a\nb"
         +'a
@@ -375,8 +341,6 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::Plain
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,3 @@
         -"a\nb"
         +a
@@ -391,8 +355,6 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::Literal
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         -"\n"
         +|2+
@@ -406,8 +368,6 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::Folded
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1,2 @@
         -"\n"
         +>2+
@@ -458,23 +418,17 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
         },
     );
     insta::assert_snapshot!(diffs, @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     -'old'
     +|2+
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -'old'
     -
     +|2+
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,2 @@
     -'old'
     +|2+
@@ -482,16 +436,12 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     -  ⏎
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -'old' # keep
     -
     +|2+ # keep
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -'old'
     -
@@ -499,8 +449,6 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     +  ⏎
      ...
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
      %YAML 1.2 # directive
     ---- 'old' # inline
@@ -513,8 +461,6 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
 #[test_case(
     ScalarStyle::Literal
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          outer:
         -  value: old # keep
@@ -528,8 +474,6 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
 #[test_case(
     ScalarStyle::Folded
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          outer:
         -  value: old # keep
@@ -588,7 +532,7 @@ fn comment_transactions_match_an_ordered_list_model() {
         for round in 0..100 {
             let before = document.to_yaml();
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let root = editor.root();
                     for step in 0..3 {
                         state ^= state << 13;
@@ -656,14 +600,12 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
         ] {
             let mut document = EditableDocument::parse(source).unwrap();
             document
-                .edit(|editor| editor.replace(&editor.root(), fragment))
+                .edit_syntax(|editor| editor.replace(&editor.root(), fragment))
                 .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
             diffs.push(edit_diff(source, document.source()));
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     ---- # marker
     \ No newline at end of file
@@ -671,8 +613,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +new
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     ---- # marker
     \ No newline at end of file
@@ -680,8 +620,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +[new]
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,2 @@
     ---- # marker
     \ No newline at end of file
@@ -689,8 +627,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +{key: new}
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,3 @@
     ---- # marker
     \ No newline at end of file
@@ -698,8 +634,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +|2-
     +  new
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
      %YAML 1.2
     ---- # marker
@@ -708,8 +642,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +new
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
      %YAML 1.2
     ---- # marker
@@ -718,8 +650,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +[new]
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
      %YAML 1.2
     ---- # marker
@@ -728,8 +658,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     +{key: new}
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,4 @@
      %YAML 1.2
     ---- # marker
@@ -748,8 +676,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
           old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
          key: # header
            &a # anchor
@@ -768,8 +694,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
           old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,4 +1,4 @@
         -key: !!str # tag
         +key: # tag
@@ -790,8 +714,6 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
           old
     "}
     => with |diff| insta::assert_snapshot!(diff, @r"
-        --- before.yaml
-        +++ after.yaml
         @@ -1,5 +1,5 @@
          key: # header
            # before anchor
@@ -806,7 +728,7 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
 fn edits_preserve_comments_between_headers_properties_and_content(source: &str) -> String {
     let mut document = EditableDocument::parse(source).unwrap();
     document
-        .edit(|editor| {
+        .edit_syntax(|editor| {
             let value = editor.mapping_entries(&editor.root())?.remove(0).1;
             editor.replace_preserving_style(&value, "new")
         })

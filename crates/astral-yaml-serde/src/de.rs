@@ -1,16 +1,19 @@
+mod input;
+
+use self::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarOf};
 use crate::{
-    AttachedComment, CommentPlacement, Error, commented, comments::CommentCache, schema::YamlType,
-    spanned, tagged, with::yaml_tag,
+    AttachedComment, CommentPlacement, Error, commented, schema::YamlType, spanned, tagged,
+    with::yaml_tag,
 };
 use astral_yaml::{
-    Entry, Node, NodeId, NodeKind, Scalar, ScalarStyle, Span, Stream,
+    NodeId, ScalarStyle, Span, Stream,
     schema::{ScalarType, classify},
 };
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-use std::{borrow::Cow, cell::Cell, collections::HashSet};
+use std::{cell::Cell, collections::HashSet};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -61,28 +64,48 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
 
-    let context = Context {
-        stream,
-        budget: Cell::new(1_000_000),
-        scalar_budget: Cell::new(64 * 1024 * 1024),
-        comments: CommentCache::new(index),
-    };
+    from_input(Parsed::new(stream, index), doc.root)
+}
 
+#[cfg(feature = "editable")]
+pub(crate) fn from_edit_value<'de, T: Deserialize<'de>>(
+    value: astral_yaml::edit::ValueRef<'de>,
+) -> Result<T> {
+    from_input(value, value.root())
+}
+
+fn from_input<'de, T: Deserialize<'de>>(input: impl Input<'de>, id: NodeId) -> Result<T> {
+    let context = Context::new(input);
     T::deserialize(Deserializer {
         context: &context,
-        id: doc.root,
+        id,
         depth: 0,
         tag_state: TagState::Unconsumed,
         yaml_tag: false,
     })
-    .map_err(|error| error.located(stream.node(doc.root).map_or(doc.span, |node| node.span)))
+    .map_err(|mut error| {
+        if error.span.is_none() {
+            error.span = context.input.node(id).ok().and_then(Node::span);
+        }
+        error.path.get_or_insert_with(|| "$".to_owned());
+        error
+    })
 }
 
-struct Context<'s, 'de> {
-    stream: &'s Stream<'de>,
+struct Context<I> {
+    input: I,
     budget: Cell<usize>,
     scalar_budget: Cell<usize>,
-    comments: CommentCache<'de>,
+}
+
+impl<I> Context<I> {
+    fn new(input: I) -> Self {
+        Self {
+            input,
+            budget: Cell::new(1_000_000),
+            scalar_budget: Cell::new(64 * 1024 * 1024),
+        }
+    }
 }
 
 /// Canonical identity for a serialized mapping key. String identities use the
@@ -91,12 +114,7 @@ pub(crate) fn canonical_key(source: &str) -> Result<String> {
     let stream = astral_yaml::parse(source)?;
     // The serializer emits exactly one node for each key.
     let document = &stream.documents()[0];
-    let context = Context {
-        stream: &stream,
-        budget: Cell::new(1_000_000),
-        scalar_budget: Cell::new(64 * 1024 * 1024),
-        comments: CommentCache::new(0),
-    };
+    let context = Context::new(Parsed::new(&stream, 0));
     let key = Deserializer {
         context: &context,
         id: document.root,
@@ -121,8 +139,8 @@ enum TagState {
 }
 
 #[derive(Clone, Copy)]
-struct Deserializer<'s, 'de> {
-    context: &'s Context<'s, 'de>,
+struct Deserializer<C> {
+    context: C,
     id: NodeId,
     depth: usize,
     tag_state: TagState,
@@ -130,46 +148,40 @@ struct Deserializer<'s, 'de> {
     yaml_tag: bool,
 }
 
-impl<'s, 'de> Deserializer<'s, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
     #[inline]
-    fn raw_node(self) -> Result<&'s Node<'de>> {
-        let node = self
-            .context
-            .stream
-            .node(self.id)
-            .expect("ID belongs to this stream");
+    fn raw_node(self) -> Result<I::Node<'s>> {
+        let node = self.context.input.node(self.id)?;
         if self.depth >= 64 || self.context.budget.get() == 0 {
             return Err(Error::at(
                 "deserialization resource limit exceeded",
-                node.span,
+                node.span(),
             ));
         }
 
         self.context.budget.set(self.context.budget.get() - 1);
-        if let NodeKind::Scalar(scalar) = &node.kind {
+        if let NodeKind::Scalar(scalar) = node.kind() {
             let remaining = self
                 .context
                 .scalar_budget
                 .get()
-                .checked_sub(scalar.value.len())
-                .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span))?;
+                .checked_sub(scalar.value().len())
+                .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span()))?;
             self.context.scalar_budget.set(remaining);
         }
 
         Ok(node)
     }
 
-    fn node(self) -> Result<&'s Node<'de>> {
-        let node = self.raw_node()?;
-        if let NodeKind::Alias { target, .. } = node.kind {
-            Self {
-                id: target,
-                depth: self.depth + 1,
-                ..self
-            }
-            .node()
-        } else {
-            Ok(node)
+    #[inline]
+    fn node(mut self) -> Result<I::Node<'s>> {
+        loop {
+            let node = self.raw_node()?;
+            let NodeKind::Alias { target } = node.kind() else {
+                return Ok(node);
+            };
+            self.id = target;
+            self.depth += 1;
         }
     }
 
@@ -184,21 +196,21 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn metadata<V: Visitor<'de>>(self, visitor: V, comments: bool) -> Result<V::Value> {
-        let span = self.raw_node()?.span;
+        let span = self.raw_node()?.span();
+        let metadata = Metadata::new(span, comments)?;
         let mut access = MetadataAccess {
             de: Self {
                 depth: self.depth + 1,
                 ..self
             },
-            span,
-            comments,
+            metadata,
             index: 0,
         };
 
         let value = visitor
             .visit_seq(&mut access)
             .map_err(|error| error.located(span))?;
-        if access.index != if comments { 2 } else { 3 } {
+        if access.index != metadata.len() {
             return Err(Error::at("metadata value was not fully consumed", span));
         }
 
@@ -208,21 +220,20 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     fn tagged<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
         let tag = node
-            .tag
-            .as_ref()
+            .tag()
             .filter(|_| self.tag_state == TagState::Unconsumed)
-            .ok_or_else(|| Error::at("expected an explicit YAML tag", node.span))?;
+            .ok_or_else(|| Error::at("expected an explicit YAML tag", node.span()))?;
 
         visitor.visit_enum(Enumeration {
             de: self,
-            variant: &tag.value,
+            variant: tag,
             value: VariantValue::Tagged(self.id),
         })
     }
 
     fn tagged_mapping<V: Visitor<'de>>(
         self,
-        node: &'s Node<'de>,
+        node: I::Node<'s>,
         variant: &'s str,
         visitor: V,
     ) -> Result<V::Value> {
@@ -238,11 +249,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         };
         let value = visitor
             .visit_map(&mut map)
-            .map_err(|error: Error| error.located(node.span))?;
+            .map_err(|error: Error| error.located(node.span()))?;
         if map.state != TagMappingState::End {
             return Err(Error::at(
                 "tagged mapping was not fully consumed",
-                node.span,
+                node.span(),
             ));
         }
 
@@ -250,10 +261,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-        let comments =
-            self.context
-                .comments
-                .get(self.context.stream, self.id, &self.context.budget)?;
+        let mut comments = self.context.input.comments(self.id, &self.context.budget)?;
         let remaining = self
             .context
             .budget
@@ -262,28 +270,27 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             .ok_or_else(|| {
                 Error::at(
                     "deserialization resource limit exceeded",
-                    self.context.stream.node(self.id).unwrap().span,
+                    self.context.input.node(self.id).ok().and_then(Node::span),
                 )
             })?;
         self.context.budget.set(remaining);
 
-        let mut ordered: Vec<_> = comments.iter().collect();
-        ordered.sort_unstable_by_key(|comment| comment.comment.span.start());
-        let records = ordered.into_iter().map(|comment| {
+        comments.sort_unstable_by_key(|comment| comment.comment.span.start());
+        let records = comments.iter().map(|comment| {
             de::value::SeqAccessDeserializer::new(CommentAccess { comment, index: 0 })
         });
 
         seed.deserialize(de::value::SeqDeserializer::new(records))
     }
 
-    fn scalar(self, expected: ScalarType) -> Result<(&'s Scalar<'de>, ScalarType)> {
+    fn scalar(self, expected: ScalarType) -> Result<(ScalarOf<'s, 'de, I>, ScalarType)> {
         let node = self.node()?;
 
         // Text destinations accept every untagged scalar spelling, so they do
         // not need implicit boolean or numeric classification.
-        if expected == ScalarType::String && node.tag.is_none() {
-            let NodeKind::Scalar(scalar) = &node.kind else {
-                return Err(Error::at("expected a scalar", node.span));
+        if expected == ScalarType::String && node.tag().is_none() {
+            let NodeKind::Scalar(scalar) = node.kind() else {
+                return Err(Error::at("expected a scalar", node.span()));
             };
 
             return Ok((scalar, ScalarType::String));
@@ -296,27 +303,22 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Ok(value)
     }
 
-    fn reject_tag(self, node: &Node<'_>) -> Result<()> {
-        if self.tag_state == TagState::Unconsumed
-            && node
-                .tag
-                .as_ref()
-                .is_some_and(|tag| !is_core_tag(&tag.value))
+    fn reject_tag(self, node: I::Node<'s>) -> Result<()> {
+        if self.tag_state == TagState::Unconsumed && node.tag().is_some_and(|tag| !is_core_tag(tag))
         {
             return Err(Error::at(
                 "non-core YAML tags require Tagged<T> or with::yaml_tag",
-                node.span,
+                node.span(),
             ));
         }
 
         Ok(())
     }
 
-    fn enum_tag(self, node: &'s Node<'de>) -> Option<&'s str> {
-        node.tag
-            .as_ref()
+    fn enum_tag(self, node: I::Node<'s>) -> Option<&'s str> {
+        node.tag()
             .filter(|_| self.yaml_tag && self.tag_state == TagState::Unconsumed)
-            .and_then(|tag| tag.value.strip_prefix('!'))
+            .and_then(|tag| tag.strip_prefix('!'))
             .filter(|name| !name.is_empty())
     }
 
@@ -327,8 +329,8 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             .get()
             .checked_sub(name.len())
             .ok_or_else(|| {
-                let node = self.context.stream.node(self.id).unwrap();
-                Error::at("expanded scalar byte limit exceeded", node.span)
+                let span = self.context.input.node(self.id).ok().and_then(Node::span);
+                Error::at("expanded scalar byte limit exceeded", span)
             })?;
         self.context.scalar_budget.set(remaining);
 
@@ -336,31 +338,31 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     }
 
     #[inline]
-    fn scalar_value(self, node: &'s Node<'de>) -> Result<(&'s Scalar<'de>, ScalarType)> {
-        let NodeKind::Scalar(s) = &node.kind else {
-            return Err(Error::at("expected a scalar", node.span));
+    fn scalar_value(self, node: I::Node<'s>) -> Result<(ScalarOf<'s, 'de, I>, ScalarType)> {
+        let NodeKind::Scalar(s) = node.kind() else {
+            return Err(Error::at("expected a scalar", node.span()));
         };
 
         let tag = if self.tag_state == TagState::ConsumedApplication {
             None
         } else {
-            node.tag.as_ref().map(|t| t.value.as_ref())
+            node.tag()
         };
 
         let kind = match tag {
             Some("!") => ScalarType::String,
             Some(tag) => match YamlType::from_tag(tag) {
                 Some(YamlType::Scalar(kind)) => kind,
-                _ => return Err(Error::at("unsupported scalar tag", node.span)),
+                _ => return Err(Error::at("unsupported scalar tag", node.span())),
             },
-            None if s.style == ScalarStyle::Plain => classify(&s.value),
+            None if s.style() == ScalarStyle::Plain => classify(s.value()),
             None => ScalarType::String,
         };
 
         if tag.is_some() && kind != ScalarType::String {
-            let actual = classify(&s.value);
+            let actual = classify(s.value());
             if actual != kind && !(kind == ScalarType::Float && actual == ScalarType::Int) {
-                return Err(Error::at("scalar does not match its tag", s.span));
+                return Err(Error::at("scalar does not match its tag", s.span()));
             }
         }
 
@@ -372,32 +374,36 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Self::visit_text(scalar, visitor)
     }
 
-    fn visit_text<V: Visitor<'de>>(scalar: &Scalar<'de>, visitor: V) -> Result<V::Value> {
-        match &scalar.value {
-            Cow::Borrowed(s) => visitor.visit_borrowed_str(s),
-            Cow::Owned(s) => visitor.visit_str(s),
+    fn visit_text<V: Visitor<'de>>(scalar: ScalarOf<'s, 'de, I>, visitor: V) -> Result<V::Value> {
+        match scalar.borrowed() {
+            Some(text) => visitor.visit_borrowed_str(text),
+            None => visitor.visit_str(scalar.value()),
         }
     }
 
-    fn integer(self) -> Result<(&'s str, u32, Span)> {
+    fn integer(self) -> Result<(&'s str, u32, Option<Span>)> {
         let (scalar, kind) = self.scalar(ScalarType::Int)?;
         Self::integer_value(scalar, kind)
     }
 
-    fn integer_value<'a>(s: &'a Scalar<'_>, kind: ScalarType) -> Result<(&'a str, u32, Span)> {
+    fn integer_value(
+        s: ScalarOf<'s, 'de, I>,
+        kind: ScalarType,
+    ) -> Result<(&'s str, u32, Option<Span>)> {
         if kind != ScalarType::Int {
-            return Err(Error::at("expected an integer", s.span));
+            return Err(Error::at("expected an integer", s.span()));
         }
 
-        let (value, radix) = if let Some(s) = s.value.strip_prefix("0x") {
+        let value = s.value();
+        let (value, radix) = if let Some(s) = value.strip_prefix("0x") {
             (s, 16)
-        } else if let Some(s) = s.value.strip_prefix("0o") {
+        } else if let Some(s) = value.strip_prefix("0o") {
             (s, 8)
         } else {
-            (s.value.as_ref(), 10)
+            (value, 10)
         };
 
-        Ok((value, radix, s.span))
+        Ok((value, radix, s.span()))
     }
 
     fn float(self) -> Result<f64> {
@@ -405,8 +411,9 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Self::float_value(scalar, kind)
     }
 
-    fn radix_integer_value(s: &Scalar<'_>, kind: ScalarType) -> Result<Option<u128>> {
-        if kind != ScalarType::Int || !(s.value.starts_with("0x") || s.value.starts_with("0o")) {
+    fn radix_integer_value(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
+        if kind != ScalarType::Int || !(s.value().starts_with("0x") || s.value().starts_with("0o"))
+        {
             return Ok(None);
         }
 
@@ -416,7 +423,7 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             .map_err(|_| Error::at("integer out of range", span))
     }
 
-    fn wide_radix_float(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
+    fn wide_radix_float(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<f64> {
         let (digits, radix, span) = Self::integer_value(s, kind)?;
         let digit_bits = if radix == 16 { 4 } else { 3 };
         let mut significand = 0_u64;
@@ -470,14 +477,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Ok(value)
     }
 
-    fn float_value(s: &Scalar<'_>, kind: ScalarType) -> Result<f64> {
+    fn float_value(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<f64> {
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
-            return Err(Error::at("expected a number", s.span));
+            return Err(Error::at("expected a number", s.span()));
         }
 
-        let unsigned = s.value.trim_start_matches(['+', '-']);
+        let unsigned = s.value().trim_start_matches(['+', '-']);
         if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
-            return Ok(if s.value.starts_with('-') {
+            return Ok(if s.value().starts_with('-') {
                 f64::NEG_INFINITY
             } else {
                 f64::INFINITY
@@ -499,17 +506,17 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         }
 
         let value: f64 = s
-            .value
+            .value()
             .parse()
-            .map_err(|_| Error::at("invalid float", s.span))?;
+            .map_err(|_| Error::at("invalid float", s.span()))?;
         if !value.is_finite() {
-            return Err(Error::at("float out of range", s.span));
+            return Err(Error::at("float out of range", s.span()));
         }
 
         Ok(value)
     }
 
-    fn check_core_tag(self, node: &Node<'_>, expected: YamlType) -> Result<()> {
+    fn check_core_tag(self, node: I::Node<'s>, expected: YamlType) -> Result<()> {
         if self.tag_state == TagState::ConsumedApplication {
             return Ok(());
         }
@@ -517,12 +524,11 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         // Non-specific `!` follows the node's shape (and forces scalar text).
         // Application tags are checked separately by reject_tag.
         if node
-            .tag
-            .as_ref()
-            .and_then(|tag| YamlType::from_tag(&tag.value))
+            .tag()
+            .and_then(YamlType::from_tag)
             .is_some_and(|declared| !expected.accepts(declared))
         {
-            return Err(Error::at("tag does not match requested type", node.span));
+            return Err(Error::at("tag does not match requested type", node.span()));
         }
 
         Ok(())
@@ -531,13 +537,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
     fn key(self) -> Result<Key<'s>> {
         let node = self.raw_node()?;
 
-        if let Some(tag) = node.tag.as_ref().filter(|tag| {
-            self.tag_state != TagState::ConsumedApplication && !is_core_tag(&tag.value)
-        }) {
+        if let Some(tag) = node
+            .tag()
+            .filter(|tag| self.tag_state != TagState::ConsumedApplication && !is_core_tag(tag))
+        {
             // Application tags define their own scalar types. Without an
             // application-specific canonical form, compare the scalar text.
-            let value = if let NodeKind::Scalar(scalar) = &node.kind {
-                Key::String(&scalar.value)
+            let value = if let NodeKind::Scalar(scalar) = node.kind() {
+                Key::String(scalar.value())
             } else {
                 Self {
                     tag_state: TagState::ConsumedApplication,
@@ -546,18 +553,18 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 .key()?
             };
 
-            return Ok(Key::Tagged(&tag.value, Box::new(value)));
+            return Ok(Key::Tagged(tag, Box::new(value)));
         }
 
-        match &node.kind {
+        match node.kind() {
             NodeKind::Scalar(_) => {
                 let (scalar, kind) = self.scalar_value(node)?;
                 Ok(match kind {
                     ScalarType::Null => Key::Null,
                     ScalarType::Bool => {
-                        Key::Bool(matches!(scalar.value.as_ref(), "true" | "True" | "TRUE"))
+                        Key::Bool(matches!(scalar.value(), "true" | "True" | "TRUE"))
                     }
-                    ScalarType::String => Key::String(&scalar.value),
+                    ScalarType::String => Key::String(scalar.value()),
                     ScalarType::Int => {
                         let (value, radix, span) = Self::integer_value(scalar, kind)?;
                         let magnitude =
@@ -590,20 +597,21 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 self.check_core_tag(node, YamlType::Mapping)?;
                 let mut pairs = entries
                     .iter()
-                    .map(|entry| Ok((self.child(entry.key).key()?, self.child(entry.value).key()?)))
+                    .map(Entry::ids)
+                    .map(|(key, value)| Ok((self.child(key).key()?, self.child(value).key()?)))
                     .collect::<Result<Vec<_>>>()?;
                 pairs.sort();
                 if pairs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-                    return Err(Error::at("duplicate mapping key", node.span));
+                    return Err(Error::at("duplicate mapping key", node.span()));
                 }
 
                 Ok(Key::Mapping(pairs))
             }
-            NodeKind::Alias { target, .. } => self.child(*target).key(),
+            NodeKind::Alias { target, .. } => self.child(target).key(),
         }
     }
 
-    fn check_mapping_keys(self, entries: &[Entry], span: Span) -> Result<()> {
+    fn check_mapping_keys(self, entries: &[I::Entry], span: Option<Span>) -> Result<()> {
         // Avoid constructing canonical keys for small string-key mappings.
         // Other key types fall back to check_general_keys.
         if entries.len() > 8 {
@@ -612,18 +620,14 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
         let mut strings = [""; 8];
 
-        for (index, entry) in entries.iter().enumerate() {
-            let de = self.child(entry.key);
+        for (index, (key, _)) in entries.iter().map(Entry::ids).enumerate() {
+            let de = self.child(key);
             let node = de.raw_node()?;
-            if !matches!(node.kind, NodeKind::Scalar(_)) {
+            if !matches!(node.kind(), NodeKind::Scalar(_)) {
                 return self.check_general_keys(entries, span);
             }
 
-            if node
-                .tag
-                .as_ref()
-                .is_some_and(|tag| !is_core_tag(&tag.value))
-            {
+            if node.tag().is_some_and(|tag| !is_core_tag(tag)) {
                 return self.check_general_keys(entries, span);
             }
 
@@ -632,9 +636,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
                 return self.check_general_keys(entries, span);
             }
 
-            let key = scalar.value.as_ref();
+            let key = scalar.value();
             if strings[..index].contains(&key) {
-                return Err(Error::at("duplicate mapping key", node.span));
+                let error = Error::at("duplicate mapping key", node.span());
+                return Err(error.in_path(format_args!(".key_at({index})")));
             }
 
             strings[index] = key;
@@ -643,15 +648,18 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         Ok(())
     }
 
-    fn check_general_keys(self, entries: &[Entry], span: Span) -> Result<()> {
+    fn check_general_keys(self, entries: &[I::Entry], span: Option<Span>) -> Result<()> {
         // Keep up to eight canonical keys on the stack. Use a hash set beyond
         // that threshold to avoid quadratic duplicate checks.
         let mut small_keys = [const { Key::Null }; 8];
         let mut large_keys =
             (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));
 
-        for (index, entry) in entries.iter().enumerate() {
-            let key = self.child(entry.key).key()?;
+        for (index, (id, _)) in entries.iter().map(Entry::ids).enumerate() {
+            let key = self
+                .child(id)
+                .key()
+                .map_err(|error| error.in_path(format_args!(".key_at({index})")))?;
             let unique = if let Some(keys) = &mut large_keys {
                 keys.insert(key)
             } else {
@@ -661,12 +669,9 @@ impl<'s, 'de> Deserializer<'s, 'de> {
             };
 
             if !unique {
-                let span = self
-                    .context
-                    .stream
-                    .node(entry.key)
-                    .map_or(span, |key| key.span);
-                return Err(Error::at("duplicate mapping key", span));
+                let span = self.context.input.node(id).map_or(span, Node::span);
+                let error = Error::at("duplicate mapping key", span);
+                return Err(error.in_path(format_args!(".key_at({index})")));
             }
         }
 
@@ -677,15 +682,15 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         self.map_node(self.node()?, visitor)
     }
 
-    fn map_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
+    fn map_node<V: Visitor<'de>>(self, node: I::Node<'s>, visitor: V) -> Result<V::Value> {
         self.reject_tag(node)?;
-        let NodeKind::Mapping { entries, .. } = &node.kind else {
-            return Err(Error::at("expected a mapping", node.span));
+        let NodeKind::Mapping { entries, .. } = node.kind() else {
+            return Err(Error::at("expected a mapping", node.span()));
         };
 
         self.check_core_tag(node, YamlType::Mapping)?;
 
-        self.check_mapping_keys(entries, node.span)?;
+        self.check_mapping_keys(entries, node.span())?;
 
         let mut access = Mapping {
             de: self,
@@ -696,9 +701,9 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
         let result = visitor
             .visit_map(&mut access)
-            .map_err(|error: Error| error.located(node.span))?;
+            .map_err(|error: Error| error.located(node.span()))?;
         if access.index != entries.len() || access.pending.is_some() {
-            return Err(Error::at("mapping was not fully consumed", node.span));
+            return Err(Error::at("mapping was not fully consumed", node.span()));
         }
 
         Ok(result)
@@ -708,10 +713,10 @@ impl<'s, 'de> Deserializer<'s, 'de> {
         self.seq_node(self.node()?, visitor)
     }
 
-    fn seq_node<V: Visitor<'de>>(self, node: &'s Node<'de>, visitor: V) -> Result<V::Value> {
+    fn seq_node<V: Visitor<'de>>(self, node: I::Node<'s>, visitor: V) -> Result<V::Value> {
         self.reject_tag(node)?;
-        let NodeKind::Sequence { items, .. } = &node.kind else {
-            return Err(Error::at("expected a sequence", node.span));
+        let NodeKind::Sequence { items, .. } = node.kind() else {
+            return Err(Error::at("expected a sequence", node.span()));
         };
 
         self.check_core_tag(node, YamlType::Sequence)?;
@@ -724,9 +729,9 @@ impl<'s, 'de> Deserializer<'s, 'de> {
 
         let result = visitor
             .visit_seq(&mut access)
-            .map_err(|error: Error| error.located(node.span))?;
+            .map_err(|error: Error| error.located(node.span()))?;
         if access.index != items.len() {
-            return Err(Error::at("sequence was not fully consumed", node.span));
+            return Err(Error::at("sequence was not fully consumed", node.span()));
         }
 
         Ok(result)
@@ -752,10 +757,7 @@ impl Key<'_> {
         match self {
             Self::Null => output.push_str("n;"),
             Self::Bool(value) => output.push_str(if *value { "b1;" } else { "b0;" }),
-            Self::String(value) => {
-                let quoted = crate::to_string(value).expect("strings serialize without errors");
-                output.push_str(quoted.strip_suffix('\n').unwrap());
-            }
+            Self::String(value) => crate::ser::write_quoted(output, value),
             Self::Integer(negative, magnitude) => {
                 write!(output, "i{}{magnitude};", if *negative { '-' } else { '+' })
                     .expect("String write");
@@ -803,7 +805,7 @@ macro_rules! integer_methods {
     };
 }
 
-impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> de::Deserializer<'de> for Deserializer<&'s Context<I>> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -815,7 +817,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
         self.reject_tag(node)?;
 
-        match &node.kind {
+        match node.kind() {
             NodeKind::Sequence { .. } => self.seq_node(node, visitor),
             NodeKind::Mapping { .. } => self.map_node(node, visitor),
             NodeKind::Scalar(_) => {
@@ -824,7 +826,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 match kind {
                     ScalarType::Null => visitor.visit_unit(),
                     ScalarType::Bool => {
-                        visitor.visit_bool(matches!(s.value.as_ref(), "true" | "True" | "TRUE"))
+                        visitor.visit_bool(matches!(s.value(), "true" | "True" | "TRUE"))
                     }
                     ScalarType::String => Self::visit_text(s, visitor),
                     ScalarType::Float => visitor.visit_f64(Self::float_value(s, kind)?),
@@ -851,7 +853,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
                 }
             }
             NodeKind::Alias { target, .. } => Self {
-                id: *target,
+                id: target,
                 depth: self.depth + 1,
                 ..self
             }
@@ -884,13 +886,13 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         } else {
             let wide = Self::float_value(scalar, kind)?;
             (
-                scalar.value.parse::<f32>().unwrap_or(wide as f32),
+                scalar.value().parse::<f32>().unwrap_or(wide as f32),
                 wide.is_finite(),
             )
         };
 
         if finite_input && !value.is_finite() {
-            return Err(Error::at("float out of range", scalar.span));
+            return Err(Error::at("float out of range", scalar.span()));
         }
 
         visitor.visit_f32(value)
@@ -903,10 +905,10 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, kind) = self.scalar(ScalarType::Bool)?;
         if kind != ScalarType::Bool {
-            return Err(Error::at("expected a boolean", s.span));
+            return Err(Error::at("expected a boolean", s.span()));
         }
 
-        visitor.visit_bool(matches!(s.value.as_ref(), "true" | "True" | "TRUE"))
+        visitor.visit_bool(matches!(s.value(), "true" | "True" | "TRUE"))
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -919,24 +921,24 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, _) = self.scalar(ScalarType::String)?;
-        let mut chars = s.value.chars();
+        let mut chars = s.value().chars();
 
         match (chars.next(), chars.next()) {
             (Some(c), None) => visitor.visit_char(c),
-            _ => Err(Error::at("expected one character", s.span)),
+            _ => Err(Error::at("expected one character", s.span())),
         }
     }
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if matches!(self.node()?.kind, NodeKind::Sequence { .. }) {
+        if matches!(self.node()?.kind(), NodeKind::Sequence { .. }) {
             return self.seq(visitor);
         }
 
         let (s, _) = self.scalar(ScalarType::String)?;
 
-        match &s.value {
-            Cow::Borrowed(s) => visitor.visit_borrowed_bytes(s.as_bytes()),
-            Cow::Owned(s) => visitor.visit_bytes(s.as_bytes()),
+        match s.borrowed() {
+            Some(text) => visitor.visit_borrowed_bytes(text.as_bytes()),
+            None => visitor.visit_bytes(s.value().as_bytes()),
         }
     }
 
@@ -949,12 +951,9 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
         // Preserve application tags for an inner Tagged<T> or yaml_tag adapter.
         // Core tags retain their normal resolution, including !!null as None.
         let application_tag = self.tag_state == TagState::Unconsumed
-            && node
-                .tag
-                .as_ref()
-                .is_some_and(|tag| !is_core_tag(&tag.value));
+            && node.tag().is_some_and(|tag| !is_core_tag(tag));
         if !application_tag
-            && matches!(node.kind, NodeKind::Scalar(_))
+            && matches!(node.kind(), NodeKind::Scalar(_))
             && self.scalar_value(node)?.1 == ScalarType::Null
         {
             visitor.visit_none()
@@ -969,7 +968,7 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let (s, kind) = self.scalar(ScalarType::Null)?;
         if kind != ScalarType::Null {
-            return Err(Error::at("expected null", s.span));
+            return Err(Error::at("expected null", s.span()));
         }
 
         visitor.visit_unit()
@@ -1055,27 +1054,30 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
 
         self.reject_tag(node)?;
 
-        match &node.kind {
+        match node.kind() {
             NodeKind::Scalar(_) => {
                 let (scalar, _) = self.scalar(ScalarType::String)?;
                 visitor.visit_enum(Enumeration {
                     de: self,
-                    variant: &scalar.value,
+                    variant: scalar.value(),
                     value: VariantValue::Unit,
                 })
             }
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
                 self.check_core_tag(node, YamlType::Mapping)?;
-                let (key, _) = self.child(entries[0].key).scalar(ScalarType::String)?;
-                visitor.visit_enum(Enumeration {
-                    de: self,
-                    variant: &key.value,
-                    value: VariantValue::Node(entries[0].value),
-                })
+                let (key, value) = entries[0].ids();
+                let (key, _) = self.child(key).scalar(ScalarType::String)?;
+                visitor
+                    .visit_enum(Enumeration {
+                        de: self,
+                        variant: key.value(),
+                        value: VariantValue::Node(value),
+                    })
+                    .map_err(|error| error.in_path(format_args!("[{:?}]", key.value())))
             }
             _ => Err(Error::at(
                 "expected an enum name or a single-entry mapping",
-                node.span,
+                node.span(),
             )),
         }
     }
@@ -1090,22 +1092,45 @@ impl<'de> de::Deserializer<'de> for Deserializer<'_, 'de> {
     }
 }
 
-struct MetadataAccess<'s, 'de> {
-    de: Deserializer<'s, 'de>,
-    span: Span,
-    comments: bool,
+struct MetadataAccess<'s, I> {
+    de: Deserializer<&'s Context<I>>,
+    metadata: Metadata,
     index: usize,
 }
 
-impl<'de> SeqAccess<'de> for &mut MetadataAccess<'_, 'de> {
+#[derive(Clone, Copy)]
+enum Metadata {
+    Span(Span),
+    Comments,
+}
+
+impl Metadata {
+    fn new(span: Option<Span>, comments: bool) -> Result<Self> {
+        if comments {
+            Ok(Self::Comments)
+        } else {
+            span.map(Self::Span)
+                .ok_or_else(|| Error::new("new node has no source span until the edit commits"))
+        }
+    }
+
+    fn len(self) -> usize {
+        match self {
+            Self::Span(_) => 3,
+            Self::Comments => 2,
+        }
+    }
+}
+
+impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut MetadataAccess<'s, I> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
-        let value = match (self.comments, self.index) {
-            (false, 0) => seed.deserialize(self.span.start().into_deserializer()),
-            (false, 1) => seed.deserialize(self.span.end().into_deserializer()),
-            (false, 2) | (true, 0) => seed.deserialize(self.de),
-            (true, 1) => self.de.comments(seed),
+        let value = match (self.metadata, self.index) {
+            (Metadata::Span(span), 0) => seed.deserialize(span.start().into_deserializer()),
+            (Metadata::Span(span), 1) => seed.deserialize(span.end().into_deserializer()),
+            (Metadata::Span(_), 2) | (Metadata::Comments, 0) => seed.deserialize(self.de),
+            (Metadata::Comments, 1) => self.de.comments(seed),
             _ => return Ok(None),
         }?;
 
@@ -1114,8 +1139,7 @@ impl<'de> SeqAccess<'de> for &mut MetadataAccess<'_, 'de> {
     }
 
     fn size_hint(&self) -> Option<usize> {
-        let fields = if self.comments { 2 } else { 3 };
-        Some(fields - self.index)
+        Some(self.metadata.len() - self.index)
     }
 }
 
@@ -1156,22 +1180,25 @@ impl<'de> SeqAccess<'de> for CommentAccess<'_, 'de> {
     }
 }
 
-struct Sequence<'s, 'de> {
-    de: Deserializer<'s, 'de>,
+struct Sequence<'s, I> {
+    de: Deserializer<&'s Context<I>>,
     items: &'s [NodeId],
     index: usize,
 }
 
-impl<'de> SeqAccess<'de> for &mut Sequence<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'s, I> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
-        let Some(&id) = self.items.get(self.index) else {
+        let index = self.index;
+        let Some(&id) = self.items.get(index) else {
             return Ok(None);
         };
 
         self.index += 1;
-        seed.deserialize(self.de.child(id)).map(Some)
+        seed.deserialize(self.de.child(id))
+            .map(Some)
+            .map_err(|error| error.in_path(format_args!("[{index}]")))
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -1179,14 +1206,33 @@ impl<'de> SeqAccess<'de> for &mut Sequence<'_, 'de> {
     }
 }
 
-struct Mapping<'s, 'de> {
-    de: Deserializer<'s, 'de>,
-    entries: &'s [Entry],
+struct Mapping<'s, I, E> {
+    de: Deserializer<&'s Context<I>>,
+    entries: &'s [E],
     index: usize,
-    pending: Option<NodeId>,
+    pending: Option<&'s E>,
 }
 
-impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> Mapping<'s, I, E> {
+    fn value_error(&self, key: NodeId, error: Error) -> Error {
+        let key = self
+            .de
+            .context
+            .input
+            .node(key)
+            .and_then(|node| self.de.scalar_value(node));
+        if let Ok((scalar, ScalarType::String)) = key {
+            error.in_path(format_args!("[{:?}]", scalar.value()))
+        } else {
+            let index = self.index - 1;
+            error.in_path(format_args!(".value_at({index})"))
+        }
+    }
+}
+
+impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> MapAccess<'de>
+    for &mut Mapping<'s, I, E>
+{
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
@@ -1194,21 +1240,26 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
             return Err(Error::new("mapping value was not consumed"));
         }
 
-        let Some(entry) = self.entries.get(self.index) else {
+        let index = self.index;
+        let Some(entry) = self.entries.get(index) else {
             return Ok(None);
         };
 
-        self.pending = Some(entry.value);
+        self.pending = Some(entry);
         self.index += 1;
-        seed.deserialize(self.de.child(entry.key)).map(Some)
+        seed.deserialize(self.de.child(entry.ids().0))
+            .map(Some)
+            .map_err(|error| error.in_path(format_args!(".key_at({index})")))
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
-        let id = self
+        let (key, value) = self
             .pending
             .take()
-            .ok_or_else(|| Error::new("mapping value requested before key"))?;
-        seed.deserialize(self.de.child(id))
+            .ok_or_else(|| Error::new("mapping value requested before key"))?
+            .ids();
+        seed.deserialize(self.de.child(value))
+            .map_err(|error| self.value_error(key, error))
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -1216,8 +1267,8 @@ impl<'de> MapAccess<'de> for &mut Mapping<'_, 'de> {
     }
 }
 
-struct TagMapping<'s, 'de> {
-    enumeration: Enumeration<'s, 'de>,
+struct TagMapping<'s, I> {
+    enumeration: Enumeration<'s, I>,
     state: TagMappingState,
 }
 
@@ -1228,7 +1279,7 @@ enum TagMappingState {
     End,
 }
 
-impl<'de> MapAccess<'de> for TagMapping<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> MapAccess<'de> for TagMapping<'s, I> {
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
@@ -1258,8 +1309,8 @@ impl<'de> MapAccess<'de> for TagMapping<'_, 'de> {
     }
 }
 
-struct Enumeration<'s, 'de> {
-    de: Deserializer<'s, 'de>,
+struct Enumeration<'s, I> {
+    de: Deserializer<&'s Context<I>>,
     variant: &'s str,
     value: VariantValue,
 }
@@ -1270,14 +1321,14 @@ enum VariantValue {
     Tagged(NodeId),
 }
 
-impl<'s, 'de> Enumeration<'s, 'de> {
-    fn payload(&self) -> Result<Deserializer<'s, 'de>> {
+impl<'s, 'de: 's, I: Input<'de>> Enumeration<'s, I> {
+    fn payload(&self) -> Result<Deserializer<&'s Context<I>>> {
         let (VariantValue::Node(id) | VariantValue::Tagged(id)) = self.value else {
             return Err(Error::new("expected a variant payload"));
         };
 
         let node = self.de.node()?;
-        let core_tag = node.tag.as_ref().is_some_and(|tag| is_core_tag(&tag.value));
+        let core_tag = node.tag().is_some_and(is_core_tag);
         let tag_state = if matches!(self.value, VariantValue::Tagged(_)) {
             if core_tag {
                 TagState::ConsumedCore
@@ -1295,7 +1346,7 @@ impl<'s, 'de> Enumeration<'s, 'de> {
     }
 }
 
-impl<'de> EnumAccess<'de> for Enumeration<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> EnumAccess<'de> for Enumeration<'s, I> {
     type Error = Error;
     type Variant = Self;
 
@@ -1305,7 +1356,7 @@ impl<'de> EnumAccess<'de> for Enumeration<'_, 'de> {
     }
 }
 
-impl<'de> VariantAccess<'de> for Enumeration<'_, 'de> {
+impl<'s, 'de: 's, I: Input<'de>> VariantAccess<'de> for Enumeration<'s, I> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
@@ -1343,10 +1394,9 @@ mod tests {
 
         let stream = astral_yaml::parse("!Text hello").unwrap();
         let context = Context {
-            stream: &stream,
+            input: super::Parsed::new(&stream, 0),
             budget: Cell::new(100),
             scalar_budget: Cell::new(100),
-            comments: crate::comments::CommentCache::new(0),
         };
         let de = Deserializer {
             context: &context,
@@ -1385,10 +1435,9 @@ mod tests {
 
         for bytes in [7, 8] {
             let context = Context {
-                stream: &stream,
+                input: super::Parsed::new(&stream, 0),
                 budget: Cell::new(10),
                 scalar_budget: Cell::new(bytes),
-                comments: crate::comments::CommentCache::new(0),
             };
             let de = Deserializer {
                 context: &context,
@@ -1424,10 +1473,9 @@ mod tests {
     fn spans_do_not_index_comments() {
         let stream = astral_yaml::parse("# before\n42 # after").unwrap();
         let context = Context {
-            stream: &stream,
+            input: super::Parsed::new(&stream, 0),
             budget: Cell::new(2),
             scalar_budget: Cell::new(100),
-            comments: crate::comments::CommentCache::new(0),
         };
         let de = Deserializer {
             context: &context,
@@ -1448,10 +1496,9 @@ mod tests {
             let bytes = Cell::new(100);
             let de = Deserializer {
                 context: &Context {
-                    stream: &stream,
+                    input: super::Parsed::new(&stream, 0),
                     budget: visits,
                     scalar_budget: bytes,
-                    comments: crate::comments::CommentCache::new(0),
                 },
                 id: stream.documents()[0].root,
                 depth: 0,
@@ -1551,10 +1598,9 @@ mod tests {
         let bytes = Cell::new(3);
         let de = Deserializer {
             context: &Context {
-                stream: &stream,
+                input: super::Parsed::new(&stream, 0),
                 budget: visits,
                 scalar_budget: bytes,
-                comments: crate::comments::CommentCache::new(0),
             },
             id: stream.documents()[0].root,
             depth: 0,
@@ -1592,10 +1638,9 @@ mod tests {
         let bytes = Cell::new(6);
         let de = Deserializer {
             context: &Context {
-                stream: &stream,
+                input: super::Parsed::new(&stream, 0),
                 budget: visits,
                 scalar_budget: bytes,
-                comments: crate::comments::CommentCache::new(0),
             },
             id: alias.unwrap(),
             depth: 0,

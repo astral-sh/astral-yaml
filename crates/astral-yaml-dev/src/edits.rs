@@ -1,6 +1,6 @@
 /// Renders a before/after YAML diff for edit snapshots.
 ///
-/// Fixed labels and context keep snapshots independent of file paths. Append `⏎`
+/// Show the diff hunks without filename headers. Append `⏎`
 /// only to lines ending in whitespace so editors cannot trim it. Double literal
 /// trailing `⏎` characters to distinguish them from the whitespace marker.
 /// Show carriage returns as `␍` so line endings survive snapshot normalization.
@@ -9,7 +9,6 @@
 pub fn edit_diff(before: &str, after: &str) -> String {
     let diff = similar::TextDiff::from_lines(before, after)
         .unified_diff()
-        .header("before.yaml", "after.yaml")
         .context_radius(3)
         .to_string();
     let mut rendered = String::new();
@@ -43,32 +42,24 @@ mod tests {
     #[test]
     fn carriage_returns_are_visible_in_diff_snapshots() {
         insta::assert_snapshot!(edit_diff("key: old\r\n", "key: new\r\n"), @"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -key: old␍
         +key: new␍
         ");
 
         insta::assert_snapshot!(edit_diff("key: old\r\n", "key: new\n"), @"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -key: old␍
         +key: new
         ");
 
         insta::assert_snapshot!(edit_diff("key: old\n", "key: ␍␛\r\n"), @"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -key: old
         +key: ␛␍␛␛␍
         ");
 
         insta::assert_snapshot!(edit_diff("key: old\r", "key: new\r"), @"
-        --- before.yaml
-        +++ after.yaml
         @@ -1 +1 @@
         -key: old␍+key: new␍
         ");

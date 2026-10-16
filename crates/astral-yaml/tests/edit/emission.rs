@@ -48,8 +48,6 @@ fn normalization_preserves_header_comments_before_leading_comments() {
 
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      key: # header
        # leading
@@ -58,8 +56,6 @@ fn normalization_preserves_header_comments_before_leading_comments() {
     +  |2 # scalar
     +  text
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      key: # header
        # leading
@@ -93,32 +89,24 @@ fn normalization_retains_multiline_scalar_styles() {
     ]
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      a
      ⏎
     -b
     +  b
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      'a
      ⏎
     -b'
     +  b'
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     -|+
     -
     +|2+
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     ->+
     -
@@ -154,8 +142,6 @@ fn normalized_block_scalars_use_their_parent_indentation() {
     insta::assert_snapshot!(outputs.join("\n"), @"
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      outer:
     -  inner: |-
@@ -163,8 +149,6 @@ fn normalized_block_scalars_use_their_parent_indentation() {
          first
          second
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      outer:
     -  - |+
@@ -211,8 +195,6 @@ fn normalization_preserves_leading_comments_in_flow_collections() {
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -[one,
     +[one, ⏎
@@ -220,16 +202,12 @@ fn normalization_preserves_leading_comments_in_flow_collections() {
        two]
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -{one: 1,
     +{one: 1, ⏎
        # second
        two: 2}
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      outer: [{
     -  # nested
@@ -348,8 +326,6 @@ fn normalization_preserves_separate_header_comments() {
         outputs.push(edit_diff(source, &output));
     }
     insta::assert_snapshot!(outputs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
      a: &a # anchor
     -  | # header
@@ -357,8 +333,6 @@ fn normalization_preserves_separate_header_comments() {
     +  |2 # header
     +  text
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -a: &a # anchor
     -  !!str # tag
@@ -369,8 +343,6 @@ fn normalization_preserves_separate_header_comments() {
     +  |2 # header
     +  text
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      a: # field
     -  &a # anchor
@@ -379,8 +351,6 @@ fn normalization_preserves_separate_header_comments() {
     +  &a # tag
        - item
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,3 @@
     -a: &a # anchor
     -  !!seq [ # opening
@@ -509,8 +479,6 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     ]
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      key: # header
        &a # anchor
@@ -519,8 +487,6 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     +    # leading
     +    value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
      - # header
        &a # anchor
@@ -529,8 +495,6 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     +    # leading
     +    value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      key: # header
     -  !!str # tag
@@ -542,8 +506,6 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     +    # leading
     +    value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      key: # header
        # before anchor
@@ -553,8 +515,6 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     +    # before value
     +    value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
      key: # header
        &a # anchor
@@ -613,8 +573,6 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
     insta::assert_snapshot!(outputs.join("\n"), @"
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -? - a
     +?
@@ -622,8 +580,6 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
        - b
      : value
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,3 @@
     -? k: v
     +?
@@ -631,8 +587,6 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
      : value
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,3 +1,4 @@
     -? &key
     +?
@@ -693,8 +647,6 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,5 @@
      # config
     ---- &root
@@ -704,8 +656,6 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
      ...
 
 
-    --- before.yaml
-    +++ after.yaml
     @@ -2,6 +2,6 @@
      ⏎
      # detached
@@ -716,8 +666,6 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
     -
     +  ⏎
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,6 @@
     -a: |+
     +a: |2+
@@ -728,8 +676,6 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
      ⏎
      b: old
 
-    --- before.yaml
-    +++ after.yaml
     @@ -2,6 +2,6 @@
      ⏎
      # detached
@@ -753,40 +699,30 @@ fn normalization_preserves_explicit_scalar_types() {
     ]
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @r"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!str 42
     \ No newline at end of file
     +!<tag:yaml.org,2002:str> 42
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!null null
     \ No newline at end of file
     +!<tag:yaml.org,2002:null> null
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!bool true
     \ No newline at end of file
     +!<tag:yaml.org,2002:bool> true
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!int '42'
     \ No newline at end of file
     +!<tag:yaml.org,2002:int> '42'
     \ No newline at end of file
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1 @@
     -!!float 1.0
     \ No newline at end of file

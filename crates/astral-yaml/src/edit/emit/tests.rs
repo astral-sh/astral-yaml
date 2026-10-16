@@ -10,21 +10,21 @@ use astral_yaml_dev::indoc;
 fn render_draft(original: &EditableDocument, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
-    let source = original.source.clone();
-    let region = region(original, original.source.root, false);
+    let source = &original.source;
+    let region = region(original, source.root, false);
     let rendered = render(
         source.emission(syntax),
-        original.source.root,
+        source.root,
         region,
-        indent(&original.source.text, region.start()),
+        indent(&source.text, region.start()),
         false,
     )
     .unwrap();
     let output = format!(
         "{}{}{}",
-        &original.source.text[..rendered.span.start()],
+        &source.text[..rendered.span.start()],
         rendered.text,
-        &original.source.text[rendered.span.end()..]
+        &source.text[rendered.span.end()..]
     );
     candidate.commit(&output).unwrap();
     output
@@ -32,10 +32,7 @@ fn render_draft(original: &EditableDocument, draft: Draft) -> String {
 
 #[test]
 fn emission_accepts_syntax_without_source_locations() {
-    use crate::edit::{
-        Comment, CommentPosition, Node,
-        view::{Emission, Syntax},
-    };
+    use crate::edit::{Comment, CommentPosition, Node, view::Syntax};
     use crate::{NodeId, ScalarStyle, comments::CommentPlacement};
 
     let source = indoc! {"
@@ -58,16 +55,13 @@ fn emission_accepts_syntax_without_source_locations() {
             position: CommentPosition::After,
         }],
     }];
-    let input = Emission::<Option<crate::Span>> {
+    let syntax = Syntax::<Option<crate::Span>> {
         nodes: &nodes,
         root: NodeId(0),
-        source,
-        options: original.source.options,
-        end_marker: original.source.end_marker,
     };
     let rendered = render(
-        input,
-        input.root,
+        original.source.emission(syntax),
+        syntax.root,
         original.source.nodes[original.source.root.0].span,
         0,
         false,
@@ -80,15 +74,9 @@ fn emission_accepts_syntax_without_source_locations() {
         &source[rendered.span.end()..],
     );
     let parsed = EditableDocument::parse(&output).unwrap();
-    let syntax = Syntax {
-        nodes: &nodes,
-        root: input.root,
-    };
     let matched = correspondence(syntax, &parsed).unwrap();
     assert!(super::comments_preserved(syntax, &parsed, &matched));
     insta::assert_snapshot!(astral_yaml_dev::edit_diff(source, &output), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,2 +1,2 @@
     ---- old
     +--- 'new' # generated
@@ -100,10 +88,13 @@ fn emission_accepts_syntax_without_source_locations() {
 #[test_case("null", "~", false)]
 #[test_case("a:", "a: null", false)]
 #[test_case("!custom", "!custom null", false)]
-#[test_case("!!null null", "!!null null", true)]
-#[test_case("!!bool true", "!!bool true", true)]
+#[test_case("! 'true'", "! true", true)]
+#[test_case("!!str '42'", "!!str 42", true)]
+#[test_case("!!null 'null'", "!!null null", true)]
+#[test_case("!!bool 'true'", "!!bool true", true)]
 #[test_case("!!int '42'", "!!int 42", true)]
-#[test_case("!!float 1.0", "!!float 1.0", true)]
+#[test_case("!!float '1.0'", "!!float 1.0", true)]
+#[test_case("!custom 'true'", "!custom true", false)]
 #[test_case("!!str 42", "!!int 42", false)]
 #[test_case("1", "2", false)]
 #[test_case("[1]", "[]", false)]
@@ -353,15 +344,15 @@ fn rendering_obeys_work_and_output_budgets(
     let mut document = EditableDocument::parse(source).unwrap();
     document.source.options.max_nodes = nodes;
     document.source.options.max_input_bytes = bytes;
-    let source = document.source.clone();
+    let source = &document.source;
     let draft = Draft::from(&document).freeze().unwrap();
-    let region = region(&document, document.source.root, false);
+    let region = region(&document, source.root, false);
     // Both committed syntax and drafts obey the same rendering limits.
     for result in [
-        render(&document, document.source.root, region, 0, false),
+        render(&document, source.root, region, 0, false),
         render(
             source.emission((&draft).into()),
-            document.source.root,
+            source.root,
             region,
             0,
             false,
@@ -1205,8 +1196,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -outer: [old] # inline
     +outer: [ # inline
@@ -1214,8 +1203,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -outer: [old] # inline
     +outer: [ # inline
@@ -1224,8 +1211,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  ]
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,4 @@
     -outer: {key: old} # inline
     +outer: { # inline
@@ -1233,8 +1218,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
     +  # added
     +  }
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1 +1,5 @@
     -outer: {key: old} # inline
     +outer: { # inline

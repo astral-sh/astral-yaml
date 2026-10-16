@@ -31,7 +31,7 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
         for style in [CollectionStyle::Flow, CollectionStyle::Block] {
             let before = document.source().to_owned();
             document
-                .edit(|editor| {
+                .edit_syntax(|editor| {
                     let outer = editor.mapping_entries(&editor.root())?[0].1.clone();
                     editor.set_collection_style(&outer, style)
                 })
@@ -40,8 +40,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
         }
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -outer:
     -  empty:
@@ -51,8 +49,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
     +  }
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,4 +1,4 @@
     -outer: {empty: ,
     +outer:
@@ -61,8 +57,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
     -  }
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -outer:
     -  empty:
@@ -73,8 +67,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
     +  }
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,5 +1,5 @@
     -outer: {empty: ,
     +outer:
@@ -84,8 +76,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
     -  }
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,6 @@
     -outer:
     -  empty:
@@ -98,8 +88,6 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
     +  }
      next: retained
 
-    --- before.yaml
-    +++ after.yaml
     @@ -1,6 +1,6 @@
     -outer: {empty: ,
     +outer:
