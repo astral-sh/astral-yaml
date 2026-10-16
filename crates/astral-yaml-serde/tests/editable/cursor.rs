@@ -366,14 +366,12 @@ fn caught_mutation_errors_still_roll_back_the_transaction(
 fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
     let source = "services: {db: {healthcheck: {retries: 3, interval: '30s'}}}\n";
     let document = edit::<Value>(source, |root| {
-        let mut health = root
-            .field("services")?
-            .field("db")?
-            .field("healthcheck")?
-            .into_mapping()?;
+        let mut health = root.field("services")?.field("db")?.field("healthcheck")?;
+        let missing = health.reborrow().field("missing").unwrap_err();
+        let mut health = health.into_mapping()?;
         assert_eq!(health.len(), 2);
         assert!(!health.is_empty());
-        assert!(health.field("missing").is_err());
+        assert_eq!(health.field("missing").unwrap_err(), missing);
         health.field("retries")?.set(5)?;
         health.field("interval")?.set("5s")?;
         assert!(health.entry("retries")?.is_occupied());

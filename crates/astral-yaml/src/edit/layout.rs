@@ -10,6 +10,13 @@ enum Tail {
     Detached(NodeId),
 }
 
+#[derive(Clone, Copy)]
+enum Presentation {
+    Unchanged,
+    QuotedScalar,
+    FlowCollection,
+}
+
 /// Formatting decisions needed before selecting rewrite regions.
 ///
 /// A block collection may need flow delimiters to keep its comments attached.
@@ -17,8 +24,7 @@ enum Tail {
 /// comment. These decisions must preserve the edited values and requested styles.
 pub(super) struct Layout {
     tails: Vec<Tail>,
-    quoted: Vec<bool>,
-    flow: Vec<bool>,
+    presentation: Vec<Presentation>,
     descendant_inline: bool,
 }
 
@@ -29,8 +35,7 @@ impl Layout {
         let mut pending = vec![(document.root, false)];
         let mut layout = Self {
             tails: vec![Tail::Closed; document.nodes.len()],
-            quoted: vec![false; document.nodes.len()],
-            flow: vec![false; document.nodes.len()],
+            presentation: vec![Presentation::Unchanged; document.nodes.len()],
             descendant_inline: false,
         };
         while let Some((id, prefix_before_slot)) = pending.pop() {
@@ -41,9 +46,10 @@ impl Layout {
                     .comments
                     .iter()
                     .any(|comment| comment.placement == CommentPlacement::Inline);
-                if emit::block_collection(&node.kind, false) {
-                    layout.flow[id.0] =
-                        !emit::block_headers_cover_comments(node, prefix_before_slot);
+                if emit::block_collection(&node.kind, false)
+                    && !emit::block_headers_cover_comments(node, prefix_before_slot)
+                {
+                    layout.presentation[id.0] = Presentation::FlowCollection;
                 }
             }
             let header = node.anchor.is_some() || node.tag.is_some();
@@ -94,7 +100,7 @@ impl Layout {
                 // an enclosing trailing comment needs adjacency to the body.
                 if comment.placement == CommentPlacement::Trailing {
                     if let Tail::Detached(owner) = tail {
-                        layout.flow[owner.0] = true;
+                        layout.presentation[owner.0] = Presentation::FlowCollection;
                         tail = Tail::Closed;
                     }
                 }
@@ -104,7 +110,7 @@ impl Layout {
                 }
                 if comment.placement == CommentPlacement::Detached {
                     if let Tail::Scalar(scalar) = tail {
-                        layout.quoted[scalar.0] = true;
+                        layout.presentation[scalar.0] = Presentation::QuotedScalar;
                     }
                     tail = if emit::block_collection(&node.kind, layout.flow(id)) {
                         Tail::Detached(id)
@@ -136,13 +142,17 @@ impl Layout {
 
     pub(super) fn tail(&self, id: NodeId) -> Option<NodeId> {
         match self.tails[id.0] {
-            Tail::Scalar(scalar) if !self.quoted[scalar.0] => Some(scalar),
+            Tail::Scalar(scalar)
+                if !matches!(self.presentation[scalar.0], Presentation::QuotedScalar) =>
+            {
+                Some(scalar)
+            }
             _ => None,
         }
     }
 
     pub(super) fn flow(&self, id: NodeId) -> bool {
-        self.flow[id.0]
+        matches!(self.presentation[id.0], Presentation::FlowCollection)
     }
 
     /// Return whether the root must start on a separate line from the document marker.
@@ -152,7 +162,7 @@ impl Layout {
     }
 
     pub(super) fn scalar_style(&self, id: NodeId, style: ScalarStyle) -> ScalarStyle {
-        if self.quoted[id.0] {
+        if matches!(self.presentation[id.0], Presentation::QuotedScalar) {
             ScalarStyle::DoubleQuoted
         } else {
             style

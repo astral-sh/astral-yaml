@@ -3,7 +3,10 @@
 use crate::{Error, to_string};
 use astral_yaml::{Span, edit as syntax};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{borrow::Cow, fmt};
+use std::{
+    borrow::Cow,
+    fmt::{self, Write},
+};
 
 #[cfg(test)]
 mod tests;
@@ -198,9 +201,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is missing or ambiguous, or an editing limit is exceeded.
     pub fn field(&mut self, name: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        let context = self.context.child(format_args!("[{name:?}]"));
-        let syntax = context.with_path(self.syntax.get(name))?;
-        context.select(syntax.ok_or_else(|| Error::new("missing mapping key")))
+        self.context
+            .child(format_args!("[{name:?}]"))
+            .select(self.syntax.field(name))
     }
 
     /// Select an occupied or vacant entry at string key `name`.
@@ -510,11 +513,9 @@ impl<'a> EditContext<'a> {
         }
     }
 
-    fn at(self, segment: fmt::Arguments<'_>) -> Self {
-        Self {
-            path: format!("{}{segment}", self.path).into(),
-            ..self
-        }
+    fn at(mut self, segment: fmt::Arguments<'_>) -> Self {
+        self.path.to_mut().write_fmt(segment).expect("String write");
+        self
     }
 
     fn child(&mut self, segment: fmt::Arguments<'_>) -> EditContext<'_> {

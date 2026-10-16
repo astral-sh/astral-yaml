@@ -130,11 +130,29 @@ impl EditableDocument {
         &mut self,
         edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
     ) -> Result<R, E> {
+        self.try_edit_syntax_with_validation(edit, |_| Ok(()))
+            .map(|(result, ())| result)
+    }
+
+    /// Edit with node handles, then validate the resulting document before committing.
+    ///
+    /// The validation callback runs after the output is parsed and checked against
+    /// the requested changes. Return the edit and validation callbacks' results after
+    /// committing. Any failure leaves the original document unchanged.
+    ///
+    /// # Errors
+    /// Propagates callback, edit, and validation errors.
+    pub fn try_edit_syntax_with_validation<R, V, E: From<Error>>(
+        &mut self,
+        edit: impl FnOnce(&mut Editor<'_>) -> Result<R, E>,
+        validate: impl FnOnce(&Self) -> Result<V, E>,
+    ) -> Result<(R, V), E> {
         let mut editor = Editor::new(self);
         let result = edit(&mut editor)?;
         let candidate = editor.finish()?;
+        let validated = validate(&candidate)?;
         *self = candidate;
-        Ok(result)
+        Ok((result, validated))
     }
 }
 

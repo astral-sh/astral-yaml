@@ -78,13 +78,14 @@ impl<T: DeserializeOwned> Editable<T> {
     /// does not contain exactly one document, cannot be deserialized as `T`, or
     /// exceeds a resource limit.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
-        Self::from_syntax(EditableDocument::parse_with_options(source, options)?)
+        let syntax = EditableDocument::parse_with_options(source, options)?;
+        let value = Self::deserialize_syntax(&syntax)?;
+        Ok(Self { value, syntax })
     }
 
-    fn from_syntax(syntax: EditableDocument) -> Result<Self, Error> {
+    fn deserialize_syntax(syntax: &EditableDocument) -> Result<T, Error> {
         let stream = parse_with_options(syntax.source(), syntax.options())?;
-        let value = from_stream(&stream)?;
-        Ok(Self { value, syntax })
+        from_stream(&stream)
     }
 
     /// Edit the document starting at its root, and return the callback's result.
@@ -180,11 +181,14 @@ impl<T: DeserializeOwned> Editable<T> {
         &mut self,
         edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, E>,
     ) -> Result<R, E> {
-        let mut syntax = self.syntax.clone();
-        let result = syntax
-            .try_edit_syntax(|editor| edit(editor).map_err(EditError))
+        let (result, value) = self
+            .syntax
+            .try_edit_syntax_with_validation(
+                |editor| edit(editor).map_err(EditError),
+                |syntax| Self::deserialize_syntax(syntax).map_err(|error| EditError(error.into())),
+            )
             .map_err(|error: EditError<E>| error.0)?;
-        *self = Self::from_syntax(syntax)?;
+        self.value = value;
         Ok(result)
     }
 }

@@ -38,8 +38,7 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
         at_column_zero: placement.at_column_zero,
         output: String::new(),
         work: options.max_nodes,
-        pending_indent: None,
-        trailing_block_scalar: false,
+        ending: EmitterEnding::Token,
     };
     match placement.before {
         super::splice::Separator::None => {}
@@ -52,12 +51,10 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     }
     Ok(Fragment {
         text: emitter.output,
-        ending: if emitter.trailing_block_scalar {
-            Ending::BlockScalar
-        } else if emitter.pending_indent.is_some() {
-            Ending::Comment
-        } else {
-            Ending::Token
+        ending: match emitter.ending {
+            EmitterEnding::Token => Ending::Token,
+            EmitterEnding::Comment { .. } => Ending::Comment,
+            EmitterEnding::BlockScalar => Ending::BlockScalar,
         },
     })
 }
@@ -271,6 +268,13 @@ enum ScalarPosition {
     FlowKey,
 }
 
+enum EmitterEnding {
+    Token,
+    // A comment terminator is materialized only when following syntax needs it.
+    Comment { indent: usize },
+    BlockScalar,
+}
+
 struct Emitter<'a, 'layout, Location> {
     document: Syntax<'a, Location>,
     options: ParseOptions,
@@ -281,9 +285,7 @@ struct Emitter<'a, 'layout, Location> {
     at_column_zero: bool,
     output: String,
     work: usize,
-    // A comment terminator is materialized only when following syntax needs it.
-    pending_indent: Option<usize>,
-    trailing_block_scalar: bool,
+    ending: EmitterEnding,
 }
 
 impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
@@ -296,7 +298,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
 
     fn push(&mut self, text: &str) -> Result<(), Error> {
         if !text.is_empty() {
-            if let Some(indent) = self.pending_indent.take() {
+            if let EmitterEnding::Comment { indent } = self.ending {
                 self.line(indent)?;
             }
         }
@@ -309,14 +311,16 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             return Err(self.error("emitted YAML exceeds input byte limit"));
         }
         if text.bytes().any(|byte| !byte.is_ascii_whitespace()) {
-            self.trailing_block_scalar = false;
+            self.ending = EmitterEnding::Token;
         }
         self.output.push_str(text);
         Ok(())
     }
 
     fn line(&mut self, indent: usize) -> Result<(), Error> {
-        self.pending_indent = None;
+        if matches!(self.ending, EmitterEnding::Comment { .. }) {
+            self.ending = EmitterEnding::Token;
+        }
         if let Some(index) = self
             .output
             .rfind('\n')
@@ -478,7 +482,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             comments.take_if(|comment| comment.position == CommentPosition::BeforeChild(child))
         {
             self.line(indent)?;
-            if !self.trailing_block_scalar {
+            if !matches!(self.ending, EmitterEnding::BlockScalar) {
                 self.push("\n")?;
             }
             self.line(indent)?;
@@ -506,7 +510,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
 
     fn comment(&mut self, comment: &Comment<Location>, indent: usize) -> Result<(), Error> {
         if comment.placement == CommentPlacement::Inline
-            && self.pending_indent.is_none()
+            && !matches!(self.ending, EmitterEnding::Comment { .. })
             && !self.output.ends_with('\n')
         {
             self.push(" ")?;
@@ -518,7 +522,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.line(indent)?;
         }
         self.comment_text(&comment.text)?;
-        self.pending_indent = Some(indent);
+        self.ending = EmitterEnding::Comment { indent };
         Ok(())
     }
 
@@ -790,7 +794,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             self.inline(comments)?;
             self.push("\n")?;
             self.push(body)?;
-            self.trailing_block_scalar = true;
+            self.ending = EmitterEnding::BlockScalar;
             return Ok(());
         }
         self.push(&text)
