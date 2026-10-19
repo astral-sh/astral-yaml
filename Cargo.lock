@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "deser"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73f38758df3495e682a29dd0c1a6326fed4ad46a274b85ea36799884127202bf"
+checksum = "43bfe67cf9a658adfb283ddfe1ca3ab882a5f9d2eb83294a926292cbde58cce5"
 dependencies = [
  "deser-core",
  "deser-derive",
@@ -423,9 +423,9 @@ dependencies = [
 
 [[package]]
 name = "deser-core"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12bd36a68e8d14a98ad4107016d65f3af3e851185f3176f05d873aaec9328472"
+checksum = "008b84ada3372d9c3ec224c4d415edc627bfc79d008798c66fb36ef062e610e4"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -436,9 +436,9 @@ dependencies = [
 
 [[package]]
 name = "deser-derive"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eca8164527abd9115827cc18284c01ebf597b2f5cf4b2e87f0e56b7654fb1c01"
+checksum = "066662685378048fc5f87e4b2ab83bd12ec278e5465607ff8050ab27440f2db3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -447,9 +447,9 @@ dependencies = [
 
 [[package]]
 name = "deser-value"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d92341b8f09ca41e6a5e9f5eed1f7f2c8025cd11922ce9b1cdb2bbe90e5faf7"
+checksum = "bbfacb84c4f33b80f23f310625adfdd380097aebe404ead958476a52e95b7ee8"
 dependencies = [
  "deser-core",
  "indexmap",
@@ -457,11 +457,13 @@ dependencies = [
 
 [[package]]
 name = "deser-yaml"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728645c3d2f7eb1bc58353d7f9c05ef5392f1ccc49ac604aae8e25fdb085a5f3"
+checksum = "20efcd913390e66c7758b1ca0c3768cdc253fc4a42be960031786af324dfaa97"
 dependencies = [
  "deser-core",
+ "itoa",
+ "simdutf8",
  "zmij",
 ]
 
@@ -617,9 +619,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
+checksum = "b67d3d2e287e4b86c10b3f3b641033d1f89b74bdb39d05f34952e2b9a6fe21cd"
 dependencies = [
  "console",
  "once_cell",
@@ -1045,6 +1047,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
 name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1110,7 +1118,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",
