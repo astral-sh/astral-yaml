@@ -110,6 +110,14 @@ struct KeyLookahead {
     plain_end: Option<usize>,
 }
 
+/// The grammar following a block collection's entry indicator.
+#[derive(Clone, Copy)]
+enum BlockEntry {
+    SequenceItem,
+    ExplicitMapping,
+    ImplicitMappingValue,
+}
+
 impl<'a> Parser<'a> {
     fn error(&self, message: &'static str) -> Error {
         Error {
@@ -670,6 +678,32 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
+    fn block_entry(&mut self, indent: usize, depth: usize, entry: BlockEntry) -> Result<NodeId> {
+        self.pos += 1;
+        self.spaces();
+
+        let at = self.pos;
+        let indentless = !matches!(entry, BlockEntry::SequenceItem);
+        if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
+            if self.byte() == Some(b'#') {
+                self.comment()?;
+            }
+
+            self.newline();
+            self.block_space()?;
+            let nested = !self.boundary()
+                && (self.column() > indent
+                    || (indentless && self.column() == indent && self.indicator(b'-')));
+            if !nested {
+                return self.empty(at);
+            }
+        } else if matches!(entry, BlockEntry::ImplicitMappingValue) {
+            return self.implicit_mapping_value(indent, depth);
+        }
+
+        self.block(signed(indent), depth, indentless)
+    }
+
     fn block_sequence(
         &mut self,
         indent: usize,
@@ -686,27 +720,8 @@ impl<'a> Parser<'a> {
         let mut end = self.pos;
 
         loop {
-            self.pos += 1;
-            self.spaces();
-
-            let empty_at = self.pos;
-            let item = if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
-                if self.byte() == Some(b'#') {
-                    self.comment()?;
-                }
-
-                self.newline();
-                self.block_space()?;
-                if !self.boundary() && self.column() > indent {
-                    self.block(signed(indent), depth + 1, false)?
-                } else {
-                    self.empty(empty_at)?
-                }
-            } else {
-                self.block(signed(indent), depth + 1, false)?
-            };
-
-            end = end.max(self.nodes[item.0].span.end).max(empty_at);
+            let item = self.block_entry(indent, depth + 1, BlockEntry::SequenceItem)?;
+            end = end.max(self.nodes[item.0].span.end);
             items.push(item);
             if self.boundary() || self.column() != indent || !self.indicator(b'-') {
                 break;
@@ -907,28 +922,7 @@ impl<'a> Parser<'a> {
             let start = self.pos;
             let explicit = self.indicator(b'?');
             let key = if explicit {
-                self.pos += 1;
-                self.spaces();
-
-                let at = self.pos;
-                if matches!(self.byte(), None | Some(b'\n' | b'\r' | b'#')) {
-                    if self.byte() == Some(b'#') {
-                        self.comment()?;
-                    }
-
-                    self.newline();
-                    self.block_space()?;
-                    if !self.boundary()
-                        && (self.column() > indent
-                            || (self.column() == indent && self.indicator(b'-')))
-                    {
-                        self.block(signed(indent), depth + 1, true)?
-                    } else {
-                        self.empty(at)?
-                    }
-                } else {
-                    self.block(signed(indent), depth + 1, true)?
-                }
+                self.block_entry(indent, depth + 1, BlockEntry::ExplicitMapping)?
             } else if self.indicator(b':') {
                 self.empty(self.pos)?
             } else {
@@ -949,28 +943,12 @@ impl<'a> Parser<'a> {
 
             let has_value = self.indicator(b':') && (!explicit || self.column() == indent);
             let value = if has_value {
-                self.pos += 1;
-                self.spaces();
-
-                let at = self.pos;
-                if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
-                    if self.byte() == Some(b'#') {
-                        self.comment()?;
-                    }
-
-                    self.newline();
-                    self.block_space()?;
-                    if !self.boundary()
-                        && (self.column() > indent
-                            || (self.column() == indent && self.indicator(b'-')))
-                    {
-                        self.block(signed(indent), depth + 1, true)?
-                    } else {
-                        self.empty(at)?
-                    }
+                let entry = if explicit {
+                    BlockEntry::ExplicitMapping
                 } else {
-                    self.mapping_value(indent, depth + 1, explicit)?
-                }
+                    BlockEntry::ImplicitMappingValue
+                };
+                self.block_entry(indent, depth + 1, entry)?
             } else if explicit {
                 self.empty(self.nodes[key.0].span.end)?
             } else {
@@ -1007,22 +985,20 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
-    fn mapping_value(&mut self, indent: usize, depth: usize, explicit: bool) -> Result<NodeId> {
-        if !explicit
-            && (self.simple_colon().is_some() || self.indicator(b'-') || self.indicator(b'?'))
-        {
+    fn implicit_mapping_value(&mut self, indent: usize, depth: usize) -> Result<NodeId> {
+        if self.simple_colon().is_some() || self.indicator(b'-') || self.indicator(b'?') {
             return Err(self.error("compact mapping is not allowed after an implicit key"));
         }
 
-        if !explicit && !matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>' | b'?' | b':')) {
-            // Lookahead has ruled out a block collection. Parse the inline
-            // value without repeating block dispatch.
-            let value = self.inline(false, signed(indent), depth)?;
-            self.finish_line()?;
-            Ok(value)
-        } else {
-            self.block(signed(indent), depth, true)
+        if matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>' | b'?' | b':')) {
+            return self.block(signed(indent), depth, true);
         }
+
+        // Lookahead has ruled out a block collection. Parse the inline
+        // value without repeating block dispatch.
+        let value = self.inline(false, signed(indent), depth)?;
+        self.finish_line()?;
+        Ok(value)
     }
 
     fn tag_prefix(&self, handle: &str) -> Option<&str> {
@@ -1259,6 +1235,39 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn flow_pair(
+        &mut self,
+        start: usize,
+        key: NodeId,
+        closing: u8,
+        parent: isize,
+        depth: usize,
+    ) -> Result<Entry> {
+        let value = if self.byte() == Some(b':') {
+            self.flow_value_start(key)?;
+            self.flow_space(parent)?;
+            if self
+                .byte()
+                .is_some_and(|byte| byte == b',' || byte == closing)
+            {
+                self.empty(self.pos)?
+            } else {
+                self.inline(true, parent, depth)?
+            }
+        } else {
+            self.empty(self.pos)?
+        };
+
+        Ok(Entry {
+            key,
+            value,
+            span: Span {
+                start,
+                end: self.nodes[value.0].span.end,
+            },
+        })
+    }
+
     fn flow_sequence(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
         self.pos += 1;
         self.flow_space(parent)?;
@@ -1292,27 +1301,11 @@ impl<'a> Parser<'a> {
                     return Err(self.error("invalid implicit flow pair key"));
                 }
 
-                let value = if self.byte() == Some(b':') {
-                    self.flow_value_start(key)?;
-                    self.flow_space(parent)?;
-                    if matches!(self.byte(), Some(b',' | b']')) {
-                        self.empty(self.pos)?
-                    } else {
-                        self.inline(true, parent, depth + 1)?
-                    }
-                } else {
-                    self.empty(self.pos)?
-                };
-
-                let end = self.nodes[value.0].span.end;
+                let entry = self.flow_pair(start, key, b']', parent, depth + 1)?;
                 let pair = self.empty(start)?;
-                self.nodes[pair.0].span.end = end;
+                self.nodes[pair.0].span.end = entry.span.end;
                 self.nodes[pair.0].kind = NodeKind::Mapping {
-                    entries: vec![Entry {
-                        key,
-                        value,
-                        span: Span { start, end },
-                    }],
+                    entries: vec![entry],
                     style: CollectionStyle::Flow,
                 };
 
@@ -1364,26 +1357,7 @@ impl<'a> Parser<'a> {
             let key = self.inline(true, parent, depth + 1)?;
 
             self.flow_space(parent)?;
-            let value = if self.byte() == Some(b':') {
-                self.flow_value_start(key)?;
-                self.flow_space(parent)?;
-                if matches!(self.byte(), Some(b',' | b'}')) {
-                    self.empty(self.pos)?
-                } else {
-                    self.inline(true, parent, depth + 1)?
-                }
-            } else {
-                self.empty(self.pos)?
-            };
-
-            entries.push(Entry {
-                key,
-                value,
-                span: Span {
-                    start,
-                    end: self.nodes[value.0].span.end,
-                },
-            });
+            entries.push(self.flow_pair(start, key, b'}', parent, depth + 1)?);
 
             self.flow_space(parent)?;
 

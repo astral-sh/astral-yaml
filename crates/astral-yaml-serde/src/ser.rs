@@ -29,8 +29,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
     let mut serializer = Serializer {
         output: String::new(),
         depth: 0,
-        tagged: false,
-        core_tag: None,
+        pending_tag: None,
         yaml_tag: false,
         keys: keys::Keys::default(),
     };
@@ -43,8 +42,7 @@ pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
 struct Serializer {
     output: String,
     depth: usize,
-    tagged: bool,
-    core_tag: Option<YamlType>,
+    pending_tag: Option<tag::Constraint>,
     yaml_tag: bool,
     keys: keys::Keys,
 }
@@ -64,23 +62,15 @@ impl Serializer {
     }
 
     #[inline]
-    fn quoted(&mut self, value: &str) {
-        self.tagged = false;
-        self.yaml_tag = false;
-        write_quoted(&mut self.output, value);
-    }
-
-    #[inline]
     fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
         // Nested collections without a core tag only need a depth increment.
-        if self.depth == 0 || self.depth >= MAX_DEPTH || self.core_tag.is_some() {
-            self.enter_compound(mapping)?;
+        let tag = self.take_core_tag();
+        if self.depth == 0 || self.depth >= MAX_DEPTH || tag.is_some() {
+            self.enter_compound(mapping, tag)?;
         } else {
             self.depth += 1;
         }
 
-        self.tagged = false;
-        self.yaml_tag = false;
         self.output.push(if mapping { '{' } else { '[' });
         let key_scope = self.keys.scope();
         Ok(Compound {
@@ -97,8 +87,8 @@ impl Serializer {
     }
 
     #[cold]
-    fn enter_compound(&mut self, mapping: bool) -> Result<()> {
-        self.check_collection_tag(mapping)?;
+    fn enter_compound(&mut self, mapping: bool, tag: Option<YamlType>) -> Result<()> {
+        Self::check_collection_tag(tag, mapping)?;
         self.enter()
     }
 
@@ -110,9 +100,9 @@ impl Serializer {
         }
 
         self.enter()?;
-        self.check_collection_tag(true)?;
+        Self::check_collection_tag(self.take_core_tag(), true)?;
         self.output.push('{');
-        self.quoted(name);
+        write_quoted(&mut self.output, name);
         self.output.push_str(": ");
 
         let mut compound = self.compound(mapping)?;
@@ -121,18 +111,24 @@ impl Serializer {
     }
 
     fn number(&mut self, value: impl std::fmt::Display) -> Result<()> {
-        self.tagged = false;
-        self.yaml_tag = false;
         let start = self.output.len();
         write!(self.output, "{value}").expect("String write");
         self.check_written_scalar_tag(start)
     }
 
-    // Most values have no explicit core tag, so only clear the slot when set.
+    /// Consume the current node's tag state and return any core type constraint.
+    #[inline]
+    fn take_core_tag(&mut self) -> Option<YamlType> {
+        self.yaml_tag = false;
+        match self.pending_tag.take() {
+            Some(tag::Constraint::Core(kind)) => Some(kind),
+            Some(tag::Constraint::Any) | None => None,
+        }
+    }
+
     #[inline]
     fn check_scalar_tag(&mut self, value: &str) -> Result<()> {
-        if let Some(tag) = self.core_tag {
-            self.core_tag = None;
+        if let Some(tag) = self.take_core_tag() {
             Self::check_tagged_scalar(tag, value)?;
         }
 
@@ -141,8 +137,7 @@ impl Serializer {
 
     #[inline]
     fn check_written_scalar_tag(&mut self, start: usize) -> Result<()> {
-        if let Some(tag) = self.core_tag {
-            self.core_tag = None;
+        if let Some(tag) = self.take_core_tag() {
             Self::check_tagged_scalar(tag, &self.output[start..])?;
         }
 
@@ -158,14 +153,13 @@ impl Serializer {
         Ok(())
     }
 
-    fn check_collection_tag(&mut self, mapping: bool) -> Result<()> {
-        let actual = if mapping {
-            YamlType::Mapping
-        } else {
-            YamlType::Sequence
-        };
-        if let Some(tag) = self.core_tag {
-            self.core_tag = None;
+    fn check_collection_tag(tag: Option<YamlType>, mapping: bool) -> Result<()> {
+        if let Some(tag) = tag {
+            let actual = if mapping {
+                YamlType::Mapping
+            } else {
+                YamlType::Sequence
+            };
             if tag != actual {
                 return Err(Error::new("serialized value does not match its YAML tag"));
             }
@@ -174,18 +168,25 @@ impl Serializer {
         Ok(())
     }
 
+    fn require_untagged(&self) -> Result<()> {
+        if self.pending_tag.is_some() {
+            return Err(Error::new("a YAML node cannot have multiple tags"));
+        }
+
+        Ok(())
+    }
+
+    fn write_tag(&mut self, tag: tag::Tag) {
+        self.pending_tag = Some(tag.write(&mut self.output));
+    }
+
     fn enum_tag(&mut self, variant: &str) -> Result<()> {
         if variant.is_empty() {
             return Err(Error::new("an enum tag requires a nonempty variant name"));
         }
 
-        if self.tagged {
-            return Err(Error::new("a YAML node cannot have multiple tags"));
-        }
-
-        let tag = ser::Serializer::serialize_str(tag::TagSerializer, &format!("!{variant}"))?;
-        self.output.push_str(&tag);
-        self.tagged = true;
+        self.require_untagged()?;
+        self.write_tag(tag::Tag::parse(&format!("!{variant}"))?);
         Ok(())
     }
 }
@@ -227,8 +228,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_bool(self, value: bool) -> Result<()> {
         let value = if value { "true" } else { "false" };
         self.check_scalar_tag(value)?;
-        self.tagged = false;
-        self.yaml_tag = false;
         self.output.push_str(value);
         Ok(())
     }
@@ -236,8 +235,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_f32(self, value: f32) -> Result<()> {
         if value.is_finite() {
             let start = self.output.len();
-            self.tagged = false;
-            self.yaml_tag = false;
             write!(self.output, "{value}").expect("String write");
             if !self.output[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0");
@@ -250,8 +247,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_f64(self, value: f64) -> Result<()> {
-        self.tagged = false;
-        self.yaml_tag = false;
         let start = self.output.len();
         if value.is_nan() {
             self.output.push_str(".nan");
@@ -277,7 +272,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_str(self, value: &str) -> Result<()> {
         self.check_scalar_tag(value)?;
-        self.quoted(value);
+        write_quoted(&mut self.output, value);
         Ok(())
     }
 
@@ -305,8 +300,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_unit(self) -> Result<()> {
         self.check_scalar_tag("null")?;
-        self.tagged = false;
-        self.yaml_tag = false;
         self.output.push_str("null");
         Ok(())
     }
@@ -318,7 +311,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_unit_variant(self, _: &'static str, _: u32, variant: &'static str) -> Result<()> {
         if std::mem::take(&mut self.yaml_tag) {
             self.enum_tag(variant)?;
-            self.tagged = false;
+            self.pending_tag = None;
             return Ok(());
         }
 
@@ -369,12 +362,8 @@ impl<'a> ser::Serializer for &'a mut Serializer {
                 return Err(Error::new("a tagged value requires a tag and payload"));
             }
 
-            if self.tagged {
-                return Err(Error::new("a YAML node cannot have multiple tags"));
-            }
-
+            self.require_untagged()?;
             self.enter()?;
-            self.tagged = true;
             self.yaml_tag = false;
             let key_scope = self.keys.scope();
             return Ok(Compound {
@@ -493,11 +482,7 @@ impl SerializeSeq for Compound<'_> {
         match self.state {
             CompoundState::Tag => {
                 let tag = value.serialize(tag::TagSerializer)?;
-                self.serializer.core_tag = tag
-                    .strip_prefix("!<")
-                    .and_then(|tag| tag.strip_suffix('>'))
-                    .and_then(YamlType::from_tag);
-                self.serializer.output.push_str(&tag);
+                self.serializer.write_tag(tag);
                 self.serializer.output.push(' ');
                 self.state = CompoundState::TaggedValue;
                 return Ok(());
