@@ -3,8 +3,10 @@ use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 use serde::Deserialize;
 
 fn deser_documents<'a, T: deser::Deserialize<'a>>(source: &'a str) -> Vec<T> {
-    let config = deser_yaml::DeserializerConfig::new().merge_keys(false);
-    let mut deserializer = deser_yaml::Deserializer::from_str_with_config(source, &config);
+    let config = deser_yaml::DeserializerConfig::builder()
+        .merge_keys(false)
+        .build();
+    let mut deserializer = deser_yaml::Deserializer::from_str_with_config(source, config);
 
     deserializer.iter::<T>().collect::<Result<_, _>>().unwrap()
 }
