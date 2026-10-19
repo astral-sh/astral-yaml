@@ -1,7 +1,59 @@
-use crate::Error;
+use crate::{Error, schema::YamlType};
 use serde::{Serialize, ser};
 
-/// Extracts the runtime tag string from the private Tagged tuple protocol.
+pub(super) enum Constraint {
+    Any,
+    Core(YamlType),
+}
+
+pub(super) struct Tag {
+    spelling: String,
+    constraint: Constraint,
+}
+
+impl Tag {
+    pub(super) fn parse(tag: &str) -> Result<Self, Error> {
+        let spelling = if tag == "!" {
+            tag.to_owned()
+        } else {
+            // Reuse the parser's URI and tag-handle validation. Comparing the
+            // expanded tag also rejects strings that inject additional YAML.
+            let spelling = format!("!<{tag}>");
+            let stream =
+                astral_yaml::parse(&spelling).map_err(|_| Error::new("invalid YAML tag"))?;
+            let expanded_tag = match stream.documents() {
+                [document] => stream
+                    .node(document.root)
+                    .and_then(|node| node.tag.as_ref()),
+                _ => None,
+            };
+            if expanded_tag.is_none_or(|property| property.value != tag) {
+                return Err(Error::new("invalid YAML tag"));
+            }
+
+            if tag.strip_prefix('!').is_some_and(|name| {
+                name.bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            }) {
+                tag.to_owned()
+            } else {
+                spelling
+            }
+        };
+
+        Ok(Self {
+            spelling,
+            constraint: YamlType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
+        })
+    }
+
+    pub(super) fn write(self, output: &mut String) -> Constraint {
+        output.push_str(&self.spelling);
+        self.constraint
+    }
+}
+
+/// Extracts a validated tag from the private Tagged tuple protocol.
 pub(super) struct TagSerializer;
 
 macro_rules! reject {
@@ -15,43 +67,18 @@ macro_rules! reject {
 }
 
 impl ser::Serializer for TagSerializer {
-    type Ok = String;
+    type Ok = Tag;
     type Error = Error;
-    type SerializeSeq = ser::Impossible<String, Error>;
-    type SerializeTuple = ser::Impossible<String, Error>;
-    type SerializeTupleStruct = ser::Impossible<String, Error>;
-    type SerializeTupleVariant = ser::Impossible<String, Error>;
-    type SerializeMap = ser::Impossible<String, Error>;
-    type SerializeStruct = ser::Impossible<String, Error>;
-    type SerializeStructVariant = ser::Impossible<String, Error>;
+    type SerializeSeq = ser::Impossible<Self::Ok, Error>;
+    type SerializeTuple = ser::Impossible<Self::Ok, Error>;
+    type SerializeTupleStruct = ser::Impossible<Self::Ok, Error>;
+    type SerializeTupleVariant = ser::Impossible<Self::Ok, Error>;
+    type SerializeMap = ser::Impossible<Self::Ok, Error>;
+    type SerializeStruct = ser::Impossible<Self::Ok, Error>;
+    type SerializeStructVariant = ser::Impossible<Self::Ok, Error>;
 
-    fn serialize_str(self, tag: &str) -> Result<String, Error> {
-        if tag == "!" {
-            return Ok(tag.to_owned());
-        }
-
-        // Reuse the parser's URI and tag-handle validation. Comparing the
-        // expanded tag also rejects strings that inject additional YAML.
-        let spelling = format!("!<{tag}>");
-        let stream = astral_yaml::parse(&spelling).map_err(|_| Error::new("invalid YAML tag"))?;
-        let expanded_tag = match stream.documents() {
-            [document] => stream
-                .node(document.root)
-                .and_then(|node| node.tag.as_ref()),
-            _ => None,
-        };
-        if expanded_tag.is_none_or(|property| property.value != tag) {
-            return Err(Error::new("invalid YAML tag"));
-        }
-
-        if tag.strip_prefix('!').is_some_and(|name| {
-            name.bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        }) {
-            Ok(tag.to_owned())
-        } else {
-            Ok(spelling)
-        }
+    fn serialize_str(self, tag: &str) -> Result<Self::Ok, Error> {
+        Tag::parse(tag)
     }
 
     reject! {
@@ -76,7 +103,7 @@ impl ser::Serializer for TagSerializer {
         serialize_unit_variant(_name: &'static str, _index: u32, _variant: &'static str);
     }
 
-    fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<String, Error> {
+    fn serialize_some<T: Serialize + ?Sized>(self, _: &T) -> Result<Self::Ok, Error> {
         Err(Error::new("expected a YAML tag string"))
     }
 
@@ -84,7 +111,7 @@ impl ser::Serializer for TagSerializer {
         self,
         _: &'static str,
         _: &T,
-    ) -> Result<String, Error> {
+    ) -> Result<Self::Ok, Error> {
         Err(Error::new("expected a YAML tag string"))
     }
 
@@ -94,7 +121,7 @@ impl ser::Serializer for TagSerializer {
         _: u32,
         _: &'static str,
         _: &T,
-    ) -> Result<String, Error> {
+    ) -> Result<Self::Ok, Error> {
         Err(Error::new("expected a YAML tag string"))
     }
 
