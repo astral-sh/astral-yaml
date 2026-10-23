@@ -2,6 +2,16 @@
 
 Development requires `rustup` and `uv`. Run commands from the repository root.
 
+## Rust style
+
+Use stable `rustfmt` and the workspace Clippy lints. For API and implementation
+choices, consult [Google's Rust style guide](https://google.github.io/styleguide/rustguide.html).
+
+Keep the fixed YAML 1.2 scalar and collection styles exhaustively matchable.
+Keep `ParseOptions` constructible with `..Default::default()` so callers can
+override individual limits. Document which source and byte offsets a public
+span refers to.
+
 ## Checks
 
 ```sh

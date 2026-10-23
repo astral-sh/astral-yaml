@@ -61,21 +61,31 @@ pub struct Node<Location = Span> {
 /// be any kind of YAML node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeKind {
+    /// Decoded text with its YAML presentation.
     Scalar {
+        /// The text after YAML escapes and line folding have been applied.
         value: String,
+        /// The scalar style retained by the editor.
         style: ScalarStyle,
     },
+    /// A sequence of child nodes.
     Sequence {
+        /// IDs in the current sequence order.
         items: Vec<NodeId>,
+        /// The block or flow style of the sequence.
         style: CollectionStyle,
     },
+    /// A mapping whose keys can themselves be collections.
     Mapping {
+        /// Pairs of key and value IDs in the current entry order.
         entries: Vec<(NodeId, NodeId)>,
+        /// The block or flow style of the mapping.
         style: CollectionStyle,
     },
     /// An alias to the node that defines its anchor.
     /// The alias name comes from that node's anchor.
     Alias {
+        /// The anchored node, which can be an ancestor of the alias.
         target: NodeId,
     },
 }

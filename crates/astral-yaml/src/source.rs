@@ -4,10 +4,15 @@ use std::borrow::Cow;
 /// An encoding recognized by YAML 1.2's byte-pattern detection rules.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Encoding {
+    /// UTF-8, also the default for empty input.
     Utf8,
+    /// UTF-16 with the high byte of each code unit first.
     Utf16Be,
+    /// UTF-16 with the low byte of each code unit first.
     Utf16Le,
+    /// UTF-32 with the most significant byte first.
     Utf32Be,
+    /// UTF-32 with the least significant byte first.
     Utf32Le,
 }
 
@@ -132,16 +137,19 @@ impl<'a> Source<'a> {
         })
     }
 
+    /// The UTF-8 text used by the parser, including any leading byte order mark.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    /// The original bytes before decoding, including any byte order mark.
     #[must_use]
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }
 
+    /// The encoding detected from the original byte pattern.
     #[must_use]
     pub const fn encoding(&self) -> Encoding {
         self.encoding

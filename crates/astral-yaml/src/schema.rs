@@ -3,10 +3,15 @@
 /// The implicit core-schema type of a plain scalar.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScalarType {
+    /// A null spelling, including the empty plain scalar and `~`.
     Null,
+    /// A core-schema spelling of `true` or `false`.
     Bool,
+    /// A decimal, octal, or hexadecimal integer of any magnitude.
     Int,
+    /// A floating-point spelling, including infinity and NaN.
     Float,
+    /// Text that does not match another core-schema type.
     String,
 }
 

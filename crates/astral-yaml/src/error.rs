@@ -4,7 +4,9 @@ use std::fmt;
 /// An error and its source span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
+    /// The range in the input to the failing operation. Decoding uses the original bytes.
     pub span: Span,
+    /// The diagnostic text without its source range.
     pub message: &'static str,
 }
 

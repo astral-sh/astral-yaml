@@ -34,7 +34,9 @@ macro_rules! edit_path {
 /// One step in an edit path. Strings are literal mapping keys, not path expressions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathSegment<'a> {
+    /// A literal string key in a mapping.
     Key(&'a str),
+    /// A zero-based position in a sequence.
     Index(usize),
 }
 
