@@ -136,6 +136,13 @@ enum BlockEntry {
     ImplicitMappingValue,
 }
 
+/// Whether a block sequence must be indented beyond its parent.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SequenceIndent {
+    Required,
+    Optional,
+}
+
 impl<'source> Parser<'source, '_> {
     fn error(&self, message: &'static str) -> Error {
         Error {
@@ -455,7 +462,7 @@ impl<'source> Parser<'source, '_> {
             let root = if self.boundary() {
                 self.empty(self.pos)?
             } else {
-                self.block(-1, 0, false)?
+                self.block(-1, 0, SequenceIndent::Required)?
             };
 
             let content_end = self.nodes[root.0].span.end;
@@ -592,15 +599,20 @@ impl<'source> Parser<'source, '_> {
         Ok(directives)
     }
 
-    fn block(&mut self, parent: isize, depth: usize, indentless: bool) -> Result<NodeId> {
-        self.block_into(parent, depth, indentless, None)
+    fn block(
+        &mut self,
+        parent: isize,
+        depth: usize,
+        sequence_indent: SequenceIndent,
+    ) -> Result<NodeId> {
+        self.block_into(parent, depth, sequence_indent, None)
     }
 
     fn block_into(
         &mut self,
         parent: isize,
         depth: usize,
-        indentless: bool,
+        sequence_indent: SequenceIndent,
         existing: Option<NodeId>,
     ) -> Result<NodeId> {
         self.check_depth(depth)?;
@@ -630,7 +642,7 @@ impl<'source> Parser<'source, '_> {
         }
 
         if existing.is_none() && !matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>')) {
-            let id = self.inline(false, parent, depth)?;
+            let id = self.inline(CollectionStyle::Block, parent, depth)?;
             self.finish_line()?;
             return Ok(id);
         }
@@ -641,7 +653,7 @@ impl<'source> Parser<'source, '_> {
             self.empty(start)?
         };
 
-        self.properties(id, false, parent)?;
+        self.properties(id, CollectionStyle::Block, parent)?;
         if self.byte() == Some(b'#') {
             self.comment()?;
         }
@@ -649,12 +661,9 @@ impl<'source> Parser<'source, '_> {
         let property_end = self.pos;
         if self.newline() {
             self.block_space()?;
-            if !self.boundary()
-                && (signed(self.column()) > parent
-                    || (indentless && signed(self.column()) == parent && self.indicator(b'-')))
-            {
+            if self.starts_nested_block(parent, sequence_indent) {
                 // Properties and content belong to the same node.
-                return self.block_into(parent, depth, indentless, Some(id));
+                return self.block_into(parent, depth, sequence_indent, Some(id));
             }
 
             let span = Span {
@@ -674,7 +683,7 @@ impl<'source> Parser<'source, '_> {
         let content_start = self.pos;
         let kind = match self.byte() {
             Some(b'|' | b'>') => self.block_scalar(parent)?,
-            _ => self.inline_kind(false, parent, depth)?,
+            _ => self.inline_kind(CollectionStyle::Block, parent, depth)?,
         };
 
         if matches!(kind, NodeKind::Alias { .. })
@@ -705,12 +714,26 @@ impl<'source> Parser<'source, '_> {
         Ok(id)
     }
 
+    fn starts_nested_block(&self, parent: isize, sequence_indent: SequenceIndent) -> bool {
+        let column = signed(self.column());
+        !self.boundary()
+            && (column > parent
+                || (sequence_indent == SequenceIndent::Optional
+                    && column == parent
+                    && self.indicator(b'-')))
+    }
+
     fn block_entry(&mut self, indent: usize, depth: usize, entry: BlockEntry) -> Result<NodeId> {
         self.pos += 1;
         self.spaces();
 
         let at = self.pos;
-        let indentless = !matches!(entry, BlockEntry::SequenceItem);
+        let sequence_indent = match entry {
+            BlockEntry::SequenceItem => SequenceIndent::Required,
+            BlockEntry::ExplicitMapping | BlockEntry::ImplicitMappingValue => {
+                SequenceIndent::Optional
+            }
+        };
         if matches!(self.byte(), None | Some(b'\r' | b'\n' | b'#')) {
             if self.byte() == Some(b'#') {
                 self.comment()?;
@@ -718,10 +741,7 @@ impl<'source> Parser<'source, '_> {
 
             self.newline();
             self.block_space()?;
-            let nested = !self.boundary()
-                && (self.column() > indent
-                    || (indentless && self.column() == indent && self.indicator(b'-')));
-            if !nested {
+            if !self.starts_nested_block(signed(indent), sequence_indent) {
                 self.check_depth(depth)?;
                 return self.empty(at);
             }
@@ -729,7 +749,7 @@ impl<'source> Parser<'source, '_> {
             return self.implicit_mapping_value(indent, depth);
         }
 
-        self.block(signed(indent), depth, indentless)
+        self.block(signed(indent), depth, sequence_indent)
     }
 
     fn block_sequence(
@@ -955,7 +975,7 @@ impl<'source> Parser<'source, '_> {
                 self.empty(self.pos)?
             } else {
                 let before = self.pos;
-                let key = self.inline(false, signed(indent), depth + 1)?;
+                let key = self.inline(CollectionStyle::Block, signed(indent), depth + 1)?;
                 self.spaces();
 
                 let key_source = &self.source[before..self.pos];
@@ -1019,12 +1039,12 @@ impl<'source> Parser<'source, '_> {
         }
 
         if matches!(self.byte(), Some(b'!' | b'&' | b'|' | b'>' | b'?' | b':')) {
-            return self.block(signed(indent), depth, true);
+            return self.block(signed(indent), depth, SequenceIndent::Optional);
         }
 
         // Lookahead has ruled out a block collection. Parse the inline
         // value without repeating block dispatch.
-        let value = self.inline(false, signed(indent), depth)?;
+        let value = self.inline(CollectionStyle::Block, signed(indent), depth)?;
         self.finish_line()?;
         Ok(value)
     }
@@ -1069,7 +1089,7 @@ impl<'source> Parser<'source, '_> {
         Ok(expanded)
     }
 
-    fn properties(&mut self, id: NodeId, flow: bool, parent: isize) -> Result<()> {
+    fn properties(&mut self, id: NodeId, context: CollectionStyle, parent: isize) -> Result<()> {
         while matches!(self.byte(), Some(b'&' | b'!')) {
             let start = self.pos;
             let anchor = self.byte() == Some(b'&');
@@ -1146,14 +1166,13 @@ impl<'source> Parser<'source, '_> {
                 });
             }
 
-            if self
-                .byte()
-                .is_some_and(|b| !(is_space(b) || flow && b",]}".contains(&b)))
-            {
+            if self.byte().is_some_and(|b| {
+                !(is_space(b) || context == CollectionStyle::Flow && b",]}".contains(&b))
+            }) {
                 return Err(self.error("node properties must be separated by whitespace"));
             }
 
-            if flow {
+            if context == CollectionStyle::Flow {
                 self.flow_space(parent)?;
             } else {
                 self.spaces();
@@ -1164,7 +1183,7 @@ impl<'source> Parser<'source, '_> {
     }
 
     #[inline]
-    fn inline(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeId> {
+    fn inline(&mut self, context: CollectionStyle, parent: isize, depth: usize) -> Result<NodeId> {
         self.check_depth(depth)?;
 
         // Scalars and aliases have no children or properties to register before
@@ -1172,7 +1191,7 @@ impl<'source> Parser<'source, '_> {
         if !matches!(self.byte(), Some(b'!' | b'&' | b'[' | b'{')) {
             self.reserve_element()?;
             let start = self.pos;
-            let kind = self.inline_kind(flow, parent, depth)?;
+            let kind = self.inline_kind(context, parent, depth)?;
             let id = NodeId(self.nodes.len());
             self.nodes.push(Node {
                 span: Span {
@@ -1187,8 +1206,8 @@ impl<'source> Parser<'source, '_> {
         }
 
         let id = self.empty(self.pos)?;
-        self.properties(id, flow, parent)?;
-        let kind = self.inline_kind(flow, parent, depth)?;
+        self.properties(id, context, parent)?;
+        let kind = self.inline_kind(context, parent, depth)?;
         if matches!(kind, NodeKind::Alias { .. })
             && (self.nodes[id.0].tag.is_some() || self.nodes[id.0].anchor.is_some())
         {
@@ -1202,7 +1221,7 @@ impl<'source> Parser<'source, '_> {
 
     fn inline_kind(
         &mut self,
-        flow: bool,
+        context: CollectionStyle,
         parent: isize,
         depth: usize,
     ) -> Result<NodeKind<'source>> {
@@ -1219,9 +1238,9 @@ impl<'source> Parser<'source, '_> {
             }
 
             Some(b':')
-                if self
-                    .next_byte()
-                    .is_none_or(|b| is_space(b) || (flow && b",]}".contains(&b))) =>
+                if self.next_byte().is_none_or(|b| {
+                    is_space(b) || (context == CollectionStyle::Flow && b",]}".contains(&b))
+                }) =>
             {
                 Ok(NodeKind::Scalar(Scalar {
                     value: Cow::Borrowed(""),
@@ -1254,7 +1273,7 @@ impl<'source> Parser<'source, '_> {
                     .ok_or_else(|| self.error("unknown alias"))?;
                 Ok(NodeKind::Alias { name, target })
             }
-            _ => self.plain(flow, parent),
+            Some(first) => self.plain(first, context, parent),
         }
     }
 
@@ -1297,7 +1316,7 @@ impl<'source> Parser<'source, '_> {
             {
                 self.empty(self.pos)?
             } else {
-                self.inline(true, parent, depth)?
+                self.inline(CollectionStyle::Flow, parent, depth)?
             }
         } else {
             self.empty(self.pos)?
@@ -1338,7 +1357,7 @@ impl<'source> Parser<'source, '_> {
             // A following colon makes this item a key one level deeper. Track its
             // deepest descendant so recognizing the pair does not require a second walk.
             let previous_deepest = std::mem::take(&mut self.deepest_node);
-            let key = self.inline(true, parent, depth + 1)?;
+            let key = self.inline(CollectionStyle::Flow, parent, depth + 1)?;
 
             self.flow_space(parent)?;
             if self.byte() == Some(b':') || explicit {
@@ -1404,7 +1423,7 @@ impl<'source> Parser<'source, '_> {
                 self.flow_space(parent)?;
             }
 
-            let key = self.inline(true, parent, depth + 1)?;
+            let key = self.inline(CollectionStyle::Flow, parent, depth + 1)?;
 
             self.flow_space(parent)?;
             entries.push(self.flow_pair(start, key, b'}', parent, depth + 1)?);
@@ -1449,14 +1468,20 @@ impl<'source> Parser<'source, '_> {
                 .len()
     }
 
-    fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'source>> {
+    fn plain(
+        &mut self,
+        first: u8,
+        context: CollectionStyle,
+        parent: isize,
+    ) -> Result<NodeKind<'source>> {
         let start = self.pos;
-        let b = self.byte().expect("plain scalar has a first byte");
-        if b"@`|>!&*%{}[],\"'".contains(&b)
-            || (b"-?:".contains(&b)
-                && self
-                    .next_byte()
-                    .is_none_or(|b| is_space(b) || (flow && b"[]{},".contains(&b))))
+        let is_flow_indicator = |byte| {
+            context == CollectionStyle::Flow && matches!(byte, b',' | b'[' | b']' | b'{' | b'}')
+        };
+        let is_separator =
+            |next: Option<u8>| next.is_none_or(|byte| is_space(byte) || is_flow_indicator(byte));
+        if b"@`|>!&*%{}[],\"'".contains(&first)
+            || (b"-?:".contains(&first) && is_separator(self.next_byte()))
         {
             return Err(self.error("invalid plain scalar start"));
         }
@@ -1465,7 +1490,7 @@ impl<'source> Parser<'source, '_> {
         let mut value: Option<String> = None;
         let mut segment = start;
 
-        if !flow {
+        if context == CollectionStyle::Block {
             end = self.reuse_plain_lookahead();
             if self.pos > start && self.byte() == Some(b':') {
                 self.pos = end;
@@ -1493,11 +1518,8 @@ impl<'source> Parser<'source, '_> {
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
                         || signed(self.leading_spaces()) <= parent
-                        || (self.byte() == Some(b':')
-                            && self
-                                .next_byte()
-                                .is_none_or(|b| is_space(b) || (flow && b",[]{}".contains(&b))))
-                        || (flow && self.byte().is_some_and(|b| b",[]{}".contains(&b)))
+                        || (self.byte() == Some(b':') && is_separator(self.next_byte()))
+                        || self.byte().is_some_and(is_flow_indicator)
                     {
                         self.pos = save;
                         self.line_start = saved_line_start;
@@ -1522,14 +1544,8 @@ impl<'source> Parser<'source, '_> {
                     break;
                 }
 
-                Some(b':')
-                    if self
-                        .next_byte()
-                        .is_none_or(|b| is_space(b) || (flow && b",[]{}".contains(&b))) =>
-                {
-                    break;
-                }
-                Some(b',' | b'[' | b']' | b'{' | b'}') if flow => break,
+                Some(b':') if is_separator(self.next_byte()) => break,
+                Some(byte) if is_flow_indicator(byte) => break,
                 Some(b' ' | b'\t') => self.pos += 1,
                 Some(_) => {
                     // Consume a run of content bytes. Every stopping character is
@@ -1540,7 +1556,7 @@ impl<'source> Parser<'source, '_> {
                         .iter()
                         .position(|&b| {
                             matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'#' | b':')
-                                || (flow && b",[]{}".contains(&b))
+                                || is_flow_indicator(b)
                         })
                         .unwrap_or(remaining.len());
                     self.pos += length;
