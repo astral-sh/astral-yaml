@@ -798,7 +798,12 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             Position::Block { .. } if self.at_document_boundary() => ScalarPosition::Document,
             Position::Block { .. } => ScalarPosition::Block,
         };
-        let text = scalar(value, style, position, indent);
+        let remaining = self
+            .options
+            .max_input_bytes
+            .saturating_sub(self.output.len());
+        let text = scalar(value, style, position, indent, remaining)
+            .ok_or_else(|| self.error("emitted YAML exceeds input byte limit"))?;
         if text.starts_with(['|', '>']) {
             let (header, body) = text.split_once('\n').expect("block scalar header");
             self.push(header)?;
@@ -888,7 +893,7 @@ pub(super) fn key_form<Location>(node: &super::Node<Location>, flow: bool) -> Ke
     } else {
         ScalarPosition::Block
     };
-    let text = scalar(value, *style, position, 0);
+    let text = scalar(value, *style, position, 0, usize::MAX).expect("unlimited scalar budget");
     let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
     let anchor = node
         .anchor
@@ -953,8 +958,17 @@ pub(super) fn quoted(value: &str) -> String {
     result
 }
 
-fn flow_scalar(value: &str, indent: usize) -> String {
-    let continuation = " ".repeat(indent + 2);
+/// Indentation can multiply the size of a small multiline value. Check the
+/// remaining output budget before appending it to the candidate spelling.
+fn indent_scalar(output: &mut String, spaces: usize, limit: usize) -> Option<()> {
+    if spaces > limit.saturating_sub(output.len()) {
+        return None;
+    }
+    output.extend(std::iter::repeat_n(' ', spaces));
+    Some(())
+}
+
+fn flow_scalar(value: &str, indent: usize, limit: usize) -> Option<String> {
     let mut result = String::new();
     let mut after_break = false;
     for character in value.chars() {
@@ -969,16 +983,16 @@ fn flow_scalar(value: &str, indent: usize) -> String {
             after_break = true;
         } else {
             if after_break {
-                result.push_str(&continuation);
+                indent_scalar(&mut result, indent + 2, limit)?;
             }
             result.push(character);
             after_break = false;
         }
     }
     if after_break {
-        result.push_str(&continuation);
+        indent_scalar(&mut result, indent + 2, limit)?;
     }
-    result
+    Some(result)
 }
 
 fn block_scalar(
@@ -986,7 +1000,8 @@ fn block_scalar(
     style: ScalarStyle,
     position: ScalarPosition,
     indent: usize,
-) -> String {
+    limit: usize,
+) -> Option<String> {
     let indicator = if style == ScalarStyle::Literal {
         '|'
     } else {
@@ -1004,25 +1019,6 @@ fn block_scalar(
         1 if value.len() > trailing => "",
         _ => "+",
     };
-    let mut body = value.to_owned();
-    if style == ScalarStyle::Folded {
-        // Only breaks between ordinary text lines fold in block scalars.
-        // Leading, trailing, and more-indented lines already retain breaks.
-        body.clear();
-        let mut previous_text = false;
-        for (index, line) in value.split('\n').enumerate() {
-            if index != 0 {
-                body.push('\n');
-            }
-            if !line.is_empty() {
-                if previous_text && !line.starts_with([' ', '\t']) {
-                    body.push('\n');
-                }
-                previous_text = !line.starts_with([' ', '\t']);
-            }
-            body.push_str(line);
-        }
-    }
     // Content is indented two spaces. At the document root its parent is at -1.
     let increment = if position == ScalarPosition::Document {
         3
@@ -1030,33 +1026,52 @@ fn block_scalar(
         2
     };
     let mut result = format!("{indicator}{increment}{chomp}\n");
-    let indentation = " ".repeat(indent + 2);
-    for line in body.split_terminator('\n') {
-        result.push_str(&indentation);
+    let mut previous_text = false;
+    for line in value.split_terminator('\n') {
+        if style == ScalarStyle::Folded && !line.is_empty() {
+            // Only breaks between ordinary text lines fold. An extra empty
+            // line preserves the decoded break between them.
+            let text = !line.starts_with([' ', '\t']);
+            if previous_text && text {
+                indent_scalar(&mut result, indent + 2, limit)?;
+                result.push('\n');
+            }
+            previous_text = text;
+        }
+        indent_scalar(&mut result, indent + 2, limit)?;
         result.push_str(line);
         result.push('\n');
     }
-    result
+    Some(result)
 }
 
-fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usize) -> String {
+fn scalar(
+    value: &str,
+    style: ScalarStyle,
+    position: ScalarPosition,
+    indent: usize,
+    limit: usize,
+) -> Option<String> {
     // Check the generated scalar in its actual flow/block context. This also
     // handles plain-scalar punctuation, folding, and explicit indentation.
     let candidate = match style {
         // Empty scalar text is observable through Serde string visitors and
         // application tags, even when the core schema resolves it as null.
-        ScalarStyle::Plain if value.is_empty() => return String::new(),
-        ScalarStyle::Plain => flow_scalar(value, indent),
+        ScalarStyle::Plain if value.is_empty() => return Some(String::new()),
+        ScalarStyle::Plain => flow_scalar(value, indent, limit)?,
         ScalarStyle::SingleQuoted => {
-            format!("'{}'", flow_scalar(value, indent).replace('\'', "''"))
+            format!(
+                "'{}'",
+                flow_scalar(value, indent, limit)?.replace('\'', "''")
+            )
         }
         ScalarStyle::Literal | ScalarStyle::Folded
             if matches!(position, ScalarPosition::Block | ScalarPosition::Document) =>
         {
-            block_scalar(value, style, position, indent)
+            block_scalar(value, style, position, indent, limit)?
         }
         ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
-            return quoted(value);
+            return Some(quoted(value));
         }
     };
     let source = match position {
@@ -1099,7 +1114,7 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
             && node.anchor.is_none()
             && stream.comments().is_empty()
     });
-    if matches { candidate } else { quoted(value) }
+    Some(if matches { candidate } else { quoted(value) })
 }
 
 /// Reparse rendered YAML and require the intended content, alias targets, styles, and comments.

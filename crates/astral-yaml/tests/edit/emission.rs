@@ -447,6 +447,35 @@ fn normalization_respects_limits_on_output_expansion() {
     );
 }
 
+#[test_case("|+", "\n"; "literal")]
+#[test_case(">+", "  x\n\n"; "folded")]
+#[test_case("'", "x\n\n"; "single quoted")]
+fn multiline_edits_budget_continuation_indentation(header: &str, line: &str) {
+    let indent = " ".repeat(2048);
+    let source = format!(
+        "{indent}k: {header}\n{indent} old{}\n",
+        if header == "'" { "'" } else { "" }
+    );
+    let mut document = EditableDocument::parse_with_options(
+        &source,
+        ParseOptions {
+            max_input_bytes: 65_536,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    let fragment = if header == "'" {
+        format!("'{}end'", line.repeat(2048))
+    } else {
+        format!("{header}\n{}", line.repeat(2048))
+    };
+    assert_eq!(
+        document.set_yaml_at(["k"], &fragment).unwrap_err().message,
+        "emitted YAML exceeds input byte limit"
+    );
+    assert_eq!(document.source(), source);
+}
+
 #[test]
 fn normalization_consumes_interleaved_property_comments_in_order() {
     // Node properties and comments: https://yaml.org/spec/1.2.2/#69-node-properties

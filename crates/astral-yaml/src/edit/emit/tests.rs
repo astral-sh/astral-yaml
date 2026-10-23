@@ -201,6 +201,15 @@ fn comment_comparison_preserves_each_owners_order(before: &str, after: &str, exp
     );
 }
 
+fn scalar(
+    value: &str,
+    style: ScalarStyle,
+    position: super::ScalarPosition,
+    indent: usize,
+) -> String {
+    super::scalar(value, style, position, indent, usize::MAX).unwrap()
+}
+
 #[test_case(ScalarStyle::Plain)]
 #[test_case(ScalarStyle::SingleQuoted)]
 #[test_case(ScalarStyle::Literal)]
@@ -220,7 +229,7 @@ fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
                 if flow && matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) {
                     continue;
                 }
-                let text = super::scalar(
+                let text = scalar(
                     value,
                     style,
                     if flow {
@@ -255,7 +264,7 @@ fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
 #[test_case(ScalarStyle::SingleQuoted)]
 fn flow_scalars_quote_whitespace_that_cannot_be_folded(style: ScalarStyle) {
     for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
-        let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
+        let text = scalar(value, style, super::ScalarPosition::Block, 2);
         let parsed = crate::parse(&text).unwrap();
         let node = parsed.node(parsed.documents()[0].root).unwrap();
         assert!(matches!(&node.kind, crate::NodeKind::Scalar(scalar)
@@ -267,7 +276,7 @@ fn flow_scalars_quote_whitespace_that_cannot_be_folded(style: ScalarStyle) {
 #[test_case(ScalarStyle::Folded)]
 fn block_scalars_preserve_indented_lines(style: ScalarStyle) {
     for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
-        let text = super::scalar(value, style, super::ScalarPosition::Block, 2);
+        let text = scalar(value, style, super::ScalarPosition::Block, 2);
         let source = format!("  value: {text}");
         let parsed = crate::parse(&source).unwrap();
         let node = parsed
@@ -384,7 +393,7 @@ fn rendering_obeys_work_and_output_budgets(
 #[test_case("first\r- second", false)]
 #[test_case("first\r---\rsecond", false)]
 fn plain_scalar_fallback_cannot_introduce_documents_or_collections(value: &str, flow: bool) {
-    let output = super::scalar(
+    let output = scalar(
         value,
         crate::ScalarStyle::Plain,
         if flow {
@@ -692,7 +701,7 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
                 - b"},
             "x: one, y",
         ] {
-            let text = super::scalar(value, crate::ScalarStyle::Plain, position, 0);
+            let text = scalar(value, crate::ScalarStyle::Plain, position, 0);
             let source = if position == ScalarPosition::BlockKey {
                 format!("{text}: value")
             } else {
