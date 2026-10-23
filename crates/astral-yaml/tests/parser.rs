@@ -727,8 +727,11 @@ fn directive_with_many_parameters(header: &str, error: Option<&str>) {
 fn undefined_tag_handle_span() {
     let source = "key: !missing!type";
     let error = parse(source).unwrap_err();
-    assert_eq!(error.message, "undefined tag handle");
-    assert_eq!(error.span.slice(source), Some("!missing!"));
+    insta::assert_snapshot!(astral_yaml_dev::diagnostic_snapshot(source, error), @"
+      |
+    1 | key: !missing!type
+      |      ^^^^^^^^^ undefined tag handle
+    ");
 }
 
 // https://yaml.org/spec/1.2.2/#681-yaml-directives

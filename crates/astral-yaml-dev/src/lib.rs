@@ -10,7 +10,7 @@ mod recursive_edits;
 mod spans;
 mod value;
 
-pub use annotations::span_snapshot;
+pub use annotations::{diagnostic_snapshot, span_snapshot};
 pub use edits::edit_diff;
 pub use events::events;
 pub use indoc::{formatdoc, indoc};
