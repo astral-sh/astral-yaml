@@ -1759,10 +1759,9 @@ impl<'a> Parser<'a> {
 
         let minimum = usize::try_from(parent + 1).expect("parent indentation starts at -1");
         let mut indent = increment.map(|n| minimum + (n - 1));
-        let mut lines: Vec<(&str, bool)> = Vec::new();
+        let mut content = BlockScalarValue::default();
         let mut end = self.pos;
         let mut leading_indent = 0;
-        let mut has_content = false;
 
         while self.byte().is_some() {
             let line_start = self.pos;
@@ -1776,7 +1775,7 @@ impl<'a> Parser<'a> {
             let empty = self.pos == line_end;
             if !empty {
                 let required = *indent.get_or_insert(spaces.max(minimum));
-                if spaces < required || self.marker("---") || self.marker("...") {
+                if spaces < required || self.document_boundary() {
                     if self.byte() == Some(b'\t') {
                         return Err(self.error("tab in block scalar indentation"));
                     }
@@ -1785,7 +1784,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
 
-                if !has_content && leading_indent > required {
+                if content.text.is_empty() && leading_indent > required {
                     return Err(self.error("leading empty line is over-indented"));
                 }
             } else if indent.is_none() {
@@ -1794,14 +1793,13 @@ impl<'a> Parser<'a> {
 
             let text_start = line_start + indent.unwrap_or(spaces).min(spaces);
             let text = &self.source[text_start..line_end];
-            has_content |= !text.is_empty();
+            content.push(text, folded);
             self.pos = line_end;
             self.newline();
-            lines.push((text, text.starts_with([' ', '\t'])));
             end = self.pos;
         }
 
-        let value = fold_block_lines(&lines, folded, chomp);
+        let value = content.finish(chomp);
         self.block_space()?;
         let style = if folded {
             ScalarStyle::Folded
@@ -1875,41 +1873,41 @@ enum Chomping {
     Strip,
 }
 
-fn fold_block_lines(lines: &[(&str, bool)], folded: bool, chomp: Chomping) -> String {
-    let mut value = String::new();
+/// Hold line breaks until the next content line determines how they fold,
+/// or the chomping indicator determines how many to keep at the end.
+#[derive(Default)]
+struct BlockScalarValue {
+    text: String,
+    breaks: usize,
+    previous_ordinary: bool,
+}
 
-    for (i, &(text, more)) in lines.iter().enumerate() {
-        value.push_str(text);
-        if folded && !text.is_empty() && !more {
-            if let Some(&(next, next_more)) = lines.get(i + 1) {
-                if !next.is_empty() && !next_more {
-                    value.push(' ');
-                    continue;
-                }
-
-                if next.is_empty()
-                    && lines[i + 1..]
-                        .iter()
-                        .find(|(s, _)| !s.is_empty())
-                        .is_some_and(|(_, more)| !more)
-                {
-                    continue;
+impl BlockScalarValue {
+    fn push(&mut self, line: &str, folded: bool) {
+        if !line.is_empty() {
+            let ordinary = !line.starts_with([' ', '\t']);
+            if folded && self.previous_ordinary && ordinary {
+                self.breaks -= 1;
+                if self.breaks == 0 {
+                    self.text.push(' ');
                 }
             }
+            self.text.extend(std::iter::repeat_n('\n', self.breaks));
+            self.text.push_str(line);
+            self.previous_ordinary = ordinary;
+            self.breaks = 0;
         }
-
-        value.push('\n');
+        self.breaks += 1;
     }
 
-    if chomp != Chomping::Keep {
-        let had_break = value.ends_with('\n');
-        value.truncate(value.trim_end_matches('\n').len());
-        if chomp == Chomping::Clip && had_break && !value.is_empty() {
-            value.push('\n');
+    fn finish(mut self, chomp: Chomping) -> String {
+        match chomp {
+            Chomping::Keep => self.text.extend(std::iter::repeat_n('\n', self.breaks)),
+            Chomping::Clip if !self.text.is_empty() => self.text.push('\n'),
+            Chomping::Clip | Chomping::Strip => {}
         }
+        self.text
     }
-
-    value
 }
 
 // JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.

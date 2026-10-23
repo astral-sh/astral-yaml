@@ -231,6 +231,40 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite(style: &str) {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#911-document-prefix
+#[test_case("|1-", "first\n", "first")]
+#[test_case(">", "", "")]
+fn a_root_block_scalar_stops_at_the_next_document_bom(header: &str, body: &str, expected: &str) {
+    let source = format!("{header}\n{body}\u{feff}--- second");
+    let stream = parse(&source).unwrap();
+    let [first, second] = stream.documents() else {
+        panic!("expected two documents")
+    };
+    let scalar = |id| match &stream.node(id).unwrap().kind {
+        NodeKind::Scalar(s) => s.value.as_ref(),
+        _ => panic!("expected scalar"),
+    };
+    assert_eq!(
+        (scalar(first.root), scalar(second.root)),
+        (expected, "second")
+    );
+    assert_eq!(
+        stream.byte_order_marks()[0].slice(&source),
+        Some("\u{feff}")
+    );
+}
+
+#[test_case("|-")]
+#[test_case(">-")]
+fn stripping_a_long_run_of_blank_lines(header: &str) {
+    let source = format!("{header}\n{}", "\n".repeat(128 * 1024));
+    let parsed = parse(&source).unwrap();
+    let NodeKind::Scalar(value) = &parsed.nodes()[0].kind else {
+        panic!("expected scalar")
+    };
+    assert_eq!(value.value, "");
+}
+
 // https://yaml.org/spec/1.2.2/#913-bare-documents
 // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
 #[test_case("|1\ntext\n", "text\n")]
