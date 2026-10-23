@@ -1,14 +1,14 @@
 # Real-world corpus
 
-The corpus contains unmodified application and infrastructure configurations,
-including Kubernetes resources, Compose applications, CI workflows, and OpenAPI
-documents.
+The corpus contains unmodified YAML from applications, infrastructure, and data
+formats. It includes Kubernetes resources, Compose applications, CI workflows,
+Devicetree and Matrix schemas, CWL workflows, Sublime syntax definitions, and
+Unity assets.
 
 `manifest.json` records each file's repository, revision, original path, size,
 SHA-256, category, and license. Revisions are full commit IDs. License files and
-upstream notices are included alongside the inputs. Selection covered application
-and infrastructure configurations. Byte-identical copies and
-templates that require rendering before they are YAML were excluded.
+upstream notices are included alongside the inputs. Each file contributes distinct
+bytes. Templates that require rendering before they are YAML are excluded.
 
 The inputs exercise expressions, multiline scripts, plain continuation lines,
 literal and folded scalars, flow collections, multiple documents, empty values,
@@ -17,12 +17,18 @@ Airflow's configuration also exercises anchors, aliases, and `<<` mapping keys.
 The parser treats `<<` as an ordinary key. YAML 1.2 core does not define merge
 expansion.
 
+The CloudFormation wait condition uses `|2` to preserve leading spaces in a
+shell script. The CWL reverse-complement workflow uses a folded JavaScript
+expression with more-indented lines. Nuclei's raw HTTP request uses `|+` to
+preserve the blank line after the headers. Espanso's combining-characters
+manifest mixes Unicode escapes with a double-quoted line continuation.
+
 Each fixture has an [inline Insta snapshot](../../crates/astral-yaml/tests/real_world/fixtures/)
 in a parser integration test. Accepted inputs render as indented trees: mapping
 entries stay together, sequences use dashes, and scalar values appear beside their
 styles and source ranges. Ranges use one-based Unicode line/column positions with
-exclusive ends. Anchors, aliases, tags, collection styles, and document markers
-are retained.
+exclusive ends. The trees include directives and their arguments, document
+markers, anchors, aliases, tags, and collection styles.
 Multiline values show one quoted decoded line at a time. Escapes make newlines
 and tabs explicit. Closing quotes expose trailing spaces.
 
@@ -71,3 +77,17 @@ snapshots.
 
 Argo CD's `applicationset/examples/template-override/default/guestbook-ui-svc.yaml`
 contains a trailing tab. This is valid separation under §6.2 and is accepted.
+
+Matrix's server-signatures schema aligns a closing flow brace with the enclosing
+block key. Flow content in a block value requires at least one more space of
+indentation. [YAML 1.2.2 §8.2.3](https://yaml.org/spec/1.2.2/#823-block-nodes)
+
+The Unity build settings declare a `!u!` tag handle and use it on an anchored
+root mapping. The physics simulator prefab reuses that handle in its second
+document without declaring it again. The parser rejects it because tag handles
+are scoped to a document. [YAML 1.2.2 §6.8.2.1](https://yaml.org/spec/1.2.2/#6821-tag-handles)
+
+Espanso's UUID package ends inside a literal scalar, immediately after the last
+character of the Python script. Its snapshot follows the YAML Test Suite's
+interpretation of end of input as a final line break when clipping. libyaml and
+ruamel.yaml omit that line break. [Upstream discussion](https://github.com/yaml/yaml-test-suite/issues/118)

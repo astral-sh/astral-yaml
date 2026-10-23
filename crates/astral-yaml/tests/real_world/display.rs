@@ -115,6 +115,16 @@ pub(super) fn tree(stream: &Stream<'_>) -> String {
         };
 
         writeln!(out, "document {} (start: {start}, end: {end})", index + 1).unwrap();
+        for directive in &document.directives {
+            writeln!(
+                out,
+                "directive %{} {:?} [@{}]",
+                directive.name,
+                directive.arguments,
+                location(stream, directive.span)
+            )
+            .unwrap();
+        }
         node(&mut out, stream, document.root, 0, "");
     }
 
@@ -175,6 +185,7 @@ fn tree_preserves_presentation_and_decoded_lines() {
 
     insta::assert_snapshot!(tree(&stream), @r#"
     document 1 (start: ---, end: ...)
+    directive %YAML "1.2" [@1:1..1:10]
     mapping [block]
       "base" [plain @3:1..3:5]: mapping [flow] &base !<!local>
         "quoted" [plain @3:21..3:27]: "é" [single-quoted @3:29..3:32]
