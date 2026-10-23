@@ -1,4 +1,6 @@
-use std::{borrow::Cow, cell::Cell, collections::HashMap};
+use std::borrow::Cow;
+use std::cell::Cell;
+use std::collections::HashMap;
 
 use crate::{
     CollectionStyle, Comment, Directive, Document, Entry, Error, Node, NodeId, NodeKind, Property,
@@ -67,11 +69,11 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
     parse_with_tag_budget(source, options, &mut remaining_tag_bytes)
 }
 
-pub(crate) fn parse_with_tag_budget<'a>(
-    source: &'a str,
+pub(crate) fn parse_with_tag_budget<'source>(
+    source: &'source str,
     options: ParseOptions,
     remaining_tag_bytes: &mut usize,
-) -> Result<Stream<'a>> {
+) -> Result<Stream<'source>> {
     options.check_input(source.len())?;
 
     let stream = Parser {
@@ -100,15 +102,15 @@ pub(crate) fn parse_with_tag_budget<'a>(
     Ok(stream)
 }
 
-struct Parser<'a, 'budget> {
-    source: &'a str,
+struct Parser<'source, 'budget> {
+    source: &'source str,
     pos: usize,
     options: ParseOptions,
-    nodes: Vec<Node<'a>>,
-    documents: Vec<Document<'a>>,
-    comments: Vec<Comment<'a>>,
-    anchors: HashMap<&'a str, NodeId>,
-    tags: HashMap<&'a str, String>,
+    nodes: Vec<Node<'source>>,
+    documents: Vec<Document<'source>>,
+    comments: Vec<Comment<'source>>,
+    anchors: HashMap<&'source str, NodeId>,
+    tags: HashMap<&'source str, &'source str>,
     remaining_tag_bytes: &'budget mut usize,
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
@@ -134,7 +136,7 @@ enum BlockEntry {
     ImplicitMappingValue,
 }
 
-impl<'a> Parser<'a, '_> {
+impl<'source> Parser<'source, '_> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: Span {
@@ -145,7 +147,7 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    fn rest(&self) -> &'a str {
+    fn rest(&self) -> &'source str {
         &self.source[self.pos..]
     }
 
@@ -390,7 +392,7 @@ impl<'a> Parser<'a, '_> {
         Ok(span)
     }
 
-    fn stream(mut self) -> Result<Stream<'a>> {
+    fn stream(mut self) -> Result<Stream<'source>> {
         let mut previous_ended = true;
 
         loop {
@@ -486,7 +488,7 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn directives(&mut self) -> Result<Vec<Directive<'a>>> {
+    fn directives(&mut self) -> Result<Vec<Directive<'source>>> {
         let mut directives = Vec::new();
         let mut version = false;
 
@@ -1027,17 +1029,17 @@ impl<'a> Parser<'a, '_> {
         Ok(value)
     }
 
-    fn tag_prefix(&self, handle: &str) -> Option<&str> {
-        self.tags.get(handle).map(String::as_str).or(match handle {
+    fn tag_prefix(&self, handle: &str) -> Option<&'source str> {
+        self.tags.get(handle).copied().or(match handle {
             "!" => Some("!"),
             "!!" => Some("tag:yaml.org,2002:"),
             _ => None,
         })
     }
 
-    fn shorthand_tag(&mut self, raw: &str) -> Result<String> {
+    fn shorthand_tag(&mut self, raw: &'source str) -> Result<Cow<'source, str>> {
         if raw == "!" {
-            return Ok("!".to_owned());
+            return Ok(Cow::Borrowed(raw));
         }
         let (handle, suffix) = raw[1..]
             .find('!')
@@ -1049,13 +1051,17 @@ impl<'a> Parser<'a, '_> {
             return Err(self.error("invalid tag suffix"));
         }
 
-        let decoded = tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
-        let remaining = self
+        let suffix = tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
+        *self.remaining_tag_bytes = self
             .remaining_tag_bytes
-            .checked_sub(prefix.len() + decoded.len())
+            .checked_sub(prefix.len() + suffix.len())
             .ok_or_else(|| self.error("expanded tag byte limit exceeded"))?;
-        let expanded = format!("{prefix}{decoded}");
-        *self.remaining_tag_bytes = remaining;
+
+        let expanded = if prefix == handle {
+            Cow::Borrowed(raw)
+        } else {
+            Cow::Owned(format!("{prefix}{suffix}"))
+        };
         if !complete_tag(&expanded) {
             return Err(self.error("invalid expanded tag URI"));
         }
@@ -1115,10 +1121,10 @@ impl<'a> Parser<'a, '_> {
                     let value = tag_uri(&self.source[uri_start..self.pos])
                         .ok_or_else(|| self.error("invalid tag URI"))?;
                     self.pos += 1;
-                    if !complete_tag(&value) {
+                    if !complete_tag(value) {
                         return Err(self.error("invalid verbatim tag URI"));
                     }
-                    value
+                    Cow::Borrowed(value)
                 } else {
                     while self
                         .byte()
@@ -1136,7 +1142,7 @@ impl<'a> Parser<'a, '_> {
                         start,
                         end: self.pos,
                     },
-                    value: Cow::Owned(value),
+                    value,
                 });
             }
 
@@ -1194,7 +1200,12 @@ impl<'a> Parser<'a, '_> {
         Ok(id)
     }
 
-    fn inline_kind(&mut self, flow: bool, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
+    fn inline_kind(
+        &mut self,
+        flow: bool,
+        parent: isize,
+        depth: usize,
+    ) -> Result<NodeKind<'source>> {
         match self.byte() {
             None | Some(b'\r' | b'\n' | b'#' | b',' | b']' | b'}') => {
                 Ok(NodeKind::Scalar(Scalar {
@@ -1302,7 +1313,7 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn flow_sequence(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
+    fn flow_sequence(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'source>> {
         self.pos += 1;
         self.flow_space(parent)?;
 
@@ -1372,7 +1383,7 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    fn flow_mapping(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'a>> {
+    fn flow_mapping(&mut self, parent: isize, depth: usize) -> Result<NodeKind<'source>> {
         self.pos += 1;
         self.flow_space(parent)?;
 
@@ -1438,7 +1449,7 @@ impl<'a> Parser<'a, '_> {
                 .len()
     }
 
-    fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'a>> {
+    fn plain(&mut self, flow: bool, parent: isize) -> Result<NodeKind<'source>> {
         let start = self.pos;
         let b = self.byte().expect("plain scalar has a first byte");
         if b"@`|>!&*%{}[],\"'".contains(&b)
@@ -1566,7 +1577,7 @@ impl<'a> Parser<'a, '_> {
         Ok(())
     }
 
-    fn quoted(&mut self, parent: isize) -> Result<NodeKind<'a>> {
+    fn quoted(&mut self, parent: isize) -> Result<NodeKind<'source>> {
         let start = self.pos;
         let quote = self.byte().unwrap_or(b'"');
         self.pos += 1;
@@ -1737,7 +1748,7 @@ impl<'a> Parser<'a, '_> {
         Ok(value)
     }
 
-    fn block_scalar(&mut self, parent: isize) -> Result<NodeKind<'a>> {
+    fn block_scalar(&mut self, parent: isize) -> Result<NodeKind<'source>> {
         let start = self.pos;
         let folded = self.byte() == Some(b'>');
         self.pos += 1;
@@ -1843,7 +1854,7 @@ fn valid_handle(s: &str) -> bool {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-'))
 }
 
-fn tag_uri(s: &str) -> Option<String> {
+fn tag_uri(s: &str) -> Option<&str> {
     let mut bytes = s.bytes();
 
     while let Some(b) = bytes.next() {
@@ -1857,7 +1868,7 @@ fn tag_uri(s: &str) -> Option<String> {
     }
 
     // URI escapes are part of tag identity, not scalar-style escapes (YAML 1.2.2 §5.6).
-    Some(s.to_owned())
+    Some(s)
 }
 
 fn complete_tag(s: &str) -> bool {
