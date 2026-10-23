@@ -1298,7 +1298,7 @@ impl<'a> Parser<'a> {
                 self.flow_space(parent)?;
             }
 
-            if self.byte() == Some(b',') {
+            if !explicit && self.byte() == Some(b',') {
                 return Err(self.error("empty flow sequence entry"));
             }
 
