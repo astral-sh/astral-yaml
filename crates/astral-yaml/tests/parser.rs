@@ -722,6 +722,15 @@ fn directive_with_many_parameters(header: &str, error: Option<&str>) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#6821-tag-handles
+#[test]
+fn undefined_tag_handle_span() {
+    let source = "key: !missing!type";
+    let error = parse(source).unwrap_err();
+    assert_eq!(error.message, "undefined tag handle");
+    assert_eq!(error.span.slice(source), Some("!missing!"));
+}
+
 // https://yaml.org/spec/1.2.2/#681-yaml-directives
 #[test_case("1.1", true)]
 #[test_case("1.2", true)]
