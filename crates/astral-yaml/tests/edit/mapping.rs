@@ -18,6 +18,37 @@ fn bom_preserves_indentless_sequence_columns(indent: &str, replacement: &str) {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test_case(false, 1022; "block at the limit")]
+#[test_case(false, 1023; "block over the limit")]
+#[test_case(true, 1022; "compact pair at the limit")]
+#[test_case(true, 1023; "compact pair over the limit")]
+fn key_edits_count_retained_padding(compact: bool, padding: usize) {
+    let spaces = " ".repeat(padding);
+    let entry = format!("a{spaces}: v");
+    let source = if compact {
+        format!("[{entry},   keep]")
+    } else {
+        entry
+    };
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|root| {
+            let mapping = if compact { root.at([0])? } else { root };
+            mapping.into_mapping()?.key_at(0)?.set_yaml("éé")
+        })
+        .unwrap();
+    let expected = if padding == 1022 {
+        source.replacen('a', "éé", 1)
+    } else if compact {
+        "[{éé: v},   keep]".to_owned()
+    } else {
+        "éé: v".to_owned()
+    };
+    assert_eq!(document.source(), expected);
+}
+
 #[test]
 fn flow_conversion_uses_content_indentation_after_properties() {
     let results = edits(
