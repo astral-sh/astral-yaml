@@ -492,7 +492,7 @@ impl<'a> Editor<'a> {
         if let Some(error) = self.failure {
             return Err(error);
         }
-        let candidate = self.draft.freeze()?;
+        let mut candidate = self.draft.freeze()?;
         let syntax = Layout::new(&candidate);
         let original = &self.original.source;
         let changes = Changes::between(original, &candidate, &syntax);
@@ -500,6 +500,7 @@ impl<'a> Editor<'a> {
             return candidate.commit(&original.text);
         }
 
+        candidate.restore_comment_spans(&original.nodes);
         let framed = super::framing::prepare(original, (&candidate).into(), &syntax);
         let (source, planned) = framed.as_ref().map_or_else(
             || (original, (&candidate).into()),
