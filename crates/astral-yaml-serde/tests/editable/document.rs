@@ -12,13 +12,11 @@ struct Config {
 
 #[test]
 fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
-    let mut config = {
-        let source = String::from(indoc! {r"
-            timeout: 30 # seconds
-            unknown : ['keep',  2]
-        "});
-        source.parse::<Editable<Config>>().unwrap()
-    };
+    let source = indoc! {r"
+        timeout: 30 # seconds
+        unknown : ['keep',  2]
+    "};
+    let mut config: Editable<Config> = source.parse().unwrap();
     let before = config.to_yaml();
     config
         .edit_syntax(|e| {

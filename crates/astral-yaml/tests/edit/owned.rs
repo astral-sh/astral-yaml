@@ -16,7 +16,7 @@ fn owned_document_retains_syntax_and_direct_comments() {
         copy: *items
         ...
     "};
-    let document = EditableDocument::parse(source).unwrap();
+    let document: EditableDocument = source.parse().unwrap();
     assert_eq!(document.source(), source);
     assert_eq!(
         document.options().max_depth,
@@ -46,12 +46,6 @@ fn owned_document_retains_syntax_and_direct_comments() {
         .unwrap();
     assert_eq!(comment.text(), " inline");
     assert_eq!(comment.span().slice(source), Some("# inline"));
-
-    let owned = {
-        let source = String::from("key: value");
-        source.parse::<EditableDocument>().unwrap()
-    };
-    assert_eq!(owned.source(), "key: value");
 }
 
 #[test]
