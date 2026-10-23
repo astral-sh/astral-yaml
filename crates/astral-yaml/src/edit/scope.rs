@@ -81,10 +81,7 @@ impl<'a> Scopes<'a> {
         let mut pending = vec![(original.root, Role::Document, None, false)];
         while let Some((id, role, enclosing_key, flow)) = pending.pop() {
             let node = &original.nodes[id.0];
-            let prefix = original.text[..node.span.start()]
-                .rsplit('\n')
-                .next()
-                .unwrap_or("");
+            let prefix = splice::line_prefix(&original.text, node.span.start());
             slots[id.0] = Some(Slot {
                 role,
                 enclosing_key,
@@ -298,7 +295,7 @@ fn value_header(
 }
 
 fn column(source: &str, at: usize) -> usize {
-    source[..at].rsplit('\n').next().unwrap_or("").len()
+    splice::line_prefix(source, at).len()
 }
 
 pub(super) fn same_attachment(old: &Comment, new: &Comment<Option<Span>>) -> bool {
