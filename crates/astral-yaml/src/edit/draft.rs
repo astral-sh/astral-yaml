@@ -44,6 +44,7 @@ pub(super) struct Draft {
     diagnostic_span: Span,
     work: Cell<usize>,
     introduced_bytes: usize,
+    remaining_tag_bytes: usize,
 }
 
 /// The intended result of a transaction, used to check the rendered YAML.
@@ -73,6 +74,7 @@ impl From<&EditableDocument> for Draft {
             diagnostic_span: document.nodes[document.root.0].span,
             work: Cell::new(document.options.max_nodes),
             introduced_bytes: 0,
+            remaining_tag_bytes: document.options.max_input_bytes,
         };
         for index in 0..draft.slots.len() {
             draft.link_children(NodeId(index));
@@ -147,7 +149,8 @@ impl Draft {
         let mut options = self.options;
         options.max_nodes = available;
         options.max_depth -= depth;
-        let document = EditableDocument::parse_with_options(yaml, options)?;
+        let document =
+            EditableDocument::parse_with_tag_budget(yaml, options, &mut self.remaining_tag_bytes)?;
         self.charge(document.source.nodes.len())?;
         Ok(document)
     }

@@ -24,7 +24,7 @@ use std::{borrow::Cow, cell::Cell};
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
     comments::{CommentIndex, CommentPlacement},
-    parse_with_options,
+    parser::parse_with_tag_budget,
 };
 
 /// An owned YAML document, including its source and comments.
@@ -32,6 +32,10 @@ use crate::{
 /// Use [`Self::edit`] to change the document. Successful edits update its source,
 /// node IDs, and spans together. Failed edits leave it unchanged. IDs and spans
 /// belong to the document state that produced them.
+///
+/// Within each transaction, imported YAML and comment text share the
+/// [`ParseOptions::max_input_bytes`] limit. The same limit applies separately to
+/// the total length of expanded shorthand tags in the imported fragments.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
     source: source::Source,
@@ -205,9 +209,18 @@ impl EditableDocument {
     /// Returns an error if the options are invalid, `source` is invalid YAML or does
     /// not contain exactly one document, or a resource limit is exceeded.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
+        let mut remaining_tag_bytes = options.max_input_bytes;
+        Self::parse_with_tag_budget(source, options, &mut remaining_tag_bytes)
+    }
+
+    fn parse_with_tag_budget(
+        source: &str,
+        options: ParseOptions,
+        remaining_tag_bytes: &mut usize,
+    ) -> Result<Self, Error> {
         options.check_input(source.len())?;
         let source = lf_source(source);
-        let stream = parse_with_options(&source, options)?;
+        let stream = parse_with_tag_budget(&source, options, remaining_tag_bytes)?;
         let [document] = stream.documents() else {
             return Err(Error {
                 span: stream.span(),

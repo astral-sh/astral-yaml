@@ -438,6 +438,26 @@ fn scalar_style_changes_retain_header_comments() {
 }
 
 #[test]
+fn imported_fragments_share_an_expanded_tag_byte_limit() {
+    let fragment = "%TAG !e! tag:example.com,2026:long-prefix/\n--- [!e!x a, !e!x b, !e!x c]";
+    let options = ParseOptions {
+        max_input_bytes: fragment.len() * 2,
+        ..ParseOptions::default()
+    };
+    let mut document = EditableDocument::parse_with_options("[]", options).unwrap();
+    let error = document
+        .edit(|root| {
+            let mut sequence = root.into_sequence()?;
+            sequence.push_yaml(fragment)?;
+            sequence.push_yaml(fragment)?;
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "expanded tag byte limit exceeded");
+    assert_eq!(document.source(), "[]");
+}
+
+#[test]
 fn small_resource_limits_are_rejected() {
     let mut document = EditableDocument::parse_with_options(
         "[]",
