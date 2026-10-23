@@ -24,7 +24,7 @@ use std::{borrow::Cow, cell::Cell};
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
     comments::{CommentIndex, CommentPlacement},
-    parse_with_options,
+    parser::parse_with_tag_budget,
 };
 
 /// An owned YAML document, including its source and comments.
@@ -205,9 +205,18 @@ impl EditableDocument {
     /// Returns an error if the options are invalid, `source` is invalid YAML or does
     /// not contain exactly one document, or a resource limit is exceeded.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
+        let mut remaining_tag_bytes = options.max_input_bytes;
+        Self::parse_with_tag_budget(source, options, &mut remaining_tag_bytes)
+    }
+
+    fn parse_with_tag_budget(
+        source: &str,
+        options: ParseOptions,
+        remaining_tag_bytes: &mut usize,
+    ) -> Result<Self, Error> {
         options.check_input(source.len())?;
         let source = lf_source(source);
-        let stream = parse_with_options(&source, options)?;
+        let stream = parse_with_tag_budget(&source, options, remaining_tag_bytes)?;
         let [document] = stream.documents() else {
             return Err(Error {
                 span: stream.span(),

@@ -63,6 +63,15 @@ pub fn parse(source: &str) -> Result<Stream<'_>> {
 /// # Errors
 /// Returns a located error for invalid syntax, invalid options, or an exceeded limit.
 pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<'_>> {
+    let mut remaining_tag_bytes = options.max_input_bytes;
+    parse_with_tag_budget(source, options, &mut remaining_tag_bytes)
+}
+
+pub(crate) fn parse_with_tag_budget<'a>(
+    source: &'a str,
+    options: ParseOptions,
+    remaining_tag_bytes: &mut usize,
+) -> Result<Stream<'a>> {
     options.check_input(source.len())?;
 
     let stream = Parser {
@@ -76,7 +85,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         comments: Vec::new(),
         anchors: HashMap::new(),
         tags: HashMap::new(),
-        remaining_tag_bytes: options.max_input_bytes,
+        remaining_tag_bytes,
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
@@ -91,7 +100,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
     Ok(stream)
 }
 
-struct Parser<'a> {
+struct Parser<'a, 'budget> {
     source: &'a str,
     pos: usize,
     options: ParseOptions,
@@ -100,7 +109,7 @@ struct Parser<'a> {
     comments: Vec<Comment<'a>>,
     anchors: HashMap<&'a str, NodeId>,
     tags: HashMap<&'a str, String>,
-    remaining_tag_bytes: usize,
+    remaining_tag_bytes: &'budget mut usize,
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
@@ -125,7 +134,7 @@ enum BlockEntry {
     ImplicitMappingValue,
 }
 
-impl<'a> Parser<'a> {
+impl<'a> Parser<'a, '_> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: Span {
@@ -1048,7 +1057,7 @@ impl<'a> Parser<'a> {
             .checked_sub(prefix.len() + decoded.len())
             .ok_or_else(|| self.error("expanded tag byte limit exceeded"))?;
         let expanded = format!("{prefix}{decoded}");
-        self.remaining_tag_bytes = remaining;
+        *self.remaining_tag_bytes = remaining;
         if !complete_tag(&expanded) {
             return Err(self.error("invalid expanded tag URI"));
         }
