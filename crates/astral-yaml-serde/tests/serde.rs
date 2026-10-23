@@ -484,6 +484,12 @@ fn serialization_escapes_at_different_offsets(padding: usize) {
 }
 
 #[test]
+fn error_display_includes_the_path_and_utf8_byte_offsets() {
+    let error = from_str::<BTreeMap<&str, u8>>("café: nope").unwrap_err();
+    insta::assert_snapshot!(error, @r#"$["café"]: expected an integer at bytes 7..11"#);
+}
+
+#[test]
 fn located_failures_and_document_count() {
     let errors = ["", "---\n---\n", "[", "256"].map(|source| {
         let error = from_str::<u8>(source).unwrap_err();
