@@ -14,6 +14,7 @@ use std::fmt::Write;
 type Result<T> = std::result::Result<T, Error>;
 
 const MAX_DEPTH: usize = 63;
+const EXPLICIT_KEY: &str = "? ";
 
 /// Serialize `value` as a YAML 1.2 document in flow style.
 ///
@@ -310,8 +311,14 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     fn serialize_unit_variant(self, _: &'static str, _: u32, variant: &'static str) -> Result<()> {
         if std::mem::take(&mut self.yaml_tag) {
+            // A node immediately after the explicit-key indicator will be followed
+            // by a colon. Separate it from the bare tag.
+            let is_key = self.output.ends_with(EXPLICIT_KEY);
             self.enum_tag(variant)?;
             self.pending_tag = None;
+            if is_key {
+                self.output.push(' ');
+            }
             return Ok(());
         }
 
@@ -538,7 +545,7 @@ impl SerializeMap for Compound<'_> {
         }
 
         self.separator();
-        self.serializer.output.push_str("? ");
+        self.serializer.output.push_str(EXPLICIT_KEY);
         let start = self.serializer.output.len();
         key.serialize(&mut *self.serializer)?;
         let signature = self

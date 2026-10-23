@@ -412,7 +412,7 @@ fn explicit_wrappers_preserve_tags_and_metadata() {
 
 #[test]
 fn renamed_variants_validate_tag_names() {
-    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    #[derive(Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
     enum Renamed {
         #[serde(rename = "some-name", alias = "old-name")]
         Name,
@@ -434,6 +434,16 @@ fn renamed_variants_validate_tag_names() {
         from_tag::<Renamed>("!<!a,b>").unwrap(),
         Renamed::Punctuation
     );
+    let keys = BTreeMap::from([
+        (YamlTag(Renamed::Name), 1),
+        (YamlTag(Renamed::Punctuation), 2),
+    ]);
+    let yaml = to_string(&keys).unwrap();
+    assert_eq!(
+        from_str::<BTreeMap<YamlTag<Renamed>, u8>>(&yaml).unwrap(),
+        keys
+    );
+
     assert!(to_string(&YamlTag(Renamed::Invalid)).is_err());
     assert!(to_string(&YamlTag(Renamed::Empty)).is_err());
 
