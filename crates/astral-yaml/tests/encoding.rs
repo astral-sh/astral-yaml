@@ -26,20 +26,20 @@ fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
 fn encodings_and_original_spans(encoding: Encoding, bom: &str) {
     let text = format!("{bom}---\na: '🌍 é' # café\n");
     let bytes = encode(&text, encoding);
-    let source = Source::from_bytes(&bytes).unwrap();
+    let source: Source<'_> = bytes.as_slice().try_into().unwrap();
     assert_eq!(source.text(), text);
     assert_eq!(source.encoding(), encoding);
     assert_eq!(source.bytes(), bytes);
 
     let stream = source.parse().unwrap();
 
-    for span in stream
+    let spans = stream
         .nodes()
         .iter()
         .map(|n| n.span)
         .chain(stream.comments().iter().map(|c| c.span))
-        .chain(stream.byte_order_marks().iter().copied())
-    {
+        .chain(stream.byte_order_marks().iter().copied());
+    for span in spans {
         let original = source.original_span(span).unwrap();
         assert_eq!(
             original.slice_bytes(&bytes).unwrap(),
@@ -70,7 +70,7 @@ fn invalid_encodings_and_limits() {
         &[0xff, 0xfe, 0, 0, 0, 0xd8, 0, 0],
         &[0, 0, 0xfe, 0xff, 0, 0x11, 0, 0],
     ] {
-        let error = Source::from_bytes(bytes).unwrap_err();
+        let error = Source::try_from(bytes).unwrap_err();
         assert!(error.span.slice_bytes(bytes).is_some());
     }
 

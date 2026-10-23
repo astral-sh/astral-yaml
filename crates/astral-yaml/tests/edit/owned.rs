@@ -16,7 +16,7 @@ fn owned_document_retains_syntax_and_direct_comments() {
         copy: *items
         ...
     "};
-    let document = EditableDocument::parse(source).unwrap();
+    let document: EditableDocument = source.parse().unwrap();
     assert_eq!(document.source(), source);
     assert_eq!(
         document.options().max_depth,
@@ -46,12 +46,6 @@ fn owned_document_retains_syntax_and_direct_comments() {
         .unwrap();
     assert_eq!(comment.text(), " inline");
     assert_eq!(comment.span().slice(source), Some("# inline"));
-
-    let owned = {
-        let source = String::from("key: value");
-        EditableDocument::parse(&source).unwrap()
-    };
-    assert_eq!(owned.source(), "key: value");
 }
 
 #[test]
@@ -168,7 +162,9 @@ fn normalization_keeps_limits_on_the_original_input_and_locates_errors_in_lf() {
     )
     .unwrap_err();
     assert_eq!(limited.message, "input byte limit exceeded");
-    let error = EditableDocument::parse("key: value\r\ninvalid: [\r\n").unwrap_err();
+    let error = "key: value\r\ninvalid: [\r\n"
+        .parse::<EditableDocument>()
+        .unwrap_err();
     assert_eq!(
         error,
         EditableDocument::parse("key: value\ninvalid: [\n").unwrap_err()

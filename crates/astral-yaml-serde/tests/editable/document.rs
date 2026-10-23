@@ -12,13 +12,11 @@ struct Config {
 
 #[test]
 fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
-    let mut config = {
-        let source = String::from(indoc! {r"
-            timeout: 30 # seconds
-            unknown : ['keep',  2]
-        "});
-        Editable::<Config>::parse(&source).unwrap()
-    };
+    let source = indoc! {r"
+        timeout: 30 # seconds
+        unknown : ['keep',  2]
+    "};
+    let mut config: Editable<Config> = source.parse().unwrap();
     let before = config.to_yaml();
     config
         .edit_syntax(|e| {
@@ -79,7 +77,7 @@ fn syntax_type_and_duplicate_key_failures_roll_back_both_views(operation: usize)
 )]
 #[test_case("timeout: bad"; "type mismatch")]
 fn typed_parse_rejects_invalid_documents(source: &str) {
-    assert!(Editable::<Config>::parse(source).is_err());
+    assert!(source.parse::<Editable<Config>>().is_err());
 }
 
 #[test]
