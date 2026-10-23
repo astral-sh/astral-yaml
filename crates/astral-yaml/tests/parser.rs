@@ -31,6 +31,28 @@ fn ascii_character_checks_cover_chunk_boundaries(padding: usize) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#912-document-markers
+#[test_case("{a:\n---\n}")]
+#[test_case("[a:\n... # end\n]")]
+#[test_case("{a: &anchor\n---\r\n}")]
+#[test_case("[?\r...\r]")]
+fn a_document_marker_cannot_supply_a_flow_node(source: &str) {
+    assert_eq!(
+        parse(source).unwrap_err().message,
+        "document marker inside flow collection"
+    );
+}
+
+#[test_case("{a:\n ---\n}", "---")]
+#[test_case("{a:\n...suffix\n}", "...suffix")]
+fn flow_values_can_resemble_document_markers(source: &str, expected: &str) {
+    let parsed = parse(source).unwrap();
+    let NodeKind::Scalar(value) = &parsed.nodes()[2].kind else {
+        panic!("expected scalar")
+    };
+    assert_eq!(value.value, expected);
+}
+
 // https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
 #[test_case("\n")]
 #[test_case("\r")]
