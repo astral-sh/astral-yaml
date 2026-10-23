@@ -402,6 +402,31 @@ fn compact_flow_pairs_have_the_same_depth_as_braced_mappings(
     }
 }
 
+#[test_case("&a value", 1)]
+#[test_case("&a\n!local\nvalue", 1)]
+#[test_case("&a\n[]", 1)]
+#[test_case("- &a\n  value", 2)]
+#[test_case("k: &a\n  - value", 3)]
+#[test_case("-", 2)]
+#[test_case("-\n- x", 2)]
+#[test_case(": ", 2)]
+#[test_case("?", 2)]
+#[test_case("outer:\n  -", 3)]
+fn node_depth_is_independent_of_properties_and_omitted_content(source: &str, required: usize) {
+    for max_depth in 1..=required {
+        let options = ParseOptions {
+            max_depth,
+            ..ParseOptions::default()
+        };
+        let result = parse_with_options(source, options);
+        assert_eq!(
+            result.err().map(|error| error.message),
+            (max_depth < required).then_some("nesting limit exceeded"),
+            "{source:?} at {max_depth}"
+        );
+    }
+}
+
 #[test]
 fn budgets_and_adversarial_nesting() {
     let mut options = ParseOptions::default();

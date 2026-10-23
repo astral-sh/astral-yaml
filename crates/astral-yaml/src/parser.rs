@@ -634,7 +634,8 @@ impl<'a> Parser<'a> {
                 && (signed(self.column()) > parent
                     || (indentless && signed(self.column()) == parent && self.indicator(b'-')))
             {
-                return self.block_into(parent, depth + 1, indentless, Some(id));
+                // Properties and content belong to the same node.
+                return self.block_into(parent, depth, indentless, Some(id));
             }
 
             let span = Span {
@@ -702,6 +703,7 @@ impl<'a> Parser<'a> {
                 && (self.column() > indent
                     || (indentless && self.column() == indent && self.indicator(b'-')));
             if !nested {
+                self.check_depth(depth)?;
                 return self.empty(at);
             }
         } else if matches!(entry, BlockEntry::ImplicitMappingValue) {
