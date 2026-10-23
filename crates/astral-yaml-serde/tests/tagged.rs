@@ -1,6 +1,6 @@
 use test_case::test_case;
 
-use astral_yaml_dev::Value;
+use astral_yaml_dev::{Value, diagnostic_snapshot};
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string};
 use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeTupleStruct};
 use std::{collections::BTreeMap, fmt::Debug};
@@ -173,15 +173,13 @@ fn generic_yaml_values_reject_local_tags() {
         assert!(from_str::<serde_json::Value>(source).is_err());
     }
 
-    let error = from_str::<Vec<Mixed>>("[!Text hello, 42]").unwrap_err();
-    assert_eq!(
-        error.message,
-        "non-core YAML tags require Tagged<T> or with::yaml_tag"
-    );
-    assert_eq!(
-        error.span.unwrap().slice("[!Text hello, 42]"),
-        Some("!Text hello")
-    );
+    let source = "[!Text hello, 42]";
+    let error = from_str::<Vec<Mixed>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @"
+      |
+    1 | [!Text hello, 42]
+      |  ^^^^^^^^^^^ $[0]: non-core YAML tags require Tagged<T> or with::yaml_tag
+    ");
     assert_eq!(
         from_str::<Vec<Mixed>>("[{Text: hello}, 42]").unwrap(),
         [Mixed::Text("hello".into()), Mixed::Number(42)]

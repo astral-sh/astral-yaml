@@ -238,26 +238,48 @@ fn sequential_sets_refresh_the_candidate_and_validate_only_on_commit() {
     assert_eq!(document.value().timeout, 60);
 }
 
-#[test_case(&["missing".into()], r#"$["missing"]"#, "missing mapping key"; "missing field")]
-#[test_case(&["items".into(), 3.into()], r#"$["items"][3]"#, "item index out of bounds"; "missing item")]
 #[test_case(
-    &["items".into(), 0.into(), "wrong".into()], r#"$["items"][0]["wrong"]"#, "expected a mapping";
+    &["missing".into()]
+    => with |error| insta::assert_snapshot!(error, @r#"
+      |
+    1 | items: [1]
+      | ^^^^^^^^^^ $["missing"]: missing mapping key
+    "#);
+    "missing field"
+)]
+#[test_case(
+    &["items".into(), 3.into()]
+    => with |error| insta::assert_snapshot!(error, @r#"
+      |
+    1 | items: [1]
+      | ^^^^^^^^^^ $["items"][3]: item index out of bounds
+    "#);
+    "missing item"
+)]
+#[test_case(
+    &["items".into(), 0.into(), "wrong".into()]
+    => with |error| insta::assert_snapshot!(error, @r#"
+      |
+    1 | items: [1]
+      | ^^^^^^^^^^ $["items"][0]["wrong"]: expected a mapping
+    "#);
     "field of scalar"
 )]
-#[test_case(&[0.into()], "$[0]", "expected a sequence"; "item of mapping")]
-fn navigation_errors_identify_the_selected_path(
-    path: &[PathSegment<'_>],
-    expected_path: &str,
-    message: &str,
-) {
+#[test_case(
+    &[0.into()]
+    => with |error| insta::assert_snapshot!(error, @"
+      |
+    1 | items: [1]
+      | ^^^^^^^^^^ $[0]: expected a sequence
+    ");
+    "item of mapping"
+)]
+fn navigation_errors_identify_the_selected_path(path: &[PathSegment<'_>]) -> String {
     let source = "items: [1]";
     let mut document = Editable::<Value>::parse(source).unwrap();
     let error = document.edit_at(path, |_| Ok(())).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        format!("{expected_path}: {message} at bytes 0..10")
-    );
     assert_eq!(document.source(), source);
+    astral_yaml_dev::diagnostic_snapshot(source, error)
 }
 
 #[test_case(|root| root.field("name").map(|_| ()); "field lookup")]
@@ -514,7 +536,11 @@ fn an_empty_edit_path_selects_the_root_and_a_missing_path_skips_the_callback() {
             panic!("a failed selection must not call the edit callback")
         })
         .unwrap_err();
-    insta::assert_snapshot!(error, @r#"$["services.db"][1]: item index out of bounds at bytes 0..21"#);
+    insta::assert_snapshot!(astral_yaml_dev::diagnostic_snapshot(&source, error), @r#"
+      |
+    1 | services.db: [[8080]] # public
+      | ^^^^^^^^^^^^^^^^^^^^^ $["services.db"][1]: item index out of bounds
+    "#);
     assert_eq!(document.source(), source);
 }
 

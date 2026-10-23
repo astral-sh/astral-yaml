@@ -1,4 +1,5 @@
 use astral_yaml::Encoding;
+use astral_yaml_dev::diagnostic_snapshot;
 use test_case::test_case;
 
 mod support;
@@ -263,11 +264,23 @@ fn wide_radix_integers_round_to_f64() {
 // https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn finite_float_overflow_is_an_error() {
-    for source in ["1e999", "-1e999", "!!float '1e999'"] {
+    let errors = ["1e999", "-1e999", "!!float '1e999'"].map(|source| {
         let error = from_str::<f64>(source).unwrap_err();
-        assert_eq!(error.message, "float out of range");
-        assert!(error.span.unwrap().slice(source).is_some());
-    }
+        diagnostic_snapshot(source, error)
+    });
+    insta::assert_snapshot!(errors.join("\n\n"), @"
+      |
+    1 | 1e999
+      | ^^^^^ $: float out of range
+
+      |
+    1 | -1e999
+      | ^^^^^^ $: float out of range
+
+      |
+    1 | !!float '1e999'
+      |         ^^^^^^^ $: float out of range
+    ");
 
     for source in [
         "3.5e38",
@@ -472,10 +485,28 @@ fn serialization_escapes_at_different_offsets(padding: usize) {
 
 #[test]
 fn located_failures_and_document_count() {
-    for source in ["", "---\n---\n", "[", "256"] {
+    let errors = ["", "---\n---\n", "[", "256"].map(|source| {
         let error = from_str::<u8>(source).unwrap_err();
-        assert!(error.span.is_some());
-    }
+        diagnostic_snapshot(source, error)
+    });
+    insta::assert_snapshot!(errors.join("\n\n"), @"
+      |
+    1 |
+      | ^ expected exactly one document
+
+      |
+    1 | / ---
+    2 | | ---
+      | |____^ expected exactly one document
+
+      |
+    1 | [
+      |  ^ unterminated flow sequence
+
+      |
+    1 | 256
+      | ^^^ $: integer out of range
+    ");
 
     for source in ["[]", "[1]", "[1,2,3]"] {
         assert!(from_str::<(u8, u8)>(source).is_err());
@@ -762,9 +793,10 @@ fn mapping_key_uniqueness_uses_core_types() {
     ] {
         let error = from_str::<Anything>(source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
-        assert!(error.span.is_some());
-        assert!(
-            from_str::<serde::de::IgnoredAny>(source).is_err(),
+        let ignored_error = from_str::<serde::de::IgnoredAny>(source).unwrap_err();
+        assert_eq!(
+            diagnostic_snapshot(source, error),
+            diagnostic_snapshot(source, ignored_error),
             "{source}"
         );
     }
@@ -791,12 +823,90 @@ fn mapping_key_uniqueness_uses_core_types() {
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test_case(1)]
-#[test_case(7)]
-#[test_case(8)]
-#[test_case(9)]
-#[test_case(64)]
-fn mapping_key_uniqueness_across_mapping_sizes(count: usize) {
+#[test_case(
+    1
+    => with |errors| insta::assert_snapshot!(errors, @"
+      |
+    1 | 0: value
+    2 | 0x00: duplicate
+      | ^^^^ $.key_at(1): duplicate mapping key
+
+      |
+    1 | key0: value
+    2 | key0: duplicate
+      | ^^^^ $.key_at(1): duplicate mapping key
+    ");
+    "two entries"
+)]
+#[test_case(
+    7
+    => with |errors| insta::assert_snapshot!(errors, @"
+      |
+    6 | 5: value
+    7 | 6: value
+    8 | 0x00: duplicate
+      | ^^^^ $.key_at(7): duplicate mapping key
+
+      |
+    6 | key5: value
+    7 | key6: value
+    8 | key0: duplicate
+      | ^^^^ $.key_at(7): duplicate mapping key
+    ");
+    "eight entries"
+)]
+#[test_case(
+    8
+    => with |errors| insta::assert_snapshot!(errors, @"
+      |
+    7 | 6: value
+    8 | 7: value
+    9 | 0x00: duplicate
+      | ^^^^ $.key_at(8): duplicate mapping key
+
+      |
+    7 | key6: value
+    8 | key7: value
+    9 | key0: duplicate
+      | ^^^^ $.key_at(8): duplicate mapping key
+    ");
+    "nine entries"
+)]
+#[test_case(
+    9
+    => with |errors| insta::assert_snapshot!(errors, @"
+       |
+     8 | 7: value
+     9 | 8: value
+    10 | 0x00: duplicate
+       | ^^^^ $.key_at(9): duplicate mapping key
+
+       |
+     8 | key7: value
+     9 | key8: value
+    10 | key0: duplicate
+       | ^^^^ $.key_at(9): duplicate mapping key
+    ");
+    "ten entries"
+)]
+#[test_case(
+    64
+    => with |errors| insta::assert_snapshot!(errors, @"
+       |
+    63 | 62: value
+    64 | 63: value
+    65 | 0x00: duplicate
+       | ^^^^ $.key_at(64): duplicate mapping key
+
+       |
+    63 | key62: value
+    64 | key63: value
+    65 | key0: duplicate
+       | ^^^^ $.key_at(64): duplicate mapping key
+    ");
+    "large mapping"
+)]
+fn mapping_key_uniqueness_across_mapping_sizes(count: usize) -> String {
     let mut source = String::new();
 
     for key in 0..count {
@@ -808,8 +918,7 @@ fn mapping_key_uniqueness_across_mapping_sizes(count: usize) {
 
     source.push_str("0x00: duplicate\n");
     let error = from_str::<BTreeMap<u64, String>>(&source).unwrap_err();
-    assert_eq!(error.message, "duplicate mapping key");
-    assert_eq!(error.span.unwrap().slice(&source), Some("0x00"));
+    let numeric = diagnostic_snapshot(&source, error);
 
     let mut source = String::new();
 
@@ -822,8 +931,8 @@ fn mapping_key_uniqueness_across_mapping_sizes(count: usize) {
 
     source.push_str("key0: duplicate\n");
     let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
-    assert_eq!(error.message, "duplicate mapping key");
-    assert_eq!(error.span.unwrap().slice(&source), Some("key0"));
+    let string = diagnostic_snapshot(&source, error);
+    format!("{numeric}\n\n{string}")
 }
 
 // https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags

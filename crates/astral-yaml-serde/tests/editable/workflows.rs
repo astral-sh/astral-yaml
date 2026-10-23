@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use astral_yaml_dev::edit_diff;
-use astral_yaml_serde::Editable;
+use astral_yaml_dev::{diagnostic_snapshot, edit_diff};
+use astral_yaml_serde::{Editable, EditableYaml};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -139,7 +139,13 @@ fn a_commit_error_identifies_the_alias_use_instead_of_the_edit_path() {
     let mut config = Editable::<Config>::parse(source).unwrap();
     let error = config.set_at(["default"], "http").unwrap_err();
 
-    insta::assert_snapshot!(error, @r#"$["ports"][0]: expected an integer at bytes 15..19"#);
+    let mut candidate = EditableYaml::parse(source).unwrap();
+    candidate.set_at(["default"], "http").unwrap();
+    insta::assert_snapshot!(diagnostic_snapshot(candidate.source(), error), @r#"
+      |
+    1 | default: &port http
+      |                ^^^^ $["ports"][0]: expected an integer
+    "#);
     assert_eq!(config.source(), source);
     assert_eq!(config.value().default, "80");
     assert_eq!(config.value().ports, [80]);

@@ -2,6 +2,7 @@ use test_case::test_case;
 
 mod support;
 
+use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Error, Tagged, from_str, to_string};
 use serde::{
     Deserialize, Serialize,
@@ -33,17 +34,30 @@ fn every_integer_width_checks_its_boundaries() {
 #[test]
 fn numeric_and_type_errors_are_located() {
     from_str::<()>("!!null null").unwrap();
-    assert_eq!(
-        from_str::<f64>("!!float 0xff").unwrap_err().message,
-        "invalid float"
-    );
     assert_eq!(from_str::<f64>("0o10").unwrap().to_bits(), 8.0f64.to_bits());
 
     let overflowing_integer = format!("0x{}", "f".repeat(257));
-    for source in ["text", "[]", "!!float 0xff", &overflowing_integer] {
+    let errors = ["text", "[]", "!!float 0xff", &overflowing_integer].map(|source| {
         let error = from_str::<f64>(source).unwrap_err();
-        assert!(error.span.is_some(), "{source}");
-    }
+        diagnostic_snapshot(source, error)
+    });
+    insta::assert_snapshot!(errors.join("\n\n"), @"
+      |
+    1 | text
+      | ^^^^ $: expected a number
+
+      |
+    1 | []
+      | ^^ $: expected a scalar
+
+      |
+    1 | !!float 0xff
+      |         ^^^^ $: invalid float
+
+      |
+    1 | 0xffffffffffffffffffffffffffffffffffff...ffffffffffffffffffffffffffffffffffffff
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ $: float out of range
+    ");
 
     for source in [
         "340282366920938463463374607431768211456",
@@ -241,17 +255,56 @@ impl<'de> Deserialize<'de> for ProtocolMap {
     }
 }
 
-#[test_case("{}", "mapping value requested before key")]
-#[test_case("{key: 1}", "mapping value was not consumed")]
-#[test_case("{partial: 1}", "mapping was not fully consumed")]
-#[test_case("[]", "expected a mapping")]
-#[test_case("{a: 1, a: 2}", "duplicate mapping key")]
-fn map_visitors_must_follow_the_protocol(source: &str, expected: &str) {
-    from_str::<ProtocolMap>("{normal: 1}").unwrap();
-
-    let error = from_str::<ProtocolMap>(source).unwrap_err();
-    assert_eq!(error.message, expected);
-    assert!(error.span.is_some());
+#[test_case("{normal: 1}" => Ok(()); "consumed")]
+#[test_case(
+    "{}"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | {}
+      | ^^ $: mapping value requested before key
+    ");
+    "value before key"
+)]
+#[test_case(
+    "{key: 1}"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | {key: 1}
+      | ^^^^^^^^ $: mapping value was not consumed
+    ");
+    "unconsumed value"
+)]
+#[test_case(
+    "{partial: 1}"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | {partial: 1}
+      | ^^^^^^^^^^^^ $: mapping was not fully consumed
+    ");
+    "unconsumed mapping"
+)]
+#[test_case(
+    "[]"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | []
+      | ^^ $: expected a mapping
+    ");
+    "wrong type"
+)]
+#[test_case(
+    "{a: 1, a: 2}"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | {a: 1, a: 2}
+      |        ^ $.key_at(1): duplicate mapping key
+    ");
+    "duplicate key"
+)]
+fn map_visitors_must_follow_the_protocol(source: &str) -> Result<(), String> {
+    from_str::<ProtocolMap>(source)
+        .map(|_| ())
+        .map_err(|error| diagnostic_snapshot(source, error))
 }
 
 #[derive(Debug)]

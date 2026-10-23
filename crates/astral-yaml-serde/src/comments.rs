@@ -42,6 +42,7 @@ mod tests {
     fn indexing_is_bounded_and_cached_including_failures() {
         let stream = astral_yaml::parse("42 # note\n").unwrap();
         let root = stream.documents()[0].root;
+        let mut spans = Vec::new();
 
         // Two lines, one node, and one comment ownership record.
         for limit in 0..=4 {
@@ -54,13 +55,24 @@ mod tests {
                 assert_eq!(cache.get(&stream, root, &budget).unwrap().len(), 1);
             } else {
                 let error = result.unwrap_err();
-                assert_eq!(error.message, "deserialization resource limit exceeded");
-                assert!(error.span.unwrap().slice(stream.source()).is_some());
                 budget.set(100);
-                assert!(cache.get(&stream, root, &budget).is_err());
+                assert_eq!(cache.get(&stream, root, &budget).unwrap_err(), error);
                 assert_eq!(budget.get(), 100);
+                spans.push((
+                    format!("budget {limit}: {}", error.message),
+                    error.span.unwrap(),
+                ));
             }
         }
+        insta::assert_snapshot!(astral_yaml_dev::span_snapshot(stream.source(), spans), @"
+          |
+        1 | 42 # note
+          | ^^ ^^^^^^^ budget 1: deserialization resource limit exceeded
+          | |  |
+          | |  budget 3: deserialization resource limit exceeded
+          | budget 0: deserialization resource limit exceeded
+          | budget 2: deserialization resource limit exceeded
+        ");
     }
 
     #[test]

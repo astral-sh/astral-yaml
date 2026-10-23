@@ -1,7 +1,7 @@
 mod support;
 
 use astral_yaml::Source;
-use astral_yaml_dev::span_snapshot;
+use astral_yaml_dev::{diagnostic_snapshot, span_snapshot};
 use astral_yaml_serde::{Spanned, from_document, from_str, from_stream, to_string};
 use serde::{Deserialize, Serialize, de};
 use std::collections::{BTreeMap, HashMap};
@@ -106,24 +106,21 @@ fn decoded_strings_require_owned_storage_and_report_lexical_spans() {
     let mut snapshots = Vec::new();
     for source in ["'it''s'", "'hello\n  world'", "\"a\\nb\""] {
         let error = from_str::<Spanned<&str>>(source).unwrap_err();
-        assert!(error.message.contains("borrowed string"));
-        let span = error.span.unwrap();
-        assert_eq!(span.slice(source), Some(source));
-        snapshots.push(span_snapshot(source, [(error.message, span)]));
+        snapshots.push(diagnostic_snapshot(source, error));
     }
     insta::assert_snapshot!(snapshots.join("\n\n"), @r#"
       |
     1 | 'it''s'
-      | ^^^^^^^ invalid type: string "it's", expected a borrowed string
+      | ^^^^^^^ $: invalid type: string "it's", expected a borrowed string
 
       |
     1 | / 'hello
     2 | |   world'
-      | |________^ invalid type: string "hello world", expected a borrowed string
+      | |________^ $: invalid type: string "hello world", expected a borrowed string
 
       |
     1 | "a\nb"
-      | ^^^^^^ invalid type: string "a\nb", expected a borrowed string
+      | ^^^^^^ $: invalid type: string "a\nb", expected a borrowed string
     "#);
 }
 
@@ -461,13 +458,31 @@ fn wrapping_preserves_validation_and_located_errors() {
         assert_eq!(plain, wrapped);
     }
 
-    let error = from_str::<BTreeMap<String, Spanned<u8>>>("count: 256").unwrap_err();
-    assert_eq!(error.span.unwrap().slice("count: 256"), Some("256"));
+    let source = "count: 256";
+    let error = from_str::<BTreeMap<String, Spanned<u8>>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @r#"
+      |
+    1 | count: 256
+      |        ^^^ $["count"]: integer out of range
+    "#);
 
-    for source in ["{a: 1, a: 2}", "&a [*a]", "!!str []"] {
+    let errors = ["{a: 1, a: 2}", "&a [*a]", "!!str []"].map(|source| {
         let error = from_str::<Spanned<de::IgnoredAny>>(source).unwrap_err();
-        assert!(error.span.unwrap().slice(source).is_some());
-    }
+        span_snapshot(source, [(error.message, error.span.unwrap())])
+    });
+    insta::assert_snapshot!(errors.join("\n\n"), @"
+      |
+    1 | {a: 1, a: 2}
+      |        ^ duplicate mapping key
+
+      |
+    1 | &a [*a]
+      |     ^^ deserialization resource limit exceeded
+
+      |
+    1 | !!str []
+      | ^^^^^^^^ tag does not match requested type
+    ");
 
     let error = from_str::<Recursive>("null").unwrap_err();
     assert_eq!(error.message, "deserialization resource limit exceeded");
@@ -584,13 +599,19 @@ mod protocol {
     fn spanned_visitors_must_consume_the_value() {
         astral_yaml_serde::from_str::<SpanProtocol>("42 # comment").unwrap();
 
-        let error = astral_yaml_serde::from_str::<SpanProtocol>("1").unwrap_err();
-        assert_eq!(error.message, "metadata value was not fully consumed");
-        assert_eq!(error.span.unwrap().slice("1"), Some("1"));
+        let snapshots = ["1", "bad"].map(|source| {
+            let error = astral_yaml_serde::from_str::<SpanProtocol>(source).unwrap_err();
+            super::diagnostic_snapshot(source, error)
+        });
+        insta::assert_snapshot!(snapshots.join("\n\n"), @"
+          |
+        1 | 1
+          | ^ $: metadata value was not fully consumed
 
-        let error = astral_yaml_serde::from_str::<SpanProtocol>("bad").unwrap_err();
-        assert_eq!(error.message, "expected an integer");
-        assert_eq!(error.span.unwrap().slice("bad"), Some("bad"));
+          |
+        1 | bad
+          | ^^^ $: expected an integer
+        ");
 
         let error = SpanProtocol::deserialize(
             de::value::U8Deserializer::<astral_yaml_serde::Error>::new(1),
