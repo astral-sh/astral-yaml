@@ -131,53 +131,6 @@ pub(super) fn tree(stream: &Stream<'_>) -> String {
     out
 }
 
-pub(super) fn diagnostic(name: &str, source: &str, error: &astral_yaml::Error) -> String {
-    // Corpus files use LF. Include the byte range because a multiline error's
-    // caret covers only its first line.
-    let prefix = &source[..error.span.start()];
-    let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-    let column = prefix.rsplit('\n').next().unwrap().chars().count() + 1;
-    let mut out = format!(
-        "{name}.yaml:{line}:{column}: {}\nbytes {}..{}\n",
-        error.message,
-        error.span.start(),
-        error.span.end(),
-    );
-
-    for (index, text) in source.lines().enumerate() {
-        let number = index + 1;
-
-        if number < line.saturating_sub(2) || number > line + 1 {
-            continue;
-        }
-
-        writeln!(out, "{number:>4} | {text}").unwrap();
-
-        if number == line {
-            let width = error
-                .span
-                .slice(source)
-                .unwrap()
-                .split('\n')
-                .next()
-                .unwrap()
-                .chars()
-                .count()
-                .max(1);
-
-            writeln!(
-                out,
-                "     | {}{}",
-                " ".repeat(column - 1),
-                "^".repeat(width)
-            )
-            .unwrap();
-        }
-    }
-
-    out
-}
-
 #[test]
 fn tree_preserves_presentation_and_decoded_lines() {
     let source = "%YAML 1.2\n---\nbase: &base !local {quoted: 'é', empty:}\nalias: *base\n? [a, b]\n: >-\n  folded\n  text\nscript: |+\n  echo \"hello\"\n\n...\n--- []\n";

@@ -4,6 +4,7 @@ mod fixtures;
 use std::fs;
 
 use astral_yaml_dev::{
+    diagnostic_snapshot,
     fixtures::{manifest, root, with_line_breaks},
     validate_spans,
 };
@@ -60,7 +61,7 @@ fn check_rejection(name: &str) -> String {
     let source = fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap();
     let error = astral_yaml::parse(&source).unwrap_err();
 
-    display::diagnostic(name, &source, &error)
+    diagnostic_snapshot(&source, error)
 }
 
 #[test]
