@@ -4,10 +4,12 @@ use std::fmt;
 /// A YAML error, optionally associated with a path and source span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error {
+    /// The diagnostic text without its path or byte range.
     pub message: String,
     /// The position being edited or deserialized, such as `$["ports"][1]`.
     /// A path through an alias describes its use, while the span can refer to its target.
     pub path: Option<String>,
+    /// The range in the YAML source, when the error can be traced to a node.
     pub span: Option<Span>,
 }
 
