@@ -337,7 +337,7 @@ fn inserted_roots_are_separated_from_end_markers() {
 
     @@ -1,3 +1,5 @@
      ---
-    +|2
+    +|3
     +  text
      ... # end
      # tail
@@ -1037,26 +1037,26 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     @@ -1,2 +1,3 @@
-    +  |2-
+    +  |3-
        old
      # tail
 
     @@ -1,2 +1,3 @@
-    +  >2-
+    +  >3-
        old
      # tail
 
     @@ -1,2 +1,3 @@
     -old
     -  # tail
-    +|2-
+    +|3-
     +  old
     +# tail
 
     @@ -1,2 +1,3 @@
     -old
     -  # tail
-    +>2-
+    +>3-
     +  old
     +# tail
     ");

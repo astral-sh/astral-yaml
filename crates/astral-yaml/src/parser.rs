@@ -1753,8 +1753,8 @@ impl<'a> Parser<'a> {
             return Err(self.error("invalid block scalar header"));
         }
 
-        let base = usize::try_from(parent).unwrap_or(0);
-        let mut indent = increment.map(|n| base + n);
+        let minimum = usize::try_from(parent + 1).expect("parent indentation starts at -1");
+        let mut indent = increment.map(|n| minimum + (n - 1));
         let mut lines: Vec<(&str, bool)> = Vec::new();
         let mut end = self.pos;
         let mut leading_indent = 0;
@@ -1771,8 +1771,7 @@ impl<'a> Parser<'a> {
             let line_end = self.line_end();
             let empty = self.pos == line_end;
             if !empty {
-                let required =
-                    *indent.get_or_insert(spaces.max(usize::try_from(parent + 1).unwrap_or(0)));
+                let required = *indent.get_or_insert(spaces.max(minimum));
                 if spaces < required || self.marker("---") || self.marker("...") {
                     if self.byte() == Some(b'\t') {
                         return Err(self.error("tab in block scalar indentation"));

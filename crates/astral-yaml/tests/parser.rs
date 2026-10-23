@@ -231,6 +231,19 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite(style: &str) {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#913-bare-documents
+// https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+#[test_case("|1\ntext\n", "text\n")]
+#[test_case("|2\n  foo\n", " foo\n")]
+#[test_case("--- &root >2\n  foo\n", " foo\n")]
+fn explicit_root_block_indentation_starts_at_minus_one(source: &str, expected: &str) {
+    let parsed = parse(source).unwrap();
+    let NodeKind::Scalar(value) = &parsed.nodes()[0].kind else {
+        panic!("expected scalar")
+    };
+    assert_eq!(value.value, expected);
+}
+
 #[test_case("|\n  \ttext\n", "\ttext\n")]
 #[test_case(">\n  \t\n  text\n", "\t\ntext\n")]
 fn block_scalar_tabs_after_indentation_are_content(source: &str, expected: &str) {

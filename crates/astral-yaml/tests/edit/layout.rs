@@ -958,7 +958,7 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     @@ -1,3 +1,5 @@
     -old
     -# remove
-    +|2+
+    +|3+
     +  new
     +  ⏎
     +...
