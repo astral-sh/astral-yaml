@@ -397,8 +397,8 @@ fn inserted_nodes_can_be_edited() {
 #[test_case(ScalarStyle::Plain, "hello"; "plain")]
 #[test_case(ScalarStyle::SingleQuoted, "'hello'"; "single quoted")]
 #[test_case(ScalarStyle::DoubleQuoted, r#""hello""#; "double quoted")]
-#[test_case(ScalarStyle::Literal, "|2-\n  hello\n"; "literal")]
-#[test_case(ScalarStyle::Folded, ">2-\n  hello\n"; "folded")]
+#[test_case(ScalarStyle::Literal, "|3-\n  hello\n"; "literal")]
+#[test_case(ScalarStyle::Folded, ">3-\n  hello\n"; "folded")]
 fn scalar_styles_can_be_changed(style: ScalarStyle, expected: &str) {
     let document = edited("'hello'", |e| e.set_scalar_style(&e.root(), style));
     assert_eq!(document.source(), expected);

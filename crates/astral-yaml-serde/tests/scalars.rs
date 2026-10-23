@@ -3,6 +3,16 @@ use test_case::test_case;
 use astral_yaml_serde::from_str;
 use serde_json::{Value, json};
 
+// A root block scalar has parent indentation -1. The nested presentations
+// use parent indentation 0 and indent their content by two spaces.
+fn document_scalar(scalar: &str) -> String {
+    if scalar.starts_with("|2") || scalar.starts_with(">2") {
+        scalar.replacen('2', "3", 1)
+    } else {
+        scalar.to_owned()
+    }
+}
+
 fn presentations(scalar: &str) -> [String; 4] {
     let nested = scalar.replace('\n', "\n  ");
     let nested = if scalar.ends_with('\n') {
@@ -12,7 +22,7 @@ fn presentations(scalar: &str) -> [String; 4] {
     };
 
     [
-        scalar.to_owned(),
+        document_scalar(scalar),
         format!("value: {scalar}"),
         format!("- {scalar}"),
         format!("outer:\n  value: {nested}"),
@@ -102,7 +112,7 @@ fn generated_block_scalars_agree_across_presentations() {
                                         assert!(from_str::<Value>(&source).is_err(), "{source:?}");
                                     }
                                 } else {
-                                    match from_str::<String>(&scalar) {
+                                    match from_str::<String>(&document_scalar(&scalar)) {
                                         Ok(expected) => assert_presentations(&scalar, &expected),
                                         Err(_) => {
                                             for source in presentations(&scalar) {

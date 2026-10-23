@@ -599,6 +599,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
                 self.scalar(
                     value,
                     self.layout.scalar_style(id, *style),
+                    id == self.document.root,
                     context,
                     &mut comments,
                 )?;
@@ -776,6 +777,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         &mut self,
         value: &str,
         style: ScalarStyle,
+        document_root: bool,
         context: Context,
         comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
@@ -784,6 +786,15 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
             Position::Flow => ScalarPosition::Flow,
             Position::ImplicitKey { flow: true } => ScalarPosition::FlowKey,
             Position::ImplicitKey { flow: false } => ScalarPosition::BlockKey,
+            Position::Block { .. }
+                if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded) =>
+            {
+                if document_root {
+                    ScalarPosition::Document
+                } else {
+                    ScalarPosition::Block
+                }
+            }
             Position::Block { .. } if self.at_document_boundary() => ScalarPosition::Document,
             Position::Block { .. } => ScalarPosition::Block,
         };
@@ -970,7 +981,12 @@ fn flow_scalar(value: &str, indent: usize) -> String {
     result
 }
 
-fn block_scalar(value: &str, style: ScalarStyle, indent: usize) -> String {
+fn block_scalar(
+    value: &str,
+    style: ScalarStyle,
+    position: ScalarPosition,
+    indent: usize,
+) -> String {
     let indicator = if style == ScalarStyle::Literal {
         '|'
     } else {
@@ -1007,7 +1023,13 @@ fn block_scalar(value: &str, style: ScalarStyle, indent: usize) -> String {
             body.push_str(line);
         }
     }
-    let mut result = format!("{indicator}2{chomp}\n");
+    // Content is indented two spaces. At the document root its parent is at -1.
+    let increment = if position == ScalarPosition::Document {
+        3
+    } else {
+        2
+    };
+    let mut result = format!("{indicator}{increment}{chomp}\n");
     let indentation = " ".repeat(indent + 2);
     for line in body.split_terminator('\n') {
         result.push_str(&indentation);
@@ -1031,7 +1053,7 @@ fn scalar(value: &str, style: ScalarStyle, position: ScalarPosition, indent: usi
         ScalarStyle::Literal | ScalarStyle::Folded
             if matches!(position, ScalarPosition::Block | ScalarPosition::Document) =>
         {
-            block_scalar(value, style, indent)
+            block_scalar(value, style, position, indent)
         }
         ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
             return quoted(value);

@@ -104,13 +104,13 @@ fn normalization_retains_multiline_scalar_styles() {
     @@ -1,2 +1,2 @@
     -|+
     -
-    +|2+
+    +|3+
     +  ⏎
 
     @@ -1,2 +1,2 @@
     ->+
     -
-    +>2+
+    +>3+
     +  ⏎
     ");
 }
@@ -140,7 +140,21 @@ fn normalized_block_scalars_use_their_parent_indentation() {
     ]
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
+    @@ -1,3 +1,3 @@
+    -  |2-
+    -  first
+    -  second
+    +  |3-
+    +   first
+    +   second
 
+    @@ -1,3 +1,3 @@
+    -  &anchor |2-
+    -  first
+    -  second
+    +  &anchor |3-
+    +   first
+    +   second
 
     @@ -1,4 +1,4 @@
      outer:

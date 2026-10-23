@@ -165,8 +165,8 @@ fn typed_root_edits_preserve_document_framing_and_comment_order() {
 
 #[test_case("first\nsecond", ScalarStyle::Plain, "first\n\n  second\n\n"; "plain")]
 #[test_case("first\nsecond", ScalarStyle::SingleQuoted, "'first\n\n  second'\n\n"; "single quoted")]
-#[test_case("\n", ScalarStyle::Literal, "|2+\n  \n"; "literal")]
-#[test_case("\n", ScalarStyle::Folded, ">2+\n  \n"; "folded")]
+#[test_case("\n", ScalarStyle::Literal, "|3+\n  \n"; "literal")]
+#[test_case("\n", ScalarStyle::Folded, ">3+\n  \n"; "folded")]
 fn value_setters_can_request_multiline_scalar_styles(
     value: &str,
     style: ScalarStyle,
@@ -497,7 +497,7 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,3 @@
-    +  |2-
+    +  |3-
        old
      # tail
     ");

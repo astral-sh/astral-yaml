@@ -1125,10 +1125,10 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
     }
     insta::assert_debug_snapshot!(outputs, @r#"
     [
-        "  |2-\n  old\n# tail\n",
-        "    |2-\n  old\n# tail\n",
-        "  |2- # inline\n  old\n# tail\n",
-        "  &a |2- # inline\n  old\n# tail\n",
+        "  |3-\n  old\n# tail\n",
+        "    |3-\n  old\n# tail\n",
+        "  |3- # inline\n  old\n# tail\n",
+        "  &a |3- # inline\n  old\n# tail\n",
     ]
     "#);
 }

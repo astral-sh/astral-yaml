@@ -355,10 +355,10 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::Literal
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        @@ -1 +1,2 @@
-        -"\n"
-        +|2+
-        +  ⏎
+    @@ -1 +1,2 @@
+    -"\n"
+    +|3+
+    +  ⏎
     "#);
     "literal"
 )]
@@ -368,10 +368,10 @@ fn root_comment_placement_respects_the_document_prefix() {
     "#},
     ScalarStyle::Folded
     => with |diff| insta::assert_snapshot!(diff, @r#"
-        @@ -1 +1,2 @@
-        -"\n"
-        +>2+
-        +  ⏎
+    @@ -1 +1,2 @@
+    -"\n"
+    +>3+
+    +  ⏎
     "#);
     "folded"
 )]
@@ -420,18 +420,18 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     insta::assert_snapshot!(diffs, @r"
     @@ -1 +1,2 @@
     -'old'
-    +|2+
+    +|3+
     +  ⏎
 
     @@ -1,2 +1,2 @@
     -'old'
     -
-    +|2+
+    +|3+
     +  ⏎
 
     @@ -1,3 +1,2 @@
     -'old'
-    +|2+
+    +|3+
        ⏎
     -  ⏎
     \ No newline at end of file
@@ -439,20 +439,20 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     @@ -1,2 +1,2 @@
     -'old' # keep
     -
-    +|2+ # keep
+    +|3+ # keep
     +  ⏎
 
     @@ -1,3 +1,3 @@
     -'old'
     -
-    +|2+
+    +|3+
     +  ⏎
      ...
 
     @@ -1,3 +1,4 @@
      %YAML 1.2 # directive
     ---- 'old' # inline
-    +--- |2+ # inline
+    +--- |3+ # inline
     +  ⏎
      ... # end
     ");
@@ -631,8 +631,8 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     ---- # marker
     \ No newline at end of file
     +--- # marker
-    +|2-
-    +  new
+    +|3-
+    +   new
 
     @@ -1,2 +1,3 @@
      %YAML 1.2
@@ -663,8 +663,8 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     ---- # marker
     \ No newline at end of file
     +--- # marker
-    +|2-
-    +  new
+    +|3-
+    +   new
     ");
 }
 
