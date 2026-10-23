@@ -826,6 +826,41 @@ fn invalid_tag_uris_are_rejected(source: &str) {
     assert!(parse(source).is_err(), "{source}");
 }
 
+// https://yaml.org/spec/1.2.2/#691-node-tags
+// https://datatracker.ietf.org/doc/html/rfc3986#section-3
+#[test_case("tag:example,a:b", true)]
+#[test_case("https://user:pw@host:123/a?one?two#part?", true)]
+#[test_case("file://", true)]
+#[test_case("https://host:", true)]
+#[test_case("https://[2001:db8::1]:443", true)]
+#[test_case("https://[::ffff:192.0.2.1]", true)]
+#[test_case("x://[Va.next:host+name]", true)]
+#[test_case("https://host/%5B%23%5D", true)]
+#[test_case("!local[brackets]#one#two", true)]
+#[test_case("https://[not-an-ip]", false)]
+#[test_case("https://[::1", false)]
+#[test_case("https://[::1]extra", false)]
+#[test_case("https://user[name]@host", false)]
+#[test_case("https://user@other@host", false)]
+#[test_case("https://ho]st", false)]
+#[test_case("https://host:port", false)]
+#[test_case("https://[::1]:port", false)]
+#[test_case("x://[v.name]", false)]
+#[test_case("x://[vG.name]", false)]
+#[test_case("x://[v1.]", false)]
+#[test_case("x://[v1.%20]", false)]
+#[test_case("https://host/a[b]", false)]
+#[test_case("tag:a[b]", false)]
+#[test_case("tag:a?q[x]", false)]
+#[test_case("tag:a#x#y", false)]
+fn verbatim_and_expanded_tags_obey_uri_syntax(prefix: &str, accepted: bool) {
+    let verbatim = format!("!<{prefix}/x> value");
+    let shorthand = format!("%TAG !e! {prefix}\n--- !e!/x value");
+    for source in [verbatim, shorthand] {
+        assert_eq!(parse(&source).is_ok(), accepted, "{source}");
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#823-block-nodes
 #[test_case("!!seq\n&a [*a]")]
 #[test_case("&a\n!!seq [*a]")]

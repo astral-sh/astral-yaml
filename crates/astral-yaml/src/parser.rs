@@ -1865,16 +1865,78 @@ fn complete_tag(s: &str) -> bool {
         return !local.is_empty();
     }
 
-    let Some((scheme, _)) = s.split_once(':') else {
+    let Some((scheme, rest)) = s.split_once(':') else {
         return false;
     };
-    scheme
+    if !scheme
         .as_bytes()
         .first()
         .is_some_and(u8::is_ascii_alphabetic)
-        && scheme
+        || !scheme
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
+    {
+        return false;
+    }
+
+    // tag_uri has checked the character repertoire and percent escapes.
+    // RFC 3986 §3 reserves literal brackets for hosts and permits one fragment.
+    let (hierarchy, suffix) = rest.split_at(rest.find(['?', '#']).unwrap_or(rest.len()));
+    if suffix.contains(['[', ']']) || suffix.split_once('#').is_some_and(|(_, f)| f.contains('#')) {
+        return false;
+    }
+    let Some(authority_path) = hierarchy.strip_prefix("//") else {
+        return !hierarchy.contains(['[', ']']);
+    };
+    let (authority, path) = authority_path
+        .split_once('/')
+        .unwrap_or((authority_path, ""));
+    !path.contains(['[', ']']) && uri_authority(authority)
+}
+
+fn uri_authority(authority: &str) -> bool {
+    let (userinfo, host_port) = authority.split_once('@').unwrap_or(("", authority));
+    if userinfo.contains(['[', ']']) || host_port.contains('@') {
+        return false;
+    }
+
+    let port = if let Some(literal) = host_port.strip_prefix('[') {
+        let Some((address, rest)) = literal.split_once(']') else {
+            return false;
+        };
+        if !ip_literal(address) {
+            return false;
+        }
+        if rest.is_empty() {
+            return true;
+        }
+        let Some(port) = rest.strip_prefix(':') else {
+            return false;
+        };
+        port
+    } else {
+        let (host, port) = host_port.split_once(':').unwrap_or((host_port, ""));
+        if host.contains(['[', ']']) {
+            return false;
+        }
+        port
+    };
+    port.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn ip_literal(address: &str) -> bool {
+    let Some(future) = address.strip_prefix(['v', 'V']) else {
+        return address.parse::<std::net::Ipv6Addr>().is_ok();
+    };
+    // IPvFuture = "v" 1*HEXDIG "." 1*(unreserved / sub-delims / ":")
+    future.split_once('.').is_some_and(|(version, host)| {
+        !version.is_empty()
+            && version.bytes().all(|b| b.is_ascii_hexdigit())
+            && !host.is_empty()
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:".contains(&b))
+    })
 }
 
 fn signed(value: usize) -> isize {
