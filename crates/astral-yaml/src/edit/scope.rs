@@ -35,6 +35,7 @@ enum Role {
     Key {
         mapping: NodeId,
         separator: KeySeparator,
+        length_limited: bool,
     },
     Value {
         mapping: NodeId,
@@ -118,7 +119,14 @@ impl<'a> Scopes<'a> {
                     );
                 }
                 NodeKind::Mapping { entries, .. } => {
+                    let mut entry_start = original.contents[id.0].start();
                     for &(key, value) in entries {
+                        // Only an implicit block or compact-pair key starts at the
+                        // next token. Other keys follow a brace, comma, or '?'.
+                        let length_limited =
+                            crate::comments::skip_trivia(&original.text, entry_start)
+                                == original.nodes[key.0].span.start();
+                        entry_start = original.nodes[value.0].span.end();
                         let separator = key_separator(original, key);
                         let header = value_header(original, id, value, separator, lines);
                         pending.push((
@@ -126,6 +134,7 @@ impl<'a> Scopes<'a> {
                             Role::Key {
                                 mapping: id,
                                 separator,
+                                length_limited,
                             },
                             enclosing_key,
                             flow,
@@ -221,19 +230,17 @@ impl<'a> Scopes<'a> {
             return false;
         }
         match slot.role {
-            Role::Key { mapping, separator } => {
+            Role::Key {
+                separator,
+                length_limited,
+                ..
+            } => {
                 // Block keys and compact flow-pair keys count the separation
                 // before ':' toward their 1024-character limit.
-                let mapping_start = self.original.contents[mapping.0].start();
-                let suffix = &self.original.text[old.span.end()..];
-                let after_spaces = suffix.trim_start_matches([' ', '\t']);
-                let padding = if after_spaces.starts_with(':')
-                    && self.original.text.as_bytes().get(mapping_start) != Some(&b'{')
-                {
-                    suffix.len() - after_spaces.len()
-                } else {
-                    0
-                };
+                let padding = length_limited.then(|| {
+                    let suffix = &self.original.text[old.span.end()..];
+                    suffix.len() - suffix.trim_start_matches([' ', '\t']).len()
+                });
                 let form = emit::key_form(new, slot.flow, padding);
                 form != KeyForm::Explicit
                     && match separator {
@@ -261,7 +268,9 @@ impl<'a> Scopes<'a> {
     pub(super) fn context(&self, id: NodeId, indent: usize) -> Context {
         let slot = self.slots[id.0];
         match slot.role {
-            Role::Key { .. } => Context::key(indent, slot.flow),
+            Role::Key { length_limited, .. } if length_limited || slot.flow => {
+                Context::key(indent, slot.flow)
+            }
             Role::Document => Context::value(indent, slot.flow, 0),
             _ => Context::value(indent, slot.flow, indent),
         }

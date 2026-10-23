@@ -717,7 +717,11 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     fn key(&mut self, key: NodeId, context: Context, depth: usize) -> Result<(), Error> {
         let indent = context.indent;
         let is_flow = context.in_flow();
-        let simple = key_form(&self.document.nodes[key.0], is_flow, 0) != KeyForm::Explicit;
+        let simple = key_form(
+            &self.document.nodes[key.0],
+            is_flow,
+            (!is_flow).then_some(0),
+        ) != KeyForm::Explicit;
         if !simple && !is_flow {
             self.push("?")?;
             let key_comments = self.node_comments(key);
@@ -881,7 +885,7 @@ pub(super) enum KeyForm {
 pub(super) fn key_form<Location>(
     node: &super::Node<Location>,
     flow: bool,
-    padding: usize,
+    implicit_key_padding: Option<usize>,
 ) -> KeyForm {
     let NodeKind::Scalar { value, style } = &node.kind else {
         return KeyForm::Explicit;
@@ -898,14 +902,24 @@ pub(super) fn key_form<Location>(
         ScalarPosition::Block
     };
     let text = scalar(value, *style, position, 0, usize::MAX).expect("unlimited scalar budget");
-    let tag = node.tag.as_ref().map_or(0, |tag| tag.chars().count() + 4);
-    let anchor = node
-        .anchor
-        .as_ref()
-        .map_or(0, |anchor| anchor.chars().count() + 2);
-    if text.contains('\n') || text.chars().count() + tag + anchor + padding > 1024 {
-        KeyForm::Explicit
-    } else if text.starts_with(['\'', '"']) {
+    if text.contains('\n') {
+        return KeyForm::Explicit;
+    }
+    if let Some(padding) = implicit_key_padding {
+        let tag = match node.tag.as_deref() {
+            None => 0,
+            Some("!") => 2,
+            Some(tag) => tag.chars().count() + 4,
+        };
+        let anchor = node
+            .anchor
+            .as_ref()
+            .map_or(0, |anchor| anchor.chars().count() + 2);
+        if text.chars().count() + tag + anchor + padding > 1024 {
+            return KeyForm::Explicit;
+        }
+    }
+    if text.starts_with(['\'', '"']) {
         KeyForm::Quoted
     } else {
         KeyForm::Implicit
