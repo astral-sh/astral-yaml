@@ -20,7 +20,7 @@ The parser is also fuzzed. See [fuzzing](fuzz/README.md) for the parser and Serd
 
 The parser defaults to:
 
-- 64 MiB of UTF-8 input.
+- 64 MiB of UTF-8 input and a separate 64 MiB budget for expanded shorthand tags.
 - 64 levels of collection nesting.
 - 1,000,000 syntax elements: nodes, comments, directives, BOMs, and document end
   markers.
