@@ -1,7 +1,7 @@
 use test_case::test_case;
 
 use super::support::{edit, edits};
-use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
+use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test_case("", "[]")]
@@ -47,6 +47,69 @@ fn key_edits_count_retained_padding(compact: bool, padding: usize) {
         "éé: v".to_owned()
     };
     assert_eq!(document.source(), expected);
+}
+
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test_case("", "! ", 1022, ""; "non-specific tag at the block key limit")]
+#[test_case("{", "", 1025, "}"; "long key in a braced mapping")]
+fn key_edits_fit_the_original_byte_budget(open: &str, tag: &str, length: usize, close: &str) {
+    let mapping = |key: &str| format!("{open}{tag}{key}: v{close}\n");
+    let source = mapping(&"a".repeat(length));
+    let mut document = EditableDocument::parse_with_options(
+        &source,
+        ParseOptions {
+            max_input_bytes: source.len(),
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    let replacement = "b".repeat(length);
+    let yaml = format!("{tag}{replacement}");
+    document
+        .edit(|root| root.into_mapping()?.key_at(0)?.set_yaml(&yaml))
+        .unwrap();
+    assert_eq!(document.source(), mapping(&replacement));
+    assert_eq!(document.normalized_yaml().unwrap(), document.source());
+}
+
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test]
+fn block_mapping_with_a_braced_first_key_counts_later_key_padding() {
+    let source = format!("{{x: y}}: first\na{}: v", " ".repeat(1023));
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|root| root.into_mapping()?.key_at(1)?.set_yaml("bb"))
+        .unwrap();
+    insta::assert_snapshot!(document.source(), @"
+    ? {x: y}
+    : first
+    bb: v
+    ");
+}
+
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test_case("[? ", ":v,   next]\n", true; "explicit compact pair")]
+#[test_case("a:   first\n? ", "\n: v\n", false; "explicit block key")]
+fn long_explicit_key_edits_preserve_surrounding_source(prefix: &str, suffix: &str, compact: bool) {
+    let original = format!("'{}'", "a".repeat(1025));
+    let replacement = format!("'{}'", "b".repeat(1025));
+    let source = format!("{prefix}{original}{suffix}");
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|root| {
+            if compact {
+                root.at([0])?
+                    .into_mapping()?
+                    .key_at(0)?
+                    .set_yaml(&replacement)
+            } else {
+                root.into_mapping()?.key_at(1)?.set_yaml(&replacement)
+            }
+        })
+        .unwrap();
+    assert_eq!(document.source(), format!("{prefix}{replacement}{suffix}"));
 }
 
 #[test]
@@ -575,6 +638,19 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
         +{'next':"value"}
     "#);
     "quoted replacement"
+)]
+#[test_case(
+    "key: value\n",
+    "'first\n\n  second'"
+    => with |diff| insta::assert_snapshot!(diff, @r"
+        @@ -1 +1,4 @@
+        -key: value
+        +? 'first
+        +
+        +  second'
+        +: value
+    ");
+    "multiline quoted block key"
 )]
 fn mapping_scalar_key_replacement_preserves_required_separation(
     source: &str,
