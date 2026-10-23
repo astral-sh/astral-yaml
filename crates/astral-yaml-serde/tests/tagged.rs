@@ -1,6 +1,6 @@
 use test_case::test_case;
 
-use astral_yaml_dev::{Value, diagnostic_snapshot};
+use astral_yaml_dev::{Value, diagnostic_snapshot, span_snapshot};
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string};
 use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeTupleStruct};
 use std::{collections::BTreeMap, fmt::Debug};
@@ -309,15 +309,28 @@ fn serialized_complex_keys_obey_the_parser_byte_budget() {
 
 #[test]
 fn spans_comments_and_aliases() {
-    let source = "# greeting\n!Text hello # inline\n";
+    let source = "# note\n!Text hello # note\n";
     let value = from_str::<Commented<'_, Spanned<Tagged<String>>>>(source).unwrap();
-    assert_eq!(value.tag, "!Text");
-    assert_eq!(value.value.value.value, "hello");
-    assert_eq!(value.span.slice(source), Some("!Text hello"));
-    assert_eq!(value.comments.len(), 2);
+    let tagged = &value.value.value;
+    let mut spans = vec![(format!("{} {:?}", tagged.tag, tagged.value), value.span)];
+    for (index, attached) in value.comments.iter().enumerate() {
+        spans.push((
+            format!("comment[{index}] {:?}", attached.placement),
+            attached.comment.span,
+        ));
+    }
+    insta::assert_snapshot!(span_snapshot(source, spans), @r#"
+      |
+    1 | # note
+      | ^^^^^^ comment[0] Leading
+    2 | !Text hello # note
+      | ^^^^^^^^^^^ ^^^^^^ comment[1] Inline
+      | |
+      | !Text "hello"
+    "#);
     assert_eq!(
         from_str::<Tagged<String>>(&to_string(&value).unwrap()).unwrap(),
-        value.value.value
+        *tagged
     );
 
     let inner = from_str::<Tagged<Spanned<Commented<'_, String>>>>(source).unwrap();

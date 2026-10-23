@@ -7,7 +7,7 @@ use astral_yaml::{
     comments::CommentPlacement,
     edit::{EditableDocument, Editor, Handle, NodeKind},
 };
-use astral_yaml_dev::{edit_diff, formatdoc, indoc};
+use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
 #[test]
 fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
@@ -19,7 +19,7 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         let entries = editor.mapping_entries(&editor.root())?;
         let existing = &entries[0].1;
         let items = &entries[1].1;
-        let empty_origin = editor.node(existing)?.span();
+        let empty_origin = editor.node(existing)?.span().unwrap();
         editor.replace(existing, "new")?;
         editor.insert_item(items, 0, "'' # imported")?;
         editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
@@ -27,29 +27,32 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
 
         let replacement = editor.node(existing)?;
+        assert!(empty_origin.is_empty());
+        assert_eq!(replacement.span(), Some(empty_origin));
+
+        let retained_comment = replacement.comments()[0].span().unwrap();
+        let origins = [
+            span_snapshot(source, [("original empty value", empty_origin)]),
+            span_snapshot(source, [("retained comment", retained_comment)]),
+        ];
+        insta::assert_snapshot!(origins.join("\n\n"), @"
+          |
+        1 | existing: # keep
+          |           ^ original empty value
+        2 | items: []
+          |
+
+          |
+        1 | existing: # keep
+          |           ^^^^^^ retained comment
+        2 | items: []
+          |
+        ");
         let item = editor.node(item)?;
-        insta::assert_snapshot!(formatdoc! {"
-            original empty value: {:?}
-            replacement origin: {:?}
-            retained comment: {:?}
-            generated value: {:?}
-            inserted comment: {:?}
-            imported comment: {:?}
-        ",
-            empty_origin.and_then(|span| span.slice(source)),
-            replacement.span().and_then(|span| span.slice(source)),
-            replacement.comments()[0].span().and_then(|span| span.slice(source)),
-            item.span(),
-            item.comments()[0].span(),
-            item.comments()[1].span(),
-        }, @r##"
-        original empty value: Some("")
-        replacement origin: Some("")
-        retained comment: Some("# keep")
-        generated value: None
-        inserted comment: None
-        imported comment: None
-        "##);
+        let [inserted, imported] = item.comments() else {
+            panic!("expected inserted and imported comments");
+        };
+        assert_eq!([item.span(), inserted.span(), imported.span()], [None; 3]);
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"

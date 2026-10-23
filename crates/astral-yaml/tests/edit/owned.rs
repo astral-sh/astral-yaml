@@ -4,7 +4,7 @@ use astral_yaml::{
     comments::{CommentIndex, CommentPlacement},
     edit::{EditableDocument, NodeKind},
 };
-use astral_yaml_dev::indoc;
+use astral_yaml_dev::{indoc, span_snapshot};
 
 #[test]
 fn owned_document_retains_syntax_and_direct_comments() {
@@ -56,6 +56,7 @@ fn alias_edges_distinguish_recursive_and_shadowed_definitions() {
         - &item [first, *item]
         - *item
         - &item second
+        - &item second
         - *item
     "};
     let document = EditableDocument::parse(source).unwrap();
@@ -65,27 +66,36 @@ fn alias_edges_distinguish_recursive_and_shadowed_definitions() {
     let NodeKind::Sequence { items: first, .. } = document.node(items[0]).unwrap().kind() else {
         panic!("sequence")
     };
-    let targets: Vec<_> = [first[1], items[1], items[3]]
-        .into_iter()
-        .map(|id| {
-            let NodeKind::Alias { target } = document.node(id).unwrap().kind() else {
-                panic!("alias")
-            };
-            document
-                .node(*target)
-                .unwrap()
-                .span()
-                .slice(source)
-                .unwrap()
-        })
-        .collect();
-    insta::assert_debug_snapshot!(targets, @r#"
-    [
-        "&item [first, *item]",
-        "&item [first, *item]",
-        "&item second",
-    ]
-    "#);
+
+    let target = |id| {
+        let NodeKind::Alias { target } = document.node(id).unwrap().kind() else {
+            panic!("alias")
+        };
+        *target
+    };
+    let before = items[1];
+    let after = items[4];
+    assert_eq!(target(first[1]), target(before));
+
+    let span = |id| document.node(id).unwrap().span();
+    let spans = [
+        ("target before rebinding", span(target(before))),
+        ("alias before rebinding", span(before)),
+        ("target after rebinding", span(target(after))),
+        ("alias after rebinding", span(after)),
+    ];
+    insta::assert_snapshot!(span_snapshot(source, spans), @"
+      |
+    1 | - &item [first, *item]
+      |   ^^^^^^^^^^^^^^^^^^^^ target before rebinding
+    2 | - *item
+      |   ^^^^^ alias before rebinding
+    3 | - &item second
+    4 | - &item second
+      |   ^^^^^^^^^^^^ target after rebinding
+    5 | - *item
+      |   ^^^^^ alias after rebinding
+    ");
 }
 
 #[test]

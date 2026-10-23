@@ -542,10 +542,20 @@ fn ignored_tagged_payloads_preserve_alias_spans() {
         Value(Spanned<de::IgnoredAny>),
     }
 
-    let source = "[&a !Value 42, *a]";
+    let source = "[&a !Value 42, *a, *a]";
     let values: Vec<YamlTag<Ignored>> = from_str(source).unwrap();
-    let Ignored::Value(value) = &values[1].0;
-    assert_eq!(value.span.slice(source), Some("*a"));
+    let payloads = values.iter().enumerate().map(|(index, value)| {
+        let Ignored::Value(payload) = &value.0;
+        (format!("payload[{index}]"), payload.span)
+    });
+    insta::assert_snapshot!(span_snapshot(source, payloads), @"
+      |
+    1 | [&a !Value 42, *a, *a]
+      |  ^^^^^^^^^^^^  ^^  ^^ payload[2]
+      |  |             |
+      |  |             payload[1]
+      |  payload[0]
+    ");
 }
 
 mod protocol {

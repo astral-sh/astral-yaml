@@ -1,7 +1,7 @@
 use test_case::test_case;
 
 use astral_yaml::ParseOptions;
-use astral_yaml_dev::{edit_diff, indoc};
+use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 use astral_yaml_serde::{Editable, Error, Spanned, Tagged};
 use serde::Deserialize;
 
@@ -14,7 +14,7 @@ struct Config {
 fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     let source = indoc! {r"
         timeout: 30 # seconds
-        unknown : ['keep',  2]
+        unknown : ['keep',  100]
     "};
     let mut config: Editable<Config> = source.parse().unwrap();
     let before = config.to_yaml();
@@ -24,16 +24,20 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
             e.replace(&entries[0].1, "100")
         })
         .unwrap();
-    assert_eq!(config.value().timeout.value, 100);
-    assert_eq!(
-        config.value().timeout.span.slice(config.syntax().source()),
-        Some("100")
-    );
+    let timeout = &config.value().timeout;
+    let field = (format!("timeout = {}", timeout.value), timeout.span);
+    insta::assert_snapshot!(span_snapshot(config.syntax().source(), [field]), @"
+      |
+    1 | timeout: 100 # seconds
+      |          ^^^ timeout = 100
+    2 | unknown : ['keep',  100]
+      |
+    ");
     insta::assert_snapshot!(edit_diff(&before, config.syntax().source()), @"
     @@ -1,2 +1,2 @@
     -timeout: 30 # seconds
     +timeout: 100 # seconds
-     unknown : ['keep',  2]
+     unknown : ['keep',  100]
     ");
     assert_eq!(config.into_inner().timeout.value, 100);
 }

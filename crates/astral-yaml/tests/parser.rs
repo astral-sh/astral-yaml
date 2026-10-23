@@ -3,6 +3,7 @@ use test_case::{test_case, test_matrix};
 use std::borrow::Cow;
 
 use astral_yaml::{NodeKind, ParseOptions, ScalarStyle, Span, parse, parse_with_options};
+use astral_yaml_dev::span_snapshot;
 
 // https://yaml.org/spec/1.2.2/#51-character-set
 #[test_case(0)]
@@ -1148,14 +1149,23 @@ fn standalone_document_end_markers_retain_spans_and_use_the_budget() {
     let source = "...\n---\nvalue\n...\n... # suffix\n";
     let stream = parse(source).unwrap();
     assert_eq!(stream.documents().len(), 1);
-    assert_eq!(
-        stream
-            .document_end_markers()
-            .iter()
-            .map(|span| span.slice(source))
-            .collect::<Vec<_>>(),
-        [Some("..."), Some("..."), Some("...")]
-    );
+
+    let markers = stream
+        .document_end_markers()
+        .iter()
+        .enumerate()
+        .map(|(index, &span)| (format!("end marker {}", index + 1), span));
+    insta::assert_snapshot!(span_snapshot(source, markers), @"
+      |
+    1 | ...
+      | ^^^ end marker 1
+    2 | ---
+    3 | value
+    4 | ...
+      | ^^^ end marker 2
+    5 | ... # suffix
+      | ^^^ end marker 3
+    ");
     assert_eq!(
         stream.documents()[0].end_marker,
         Some(stream.document_end_markers()[1])
