@@ -115,54 +115,17 @@ pub(super) fn tree(stream: &Stream<'_>) -> String {
         };
 
         writeln!(out, "document {} (start: {start}, end: {end})", index + 1).unwrap();
-        node(&mut out, stream, document.root, 0, "");
-    }
-
-    out
-}
-
-pub(super) fn diagnostic(name: &str, source: &str, error: &astral_yaml::Error) -> String {
-    // Corpus files use LF. Include the byte range because a multiline error's
-    // caret covers only its first line.
-    let prefix = &source[..error.span.start()];
-    let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-    let column = prefix.rsplit('\n').next().unwrap().chars().count() + 1;
-    let mut out = format!(
-        "{name}.yaml:{line}:{column}: {}\nbytes {}..{}\n",
-        error.message,
-        error.span.start(),
-        error.span.end(),
-    );
-
-    for (index, text) in source.lines().enumerate() {
-        let number = index + 1;
-
-        if number < line.saturating_sub(2) || number > line + 1 {
-            continue;
-        }
-
-        writeln!(out, "{number:>4} | {text}").unwrap();
-
-        if number == line {
-            let width = error
-                .span
-                .slice(source)
-                .unwrap()
-                .split('\n')
-                .next()
-                .unwrap()
-                .chars()
-                .count()
-                .max(1);
-
+        for directive in &document.directives {
             writeln!(
                 out,
-                "     | {}{}",
-                " ".repeat(column - 1),
-                "^".repeat(width)
+                "directive %{} {:?} [@{}]",
+                directive.name,
+                directive.arguments,
+                location(stream, directive.span)
             )
             .unwrap();
         }
+        node(&mut out, stream, document.root, 0, "");
     }
 
     out
@@ -175,6 +138,7 @@ fn tree_preserves_presentation_and_decoded_lines() {
 
     insta::assert_snapshot!(tree(&stream), @r#"
     document 1 (start: ---, end: ...)
+    directive %YAML "1.2" [@1:1..1:10]
     mapping [block]
       "base" [plain @3:1..3:5]: mapping [flow] &base !<!local>
         "quoted" [plain @3:21..3:27]: "é" [single-quoted @3:29..3:32]
