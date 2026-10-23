@@ -722,6 +722,18 @@ fn directive_with_many_parameters(header: &str, error: Option<&str>) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#6821-tag-handles
+#[test]
+fn undefined_tag_handle_span() {
+    let source = "key: !missing!type";
+    let error = parse(source).unwrap_err();
+    insta::assert_snapshot!(astral_yaml_dev::diagnostic_snapshot(source, error), @"
+      |
+    1 | key: !missing!type
+      |      ^^^^^^^^^ undefined tag handle
+    ");
+}
+
 // https://yaml.org/spec/1.2.2/#681-yaml-directives
 #[test_case("1.1", true)]
 #[test_case("1.2", true)]

@@ -1057,16 +1057,22 @@ impl<'source> Parser<'source, '_> {
         })
     }
 
-    fn shorthand_tag(&mut self, raw: &'source str) -> Result<Cow<'source, str>> {
+    fn shorthand_tag(&mut self, start: usize) -> Result<Cow<'source, str>> {
+        let raw = &self.source[start..self.pos];
         if raw == "!" {
             return Ok(Cow::Borrowed(raw));
         }
+
         let (handle, suffix) = raw[1..]
             .find('!')
             .map_or(("!", &raw[1..]), |n| (&raw[..n + 2], &raw[n + 2..]));
-        let prefix = self
-            .tag_prefix(handle)
-            .ok_or_else(|| self.error("undefined tag handle"))?;
+        let prefix = self.tag_prefix(handle).ok_or(Error {
+            span: Span {
+                start,
+                end: start + handle.len(),
+            },
+            message: "undefined tag handle",
+        })?;
         if suffix.is_empty() || suffix.contains('!') {
             return Err(self.error("invalid tag suffix"));
         }
@@ -1153,8 +1159,7 @@ impl<'source> Parser<'source, '_> {
                         self.pos += self.rest().chars().next().map_or(0, char::len_utf8);
                     }
 
-                    let raw = &self.source[start..self.pos];
-                    self.shorthand_tag(raw)?
+                    self.shorthand_tag(start)?
                 };
 
                 self.nodes[id.0].tag = Some(Property {

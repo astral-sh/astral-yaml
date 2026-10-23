@@ -1,4 +1,4 @@
-use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet};
+use annotate_snippets::{Annotation, AnnotationKind, Group, Level, Renderer, Snippet};
 use astral_yaml::Span;
 use std::borrow::Cow;
 
@@ -18,6 +18,38 @@ where
                 .span(span.start()..span.end())
                 .label(label)
         }));
+    render(snippet)
+}
+
+/// Renders a located diagnostic with its YAML path and the lines leading up to the error.
+///
+/// # Panics
+///
+/// Panics if the error has no span or the span cannot slice `source`.
+pub fn diagnostic_snapshot(source: &str, error: impl Into<astral_yaml_serde::Error>) -> String {
+    let error = error.into();
+    let span = error.span.expect("diagnostic must have a source span");
+    span.slice(source)
+        .expect("diagnostic span must slice the source");
+    let label = match error.path {
+        Some(path) => format!("{path}: {}", error.message),
+        None => error.message,
+    };
+    let context_start = source[..span.start()]
+        .rmatch_indices('\n')
+        .nth(2)
+        .map_or(0, |(newline, _)| newline + 1);
+    let snippet = Snippet::source(source)
+        .annotation(AnnotationKind::Visible.span(context_start..span.start()))
+        .annotation(
+            AnnotationKind::Primary
+                .span(span.start()..span.end())
+                .label(label),
+        );
+    render(snippet)
+}
+
+fn render(snippet: Snippet<'_, Annotation<'_>>) -> String {
     Renderer::plain()
         .term_width(120)
         .render(&[Group::with_level(Level::NOTE).element(snippet)])
