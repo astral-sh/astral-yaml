@@ -19,7 +19,9 @@ pub use transaction::{
 
 pub use crate::edit_path;
 
-use std::{borrow::Cow, cell::Cell};
+use std::borrow::Cow;
+use std::cell::Cell;
+use std::str::FromStr;
 
 use crate::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
@@ -189,8 +191,16 @@ fn charge_work(work: &Cell<usize>, amount: usize, span: Span) -> Result<(), Erro
     Ok(())
 }
 
+impl FromStr for EditableDocument {
+    type Err = Error;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        Self::parse(source)
+    }
+}
+
 impl EditableDocument {
-    /// Parse `source` as an editable YAML document.
+    /// Parse `source` as an editable YAML document. [`str::parse`] uses the same limits.
     ///
     /// CR and CRLF line endings are converted to LF. Spans and error locations refer
     /// to this normalized source.

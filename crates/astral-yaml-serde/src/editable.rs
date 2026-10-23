@@ -1,14 +1,11 @@
-use crate::{
-    Error,
-    edit::{self, Cursor, PathSegment},
-    from_stream,
-};
-use astral_yaml::{
-    ParseOptions,
-    edit::{EditableDocument, Editor as SyntaxEditor},
-    parse_with_options,
-};
-use serde::{Serialize, de::DeserializeOwned};
+use std::str::FromStr;
+
+use crate::Error;
+use crate::edit::{self, Cursor, PathSegment};
+use astral_yaml::ParseOptions;
+use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 /// A YAML document you can edit without defining a Rust type for the whole document.
 ///
@@ -44,7 +41,7 @@ pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 /// #[derive(Debug, Deserialize)]
 /// struct Config { timeout: u64 }
 ///
-/// let mut config = Editable::<Config>::parse("timeout: 30 # seconds\n")?;
+/// let mut config: Editable<Config> = "timeout: 30 # seconds\n".parse()?;
 /// config.set_at(["timeout"], 60)?;
 /// assert_eq!(config.value().timeout, 60);
 /// assert_eq!(config.to_yaml(), "timeout: 60 # seconds\n");
@@ -54,6 +51,14 @@ pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 pub struct Editable<T> {
     value: T,
     syntax: EditableDocument,
+}
+
+impl<T: DeserializeOwned> FromStr for Editable<T> {
+    type Err = Error;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        Self::parse(source)
+    }
 }
 
 impl<T: DeserializeOwned> Editable<T> {
@@ -84,8 +89,8 @@ impl<T: DeserializeOwned> Editable<T> {
     }
 
     fn deserialize_syntax(syntax: &EditableDocument) -> Result<T, Error> {
-        let stream = parse_with_options(syntax.source(), syntax.options())?;
-        from_stream(&stream)
+        let stream = astral_yaml::parse_with_options(syntax.source(), syntax.options())?;
+        crate::from_stream(&stream)
     }
 
     /// Edit the document starting at its root, and return the callback's result.
