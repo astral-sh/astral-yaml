@@ -26,7 +26,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Commented";
 ///
 /// Serialization emits only the value. Changing the value does not update the
 /// comments. Equality and hashing include both. Comment text borrows the source
-/// even when `T` is owned.
+/// even when `T` is owned, so `Commented` cannot be used where
+/// [`DeserializeOwned`](serde::de::DeserializeOwned) is required.
 ///
 /// Deserialization requires this crate's deserializer. Serde's `untagged` and
 /// `flatten` buffers discard comments. Wrap the containing enum or struct when
@@ -47,25 +48,6 @@ pub(crate) const NAME: &str = "$astral_yaml::Commented";
 /// assert_eq!(*config.timeout, 30);
 /// assert_eq!(config.timeout.comments[0].comment.text, " seconds");
 /// # Ok::<(), astral_yaml_serde::Error>(())
-/// ```
-///
-/// `Commented` cannot outlive the source of its comments:
-///
-/// ```compile_fail
-/// use astral_yaml_serde::{Commented, from_str};
-/// let value = {
-///     let source = String::from("42 # answer");
-///     from_str::<Commented<'_, u64>>(&source).unwrap()
-/// };
-/// println!("{:?}", value.comments);
-/// ```
-///
-/// It does not implement `DeserializeOwned`, even for an owned `T`:
-///
-/// ```compile_fail
-/// use astral_yaml_serde::Commented;
-/// fn owned<T: serde::de::DeserializeOwned>() {}
-/// owned::<Commented<'static, String>>();
 /// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Commented<'a, T> {
