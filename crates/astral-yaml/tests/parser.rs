@@ -799,6 +799,23 @@ fn collection_indicators_and_blank_line_tabs_are_accepted(source: &str) {
     assert!(parse(source).is_ok(), "{source:?}");
 }
 
+#[test_case(0, true; "at the limit")]
+#[test_case(1, false; "one byte over")]
+fn expanded_tag_budget_spans_documents(shortfall: usize, accepted: bool) {
+    let prefix = format!("tag:example.org,2000:{}", "a".repeat(64));
+    let document = format!("%TAG !t! {prefix}\n---\n- !t!x v\n- !t!x v\n...\n");
+    let source = document.repeat(2);
+    let options = ParseOptions {
+        max_input_bytes: 4 * (prefix.len() + 1) - shortfall,
+        ..ParseOptions::default()
+    };
+    let result = parse_with_options(&source, options);
+    assert_eq!(
+        result.err().map(|error| error.message),
+        (!accepted).then_some("expanded tag byte limit exceeded")
+    );
+}
+
 // https://yaml.org/spec/1.2.2/#682-tag-directives
 #[test]
 fn tag_handle_lookup_in_a_large_directive_list() {

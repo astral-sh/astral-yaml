@@ -16,7 +16,8 @@ pub struct ParseOptions {
     /// Maximum number of nodes, comments, directives, BOMs, and end markers in a stream.
     pub max_nodes: usize,
 
-    /// Maximum UTF-8 input length in bytes.
+    /// Maximum UTF-8 input length in bytes. The same limit applies separately to the
+    /// total length of expanded shorthand tags in the stream.
     pub max_input_bytes: usize,
 }
 
@@ -73,6 +74,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         comments: Vec::new(),
         anchors: HashMap::new(),
         tags: HashMap::new(),
+        remaining_tag_bytes: options.max_input_bytes,
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
@@ -95,6 +97,7 @@ struct Parser<'a> {
     comments: Vec<Comment<'a>>,
     anchors: HashMap<&'a str, NodeId>,
     tags: HashMap<&'a str, String>,
+    remaining_tag_bytes: usize,
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
@@ -1006,6 +1009,34 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn shorthand_tag(&mut self, raw: &str) -> Result<String> {
+        if raw == "!" {
+            return Ok("!".to_owned());
+        }
+        let (handle, suffix) = raw[1..]
+            .find('!')
+            .map_or(("!", &raw[1..]), |n| (&raw[..n + 2], &raw[n + 2..]));
+        let prefix = self
+            .tag_prefix(handle)
+            .ok_or_else(|| self.error("undefined tag handle"))?;
+        if suffix.is_empty() || suffix.contains('!') {
+            return Err(self.error("invalid tag suffix"));
+        }
+
+        let decoded = tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
+        let remaining = self
+            .remaining_tag_bytes
+            .checked_sub(prefix.len() + decoded.len())
+            .ok_or_else(|| self.error("expanded tag byte limit exceeded"))?;
+        let expanded = format!("{prefix}{decoded}");
+        self.remaining_tag_bytes = remaining;
+        if !complete_tag(&expanded) {
+            return Err(self.error("invalid expanded tag URI"));
+        }
+
+        Ok(expanded)
+    }
+
     fn properties(&mut self, id: NodeId, flow: bool, parent: isize) -> Result<()> {
         while matches!(self.byte(), Some(b'&' | b'!')) {
             let start = self.pos;
@@ -1071,27 +1102,7 @@ impl<'a> Parser<'a> {
                     }
 
                     let raw = &self.source[start..self.pos];
-                    if raw == "!" {
-                        "!".to_owned()
-                    } else {
-                        let (handle, suffix) = raw[1..]
-                            .find('!')
-                            .map_or(("!", &raw[1..]), |n| (&raw[..n + 2], &raw[n + 2..]));
-                        let prefix = self
-                            .tag_prefix(handle)
-                            .ok_or_else(|| self.error("undefined tag handle"))?;
-                        if suffix.is_empty() || suffix.contains('!') {
-                            return Err(self.error("invalid tag suffix"));
-                        }
-
-                        let decoded =
-                            tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
-                        let expanded = format!("{prefix}{decoded}");
-                        if !complete_tag(&expanded) {
-                            return Err(self.error("invalid expanded tag URI"));
-                        }
-                        expanded
-                    }
+                    self.shorthand_tag(raw)?
                 };
 
                 self.nodes[id.0].tag = Some(Property {
