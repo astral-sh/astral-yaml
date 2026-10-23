@@ -441,12 +441,7 @@ impl Lines {
             charge(budget, Span { start, end: start })?;
             let end = start
                 + memchr::memchr2(b'\r', b'\n', &bytes[start..]).unwrap_or(bytes.len() - start);
-            let column_start = start
-                + if bytes[start..end].starts_with(b"\xef\xbb\xbf") {
-                    3
-                } else {
-                    0
-                };
+            let column_start = end - source[start..end].trim_start_matches('\u{feff}').len();
             let content = column_start
                 + bytes[column_start..end]
                     .iter()

@@ -17,7 +17,7 @@ impl Line {
         let start = memchr::memrchr(b'\n', &bytes[..at]).map_or(0, |newline| newline + 1);
         let end = memchr::memchr(b'\n', &bytes[at..]).map_or(bytes.len(), |newline| at + newline);
         let text = &source[start..end];
-        let content = text.strip_prefix('\u{feff}').unwrap_or(text);
+        let content = text.trim_start_matches('\u{feff}');
         let column_zero = end - content.len();
         Self {
             start,

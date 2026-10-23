@@ -159,8 +159,7 @@ impl<'a> Parser<'a, '_> {
 
     #[inline]
     fn column(&self) -> usize {
-        let prefix = &self.source[self.line_start..self.pos];
-        prefix.strip_prefix('\u{feff}').unwrap_or(prefix).len()
+        self.pos - self.line_start
     }
 
     fn line_end(&self) -> usize {
@@ -275,8 +274,7 @@ impl<'a> Parser<'a, '_> {
 
     #[inline]
     fn leading_spaces(&self) -> usize {
-        let start = self.pos - self.column();
-        self.source[start..]
+        self.source[self.line_start..]
             .bytes()
             .take_while(|&b| b == b' ')
             .count()
@@ -362,17 +360,21 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    fn consume_bom(&mut self) -> Result<()> {
-        if self.rest().starts_with('\u{feff}') && self.column() == 0 {
+    fn document_prefixes(&mut self) -> Result<()> {
+        loop {
+            self.block_space()?;
+            if self.column() != 0 || !self.rest().starts_with('\u{feff}') {
+                return Ok(());
+            }
+
             self.reserve_element()?;
             self.byte_order_marks.push(Span {
                 start: self.pos,
                 end: self.pos + 3,
             });
             self.pos += 3;
+            self.line_start = self.pos;
         }
-
-        Ok(())
     }
 
     fn end_marker(&mut self) -> Result<Span> {
@@ -389,14 +391,10 @@ impl<'a> Parser<'a, '_> {
     }
 
     fn stream(mut self) -> Result<Stream<'a>> {
-        self.consume_bom()?;
-        self.block_space()?;
-
         let mut previous_ended = true;
 
-        while self.byte().is_some() {
-            self.consume_bom()?;
-            self.block_space()?;
+        loop {
+            self.document_prefixes()?;
             if self.byte().is_none() {
                 break;
             }
