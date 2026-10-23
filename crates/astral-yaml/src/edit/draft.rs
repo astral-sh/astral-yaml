@@ -495,6 +495,41 @@ impl<'a> From<&'a Candidate> for Syntax<'a, Option<Span>> {
 }
 
 impl Candidate {
+    /// Reuse the original layout when comment edits cancel within a larger transaction.
+    pub(super) fn restore_comment_spans(&mut self, original: &[Node]) {
+        for (node, old) in self.nodes.iter_mut().zip(original) {
+            let new = &mut node.comments;
+            if new.iter().all(|comment| comment.span.is_some()) {
+                continue;
+            }
+
+            let mut old = old.comments.as_slice();
+            for group in new.split_inclusive_mut(|comment| comment.span.is_some()) {
+                // Each retained comment bounds a gap in both lists. Its original
+                // span stays with it even if a new neighbor has identical text.
+                let (previous, missing) = if let Some(span) = group.last().and_then(|c| c.span) {
+                    let at = old
+                        .iter()
+                        .position(|comment| comment.span == span)
+                        .expect("retained comments preserve their source order");
+                    let (previous, anchored) = old.split_at(at);
+                    old = &anchored[1..];
+                    let count = group.len() - 1;
+                    (previous, &mut group[..count])
+                } else {
+                    (old, group)
+                };
+                let prefix = restore_matching_comments(previous.iter().zip(missing.iter_mut()));
+                restore_matching_comments(
+                    previous[prefix..]
+                        .iter()
+                        .rev()
+                        .zip(missing[prefix..].iter_mut().rev()),
+                );
+            }
+        }
+    }
+
     pub(super) fn parents(&self) -> &[Option<NodeId>] {
         &self.parents
     }
@@ -513,6 +548,20 @@ impl Candidate {
             &self.requested_styles,
         )
     }
+}
+
+fn restore_matching_comments<'a>(
+    pairs: impl Iterator<Item = (&'a Comment, &'a mut Comment<Option<Span>>)>,
+) -> usize {
+    let mut matched = 0;
+    for (old, comment) in pairs {
+        if comment.attachment() != old.attachment() {
+            break;
+        }
+        comment.span = Some(old.span);
+        matched += 1;
+    }
+    matched
 }
 
 fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>) {

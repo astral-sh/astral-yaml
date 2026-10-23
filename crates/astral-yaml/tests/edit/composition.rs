@@ -6,6 +6,67 @@ use astral_yaml::{
     edit::{EditableDocument, Editor},
 };
 use astral_yaml_dev::indoc;
+use test_case::test_case;
+
+#[test_case(
+    "nested:\n  value: 'old'\n# model\n", &[]
+    => "nested:\n  value: |2+\n    new\n    \n# model\n";
+    "document root"
+)]
+#[test_case(
+    "outer:\n  nested:\n    value: old\n  # model\nother: kept\n", &["outer"]
+    => "outer:\n  nested:\n    value: |2+\n      new\n      \n  # model\nother: kept\n";
+    "nested mapping"
+)]
+fn reinserted_comments_keep_their_layout_during_descendant_edits(
+    source: &str,
+    scope: &[&str],
+) -> String {
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit_at(scope.iter().copied(), |mut root| {
+            root.remove_comment(0)?;
+            root.reborrow()
+                .get("nested")?
+                .unwrap()
+                .get("value")?
+                .unwrap()
+                .replace_yaml("|+\n  new\n\n")?;
+            root.append_comment(" model", CommentPlacement::Trailing)
+        })
+        .unwrap();
+    document.into_yaml()
+}
+
+#[test_case(true; "new leading comment before the restored comment")]
+#[test_case(false; "new trailing comment after the restored comment")]
+fn restoring_one_comment_preserves_its_source_when_a_neighbor_is_added(leading: bool) {
+    let source = "nested:\n  value: old\n# keep\n# keep\n";
+    let render = |cancel| {
+        let mut document = EditableDocument::parse(source).unwrap();
+        document
+            .edit(|mut root| {
+                let index = usize::from(!leading);
+                if cancel {
+                    root.remove_comment(index)?;
+                    root.insert_comment(index, " keep", CommentPlacement::Trailing)?;
+                }
+                if leading {
+                    root.insert_comment(0, " added", CommentPlacement::Leading)?;
+                } else {
+                    root.append_comment(" added", CommentPlacement::Trailing)?;
+                }
+                root.get("nested")?
+                    .unwrap()
+                    .get("value")?
+                    .unwrap()
+                    .replace_yaml("|+\n  new\n\n")
+            })
+            .unwrap();
+        document.into_yaml()
+    };
+    assert_eq!(render(true), render(false));
+}
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
