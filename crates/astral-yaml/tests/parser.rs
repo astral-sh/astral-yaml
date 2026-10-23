@@ -31,6 +31,25 @@ fn ascii_character_checks_cover_chunk_boundaries(padding: usize) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+#[test]
+fn an_empty_explicit_flow_pair_can_precede_another_item() {
+    let events = astral_yaml_dev::events(&parse("[? , x]").unwrap());
+    insta::assert_snapshot!(events, @"
+    +STR
+    +DOC
+    +SEQ []
+    +MAP {}
+    =VAL :
+    =VAL :
+    -MAP
+    =VAL :x
+    -SEQ
+    -DOC
+    -STR
+    ");
+}
+
 // https://yaml.org/spec/1.2.2/#912-document-markers
 #[test_case("{a:\n---\n}")]
 #[test_case("[a:\n... # end\n]")]
