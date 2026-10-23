@@ -127,12 +127,12 @@ impl<Child> CommentPosition<Child> {
 
 impl CommentPosition {
     fn for_comment(
-        stream: &crate::Stream<'_>,
+        nodes: &[Node],
         owner: NodeId,
         attached: &crate::comments::AttachedComment<'_>,
         content_start: usize,
     ) -> Self {
-        let node = &stream.nodes()[owner.0];
+        let node = &nodes[owner.0];
         let at = attached.comment.span.start();
         if at < node.span.start() {
             CommentPosition::Before
@@ -142,10 +142,10 @@ impl CommentPosition {
             && at < node.span.end()
             && matches!(
                 node.kind,
-                crate::NodeKind::Sequence {
+                NodeKind::Sequence {
                     style: CollectionStyle::Flow,
                     ..
-                } | crate::NodeKind::Mapping {
+                } | NodeKind::Mapping {
                     style: CollectionStyle::Flow,
                     ..
                 }
@@ -154,14 +154,14 @@ impl CommentPosition {
             CommentPosition::Opening
         } else if attached.placement == CommentPlacement::Detached {
             let following = match &node.kind {
-                crate::NodeKind::Sequence { items, .. } => {
-                    let index = items.partition_point(|id| stream.nodes()[id.0].span.start() <= at);
+                NodeKind::Sequence { items, .. } => {
+                    let index = items.partition_point(|id| nodes[id.0].span.start() <= at);
                     items.get(index).copied()
                 }
-                crate::NodeKind::Mapping { entries, .. } => {
-                    let index = entries
-                        .partition_point(|entry| stream.nodes()[entry.key.0].span.start() <= at);
-                    entries.get(index).map(|entry| entry.key)
+                NodeKind::Mapping { entries, .. } => {
+                    let index =
+                        entries.partition_point(|&(key, _)| nodes[key.0].span.start() <= at);
+                    entries.get(index).map(|&(key, _)| key)
                 }
                 _ => None,
             };
@@ -221,47 +221,18 @@ impl EditableDocument {
         options.check_input(source.len())?;
         let source = lf_source(source);
         let stream = parse_with_tag_budget(&source, options, remaining_tag_bytes)?;
-        let [document] = stream.documents() else {
+        let [document] = stream.documents.as_slice() else {
             return Err(Error {
                 span: stream.span(),
                 message: "expected exactly one document",
             });
         };
-        let mut nodes: Vec<_> = stream
-            .nodes()
-            .iter()
-            .map(|node| {
-                let kind = match &node.kind {
-                    crate::NodeKind::Scalar(scalar) => NodeKind::Scalar {
-                        value: scalar.value.to_string(),
-                        style: scalar.style,
-                    },
-                    crate::NodeKind::Sequence { items, style } => NodeKind::Sequence {
-                        items: items.clone(),
-                        style: *style,
-                    },
-                    crate::NodeKind::Mapping { entries, style } => NodeKind::Mapping {
-                        entries: entries
-                            .iter()
-                            .map(|entry| (entry.key, entry.value))
-                            .collect(),
-                        style: *style,
-                    },
-                    crate::NodeKind::Alias { target, .. } => NodeKind::Alias { target: *target },
-                };
-                Node {
-                    span: node.span,
-                    kind,
-                    anchor: node.anchor.as_ref().map(|p| p.value.to_string()),
-                    tag: node.tag.as_ref().map(|p| p.value.to_string()),
-                    comments: Vec::new(),
-                }
-            })
-            .collect();
         let contents = source::contents(&source, stream.nodes());
-        for (owner, attached) in CommentIndex::new(&stream, 0)?.direct() {
+        let comments = CommentIndex::new(&stream, 0)?;
+        let mut nodes: Vec<_> = stream.nodes.into_iter().map(Node::from_parsed).collect();
+        for (owner, attached) in comments.direct() {
             let position =
-                CommentPosition::for_comment(&stream, owner, attached, contents[owner.0].start());
+                CommentPosition::for_comment(&nodes, owner, attached, contents[owner.0].start());
             nodes[owner.0].comments.push(Comment {
                 text: attached.comment.text.to_owned(),
                 placement: attached.placement,
@@ -275,13 +246,12 @@ impl EditableDocument {
                 contents,
                 root: document.root,
                 options,
-                byte_order_marks: stream.byte_order_marks().to_vec(),
+                byte_order_marks: stream.byte_order_marks,
                 start_marker: document.start_marker,
                 end_marker: document.end_marker,
                 extra_end_markers: stream
-                    .document_end_markers()
-                    .iter()
-                    .copied()
+                    .document_end_markers
+                    .into_iter()
                     .filter(|marker| {
                         document
                             .end_marker
@@ -359,6 +329,33 @@ fn lf_source(source: &str) -> Cow<'_, str> {
         normalized.push_str(segment.strip_prefix('\n').unwrap_or(segment));
     }
     Cow::Owned(normalized)
+}
+
+impl Node {
+    fn from_parsed(node: crate::Node<'_>) -> Self {
+        let kind = match node.kind {
+            crate::NodeKind::Scalar(scalar) => NodeKind::Scalar {
+                value: scalar.value.into_owned(),
+                style: scalar.style,
+            },
+            crate::NodeKind::Sequence { items, style } => NodeKind::Sequence { items, style },
+            crate::NodeKind::Mapping { entries, style } => NodeKind::Mapping {
+                entries: entries
+                    .into_iter()
+                    .map(|entry| (entry.key, entry.value))
+                    .collect(),
+                style,
+            },
+            crate::NodeKind::Alias { target, .. } => NodeKind::Alias { target },
+        };
+        Self {
+            span: node.span,
+            kind,
+            anchor: node.anchor.map(|property| property.value.into_owned()),
+            tag: node.tag.map(|property| property.value.into_owned()),
+            comments: Vec::new(),
+        }
+    }
 }
 
 impl<Location> Node<Location> {
