@@ -8,6 +8,7 @@ use super::{
     emit::{self, Context, Ending, Fragment},
     layout::Layout,
     lines::Line,
+    source::Source,
     view::{Emission, Syntax},
 };
 use crate::{Error, NodeId, Span, comments::CommentPlacement};
@@ -189,6 +190,7 @@ impl<'a> Boundary<'a> {
             span.end += suffix.len() - trimmed.len();
         }
         let needs_break = matches!(fragment.ending, Ending::Comment)
+            || suffix.starts_with('\u{feff}')
             || self
                 .end_marker
                 .is_some_and(|marker| marker.start() == span.end())
@@ -285,17 +287,107 @@ fn following_line_breaks(source: &str, start: usize) -> usize {
     }
 }
 
+/// Preserve stream marks crossed by a rewrite, including those between its comments.
+/// Prefix lines are counted from the start of the stream and suffix lines from the end.
+/// When an edit removes those lines, the marks stay outside the document content.
+pub(super) fn apply(
+    source: &Source,
+    patches: Vec<(Span, String)>,
+    span: Span,
+) -> Result<String, Error> {
+    let error = |message| Error { span, message };
+    let marks = &source.byte_order_marks;
+    let mut regions = Vec::new();
+    if !marks.is_empty() {
+        regions.extend(patches.iter().map(|(span, _)| *span));
+    }
+    let limit = source.options.max_input_bytes;
+    let set = PatchSet::new(&source.text, patches, limit).map_err(error)?;
+    let mut covered = Vec::new();
+    for region in regions {
+        let first = marks.partition_point(|mark| mark.start() < region.start());
+        let last = marks.partition_point(|mark| mark.start() < region.end());
+        covered.extend_from_slice(&marks[first..last]);
+    }
+    if covered.is_empty() {
+        return Ok(set.apply());
+    }
+    if covered.len() > (limit - set.length) / '\u{feff}'.len_utf8() {
+        return Err(error("emitted YAML exceeds input byte limit"));
+    }
+
+    let output = set.apply();
+    let stream = crate::parse_with_options(&output, source.options)?;
+    let [document] = stream.documents() else {
+        return Err(error("expected exactly one document"));
+    };
+    let root = &stream.nodes()[document.root.0];
+    let mut insertions = std::collections::BTreeMap::<usize, usize>::new();
+    covered.sort_unstable_by_key(|mark| mark.start());
+    let split =
+        covered.partition_point(|mark| mark.start() < source.nodes[source.root.0].span.start());
+    let (prefix, suffix) = covered.split_at(split);
+
+    let mut lines = memchr::memchr_iter(b'\n', &output.as_bytes()[..document.span.start()]);
+    let mut at = 0;
+    let mut previous = 0;
+    for mark in prefix {
+        for _ in memchr::memchr_iter(b'\n', &source.text.as_bytes()[previous..mark.start()]) {
+            if let Some(newline) = lines.next() {
+                at = newline + 1;
+            }
+        }
+        *insertions.entry(at).or_default() += 1;
+        previous = mark.start();
+    }
+
+    let end = root.span.end();
+    let boundary = if output[..end].ends_with('\n') {
+        end
+    } else {
+        output[end..]
+            .find('\n')
+            .map_or(output.len(), |newline| end + newline + 1)
+    };
+    let mut lines = memchr::memrchr_iter(b'\n', &output.as_bytes()[boundary..])
+        .map(|newline| boundary + newline + 1);
+    let mut at = lines.next().unwrap_or(boundary);
+    let mut previous = source.text.len();
+    for mark in suffix.iter().rev() {
+        for _ in memchr::memchr_iter(b'\n', &source.text.as_bytes()[mark.start()..previous]) {
+            at = lines.next().unwrap_or(boundary);
+        }
+        *insertions.entry(at).or_default() += 1;
+        previous = mark.start();
+    }
+
+    let patches = insertions
+        .into_iter()
+        .map(|(at, count)| {
+            let mut text = String::new();
+            if at == output.len() && !output.ends_with('\n') {
+                text.push('\n');
+            }
+            text.extend(std::iter::repeat_n('\u{feff}', count));
+            (Span { start: at, end: at }, text)
+        })
+        .collect();
+    PatchSet::new(&output, patches, limit)
+        .map(PatchSet::apply)
+        .map_err(error)
+}
+
 /// Source replacements ready to apply.
 ///
 /// Construction checks for overlapping ranges, invalid UTF-8 boundaries, and
 /// excessive output size. Applying the patches only concatenates the checked segments.
-pub(super) struct PatchSet<'a> {
+struct PatchSet<'a> {
     segments: Vec<Cow<'a, str>>,
     length: usize,
 }
 
 impl<'a> PatchSet<'a> {
-    pub(super) fn new(
+    fn new(
         source: &'a str,
         mut patches: Vec<(Span, String)>,
         limit: usize,
@@ -330,7 +422,7 @@ impl<'a> PatchSet<'a> {
         Ok(Self { segments, length })
     }
 
-    pub(super) fn apply(self) -> String {
+    fn apply(self) -> String {
         let mut output = String::with_capacity(self.length);
         for segment in self.segments {
             output.push_str(&segment);

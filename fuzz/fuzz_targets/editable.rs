@@ -48,6 +48,9 @@ fuzz_target!(|data: &[u8]| {
         document.source(),
         source.replace("\r\n", "\n").replace('\r', "\n")
     );
+    let stream_marks = source
+        .contains('\u{feff}')
+        .then(|| astral_yaml::parse(source).unwrap().byte_order_marks().len());
     let original: Value = from_str(source).unwrap();
     assert_eq!(to_string(document.value()), to_string(&original));
 
@@ -127,6 +130,15 @@ fuzz_target!(|data: &[u8]| {
         } else {
             let source = document.to_yaml();
             assert!(!source.contains('\r'));
+            if let Some(count) = stream_marks {
+                assert_eq!(
+                    astral_yaml::parse(&source)
+                        .unwrap()
+                        .byte_order_marks()
+                        .len(),
+                    count
+                );
+            }
             let decoded: Value = from_str(&source).unwrap();
             assert_eq!(to_string(document.value()), to_string(&decoded));
         }

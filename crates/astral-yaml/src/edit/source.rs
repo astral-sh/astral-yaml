@@ -38,6 +38,7 @@ pub(super) struct Source {
     pub(super) contents: Vec<Span>,
     pub(super) root: NodeId,
     pub(super) options: ParseOptions,
+    pub(super) byte_order_marks: Vec<Span>,
     pub(super) start_marker: Option<Span>,
     pub(super) end_marker: Option<Span>,
     pub(super) extra_end_markers: Vec<Span>,
@@ -172,7 +173,8 @@ impl<'a> Frame<'a> {
                 insertions.pop();
                 count += 1;
             }
-            let separator = if at > 0 && !self.text[..at].ends_with('\n') {
+            let prefix = self.text[..at].trim_end_matches('\u{feff}');
+            let separator = if !prefix.is_empty() && !prefix.ends_with('\n') {
                 "\n"
             } else {
                 ""
@@ -249,6 +251,12 @@ impl<'a> Frame<'a> {
                 .collect(),
             root,
             options: self.original.options,
+            byte_order_marks: self
+                .original
+                .byte_order_marks
+                .iter()
+                .map(|&mark| self.locations.span(mark, false))
+                .collect(),
             start_marker: self
                 .start
                 .map(|marker| self.locations.after(marker.span, marker.generation, false)),

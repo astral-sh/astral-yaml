@@ -274,13 +274,7 @@ impl RootComments {
             let whole_line = at == 0 || source[..at].ends_with('\n');
             let index = covered.partition_point(|span| span.end() <= at);
             let owned = covered.get(index).is_some_and(|span| span.start() < next);
-            if whole_line
-                && next <= end
-                && !owned
-                && source[at..line_end]
-                    .bytes()
-                    .all(|byte| matches!(byte, b' ' | b'\t'))
-            {
+            if whole_line && next <= end && !owned && blank(&source[at..line_end]) {
                 patches.push((
                     Span {
                         start: at,
@@ -962,16 +956,19 @@ fn line_end(source: &str, start: usize) -> usize {
         .map_or(source.len(), |offset| start + offset)
 }
 
+/// A stream mark occupies no indentation column on a framing line.
+fn blank(line: &str) -> bool {
+    line.trim_start_matches('\u{feff}')
+        .bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t'))
+}
+
 fn blank_between(source: &str, before: usize, after: usize) -> bool {
     let mut end = line_end(source, before);
     while end < after {
         let start = end + 1;
         end = line_end(source, start);
-        if end < after
-            && source[start..end]
-                .bytes()
-                .all(|byte| matches!(byte, b' ' | b'\t'))
-        {
+        if end < after && blank(&source[start..end]) {
             return true;
         }
     }
@@ -984,10 +981,7 @@ fn removal_span(source: &str, span: Span) -> Span {
     let start = source[..span.start()]
         .rfind('\n')
         .map_or(0, |index| index + 1);
-    if source[start..span.start()]
-        .bytes()
-        .all(|byte| matches!(byte, b' ' | b'\t'))
-    {
+    if blank(&source[start..span.start()]) {
         let suffix = &source[span.end()..];
         let terminator = usize::from(suffix.starts_with('\n'));
         Span {

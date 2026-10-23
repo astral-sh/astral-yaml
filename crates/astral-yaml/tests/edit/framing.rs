@@ -16,6 +16,91 @@ fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
     assert_eq!(document.source(), format!("{prefix}---\n"));
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
+#[test_case("|-\n  x\n\u{feff}\n# tail\n", "[a, b]" => "[a, b]\n\u{feff}# tail\n"; "trailing attachment after a marked blank line")]
+#[test_case("---\n\u{feff}", "[a, b]" => "---\n[a, b]\n\u{feff}"; "empty document before a suffix mark")]
+#[test_case("---\n\u{feff}... # tail\n", "'new'" => "---\n'new'\n\u{feff}... # tail\n"; "empty document before a marked end marker")]
+#[test_case("# first\n\u{feff}old", "[x, y]" => "# first\n\u{feff}[x, y]"; "prefix on replaced line")]
+#[test_case("\u{feff}old\n\u{feff}# tail\n", "|-\n  x" => "\u{feff}|3-\n  x\n\u{feff}# tail\n"; "suffix after block scalar")]
+#[test_case("# first\n\u{feff}# second\n\u{feff}\u{feff}old\n\u{feff}# tail\n", "[x, y]" => "# first\n\u{feff}# second\n\u{feff}\u{feff}[x, y]\n\u{feff}# tail\n"; "marks between comments")]
+#[test_case("# first\n\u{feff}'x\u{feff}'", "new" => "# first\n\u{feff}new"; "removed quoted content")]
+#[test_case("# first\n\u{feff}old", "'y\u{feff}'" => "# first\n\u{feff}'y\u{feff}'"; "imported quoted content")]
+fn replacing_a_root_keeps_its_stream_marks(source: &str, replacement: &str) -> String {
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|mut root| root.replace_yaml(replacement))
+        .unwrap();
+    document.into_yaml()
+}
+
+#[test]
+fn normalization_keeps_the_mark_before_a_collection() {
+    let source = "# first\n\u{feff}-   old\n";
+    let normalized = EditableDocument::parse(source)
+        .unwrap()
+        .normalized_yaml()
+        .unwrap();
+    assert_eq!(normalized, "# first\n\u{feff}- old\n");
+    assert_eq!(
+        EditableDocument::parse(&normalized)
+            .unwrap()
+            .normalized_yaml()
+            .unwrap(),
+        normalized
+    );
+}
+
+#[test]
+fn an_inserted_end_marker_shares_a_line_with_the_stream_mark() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let source = "\u{feff}# first\n\n\u{feff}\u{feff}old # inline\n\u{feff}";
+    let document = edited(source, |editor| {
+        let root = editor.root();
+        let count = editor.node(&root)?.comments().len();
+        editor.insert_comment(&root, count, " audit", CommentPlacement::Inline)
+    });
+    assert_eq!(
+        document.source(),
+        "\u{feff}# first\n\n\u{feff}\u{feff}old # inline\n\u{feff}... # audit\n"
+    );
+}
+
+#[test]
+fn a_marked_blank_line_can_be_removed_between_comment_headers() {
+    use astral_yaml::comments::CommentPlacement;
+
+    let source = "o\n... # first\n\u{feff}\n... # second\n";
+    let mut document = EditableDocument::parse(source).unwrap();
+    document
+        .edit(|mut root| root.append_comment(" added", CommentPlacement::Trailing))
+        .unwrap();
+    assert_eq!(
+        document.source(),
+        "o\n... # first\n\u{feff}... # second\n# added\n"
+    );
+}
+
+#[test_case(0 => (None, "# first\n\u{feff}[x, y]".into()); "exact limit")]
+#[test_case(1 => (Some("emitted YAML exceeds input byte limit"), "# first\n\u{feff}x".into()); "one byte short")]
+fn retained_stream_marks_count_toward_the_edit_limit(
+    shortfall: usize,
+) -> (Option<&'static str>, String) {
+    let mut document = EditableDocument::parse_with_options(
+        "# first\n\u{feff}x",
+        astral_yaml::ParseOptions {
+            max_input_bytes: "# first\n\u{feff}[x, y]".len() - shortfall,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let error = document
+        .edit(|mut root| root.replace_yaml("[x, y]"))
+        .err()
+        .map(|err| err.message);
+    (error, document.into_yaml())
+}
+
 #[test]
 fn descendant_inline_comments_are_separate_from_document_markers() {
     use astral_yaml::{comments::CommentPlacement, edit::NodeKind};

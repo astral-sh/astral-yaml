@@ -7,6 +7,44 @@ use crate::{
 };
 use astral_yaml_dev::{edit_diff, indoc};
 
+#[test_case("new" => Ok("\u{feff}new\n\u{feff}".into()); "prefix and suffix lines were removed")]
+#[test_case("# kept\n|2-\n  text\n# tail\n" => Ok("# kept\n\u{feff}|2-\n  text\n\u{feff}# tail\n".into()); "framing on both sides of a scalar")]
+#[test_case("[a" => Err("expected ',' or ']'"); "malformed replacement")]
+#[test_case("# only a comment" => Err("expected exactly one document"); "document was removed")]
+#[test_case("one\n--- two" => Err("expected exactly one document"); "second document was introduced")]
+fn patches_crossing_marks_need_a_document_boundary(
+    replacement: &str,
+) -> Result<String, &'static str> {
+    let document =
+        crate::edit::EditableDocument::parse("# prefix\n\u{feff}old\n\u{feff}# suffix\n").unwrap();
+    let source = &document.source;
+    let span = Span {
+        start: 0,
+        end: source.text.len(),
+    };
+    super::apply(source, vec![(span, replacement.into())], span).map_err(|error| error.message)
+}
+
+#[test_case("abc"; "retained mark")]
+#[test_case("ab"; "separator before the mark")]
+fn patch_limits_include_framing_after_the_replacement(replacement: &str) {
+    let text = "a\n\u{feff}";
+    let document = crate::edit::EditableDocument::parse_with_options(
+        text,
+        crate::ParseOptions {
+            max_input_bytes: text.len(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let span = Span {
+        start: 0,
+        end: text.len(),
+    };
+    let error = super::apply(&document.source, vec![(span, replacement.into())], span).unwrap_err();
+    assert_eq!(error.message, "emitted YAML exceeds input byte limit");
+}
+
 #[test]
 fn normalization_limit_includes_retained_framing() {
     let source = indoc! {"

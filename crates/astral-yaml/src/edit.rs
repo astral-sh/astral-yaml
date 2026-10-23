@@ -275,6 +275,7 @@ impl EditableDocument {
                 contents,
                 root: document.root,
                 options,
+                byte_order_marks: stream.byte_order_marks().to_vec(),
                 start_marker: document.start_marker,
                 end_marker: document.end_marker,
                 extra_end_markers: stream
@@ -307,7 +308,8 @@ impl EditableDocument {
     /// Render the document with normalized whitespace, without modifying it.
     ///
     /// Comments and compatible styles are preserved. Source outside the root node's
-    /// rewrite region is copied unchanged.
+    /// rewrite region is copied unchanged. Byte order marks within the region
+    /// stay on prefix or suffix lines outside the document content.
     ///
     /// # Errors
     /// Returns an error if rendering exceeds a resource limit or changes scalar
@@ -315,16 +317,7 @@ impl EditableDocument {
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = splice::region(self, self.source.root, false);
         let rendered = splice::render(self, self.source.root, region, false)?;
-        let output = splice::PatchSet::new(
-            &self.source.text,
-            vec![(rendered.span, rendered.text)],
-            self.source.options.max_input_bytes,
-        )
-        .map_err(|message| Error {
-            span: region,
-            message,
-        })?
-        .apply();
+        let output = splice::apply(&self.source, vec![(rendered.span, rendered.text)], region)?;
         emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?;
         Ok(output)
     }
