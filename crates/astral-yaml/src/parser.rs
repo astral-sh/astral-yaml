@@ -470,7 +470,6 @@ impl<'a> Parser<'a> {
     fn directives(&mut self) -> Result<Vec<Directive<'a>>> {
         let mut directives = Vec::new();
         let mut version = false;
-        let mut handles = Vec::new();
 
         while self.column() == 0 && self.byte() == Some(b'%') {
             self.reserve_element()?;
@@ -532,11 +531,9 @@ impl<'a> Parser<'a> {
                         return Err(self.error("invalid TAG directive"));
                     }
 
-                    if handles.contains(&words[0]) {
+                    if self.tags.contains_key(words[0]) {
                         return Err(self.error("duplicate TAG directive"));
                     }
-
-                    handles.push(words[0]);
 
                     let prefix = tag_uri(words[1]).ok_or_else(|| self.error("invalid tag URI"))?;
                     if prefix.starts_with([',', '[', ']']) {

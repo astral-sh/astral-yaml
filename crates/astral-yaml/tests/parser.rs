@@ -799,6 +799,29 @@ fn collection_indicators_and_blank_line_tabs_are_accepted(source: &str) {
     assert!(parse(source).is_ok(), "{source:?}");
 }
 
+// https://yaml.org/spec/1.2.2/#682-tag-directives
+#[test]
+fn tag_handle_lookup_in_a_large_directive_list() {
+    use std::fmt::Write;
+
+    let mut directives = String::new();
+    for index in 0..16_384 {
+        writeln!(directives, "%TAG !h{index}! !prefix{index}/").unwrap();
+    }
+    let source = format!("{directives}--- !h12345!suffix value");
+    let stream = parse(&source).unwrap();
+    assert_eq!(
+        stream.nodes()[0].tag.as_ref().unwrap().value,
+        "!prefix12345/suffix"
+    );
+
+    let duplicate = format!("{directives}%TAG !h12345! !other/\n--- value");
+    assert_eq!(
+        parse(&duplicate).unwrap_err().message,
+        "duplicate TAG directive"
+    );
+}
+
 // https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test_case(",tag:example")]
 #[test_case("[tag:example")]
