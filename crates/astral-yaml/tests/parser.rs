@@ -897,7 +897,11 @@ fn empty_scalar_span_follows_properties() {
 
 // https://yaml.org/spec/1.2.2/#61-indentation-spaces
 // https://yaml.org/spec/1.2.2/#63-line-prefixes
+// https://yaml.org/spec/1.2.2/#64-empty-lines
 #[test_case("a: plain\n\tcontinued")]
+#[test_case("a: plain\n\t\n  continued")]
+#[test_case("a: 'first\n\t\n  second'")]
+#[test_case("outer:\n  a: \"first\\\n \t\n    second\"")]
 #[test_case("a: \"first\\\nsecond\"")]
 #[test_case("\"first\\\n---\nsecond\"")]
 fn tab_indented_continuations_are_rejected(source: &str) {
@@ -906,6 +910,7 @@ fn tab_indented_continuations_are_rejected(source: &str) {
 
 #[test_case("a: plain\n \tcontinued")]
 #[test_case("a: \"first\\\n \tsecond\"")]
+#[test_case("outer:\n  a: \"first\\\n   \t\n    second\"")]
 fn tabs_after_continuation_indentation_are_content(source: &str) {
     assert!(parse(source).is_ok(), "{source:?}");
 }
@@ -979,6 +984,7 @@ fn block_collections_reject_invalid_indentation_and_compact_values(source: &str)
 }
 
 #[test_case("a: ?foo")]
+#[test_case("a: plain\n\t\nb: next")]
 #[test_case("a: '?'")]
 #[test_case("a:\n  ?\n")]
 #[test_case("? a\n: ?\n")]

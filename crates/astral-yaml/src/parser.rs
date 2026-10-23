@@ -1508,12 +1508,7 @@ impl<'source> Parser<'source, '_> {
                 Some(b'\r' | b'\n') => {
                     let save = self.pos;
                     let saved_line_start = self.line_start;
-                    let mut breaks = 0;
-
-                    while self.newline() {
-                        breaks += 1;
-                        self.spaces();
-                    }
+                    let breaks = self.scalar_breaks(parent);
 
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
@@ -1580,6 +1575,23 @@ impl<'source> Parser<'source, '_> {
         }))
     }
 
+    /// Consume folded or escaped breaks, leaving a tab in the indentation for
+    /// the caller to treat as the end of a plain scalar or an invalid quoted line.
+    fn scalar_breaks(&mut self, parent: isize) -> usize {
+        let mut breaks = 0;
+        while self.newline() {
+            breaks += 1;
+            while self.byte() == Some(b' ') {
+                self.pos += 1;
+            }
+            if self.byte() == Some(b'\t') && signed(self.column()) <= parent {
+                break;
+            }
+            self.spaces();
+        }
+        breaks
+    }
+
     fn quoted_continuation(&self, parent: isize) -> Result<()> {
         // A BOM inside a quoted scalar is content, not a document boundary.
         if self.byte().is_none()
@@ -1641,15 +1653,10 @@ impl<'source> Parser<'source, '_> {
                     let text = output.get_or_insert_with(String::new);
                     text.push_str(&self.source[segment..self.pos]);
                     self.pos += 1;
-                    if self.newline() {
-                        self.spaces();
-
-                        while self.newline() {
-                            text.push('\n');
-                            self.spaces();
-                        }
-
+                    let breaks = self.scalar_breaks(parent);
+                    if breaks > 0 {
                         self.quoted_continuation(parent)?;
+                        text.extend(std::iter::repeat_n('\n', breaks - 1));
                     } else {
                         text.push(self.escape()?);
                     }
@@ -1659,13 +1666,7 @@ impl<'source> Parser<'source, '_> {
                 Some(b'\r' | b'\n') => {
                     let text = output.get_or_insert_with(String::new);
                     text.push_str(self.source[segment..self.pos].trim_end_matches([' ', '\t']));
-                    let mut breaks = 0;
-
-                    while self.newline() {
-                        breaks += 1;
-                        self.spaces();
-                    }
-
+                    let breaks = self.scalar_breaks(parent);
                     self.quoted_continuation(parent)?;
 
                     if breaks == 1 {
