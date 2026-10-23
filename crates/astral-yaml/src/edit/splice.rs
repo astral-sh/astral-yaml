@@ -36,11 +36,14 @@ pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, oute
     Span::new(start, end).expect("ordered source ranges")
 }
 
+/// The bytes on this line before the node, excluding a document's byte-order mark.
+pub(super) fn line_prefix(source: &str, at: usize) -> &str {
+    let prefix = source[..at].rsplit('\n').next().unwrap_or("");
+    prefix.strip_prefix('\u{feff}').unwrap_or(prefix)
+}
+
 pub(super) fn indent(source: &str, at: usize) -> usize {
-    source[..at]
-        .rsplit('\n')
-        .next()
-        .unwrap_or("")
+    line_prefix(source, at)
         .bytes()
         .take_while(|&byte| byte == b' ')
         .count()
@@ -87,11 +90,7 @@ impl<'a> Boundary<'a> {
         end_marker: Option<Span>,
     ) -> Self {
         let erased = (erase_root && !body.is_empty()).then(|| {
-            let prefix = source[..body.start()]
-                .rsplit('\n')
-                .next()
-                .unwrap_or("")
-                .trim_start_matches('\u{feff}');
+            let prefix = line_prefix(source, body.start());
             if prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
                 RootLine::Standalone {
                     start: body.start() - prefix.len(),
@@ -131,10 +130,7 @@ impl<'a> Boundary<'a> {
         all_comments: &[Comment<Location>],
         own_line: bool,
     ) -> Placement<'comments, Location> {
-        let prefix = self.source[..self.body.start()]
-            .rsplit('\n')
-            .next()
-            .unwrap_or("");
+        let prefix = line_prefix(self.source, self.body.start());
         let line_start = self.body.start() - prefix.len();
         let terminated = self.body.is_empty()
             && all_comments.iter().any(|comment| {
@@ -158,7 +154,7 @@ impl<'a> Boundary<'a> {
             comments,
             context,
             before,
-            at_column_zero: prefix.trim_start_matches('\u{feff}').is_empty(),
+            at_column_zero: prefix.is_empty(),
             comment_follows: self.body.is_empty()
                 && self.source.as_bytes().get(self.body.end()) == Some(&b'#'),
             diagnostic_span: self.body,

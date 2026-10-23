@@ -4,6 +4,20 @@ use super::support::{edit, edits};
 use astral_yaml::{CollectionStyle, ScalarStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
+#[test_case("", "[]")]
+#[test_case("  ", "[new]")]
+fn bom_preserves_indentless_sequence_columns(indent: &str, replacement: &str) {
+    let source = format!("\u{feff}{indent}v:\n{indent}- old");
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|root| root.at(["v"])?.replace_yaml(replacement))
+        .unwrap();
+    assert_eq!(
+        document.source(),
+        format!("\u{feff}{indent}v: {replacement}")
+    );
+}
+
 #[test]
 fn flow_conversion_uses_content_indentation_after_properties() {
     let results = edits(
