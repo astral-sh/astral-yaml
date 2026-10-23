@@ -23,6 +23,15 @@ pub struct Source<'a> {
     encoding: Encoding,
 }
 
+/// Decodes the input with the same byte limit as [`Source::from_bytes`].
+impl<'input> TryFrom<&'input [u8]> for Source<'input> {
+    type Error = Error;
+
+    fn try_from(bytes: &'input [u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(bytes)
+    }
+}
+
 impl<'a> Source<'a> {
     /// Decode UTF-8, UTF-16, or UTF-32 input, with or without a byte order mark.
     ///
