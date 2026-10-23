@@ -516,7 +516,7 @@ impl<'a> Parser<'a> {
                 end: argument_start + args.len(),
             };
 
-            let words: Vec<_> = args.split_ascii_whitespace().collect();
+            let mut words = args.split_ascii_whitespace();
 
             match name {
                 "YAML" => {
@@ -524,12 +524,15 @@ impl<'a> Parser<'a> {
                         return Err(self.error("duplicate YAML directive"));
                     }
 
-                    let valid = words.len() == 1
-                        && words[0].split_once('.').is_some_and(|(major, minor)| {
+                    let valid = words
+                        .next()
+                        .and_then(|word| word.split_once('.'))
+                        .is_some_and(|(major, minor)| {
                             major.trim_start_matches('0') == "1"
                                 && !minor.is_empty()
                                 && minor.bytes().all(|b| b.is_ascii_digit())
-                        });
+                        })
+                        && words.next().is_none();
                     if !valid {
                         return Err(self.error("invalid YAML version directive"));
                     }
@@ -539,20 +542,25 @@ impl<'a> Parser<'a> {
                     version = true;
                 }
                 "TAG" => {
-                    if words.len() != 2 || !valid_handle(words[0]) {
+                    let (Some(handle), Some(prefix), None) =
+                        (words.next(), words.next(), words.next())
+                    else {
+                        return Err(self.error("invalid TAG directive"));
+                    };
+                    if !valid_handle(handle) {
                         return Err(self.error("invalid TAG directive"));
                     }
 
-                    if self.tags.contains_key(words[0]) {
+                    if self.tags.contains_key(handle) {
                         return Err(self.error("duplicate TAG directive"));
                     }
 
-                    let prefix = tag_uri(words[1]).ok_or_else(|| self.error("invalid tag URI"))?;
+                    let prefix = tag_uri(prefix).ok_or_else(|| self.error("invalid tag URI"))?;
                     if prefix.starts_with([',', '[', ']']) {
                         return Err(self.error("invalid global tag prefix"));
                     }
 
-                    self.tags.insert(words[0], prefix);
+                    self.tags.insert(handle, prefix);
                 }
                 "" => return Err(self.error("empty directive name")),
                 _ => {}

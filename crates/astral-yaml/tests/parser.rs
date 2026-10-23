@@ -706,6 +706,25 @@ fn directive_parameters_and_comments_are_separate(
     }
 }
 
+// https://yaml.org/spec/1.2.2/#68-directives
+#[test_case("APP", None)]
+#[test_case("YAML 1.2", Some("invalid YAML version directive"))]
+#[test_case("TAG !e! !prefix/", Some("invalid TAG directive"))]
+fn directive_with_many_parameters(header: &str, error: Option<&str>) {
+    let arguments = " x".repeat(32_768);
+    let source = format!("%{header}{arguments}\n--- value");
+    match parse(&source) {
+        Ok(stream) => {
+            assert_eq!(error, None);
+            assert_eq!(
+                stream.documents()[0].directives[0].arguments,
+                arguments.trim_start()
+            );
+        }
+        Err(err) => assert_eq!(Some(err.message), error),
+    }
+}
+
 // https://yaml.org/spec/1.2.2/#681-yaml-directives
 #[test_case("1.1", true)]
 #[test_case("1.2", true)]
