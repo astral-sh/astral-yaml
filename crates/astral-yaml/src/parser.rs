@@ -249,6 +249,10 @@ impl<'a> Parser<'a> {
             crossed_line = true;
         }
 
+        if crossed_line && (self.marker("---") || self.marker("...")) {
+            return Err(self.error("document marker inside flow collection"));
+        }
+
         if crossed_line && self.byte().is_some() && signed(self.leading_spaces()) <= parent {
             return Err(self.error("flow continuation must be indented"));
         }
