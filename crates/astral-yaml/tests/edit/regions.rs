@@ -5,9 +5,27 @@ use test_case::test_case;
 use super::support::{edit, edited};
 use astral_yaml::{
     CollectionStyle,
-    edit::{Editor, Handle, NodeKind},
+    edit::{EditableDocument, Editor, Handle, NodeKind},
 };
 use astral_yaml_dev::{edit_diff, indoc};
+
+#[test]
+fn scalar_edits_on_long_flow_lines_preserve_their_surroundings() {
+    let items = "a,".repeat(40_000);
+    let source = format!("[first, {items}\n  {items}last]");
+    let mut document = EditableDocument::parse(&source).unwrap();
+    document
+        .edit(|root| {
+            let mut sequence = root.into_sequence()?;
+            sequence.item(0)?.set_yaml("left")?;
+            sequence.item(80_001)?.set_yaml("right")
+        })
+        .unwrap();
+    assert_eq!(
+        document.source(),
+        format!("[left, {items}\n  {items}right]")
+    );
+}
 
 fn collection(editor: &Editor<'_>, nested: bool) -> Handle {
     if nested {

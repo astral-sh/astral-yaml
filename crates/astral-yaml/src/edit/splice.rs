@@ -7,6 +7,7 @@ use super::{
     Comment,
     emit::{self, Context, Ending, Fragment},
     layout::Layout,
+    lines::Line,
     view::{Emission, Syntax},
 };
 use crate::{Error, NodeId, Span, comments::CommentPlacement};
@@ -36,17 +37,8 @@ pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, oute
     Span::new(start, end).expect("ordered source ranges")
 }
 
-/// The bytes on this line before the node, excluding a document's byte-order mark.
-pub(super) fn line_prefix(source: &str, at: usize) -> &str {
-    let prefix = source[..at].rsplit('\n').next().unwrap_or("");
-    prefix.strip_prefix('\u{feff}').unwrap_or(prefix)
-}
-
 pub(super) fn indent(source: &str, at: usize) -> usize {
-    line_prefix(source, at)
-        .bytes()
-        .take_while(|&byte| byte == b' ')
-        .count()
+    Line::at(source, at).indent(at)
 }
 
 pub(super) enum Separator {
@@ -78,6 +70,7 @@ pub(super) struct Boundary<'a> {
     source: &'a str,
     body: Span,
     reserved: Span,
+    line: Line,
     erased: Option<RootLine>,
     end_marker: Option<Span>,
 }
@@ -86,11 +79,12 @@ impl<'a> Boundary<'a> {
     pub(super) fn new(
         source: &'a str,
         body: Span,
+        line: Line,
         erase_root: bool,
         end_marker: Option<Span>,
     ) -> Self {
         let erased = (erase_root && !body.is_empty()).then(|| {
-            let prefix = line_prefix(source, body.start());
+            let prefix = &source[body.start() - line.column(body.start())..body.start()];
             if prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
                 RootLine::Standalone {
                     start: body.start() - prefix.len(),
@@ -112,6 +106,7 @@ impl<'a> Boundary<'a> {
             },
             erased,
             end_marker,
+            line,
         }
     }
 
@@ -130,15 +125,15 @@ impl<'a> Boundary<'a> {
         all_comments: &[Comment<Location>],
         own_line: bool,
     ) -> Placement<'comments, Location> {
-        let prefix = line_prefix(self.source, self.body.start());
-        let line_start = self.body.start() - prefix.len();
+        let at = self.body.start();
+        let line_start = at - self.line.column(at);
         let terminated = self.body.is_empty()
             && all_comments.iter().any(|comment| {
                 comment.span.into().is_some_and(|span| {
                     span.start() >= line_start && span.end() <= self.body.start()
                 })
             });
-        let before = if terminated || (own_line && !prefix.bytes().all(|byte| byte == b' ')) {
+        let before = if terminated || (own_line && !self.line.own_line(at)) {
             Separator::Line(context.indent)
         } else if self.body.is_empty()
             && matches!(
@@ -154,7 +149,7 @@ impl<'a> Boundary<'a> {
             comments,
             context,
             before,
-            at_column_zero: prefix.is_empty(),
+            at_column_zero: self.line.column(at) == 0,
             comment_follows: self.body.is_empty()
                 && self.source.as_bytes().get(self.body.end()) == Some(&b'#'),
             diagnostic_span: self.body,
@@ -229,16 +224,18 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     document: impl Into<Emission<'a, Location>>,
     id: NodeId,
     region: Span,
-    indent: usize,
     flow: bool,
 ) -> Result<Replacement, Error> {
     let document = document.into();
     let Emission { syntax, source } = document;
     let root = id == syntax.root;
     let node = &syntax.nodes[id.0];
+    let line = Line::at(&source.text, region.start());
+    let indent = line.indent(region.start());
     let boundary = Boundary::new(
         &source.text,
         region,
+        line,
         root && emit::omitted(node),
         source.end_marker,
     );

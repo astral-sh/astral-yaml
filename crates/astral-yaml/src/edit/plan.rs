@@ -6,6 +6,7 @@ use super::{
     emit,
     framing::{RootComments, RootLayout},
     layout::Layout,
+    lines::LineIndex,
     scope::Scopes,
     source::Source,
     splice::{self, Boundary, PatchSet},
@@ -160,7 +161,8 @@ impl Plan<'_> {
         if self.changes.roots.is_empty() {
             return Ok(Vec::new());
         }
-        let scopes = Scopes::new(self.original, self.candidate, syntax);
+        let mut lines = LineIndex::new(&self.original.text);
+        let scopes = Scopes::new(self.original, self.candidate, syntax, &mut lines);
         let mut ids: Vec<_> = self.changes.roots.iter().copied().collect();
         if layout.needs_suffix_context()
             || (layout.needs_scalar_boundary(self.candidate)
@@ -183,12 +185,14 @@ impl Plan<'_> {
                 .iter()
                 .map(|&id| {
                     let span = self.body_region(id, layout, &scopes);
+                    let line = lines.at(span.start());
                     Rewrite {
                         id,
-                        context: scopes.context(id, span),
+                        context: scopes.context(id, line.indent(span.start())),
                         boundary: Boundary::new(
                             &self.original.text,
                             span,
+                            line,
                             id == self.candidate.root && emit::omitted(&self.candidate.nodes[id.0]),
                             self.original.end_marker,
                         ),
