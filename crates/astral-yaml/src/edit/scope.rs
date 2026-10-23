@@ -221,8 +221,20 @@ impl<'a> Scopes<'a> {
             return false;
         }
         match slot.role {
-            Role::Key { separator, .. } => {
-                let form = emit::key_form(new, slot.flow);
+            Role::Key { mapping, separator } => {
+                // Block keys and compact flow-pair keys count the separation
+                // before ':' toward their 1024-character limit.
+                let mapping_start = self.original.contents[mapping.0].start();
+                let suffix = &self.original.text[old.span.end()..];
+                let after_spaces = suffix.trim_start_matches([' ', '\t']);
+                let padding = if after_spaces.starts_with(':')
+                    && self.original.text.as_bytes().get(mapping_start) != Some(&b'{')
+                {
+                    suffix.len() - after_spaces.len()
+                } else {
+                    0
+                };
+                let form = emit::key_form(new, slot.flow, padding);
                 form != KeyForm::Explicit
                     && match separator {
                         KeySeparator::Missing => !emit::omitted(new),
