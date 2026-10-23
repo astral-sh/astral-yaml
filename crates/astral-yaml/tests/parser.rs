@@ -796,24 +796,24 @@ fn escape_repertoire_and_empty_pairs() {
 
 // https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 // https://yaml.org/spec/1.2.2/#691-node-tags
+#[test_case("! value", "!")]
 #[test_case("!local%21 value", "!local%21")]
 #[test_case("!<tag:example.com,2000:%c3%a9> value", "tag:example.com,2000:%c3%a9")]
-#[test_case(
-    "%TAG !e! tag:example:%FF\n--- !e!suffix value",
-    "tag:example:%FFsuffix"
-)]
-fn tag_uris_preserve_percent_escapes(source: &str, tag: &str) {
+fn unchanged_tags_borrow_their_spelling(source: &str, spelling: &str) {
     let stream = parse(source).unwrap();
-    assert_eq!(
-        stream
-            .node(stream.documents()[0].root)
-            .unwrap()
-            .tag
-            .as_ref()
-            .unwrap()
-            .value,
-        tag
-    );
+    let tag = stream.nodes()[0].tag.as_ref().unwrap();
+    let Cow::Borrowed(value) = tag.value else {
+        panic!("expected a borrowed tag");
+    };
+    assert_eq!(value, spelling);
+}
+
+// https://yaml.org/spec/1.2.2/#682-tag-directives
+#[test]
+fn tag_expansion_preserves_percent_escapes() {
+    let stream = parse("%TAG !e! tag:example:%FF\n--- !e!suffix value").unwrap();
+    let tag = stream.nodes()[0].tag.as_ref().unwrap();
+    assert_eq!(tag.value, "tag:example:%FFsuffix");
 }
 
 #[test_case("!é x")]
@@ -995,10 +995,12 @@ fn collection_indicators_and_blank_line_tabs_are_accepted(source: &str) {
 #[test_case(1, false; "one byte over")]
 fn expanded_tag_budget_spans_documents(shortfall: usize, accepted: bool) {
     let prefix = format!("tag:example.org,2000:{}", "a".repeat(64));
-    let document = format!("%TAG !t! {prefix}\n---\n- !t!x v\n- !t!x v\n...\n");
+    let local = "!local";
+    let document = format!("%TAG !t! {prefix}\n---\n- !t!x v\n- !t!x v\n- {local} v\n...\n");
     let source = document.repeat(2);
+    let document_tag_bytes = 2 * (prefix.len() + 1) + local.len();
     let options = ParseOptions {
-        max_input_bytes: 4 * (prefix.len() + 1) - shortfall,
+        max_input_bytes: 2 * document_tag_bytes - shortfall,
         ..ParseOptions::default()
     };
     let result = parse_with_options(&source, options);
