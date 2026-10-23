@@ -6,8 +6,8 @@ use super::{
     Comment, CommentPosition, Node, NodeKind,
     emit::{self, Context, KeyForm},
     layout::Layout,
+    lines::LineIndex,
     source::Source,
-    splice,
     view::Syntax,
 };
 use crate::{CollectionStyle, NodeId, ScalarStyle, Span};
@@ -75,18 +75,18 @@ impl<'a> Scopes<'a> {
         original: &'a Source,
         candidate: Syntax<'a, Option<Span>>,
         layout: &'a Layout,
+        lines: &mut LineIndex<'_>,
     ) -> Self {
         let mut slots = vec![None; original.nodes.len()];
         let mut order = Vec::new();
         let mut pending = vec![(original.root, Role::Document, None, false)];
         while let Some((id, role, enclosing_key, flow)) = pending.pop() {
             let node = &original.nodes[id.0];
-            let prefix = splice::line_prefix(&original.text, node.span.start());
             slots[id.0] = Some(Slot {
                 role,
                 enclosing_key,
                 flow,
-                own_line: prefix.bytes().all(|byte| byte == b' '),
+                own_line: lines.at(node.span.start()).own_line(node.span.start()),
                 body: node.span,
                 outer_comments: node.comments.iter().any(|comment| {
                     comment.span.start() < node.span.start() || comment.span.end() > node.span.end()
@@ -120,7 +120,7 @@ impl<'a> Scopes<'a> {
                 NodeKind::Mapping { entries, .. } => {
                     for &(key, value) in entries {
                         let separator = key_separator(original, key);
-                        let header = value_header(original, id, value, separator);
+                        let header = value_header(original, id, value, separator, lines);
                         pending.push((
                             key,
                             Role::Key {
@@ -258,9 +258,8 @@ impl<'a> Scopes<'a> {
         }
     }
 
-    pub(super) fn context(&self, id: NodeId, region: Span) -> Context {
+    pub(super) fn context(&self, id: NodeId, indent: usize) -> Context {
         let slot = self.slots[id.0];
-        let indent = splice::indent(&self.original.text, region.start());
         match slot.role {
             Role::Key { .. } => Context::key(indent, slot.flow),
             Role::Document => Context::value(indent, slot.flow, 0),
@@ -286,28 +285,27 @@ fn value_header(
     mapping: NodeId,
     value: NodeId,
     separator: KeySeparator,
+    lines: &mut LineIndex<'_>,
 ) -> ValueHeader {
     let node = &original.nodes[value.0];
     if node.span.is_empty() && matches!(separator, KeySeparator::Missing) {
         return ValueHeader::Missing;
     }
+    let value_start = original.contents[value.0].start();
+    let mapping_start = original.contents[mapping.0].start();
     if matches!(
         node.kind,
         NodeKind::Sequence {
             style: CollectionStyle::Block,
             ..
         }
-    ) && column(&original.text, original.contents[value.0].start())
-        == column(&original.text, original.contents[mapping.0].start())
+    ) && lines.at(value_start).column(value_start)
+        == lines.at(mapping_start).column(mapping_start)
     {
         ValueHeader::IndentlessSequence
     } else {
         ValueHeader::Present
     }
-}
-
-fn column(source: &str, at: usize) -> usize {
-    splice::line_prefix(source, at).len()
 }
 
 pub(super) fn same_attachment(old: &Comment, new: &Comment<Option<Span>>) -> bool {

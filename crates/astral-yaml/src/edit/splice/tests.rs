@@ -1,6 +1,6 @@
 use test_case::test_case;
 
-use super::{Boundary, PatchSet};
+use super::{Boundary, Line, PatchSet};
 use crate::{
     Span,
     edit::emit::{Ending, Fragment},
@@ -47,7 +47,7 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
     .replace("{padding}", "   ");
     let start = source.find("old").unwrap();
     let body = Span::new(start, start + 3).unwrap();
-    let boundary = Boundary::new(&source, body, false, None);
+    let boundary = Boundary::new(&source, body, Line::at(&source, body.start()), false, None);
     let mut results = Vec::new();
     for (name, text, ending) in [
         ("token", "new", Ending::Token),
@@ -133,7 +133,7 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
 fn erased_root_boundaries_retain_shared_marker_lines(source: &str) -> String {
     let start = source.find("old").unwrap();
     let body = Span::new(start, start + 3).unwrap();
-    let boundary = Boundary::new(source, body, true, None);
+    let boundary = Boundary::new(source, body, Line::at(source, body.start()), true, None);
     let replacement = boundary
         .complete(
             Fragment {
@@ -153,7 +153,13 @@ fn erased_root_boundaries_retain_shared_marker_lines(source: &str) -> String {
 
 #[test]
 fn completing_a_boundary_checks_new_separation_against_the_limit() {
-    let boundary = Boundary::new("old\n", Span::new(0, 4).unwrap(), false, None);
+    let boundary = Boundary::new(
+        "old\n",
+        Span::new(0, 4).unwrap(),
+        Line::at("old\n", 0),
+        false,
+        None,
+    );
     let result = boundary.complete(
         Fragment {
             text: "new".to_owned(),

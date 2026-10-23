@@ -3,7 +3,7 @@ use test_case::test_case;
 use super::{EditableDocument, NodeKind, correspondence};
 use crate::ScalarStyle;
 use crate::edit::draft::Draft;
-use crate::edit::splice::{indent, region, render};
+use crate::edit::splice::{region, render};
 use astral_yaml_dev::indoc;
 
 /// Render a frozen draft against its original source.
@@ -12,14 +12,7 @@ fn render_draft(original: &EditableDocument, draft: Draft) -> String {
     let syntax = (&candidate).into();
     let source = &original.source;
     let region = region(original, source.root, false);
-    let rendered = render(
-        source.emission(syntax),
-        source.root,
-        region,
-        indent(&source.text, region.start()),
-        false,
-    )
-    .unwrap();
+    let rendered = render(source.emission(syntax), source.root, region, false).unwrap();
     let output = format!(
         "{}{}{}",
         &source.text[..rendered.span.start()],
@@ -63,7 +56,6 @@ fn emission_accepts_syntax_without_source_locations() {
         original.source.emission(syntax),
         syntax.root,
         original.source.nodes[original.source.root.0].span,
-        0,
         false,
     )
     .unwrap();
@@ -358,14 +350,8 @@ fn rendering_obeys_work_and_output_budgets(
     let region = region(&document, source.root, false);
     // Both committed syntax and drafts obey the same rendering limits.
     for result in [
-        render(&document, source.root, region, 0, false),
-        render(
-            source.emission((&draft).into()),
-            source.root,
-            region,
-            0,
-            false,
-        ),
+        render(&document, source.root, region, false),
+        render(source.emission((&draft).into()), source.root, region, false),
     ] {
         assert_eq!(result.unwrap_err().message, expected);
     }
@@ -900,7 +886,7 @@ fn detached_prefixes_are_emitted_before_content() {
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
         let span = region(&document, document.source.root, true);
-        let rendered = render(&document, document.source.root, span, 0, false).unwrap();
+        let rendered = render(&document, document.source.root, span, false).unwrap();
         let parsed = EditableDocument::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
         assert!(super::comments_preserved(
@@ -1113,14 +1099,7 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
             style: crate::ScalarStyle::Literal,
         };
         let region = region(&candidate, candidate.source.root, true);
-        let rendered = render(
-            &candidate,
-            candidate.source.root,
-            region,
-            indent(source, region.start()),
-            false,
-        )
-        .unwrap();
+        let rendered = render(&candidate, candidate.source.root, region, false).unwrap();
         let output = format!(
             "{}{}{}",
             &source[..rendered.span.start()],

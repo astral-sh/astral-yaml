@@ -4,6 +4,7 @@ mod draft;
 mod emit;
 mod framing;
 mod layout;
+mod lines;
 mod plan;
 mod scope;
 mod source;
@@ -300,8 +301,7 @@ impl EditableDocument {
     /// content, alias targets, or comment ownership, placement, or order.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = splice::region(self, self.source.root, false);
-        let indent = splice::indent(&self.source.text, region.start());
-        let rendered = splice::render(self, self.source.root, region, indent, false)?;
+        let rendered = splice::render(self, self.source.root, region, false)?;
         let output = splice::PatchSet::new(
             &self.source.text,
             vec![(rendered.span, rendered.text)],
