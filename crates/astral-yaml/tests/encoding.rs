@@ -53,7 +53,6 @@ fn encodings_and_original_spans(encoding: Encoding, bom: &str) {
             .original_span(Span::new(inside, inside).unwrap())
             .is_none()
     );
-    assert_ne!(format!("{:?}", source.clone()), "");
 }
 
 // https://yaml.org/spec/1.2.2/#52-character-encodings

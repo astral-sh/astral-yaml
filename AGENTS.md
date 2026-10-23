@@ -12,6 +12,8 @@
 
 - All library code should have 100% test coverage.
 
+- Test behavior that can regress. Let Rust enforce ownership and trait bounds.
+
 - All Rust should be written in a reader-friendly manner, meaning it should not be golfed or overly dense.
   Changes should preserve logical separations between functions and critical sections using whitespace.
 

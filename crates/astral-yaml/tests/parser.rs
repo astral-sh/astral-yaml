@@ -343,9 +343,6 @@ fn spans_comments_and_locations() {
 
     assert_eq!(stream.location(8), Some((2, 1)));
     assert_eq!(stream.location(source.len() + 1), None);
-
-    assert_eq!(stream.clone(), stream);
-    assert_ne!(format!("{stream:?}"), "");
 }
 
 #[test]
