@@ -7,10 +7,12 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// Limits on input size, collection nesting, and syntax elements.
+/// Limits on input size, syntax depth, and syntax elements.
 #[derive(Clone, Copy, Debug)]
 pub struct ParseOptions {
-    /// Maximum collection nesting, between 1 and 128.
+    /// Maximum number of nodes on a path from a document root, between 1 and 128.
+    /// A scalar root uses one level. A sequence containing a scalar uses two.
+    /// An alias is a leaf.
     pub max_depth: usize,
 
     /// Maximum number of nodes, comments, directives, BOMs, and end markers in a stream.
