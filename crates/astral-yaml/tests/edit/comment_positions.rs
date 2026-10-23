@@ -5,7 +5,7 @@ use astral_yaml::{
     comments::CommentPlacement,
     edit::{CommentPosition, EditableDocument, NodeKind},
 };
-use astral_yaml_dev::indoc;
+use astral_yaml_dev::{indoc, span_snapshot};
 
 #[test_case(
     indoc! {r"
@@ -223,8 +223,16 @@ fn invalid_comment_boundaries_poison_the_transaction() {
     "};
     let mut document = EditableDocument::parse(source).unwrap();
     let foreign = document.edit_syntax(|editor| Ok(editor.root())).unwrap();
-    let mut errors = Vec::new();
-    for case in 0..6 {
+    let cases = [
+        "foreign handle",
+        "removed child",
+        "other parent",
+        "mapping value",
+        "scalar",
+        "leading comment",
+    ];
+    let mut spans = Vec::new();
+    for (case, label) in cases.into_iter().enumerate() {
         let error = document
             .edit_syntax(|editor| {
                 let root = editor.root();
@@ -257,18 +265,21 @@ fn invalid_comment_boundaries_poison_the_transaction() {
             })
             .unwrap_err();
         assert_eq!(document.source(), source);
-        errors.push(error.to_string());
+        spans.push((format!("{label}: {}", error.message), error.span));
     }
-    insta::assert_debug_snapshot!(errors, @r#"
-    [
-        "foreign or deleted edit handle at bytes 0..32",
-        "foreign or deleted edit handle at bytes 0..32",
-        "comment boundary is not a collection child at bytes 0..32",
-        "comment boundary is not a collection child at bytes 0..32",
-        "comment boundary is not a collection child at bytes 0..32",
-        "collection gaps require detached comments at bytes 0..32",
-    ]
-    "#);
+    insta::assert_snapshot!(span_snapshot(source, spans), @"
+      |
+    1 | / items: [one, two]
+    2 | | other: [three]
+      | |              ^
+      | |              |
+      | |              foreign handle: foreign or deleted edit handle
+      | |              removed child: foreign or deleted edit handle
+      | |              other parent: comment boundary is not a collection child
+      | |              mapping value: comment boundary is not a collection child
+      | |______________scalar: comment boundary is not a collection child
+      |                leading comment: collection gaps require detached comments
+    ");
 }
 
 #[test]

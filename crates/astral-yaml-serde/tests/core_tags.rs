@@ -2,6 +2,7 @@ use test_case::test_case;
 
 mod support;
 
+use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Spanned, Tagged, from_str};
 use serde::{Deserialize, de::IgnoredAny};
 use std::{collections::BTreeMap, fmt::Write};
@@ -115,7 +116,11 @@ fn wrappers_and_aliases_preserve_tag_checks(source: &str) {
     assert_eq!(result.is_ok(), expected.is_ok());
 
     if let Err(error) = result {
-        assert_eq!(error.span.unwrap().slice(&alias), Some("&value !!int 7"));
+        insta::assert_snapshot!(diagnostic_snapshot(&alias, error), @"
+          |
+        1 | [&value !!int 7, *value]
+          |  ^^^^^^^^^^^^^^ $[1]: tag does not match requested type
+        ");
     }
 }
 
@@ -123,23 +128,30 @@ fn wrappers_and_aliases_preserve_tag_checks(source: &str) {
 // https://yaml.org/spec/1.2.2/#691-node-tags
 #[test]
 fn tag_mismatch_errors_retain_the_node_span() {
-    let mut output = String::new();
-
-    for source in [
+    let cases = [
         "!!int '42'",
         "!<tag:yaml.org,2002:int> 42",
         "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42",
-    ] {
+    ];
+    let snapshots = cases.map(|source| {
         let error = from_str::<String>(source).unwrap_err();
         assert_eq!(from_str::<&str>(source).unwrap_err(), error);
-        writeln!(output, "{source:?}: {error}").unwrap();
-    }
+        diagnostic_snapshot(source, error)
+    });
+    insta::assert_snapshot!(snapshots.join("\n\n"), @"
+      |
+    1 | !!int '42'
+      | ^^^^^^^^^^ $: tag does not match requested type
 
-    insta::assert_snapshot!(output, @r#"
-    "!!int '42'": $: tag does not match requested type at bytes 0..10
-    "!<tag:yaml.org,2002:int> 42": $: tag does not match requested type at bytes 0..27
-    "%TAG !c! tag:yaml.org,2002:\n--- !c!int 42": $: tag does not match requested type at bytes 32..41
-    "#);
+      |
+    1 | !<tag:yaml.org,2002:int> 42
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ $: tag does not match requested type
+
+      |
+    1 | %TAG !c! tag:yaml.org,2002:
+    2 | --- !c!int 42
+      |     ^^^^^^^^^ $: tag does not match requested type
+    ");
 }
 
 #[test_case("7", true)]

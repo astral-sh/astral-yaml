@@ -2,6 +2,7 @@ use test_case::test_case;
 
 mod support;
 
+use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string, with::yaml_tag};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::{collections::BTreeMap, fmt::Write};
@@ -64,8 +65,12 @@ fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
             error.message, "non-core YAML tags require Tagged<T> or with::yaml_tag",
             "{source}"
         );
-        assert!(error.span.unwrap().slice(source).is_some());
-        assert!(from_str::<serde_json::Value>(source).is_err());
+        let value_error = from_str::<serde_json::Value>(source).unwrap_err();
+        assert_eq!(
+            diagnostic_snapshot(source, error),
+            diagnostic_snapshot(source, value_error),
+            "{source}"
+        );
     }
 
     assert!(from_str::<Empty>("{ignored: !Count 42}").is_err());
@@ -497,14 +502,38 @@ impl<'de> Deserialize<'de> for BufferedMap {
     }
 }
 
-#[test_case("!partial 1", "tagged mapping was not fully consumed")]
-#[test_case("!key 1", "mapping key has no value")]
-#[test_case("!value 1", "mapping value has no key")]
-fn tag_buffering_enforces_map_consumption(source: &str, expected: &str) {
-    from_tag::<BufferedMap>("!normal 1").unwrap();
-    let error = from_tag::<BufferedMap>(source).unwrap_err();
-    assert_eq!(error.message, expected);
-    assert_eq!(error.span.unwrap().slice(source), Some(source));
+#[test_case("!normal 1" => Ok(()); "consumed")]
+#[test_case(
+    "!partial 1"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | !partial 1
+      | ^^^^^^^^^^ $: tagged mapping was not fully consumed
+    ");
+    "partial"
+)]
+#[test_case(
+    "!key 1"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | !key 1
+      | ^^^^^^ $: mapping key has no value
+    ");
+    "extra key"
+)]
+#[test_case(
+    "!value 1"
+    => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"
+      |
+    1 | !value 1
+      | ^^^^^^^^ $: mapping value has no key
+    ");
+    "extra value"
+)]
+fn tag_buffering_enforces_map_consumption(source: &str) -> Result<(), String> {
+    from_tag::<BufferedMap>(source)
+        .map(|_| ())
+        .map_err(|error| diagnostic_snapshot(source, error))
 }
 
 #[test]

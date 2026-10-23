@@ -53,7 +53,11 @@ fn a_failed_update_prevents_commit_and_does_not_run_the_transform() {
             Ok(())
         })
         .unwrap_err();
-    insta::assert_snapshot!(error, @"$: expected an integer at bytes 0..1");
+    insta::assert_snapshot!(astral_yaml_dev::diagnostic_snapshot(source, error), @"
+      |
+    1 | 3 # keep
+      | ^ $: expected an integer
+    ");
     assert_eq!(document.source(), source);
 }
 
@@ -107,7 +111,12 @@ fn reads_report_a_dangling_alias_without_preventing_repair() {
             Ok(error)
         })
         .unwrap();
-    insta::assert_snapshot!(error, @r#"$["copy"]: node is no longer in the document at bytes 0..42"#);
+    insta::assert_snapshot!(astral_yaml_dev::diagnostic_snapshot(source, error), @r#"
+      |
+    1 | / default: &value {nested: old}
+    2 | | copy: *value
+      | |____________^ $["copy"]: node is no longer in the document
+    "#);
 }
 
 #[test]

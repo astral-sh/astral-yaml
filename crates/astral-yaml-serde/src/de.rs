@@ -1459,11 +1459,15 @@ mod tests {
                 }
                 Err(error) => {
                     assert_eq!(bytes, 7);
-                    assert_eq!(error.message, "expanded scalar byte limit exceeded");
-                    assert_eq!(
-                        error.span.unwrap().slice(stream.source()),
-                        Some("!long-tag x")
+                    let snippet = astral_yaml_dev::span_snapshot(
+                        stream.source(),
+                        [(error.message, error.span.unwrap())],
                     );
+                    insta::assert_snapshot!(snippet, @"
+                      |
+                    1 | !long-tag x
+                      | ^^^^^^^^^^^ expanded scalar byte limit exceeded
+                    ");
                 }
             }
         }
@@ -1490,6 +1494,7 @@ mod tests {
     #[test]
     fn nested_comment_lists_charge_each_emitted_record() {
         let stream = astral_yaml::parse("# leading\n42 # inline").unwrap();
+        let mut spans = Vec::new();
 
         for budget in [2, 11, 12] {
             let visits = Cell::new(budget);
@@ -1514,10 +1519,21 @@ mod tests {
                 assert_eq!(de.context.budget.get(), 0);
             } else {
                 let error = result.unwrap_err();
-                assert_eq!(error.message, "deserialization resource limit exceeded");
-                assert!(error.span.unwrap().slice(stream.source()).is_some());
+                spans.push((
+                    format!("budget {budget}: {}", error.message),
+                    error.span.unwrap(),
+                ));
             }
         }
+        insta::assert_snapshot!(astral_yaml_dev::span_snapshot(stream.source(), spans), @"
+          |
+        1 | # leading
+        2 | 42 # inline
+          | ^^
+          | |
+          | budget 2: deserialization resource limit exceeded
+          | budget 11: deserialization resource limit exceeded
+        ");
     }
 
     #[test]
