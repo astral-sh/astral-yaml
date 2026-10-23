@@ -9,7 +9,7 @@ use super::{
     lines::LineIndex,
     scope::Scopes,
     source::Source,
-    splice::{self, Boundary, PatchSet},
+    splice::{self, Boundary},
     view::Syntax,
 };
 use crate::{Error, NodeId, Span, comments::CommentPlacement};
@@ -113,13 +113,6 @@ fn only_outer_comments(old: &Node, new: &Node<Option<Span>>) -> bool {
 }
 
 impl Plan<'_> {
-    fn error(&self, message: &'static str) -> Error {
-        Error {
-            span: self.original.nodes[self.original.root.0].span,
-            message,
-        }
-    }
-
     fn charge(&self, amount: usize) -> Result<(), Error> {
         let span = self.original.nodes[self.original.root.0].span;
         super::charge_work(self.work, amount, span)
@@ -263,12 +256,10 @@ impl Plan<'_> {
             patches.append(&mut comments.after_body);
             comments.finish_separation(self.original, &mut patches);
         }
-        PatchSet::new(
-            &self.original.text,
+        splice::apply(
+            self.original,
             patches,
-            self.original.options.max_input_bytes,
+            self.original.nodes[self.original.root.0].span,
         )
-        .map(PatchSet::apply)
-        .map_err(|message| self.error(message))
     }
 }
