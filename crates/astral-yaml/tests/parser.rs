@@ -1017,6 +1017,39 @@ fn tag_prefixes_accept_local_and_global_forms(prefix: &str) {
     parse(&source).unwrap();
 }
 
+// https://yaml.org/spec/1.2.2/#911-document-prefix
+#[test_case("\u{feff}\n\u{feff}\n\u{feff}\n", &[])]
+#[test_case("\u{feff}\u{feff}--- value", &["value"])]
+#[test_case("\u{feff}\n# before\n\u{feff}\n\u{feff}value", &["value"])]
+#[test_case("one\n\u{feff}\n\u{feff}--- two", &["one", "two"])]
+#[test_case("one\n...\n\u{feff}\n\u{feff}two", &["one", "two"])]
+fn document_prefixes_do_not_create_nodes(source: &str, expected: &[&str]) {
+    let stream = parse(source).unwrap();
+    let roots: Vec<_> = stream
+        .documents()
+        .iter()
+        .map(|doc| {
+            let NodeKind::Scalar(scalar) = &stream.node(doc.root).unwrap().kind else {
+                panic!("expected scalar");
+            };
+            scalar.value.as_ref()
+        })
+        .collect();
+    assert_eq!(roots, expected);
+    let marks: Vec<_> = stream
+        .byte_order_marks()
+        .iter()
+        .map(|span| span.start())
+        .collect();
+    assert_eq!(
+        marks,
+        source
+            .match_indices('\u{feff}')
+            .map(|(at, _)| at)
+            .collect::<Vec<_>>()
+    );
+}
+
 // https://yaml.org/spec/1.2.2/#92-streams
 #[test_case("\n"; "LF")]
 #[test_case("\r"; "CR")]

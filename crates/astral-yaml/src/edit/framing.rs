@@ -5,6 +5,7 @@
 use super::{
     Comment, CommentPosition, emit,
     layout::Layout,
+    lines::Line,
     source::{Frame, Prepared, Source},
     splice,
     view::Syntax,
@@ -111,10 +112,7 @@ pub(super) fn prepare(
     }
     if start {
         // Prefix comments and blank lines keep their relation to the boundary.
-        let at = original.text[..root_start].rfind('\n').map_or_else(
-            || usize::from(original.text.starts_with('\u{feff}')) * '\u{feff}'.len_utf8(),
-            |index| index + 1,
-        );
+        let at = root_start - Line::at(&original.text, root_start).column(root_start);
         frame.start_marker(at);
     }
     Some(frame.finish(candidate))

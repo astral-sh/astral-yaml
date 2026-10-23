@@ -6,6 +6,16 @@ use super::support::{edit, edited};
 use astral_yaml::{CollectionStyle, edit::EditableDocument};
 use astral_yaml_dev::{edit_diff, indoc};
 
+// https://yaml.org/spec/1.2.2/#911-document-prefix
+#[test_case("\u{feff}")]
+#[test_case("\n\u{feff}")]
+#[test_case("# before\n\u{feff}\u{feff}")]
+fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
+    let mut document = EditableDocument::parse(&format!("{prefix}old")).unwrap();
+    document.edit(|mut root| root.replace_yaml("---")).unwrap();
+    assert_eq!(document.source(), format!("{prefix}---\n"));
+}
+
 #[test]
 fn descendant_inline_comments_are_separate_from_document_markers() {
     use astral_yaml::{comments::CommentPlacement, edit::NodeKind};
