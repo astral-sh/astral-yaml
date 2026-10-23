@@ -78,6 +78,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
+        deepest_node: 0,
         line_start: 0,
         line_end_cache: Cell::new(None),
         colon_cache: Cell::new(None),
@@ -101,6 +102,7 @@ struct Parser<'a> {
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
+    deepest_node: usize,
     line_start: usize,
     line_end_cache: Cell<Option<Span>>,
     colon_cache: Cell<Option<KeyLookahead>>,
@@ -340,7 +342,8 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
-    fn check_depth(&self, depth: usize) -> Result<()> {
+    fn check_depth(&mut self, depth: usize) -> Result<()> {
+        self.deepest_node = self.deepest_node.max(depth);
         if depth >= self.options.max_depth {
             Err(self.error("nesting limit exceeded"))
         } else {
@@ -1302,10 +1305,14 @@ impl<'a> Parser<'a> {
                 return Err(self.error("empty flow sequence entry"));
             }
 
+            // A following colon makes this item a key one level deeper. Track its
+            // deepest descendant so recognizing the pair does not require a second walk.
+            let previous_deepest = std::mem::take(&mut self.deepest_node);
             let key = self.inline(true, parent, depth + 1)?;
 
             self.flow_space(parent)?;
             if self.byte() == Some(b':') || explicit {
+                self.check_depth(self.deepest_node + 1)?;
                 if !explicit
                     && (self.source[start..self.pos].contains(['\r', '\n'])
                         || self.source[start..self.pos].chars().count() > 1024)
@@ -1313,7 +1320,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error("invalid implicit flow pair key"));
                 }
 
-                let entry = self.flow_pair(start, key, b']', parent, depth + 1)?;
+                let entry = self.flow_pair(start, key, b']', parent, depth + 2)?;
                 let pair = self.empty(start)?;
                 self.nodes[pair.0].span.end = entry.span.end;
                 self.nodes[pair.0].kind = NodeKind::Mapping {
@@ -1327,6 +1334,7 @@ impl<'a> Parser<'a> {
             } else {
                 items.push(key);
             }
+            self.deepest_node = self.deepest_node.max(previous_deepest);
 
             match self.byte() {
                 Some(b',') => {

@@ -364,6 +364,31 @@ fn span_construction() {
     assert_eq!(span.slice("é"), None);
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+#[test_case("[a: []]", "[{a: []}]", 3)]
+#[test_case("[[[]]: v]", "[{[[]]: v}]", 4)]
+#[test_case("[? [a: []] : [b: []]]", "[{? [{a: []}] : [{b: []}]}]", 5)]
+#[test_case("[[[x]], a: b]", "[[[x]], {a: b}]", 4)]
+fn compact_flow_pairs_have_the_same_depth_as_braced_mappings(
+    compact: &str,
+    braced: &str,
+    required: usize,
+) {
+    for max_depth in 1..=required {
+        let options = ParseOptions {
+            max_depth,
+            ..ParseOptions::default()
+        };
+        for source in [compact, braced] {
+            assert_eq!(
+                parse_with_options(source, options).is_ok(),
+                max_depth == required,
+                "{source} at depth {max_depth}"
+            );
+        }
+    }
+}
+
 #[test]
 fn budgets_and_adversarial_nesting() {
     let mut options = ParseOptions::default();
