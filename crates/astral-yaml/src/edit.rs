@@ -32,6 +32,10 @@ use crate::{
 /// Use [`Self::edit`] to change the document. Successful edits update its source,
 /// node IDs, and spans together. Failed edits leave it unchanged. IDs and spans
 /// belong to the document state that produced them.
+///
+/// Within each transaction, imported YAML and comment text share the
+/// [`ParseOptions::max_input_bytes`] limit. The same limit applies separately to
+/// the total length of expanded shorthand tags in the imported fragments.
 #[derive(Clone, Debug)]
 pub struct EditableDocument {
     source: source::Source,
