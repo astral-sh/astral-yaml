@@ -85,13 +85,10 @@ impl<'de> CommentIndex<'de> {
             .map(|d| tree.lines.line(d.span.start()))
             .collect();
         marker_lines.extend(doc.start_marker.map(|s| tree.lines.line(s.start())));
-        marker_lines.extend(
-            stream
-                .document_end_markers()
-                .iter()
-                .filter(|span| start <= span.start() && span.start() < end)
-                .map(|span| tree.lines.line(span.start())),
-        );
+        let ends = stream.document_end_markers();
+        let ends = &ends[ends.partition_point(|span| span.start() < start)
+            ..ends.partition_point(|span| span.start() < end)];
+        marker_lines.extend(ends.iter().map(|span| tree.lines.line(span.start())));
         marker_lines.sort_unstable();
 
         let mut owned: Vec<_> = comments
@@ -434,7 +431,10 @@ impl Lines {
         let mut result = Self {
             lines: Vec::with_capacity(32),
         };
-        let mut start = range.start;
+        // A later bare document can start after indentation on its first line.
+        let mut start = source[..range.start]
+            .rfind(['\r', '\n'])
+            .map_or(0, |i| i + 1);
         let mut blanks = 0;
 
         loop {

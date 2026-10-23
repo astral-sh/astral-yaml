@@ -1018,6 +1018,46 @@ fn tag_prefixes_accept_local_and_global_forms(prefix: &str) {
 }
 
 // https://yaml.org/spec/1.2.2/#92-streams
+#[test_case("\n"; "LF")]
+#[test_case("\r"; "CR")]
+#[test_case("\r\n"; "CRLF")]
+fn comment_ownership_retains_indentation_in_later_bare_documents(newline: &str) {
+    use astral_yaml::comments::{CommentIndex, CommentPlacement};
+
+    let source = [
+        "first",
+        "... # first end",
+        "  a: one",
+        "  # next value",
+        "  b: two",
+        "... # second end",
+        "... # suffix",
+        "--- third",
+    ]
+    .join(newline);
+    let stream = parse(&source).unwrap();
+    let doc = &stream.documents()[1];
+    let NodeKind::Mapping { entries, .. } = &stream.node(doc.root).unwrap().kind else {
+        panic!("expected mapping");
+    };
+    let index = CommentIndex::new(&stream, 1).unwrap();
+    let mut comments: Vec<_> = index.direct().collect();
+    comments.sort_by_key(|(_, comment)| comment.comment.span.start());
+    let attachments: Vec<_> = comments
+        .iter()
+        .map(|(owner, comment)| (*owner, comment.comment.text, comment.placement))
+        .collect();
+    assert_eq!(
+        attachments,
+        [
+            (entries[1].value, " next value", CommentPlacement::Leading),
+            (doc.root, " second end", CommentPlacement::Inline),
+            (doc.root, " suffix", CommentPlacement::Inline),
+        ]
+    );
+}
+
+// https://yaml.org/spec/1.2.2/#92-streams
 #[test]
 fn standalone_document_end_markers_retain_spans_and_use_the_budget() {
     let source = "...\n---\nvalue\n...\n... # suffix\n";
