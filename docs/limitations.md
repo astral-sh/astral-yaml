@@ -1,38 +1,32 @@
 # Limitations
 
-See [resource limits](../SECURITY.md#resource-limits) for input and processing limits.
-
 ## Serde buffering
 
-Serde buffers values for untagged enums, internally tagged enums, and flattened
-fields. If a plain scalar resolves as a number, boolean, or null, the buffer
-loses its text and cannot deserialize it into a string. Quote the scalar or use
-`!!str` to preserve it as a string in these contexts.
+Serde buffers values when it reads untagged enums, internally tagged enums,
+and flattened fields. If a plain scalar resolves to a number, boolean, or
+null, the buffer loses the original text. For example, a `String` variant of
+an untagged enum cannot read the number `42`. Write `"42"` or `!!str 42` to
+give the variant a string.
 
-`Spanned`, `Commented`, and `Tagged` require direct access to the YAML
-deserializer. Serde's intermediate buffers cannot retain their metadata. For
-spans or comments, wrap the containing enum or struct instead of a field decoded
-from the buffer.
+The buffer also loses source spans, comments, and tags. `Spanned`, `Commented`,
+and `Tagged` need direct access to the YAML deserializer. To capture a span or
+comments around an untagged enum, wrap the whole enum in `Spanned` or
+`Commented`. The same applies to a struct with flattened fields.
 
 ## Mapping keys
 
-Mapping-key comparison uses 128-bit integer magnitudes and 64-bit floats,
-independently of the destination key type. Comparison includes application tags.
-Application-tagged scalar keys are compared by their tag and scalar text. The
-adapter cannot infer a custom tag's canonical form. Applications that assign
-additional equivalences to these keys must check them when constructing values.
+`astral-yaml-serde` checks for duplicate YAML keys before deserializing a
+mapping.
 
-The adapter rejects duplicate YAML keys before deserializing a mapping. Serde's
-`MapAccess` interface does not expose the destination key type's equality to the
-deserializer, so it cannot detect collisions between distinct YAML keys that
-deserialize into equal Rust keys. For example, in `{1: first, "1": second}`,
-the keys are a YAML integer and string, but both deserialize to `"1"` in a
-`BTreeMap<String, String>`. Serde's `BTreeMap` and `HashMap` implementations keep
-the last value, so the result contains only `"1": "second"`.
+- `{1: first, 01: second}` is an error. Both YAML keys are the integer `1`.
+- `{1: first, "1": second}` passes the YAML check. One key is an integer and
+  the other is a string. When read into a `BTreeMap<String, String>`, both
+  become the Rust string `"1"`. The map keeps the last value, `"second"`.
 
-To reject collisions between deserialized keys, apply a map adapter such as
-[`serde_with::MapPreventDuplicates`](https://docs.rs/serde_with/latest/serde_with/struct.MapPreventDuplicates.html)
-to each map that needs the check:
+`HashMap` also keeps the last value. Serde's `MapAccess` does not tell the
+deserializer how the destination map compares keys. To reject collisions in
+the Rust map, annotate each field that needs the check with
+[`serde_with::MapPreventDuplicates`](https://docs.rs/serde_with/latest/serde_with/struct.MapPreventDuplicates.html).
 
 ```rust
 use serde::Deserialize;
@@ -46,11 +40,27 @@ struct Config {
     values: BTreeMap<String, String>,
 }
 
-let source = r#"values: {1: first, "1": second}"#;
-assert!(astral_yaml_serde::from_str::<Config>(source).is_err());
+fn main() -> Result<(), astral_yaml_serde::Error> {
+    let source = r#"values: {1: first, "1": second}"#;
+    assert!(astral_yaml_serde::from_str::<Config>(source).is_err());
+
+    let config: Config = astral_yaml_serde::from_str(r#"values: {1: first, "01": second}"#)?;
+    assert_eq!(config.values["1"], "first");
+    assert_eq!(config.values["01"], "second");
+    Ok(())
+}
 ```
+
+For numeric keys, the YAML check compares integer magnitudes as `u128` and
+floats as `f64`, regardless of the destination key type. For scalar keys with
+application tags, it compares the tag and the decoded text. If your application
+treats other spellings as equal for a given tag, check for those collisions
+when constructing the map.
 
 ## Numeric values
 
-Numeric values must fit the requested Rust type. The parser can still recognize
-numeric syntax outside machine integer ranges.
+The parser recognizes integer syntax even outside machine integer ranges.
+Deserializing a number into a Rust type still requires it to fit. For example,
+`256` is a YAML integer that fits in a `u16` but exceeds the range of a `u8`.
+
+For input size, nesting, and processing limits, see [resource limits](../SECURITY.md#resource-limits).

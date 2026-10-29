@@ -1,7 +1,12 @@
 # Editing YAML
 
-Enable the `editable` feature on `astral-yaml-serde`. The typed examples also
-use Serde's derive feature:
+Use `EditableYaml` to edit a YAML document without defining a Rust type for
+it. If your application already reads the document into a type `T`, use
+`Editable<T>` to check that the document still deserializes as `T` after each
+edit. Call `source()` on either editor to get the YAML to save.
+
+Enable the `editable` feature on `astral-yaml-serde`. The typed example also
+uses Serde's derive feature.
 
 ```toml
 [dependencies]
@@ -9,181 +14,176 @@ astral-yaml-serde = { version = "0.1.0", features = ["editable"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
-`EditableYaml` edits a document without requiring a Rust type for the whole
-document. It still checks the document using Serde's YAML rules, including
-duplicate-key checks and alias limits. To change an existing value, pass its
-path to `set_at()`:
+## Change an existing field
+
+To change a service's image, parse the YAML and pass the field's path and new
+value to `set_at()`.
 
 ```rust
-use astral_yaml_serde::{EditableYaml, edit::edit_path};
+use astral_yaml_serde::EditableYaml;
 
 fn main() -> Result<(), astral_yaml_serde::Error> {
-    let mut deployment = EditableYaml::parse("containers:\n  - image: 'api:v1' # rollout\n")?;
-    deployment.set_at(edit_path!["containers", 0, "image"], "api:v2")?;
-    assert_eq!(
-        deployment.source(),
-        "containers:\n  - image: 'api:v2' # rollout\n"
-    );
+    let source = "image: 'api:v1' # release\nports: [80]\n";
+    let mut service = EditableYaml::parse(source)?;
+    service.set_at(["image"], "api:v2")?;
+    print!("{}", service.source());
     Ok(())
 }
 ```
 
-Path keys are literal strings and sequence indices are zero-based. For example,
-`["service.db"]` selects one key, while `["service", "db"]` selects a nested
-value. Use `edit_path!` when a path mixes keys and indices. A missing path is an
-error, so `set_at()` will not create a field for a misspelled key.
+The image keeps its quotes and comment.
+
+```yaml
+image: 'api:v2' # release
+ports: [80]
+```
+
+Each string in a path is one key. For example, `["service.db"]` selects a
+literal key containing a dot, while `["service", "db"]` selects `db` inside
+`service`. To mix keys and zero-based sequence indices, import
+`astral_yaml_serde::edit::edit_path` and use a path like
+`edit_path!["containers", 0, "image"]` for the first container's image.
+`set_at()` returns an error if the path is missing. To add a key, edit its
+parent mapping as in the next example. Both editors support the same methods.
 
 ## Edit a typed configuration
 
-`Editable<T>` keeps the YAML source and its deserialized value in sync. `T` must
-implement `DeserializeOwned`, but does not need to implement `Serialize` or
-`Clone`. An `edit()` callback starts at the root and can make several changes in
-one transaction:
+Suppose you want to add a port and supply a retry count if one is missing.
+Define a type for the fields you use. The `edit()` callback starts at the
+document root, so `root.into_mapping()?` gives you access to the service's
+fields.
 
 ```rust
 use astral_yaml_serde::Editable;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-struct Config {
-    timeout: u64,
-    servers: Vec<String>,
+struct Service {
+    ports: Vec<u16>,
     #[serde(default)]
     retries: u8,
 }
 
 fn main() -> Result<(), astral_yaml_serde::Error> {
-    let source = "timeout: 30 # seconds\nservers: [primary]\nextra: 'retained'\n";
-    let mut config = Editable::<Config>::parse(source)?;
-    config.edit(|root| {
-        let mut settings = root.into_mapping()?;
-        settings
-            .field("timeout")?
-            .update(|seconds: u64| seconds + 30)?;
-        settings.entry("retries")?.or_insert(3)?;
-        settings.field("servers")?.into_sequence()?.push("backup")?;
+    let source = "image: 'api:v2' # release\nports: [80]\n";
+    let mut service = Editable::<Service>::parse(source)?;
+    service.edit(|root| {
+        let mut fields = root.into_mapping()?;
+        let mut ports = fields.field("ports")?.into_sequence()?;
+        ports.push(443)?;
+        fields.entry("retries")?.or_insert(3)?;
         Ok(())
     })?;
 
-    assert_eq!(config.value().timeout, 60);
-    assert_eq!(config.value().servers, ["primary", "backup"]);
-    assert_eq!(config.value().retries, 3);
-    print!("{}", config.source());
+    assert_eq!(service.value().ports, [80, 443]);
+    assert_eq!(service.value().retries, 3);
+    print!("{}", service.source());
     Ok(())
 }
 ```
 
-The output retains the comment and the field not modeled by `Config`:
-
 ```yaml
-timeout: 60 # seconds
-servers: [primary, "backup"]
-extra: 'retained'
+image: 'api:v2' # release
+ports: [80, 443]
 "retries": 3
 ```
 
-The mapping view lets the callback edit sibling fields without navigating from
-the root each time. `field()` requires the string key to exist, while `get()`
-returns `None` for a missing key. `entry(name)?.or_insert(value)?` inserts a
-default only when the key is absent. An existing entry is unchanged and the
-default is not serialized.
+`#[serde(default)]` lets `Service` read a file with no `retries` field.
+`or_insert(3)` writes the default into the YAML only when the key is missing.
+To set the retry count even when one exists, use `fields.set("retries", 3)?`.
 
-To replace or add an entry, use `set(name, value)` on the mapping view. Use
-`ensure_mapping()` or `ensure_sequence()` to edit a collection that may be
-absent. They create an empty collection for a missing key and return an error if
-an existing value is not the requested collection type. `key_at()` and
-`value_at()` select the key or value of an existing entry by index, including
-entries with non-string keys.
-
-`update()` reads, transforms, and replaces the selected value. Editing the field
-itself preserves the rest of the document, including fields absent from `T`. If
-you replace a whole mapping, include any fields you want to retain in the
-replacement. Use `edit_at()` to start a callback at a selected node, or `read()`
-to inspect a value before changing it. Reads see earlier changes in the
-transaction.
+The example edits individual fields, so the YAML keeps `image` even though
+`Service` omits it. If you replace a whole mapping, include every field you
+want to keep. `Editable<T>` requires `T` to implement `DeserializeOwned`.
+`Service` needs neither `Serialize` nor `Clone`.
 
 ## Failed edits
 
-An edit commits only if the callback succeeds and the resulting YAML
-deserializes as `T`. A failure leaves both the source and the typed value
-unchanged:
+`edit()` commits only if the callback succeeds and the resulting document
+deserializes as `T`. Here the callback adds a valid port, then sets the first
+port to `"http"`. The string cannot deserialize as a `u16`, so the editor
+discards both changes.
 
 ```rust
 use astral_yaml_serde::Editable;
 
 fn main() -> Result<(), astral_yaml_serde::Error> {
-    let mut ports = Editable::<Vec<u16>>::parse("[80, 443] # ports\n")?;
+    let source = "[80] # ports\n";
+    let mut ports = Editable::<Vec<u16>>::parse(source)?;
     let result = ports.edit(|root| {
         let mut items = root.into_sequence()?;
-        items.push(8080)?;
+        items.push(443)?;
         items.item(0)?.set("http")?;
         Ok(())
     });
 
     assert_eq!(result.unwrap_err().path.as_deref(), Some("$[0]"));
-    assert_eq!(ports.source(), "[80, 443] # ports\n");
-    assert_eq!(ports.value(), &[80, 443]);
+    assert_eq!(ports.source(), source);
+    assert_eq!(ports.value(), &[80]);
     Ok(())
 }
 ```
 
-A failed mutation prevents commit even if the callback handles the error. A
-failed selection or read does not, so the callback can try another field.
-Deserialization errors report a path in the proposed document. If the path
-follows an alias, the byte span can point to the anchor it references.
+Inside a callback, `read()` sees earlier edits. You can handle a failed read
+or lookup and continue editing. A failed mutation prevents the commit even if
+you catch the error.
 
-`try_edit()` lets the callback return an application error that implements
-`From<astral_yaml_serde::Error>`. Application errors are returned unchanged. A
-successful callback result is returned only after commit.
+Use `try_edit()` to return your own error type from the callback. It must
+implement `From<astral_yaml_serde::Error>`. The editor passes application
+errors through and returns a successful result only after committing.
 
-## YAML fragments and source preservation
+## Use a YAML fragment
 
-Use `set_yaml()` to replace a node with a YAML fragment while retaining the
-node's anchor and compatible style. Use `replace_yaml()` to take the fragment's
-anchor and style instead. Both retain the selected node's outer comments:
+When the replacement is already YAML, pass the fragment to the node you want
+to change. Here `edit_at()` selects the port list. You can keep the brackets
+around the list or use the fragment's block style.
 
 ```rust
-use astral_yaml_serde::Editable;
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Config {
-    name: String,
-    ports: Vec<u16>,
-}
+use astral_yaml_serde::EditableYaml;
 
 fn main() -> Result<(), astral_yaml_serde::Error> {
-    let mut config = Editable::<Config>::parse("name: 'primary' # service\nports: [80]\n")?;
-    config.edit(|root| {
-        let mut settings = root.into_mapping()?;
-        settings.field("name")?.set_yaml("\"backup\"")?;
-        settings.field("ports")?.replace_yaml("- 8080\n- 8443\n")?;
-        Ok(())
-    })?;
+    let mut service = EditableYaml::parse("ports: [80]\n")?;
+    let fragment = "- 80\n- 443\n";
 
-    assert_eq!(config.value().name, "backup");
-    assert_eq!(config.value().ports, [8080, 8443]);
-    assert_eq!(
-        config.source(),
-        "name: 'backup' # service\nports:\n  - 8080\n  - 8443\n"
-    );
+    service.edit_at(["ports"], |mut ports| ports.set_yaml(fragment))?;
+    assert_eq!(service.source(), "ports: [80, 443]\n");
+
+    service.edit_at(["ports"], |mut ports| ports.replace_yaml(fragment))?;
+    assert_eq!(service.source(), "ports:\n  - 80\n  - 443\n");
     Ok(())
 }
 ```
 
-Loading normalizes CR and CRLF line endings to LF. Edits preserve text outside
-rewritten regions, but may change whitespace or scalar spelling within them.
-`parse_with_options()` sets syntax limits for loading and subsequent edits.
-Serde's separate alias-expansion limits still apply.
+`set_yaml()` keeps the node's anchor and its style when compatible.
+`replace_yaml()` uses the fragment's anchor and style. Both keep the outer
+comments on the selected node.
 
-Navigation does not follow aliases. Reading an alias follows its target, while
-setting or updating that position replaces the alias itself. Commit fails if an
-alias loses its anchor or changes its target.
+Parsing converts CR and CRLF line endings to LF. Edits preserve text outside
+the regions they rewrite. Within those regions, spacing and scalar spelling
+can change.
 
-The [configuration example](../crates/astral-yaml-serde/examples/edit-config.rs)
-also shows comment and style changes.
+The configuration example uses `update()` to increment a timeout, adds a
+comment, and switches a sequence to block style. Run it from the repository
+root. [Example source](../crates/astral-yaml-serde/examples/edit-config.rs)
 
-Use `edit_syntax()` for operations that need node handles, such as inserting an
-entry with a non-string key or explicitly editing an alias. For syntax-only
-editing without Serde's checks, enable `astral-yaml`'s `editable` feature and
-use `astral_yaml::edit::EditableDocument`.
+```sh
+cargo run -p astral-yaml-serde --features editable --example edit-config
+```
+
+## Aliases and non-string keys
+
+Paths stop at aliases. Given `default_port: &port 80` and `port: *port`,
+reading `port` returns `80`. Setting `port` to `443` replaces just the alias.
+To change the shared value, edit `default_port`. An edit fails if a surviving
+alias would lose its anchor or point to a different node. When deserialization
+fails at an alias, the error path identifies its use in the proposed document
+and the byte span can point to its target.
+
+If a mapping has non-string keys, use `key_at()` and `value_at()` to select
+an existing entry by index. To insert a non-string key, use `edit_syntax()`
+to work with node handles.
+
+Both Serde editors check for duplicate keys and limit alias expansion.
+`parse_with_options()` configures the separate parser limits for loading and
+editing. For syntax-only editing, enable the `editable` feature on
+`astral-yaml` and use `astral_yaml::edit::EditableDocument`.
