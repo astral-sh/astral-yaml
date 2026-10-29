@@ -1,6 +1,6 @@
 use test_case::{test_case, test_matrix};
 
-use super::support::{edit, edit_syntax};
+use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::{
     Editable, Tagged,
@@ -304,47 +304,6 @@ fn typed_collection_edits_preserve_root_property_comments(property: &str, emitte
 }
 
 #[test]
-fn commented_fragments_refresh_the_typed_view() {
-    let source = indoc! {r"
-        a: old
-
-        # tail
-    "};
-    let document = edit_syntax::<std::collections::BTreeMap<String, String>>(source, |editor| {
-        editor.replace(
-            &editor.root(),
-            indoc! {r"
-                # leading
-                a: one
-
-                # middle
-
-                b: two
-            "},
-        )
-    });
-    assert_eq!(
-        document.value(),
-        &std::collections::BTreeMap::from([
-            ("a".to_owned(), "one".to_owned()),
-            ("b".to_owned(), "two".to_owned()),
-        ])
-    );
-    insta::assert_snapshot!(edit_diff(source, document.source()), @"
-    @@ -1,3 +1,8 @@
-    -a: old
-    +# leading
-    +a: one
-    +
-    +# middle
-    +
-    +b: two
-     ⏎
-     # tail
-    ");
-}
-
-#[test]
 fn typed_insertions_keep_flow_delimiter_comments() {
     let source = indoc! {r"
         [ # open
@@ -457,29 +416,22 @@ fn typed_collection_edits_use_document_comment_boundaries() {
 }
 
 #[test]
-fn typed_root_omission_refreshes_the_value_and_preserves_comments() {
+fn setting_root_to_null_refreshes_the_value_and_preserves_comments() {
     let source = indoc! {r"
         ---
         # leading
         old # inline
         ...
     "};
-    let document = edit_syntax::<Option<String>>(source, |editor| {
-        editor.replace(
-            &editor.root(),
-            indoc! {r"
-                ---
-            "},
-        )
-    });
+    let document = edit::<Option<String>>(source, |mut root| root.set(None::<String>));
     assert_eq!(document.value(), &None);
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
-    @@ -1,4 +1,3 @@
-    ----
+    @@ -1,4 +1,4 @@
+     ---
      # leading
     -old # inline
-    +--- # inline
+    +null # inline
      ...
     ");
 }

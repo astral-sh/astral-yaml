@@ -8,7 +8,7 @@ license.workspace = true
 publish = false
 
 [features]
-editable = ["astral-yaml/editable", "astral-yaml-serde/editable"]
+editable = ["astral-yaml-serde/editable"]
 compare = ["dep:deser", "dep:deser-value", "dep:deser-yaml", "dep:serde-saphyr", "dep:yaml_serde"]
 
 [dependencies]

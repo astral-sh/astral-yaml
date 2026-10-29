@@ -38,6 +38,10 @@ image: 'api:v2' # release
 ports: [80]
 ```
 
+Pass the Rust value you want the field to contain. For example,
+`service.set_at(["ports"], [80, 443])?` writes a sequence. Passing
+`"[80, 443]"` writes a string.
+
 Each string in a path is one key. For example, `["service.db"]` selects a
 literal key containing a dot, while `["service", "db"]` selects `db` inside
 `service`. To mix keys and zero-based sequence indices, import
@@ -132,31 +136,7 @@ Use `try_edit()` to return your own error type from the callback. It must
 implement `From<astral_yaml_serde::Error>`. The editor passes application
 errors through and returns a successful result only after committing.
 
-## Use a YAML fragment
-
-When the replacement is already YAML, pass the fragment to the node you want
-to change. Here `edit_at()` selects the port list. You can keep the brackets
-around the list or use the fragment's block style.
-
-```rust
-use astral_yaml_serde::EditableYaml;
-
-fn main() -> Result<(), astral_yaml_serde::Error> {
-    let mut service = EditableYaml::parse("ports: [80]\n")?;
-    let fragment = "- 80\n- 443\n";
-
-    service.edit_at(["ports"], |mut ports| ports.set_yaml(fragment))?;
-    assert_eq!(service.source(), "ports: [80, 443]\n");
-
-    service.edit_at(["ports"], |mut ports| ports.replace_yaml(fragment))?;
-    assert_eq!(service.source(), "ports:\n  - 80\n  - 443\n");
-    Ok(())
-}
-```
-
-`set_yaml()` keeps the node's anchor and its style when compatible.
-`replace_yaml()` uses the fragment's anchor and style. Both keep the outer
-comments on the selected node.
+## Source preservation
 
 Parsing converts CR and CRLF line endings to LF. Edits preserve text outside
 the regions they rewrite. Within those regions, spacing and scalar spelling
@@ -180,10 +160,8 @@ fails at an alias, the error path identifies its use in the proposed document
 and the byte span can point to its target.
 
 If a mapping has non-string keys, use `key_at()` and `value_at()` to select
-an existing entry by index. To insert a non-string key, use `edit_syntax()`
-to work with node handles.
+an existing entry by index.
 
 Both Serde editors check for duplicate keys and limit alias expansion.
 `parse_with_options()` configures the separate parser limits for loading and
-editing. For syntax-only editing, enable the `editable` feature on
-`astral-yaml` and use `astral_yaml::edit::EditableDocument`.
+editing.

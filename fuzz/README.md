@@ -28,17 +28,16 @@ Seeding preserves existing corpus discoveries and artifacts.
 
 ## Targets
 
-The fuzz crate explicitly enables `editable` on both libraries and the shared
-development helpers.
+The fuzz crate enables `editable` on `astral-yaml-serde` and the shared development helpers.
 
 - `parse` checks source ranges, arena references, comment ordering, and error
   ranges. Its seeds include every official test-suite case.
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
-- `editable` checks bounded syntax and typed edits on arbitrary YAML, including
+- `editable` checks value edits and style changes on arbitrary YAML, including
   LF normalization and rollback. Its first eight bytes select edits and paths.
-  Bit 5 selects typed editing. The rest is YAML.
+  Bit 5 selects between nested paths and operations starting at the root. The rest is YAML.
 - `editable-model` checks valid edits against independent value and comment
   models, including nested collections, aliases, and canceled edits.
 - `editable-graph` checks drafts and commits against an independent recursive
@@ -75,7 +74,6 @@ Other bounds limit the model, not the API:
 | Model scope | Complementary checks |
 | --- | --- |
 | One inline comment per node, allowing arbitrary scalar replacements | Bounded layouts with all subsets of tag, anchor, opening, and closing inline comments |
-| Replacement prefixes omitted when retained comments need property-header ordering | Bounded fragment-prefix merges with property comments in root, item, key, and value positions |
 | Generated detached comments use suffix positions | Corpus reinsertion at captured positions. Gap insertion and child-deletion tests |
 
 The bounded layout tests compare equivalent comment edits with independent source

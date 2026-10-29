@@ -120,16 +120,35 @@ fn reads_report_a_dangling_alias_without_preventing_repair() {
 }
 
 #[test]
-fn reads_apply_tag_resolution_and_bound_alias_expansion() {
+fn reads_apply_tag_resolution() {
     let mut document = Editable::<Value>::parse("null").unwrap();
     document
         .edit(|mut root| {
-            root.set_yaml("!label 9")?;
+            root.set(Tagged {
+                tag: "!label".to_owned(),
+                value: 9,
+            })?;
             let tagged: Tagged<u8> = root.read()?;
             assert_eq!(tagged.tag, "!label");
             assert_eq!(tagged.value, 9);
+            root.set(())
+        })
+        .unwrap();
+}
 
-            root.set_yaml("&cycle [*cycle]")?;
+#[test]
+fn reads_bound_alias_expansion_in_an_existing_document() {
+    // Load the graph without expanding the cycle until the cursor reads it.
+    struct Graph;
+    impl<'de> serde::Deserialize<'de> for Graph {
+        fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+            Ok(Self)
+        }
+    }
+
+    let mut document = Editable::<Graph>::parse("&cycle [*cycle]").unwrap();
+    document
+        .edit(|mut root| {
             let error = root.read::<Value>().unwrap_err();
             assert_eq!(error.message, "deserialization resource limit exceeded");
             root.set(())

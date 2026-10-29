@@ -1,7 +1,8 @@
 //! Edit YAML using Rust values inside an [`Editable`](crate::Editable) transaction.
 
+use crate::syntax;
 use crate::{Error, to_string};
-use astral_yaml::{Span, edit as syntax};
+use astral_yaml::Span;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     borrow::Cow,
@@ -11,11 +12,60 @@ use std::{
 #[cfg(test)]
 mod tests;
 
-pub use astral_yaml::{
-    CollectionStyle, ScalarStyle,
-    comments::CommentPlacement,
-    edit::{CommentPosition, Node, NodeKind, PathSegment, edit_path},
-};
+pub use crate::edit_path;
+pub use crate::syntax::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind};
+pub use astral_yaml::{CollectionStyle, ScalarStyle, comments::CommentPlacement};
+
+/// Build an edit path from literal mapping keys and zero-based sequence indices.
+///
+/// For a path containing only keys or only indices, an array like `["service", "port"]`
+/// works without this macro. Keys containing `.` or `/` are always taken literally.
+///
+/// ```
+/// use astral_yaml_serde::{EditableYaml, edit::edit_path};
+///
+/// let mut doc = EditableYaml::parse("servers: [{host: 'old'}]\n")?;
+/// doc.set_at(edit_path!["servers", 0, "host"], "new")?;
+/// assert_eq!(doc.source(), "servers: [{host: 'new'}]\n");
+/// # Ok::<(), astral_yaml_serde::Error>(())
+/// ```
+#[macro_export]
+macro_rules! edit_path {
+    () => { [] as [$crate::edit::PathSegment<'static>; 0] };
+    ($($segment:expr),+ $(,)?) => {
+        [$($crate::edit::PathSegment::from($segment)),+]
+    };
+}
+
+/// One step in an edit path. Strings are literal mapping keys, not path expressions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PathSegment<'a> {
+    /// A literal string key in a mapping.
+    Key(&'a str),
+    /// A zero-based position in a sequence.
+    Index(usize),
+}
+
+impl<'a> From<&'a str> for PathSegment<'a> {
+    fn from(key: &'a str) -> Self {
+        Self::Key(key)
+    }
+}
+
+impl From<usize> for PathSegment<'_> {
+    fn from(index: usize) -> Self {
+        Self::Index(index)
+    }
+}
+
+impl<Segment> From<&Segment> for PathSegment<'_>
+where
+    Segment: Copy + Into<Self>,
+{
+    fn from(segment: &Segment) -> Self {
+        (*segment).into()
+    }
+}
 
 pub(crate) fn transaction<R, E: From<Error>>(
     editor: &mut syntax::Editor<'_>,
@@ -46,13 +96,6 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Lend this position to an edit, so navigation can start here again afterwards.
     pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
         self.context.reborrow().cursor(self.syntax.reborrow())
-    }
-
-    /// Continue editing the selected node with the core syntax cursor.
-    /// Commit still checks the complete document and its deserialized value.
-    #[must_use]
-    pub fn into_syntax(self) -> syntax::Cursor<'a, 'doc> {
-        self.syntax
     }
 
     /// Select a descendant by literal mapping keys and sequence indices.
@@ -149,25 +192,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
         let yaml = self.context.mutate(|| to_string(&value))?;
-        self.set_yaml(&yaml)
-    }
-
-    /// Replace the selected node with YAML, keeping its anchor and compatible style.
-    /// Outer comments are retained and tags come from the fragment.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid or an editing limit is exceeded.
-    pub fn set_yaml(&mut self, yaml: &str) -> Result<(), Error> {
-        self.context.mutate(|| self.syntax.set_yaml(yaml))
-    }
-
-    /// Replace the selected node with YAML, using the fragment's style and anchor.
-    /// Outer comments are retained.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid or an editing limit is exceeded.
-    pub fn replace_yaml(&mut self, yaml: &str) -> Result<(), Error> {
-        self.context.mutate(|| self.syntax.replace_yaml(yaml))
+        self.context.mutate(|| self.syntax.set_yaml(&yaml))
     }
 
     /// Request a style for the selected scalar.
@@ -245,17 +270,6 @@ impl<'doc> MappingMut<'_, 'doc> {
         context.edit(|| self.syntax.set_yaml(name, &yaml))
     }
 
-    /// Set a YAML value at string key `name`, appending the entry if absent.
-    /// Keep the existing value's anchor and compatible style.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid, the key is ambiguous, or an editing limit is exceeded.
-    pub fn set_yaml(&mut self, name: &str, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        self.context
-            .child(format_args!("[{name:?}]"))
-            .edit(|| self.syntax.set_yaml(name, yaml))
-    }
-
     /// Remove the entry at string key `name`, including its comments.
     /// Return whether an entry was removed.
     ///
@@ -320,14 +334,6 @@ impl<'doc> SequenceMut<'_, 'doc> {
         self.insert(self.len(), value)
     }
 
-    /// Append a YAML fragment and return a cursor to the new item.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid or an editing limit is exceeded.
-    pub fn push_yaml(&mut self, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        self.insert_yaml(self.len(), yaml)
-    }
-
     /// Insert a serialized value before `index` and return a cursor to it.
     /// An index equal to the sequence's length appends the item.
     ///
@@ -339,17 +345,9 @@ impl<'doc> SequenceMut<'_, 'doc> {
         value: impl Serialize,
     ) -> Result<Cursor<'_, 'doc>, Error> {
         let yaml = self.context.mutate(|| to_string(&value))?;
-        self.insert_yaml(index, &yaml)
-    }
-
-    /// Insert a YAML fragment before `index` and return a cursor to it.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid, `index` exceeds the length, or an editing limit is exceeded.
-    pub fn insert_yaml(&mut self, index: usize, yaml: &str) -> Result<Cursor<'_, 'doc>, Error> {
         let syntax = self
             .context
-            .mutate(|| self.syntax.insert_yaml(index, yaml))?;
+            .mutate(|| self.syntax.insert_yaml(index, &yaml))?;
         Ok(self.context.child(format_args!("[{index}]")).cursor(syntax))
     }
 
@@ -383,19 +381,10 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn or_insert(mut self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
         if self.is_occupied() {
-            return self.or_insert_yaml("");
+            return self.context.edit(|| self.syntax.or_insert_yaml(""));
         }
         let yaml = self.context.mutate(|| to_string(&value))?;
-        self.or_insert_yaml(&yaml)
-    }
-
-    /// Return the existing value, or insert a YAML default if absent.
-    /// An occupied entry does not parse the unused fragment.
-    ///
-    /// # Errors
-    /// Returns an error if the fragment is invalid or an editing limit is exceeded.
-    pub fn or_insert_yaml(self, yaml: &str) -> Result<Cursor<'a, 'doc>, Error> {
-        self.context.edit(|| self.syntax.or_insert_yaml(yaml))
+        self.context.edit(|| self.syntax.or_insert_yaml(&yaml))
     }
 
     /// Edit the entry's mapping, inserting an empty mapping only if the entry is absent.
@@ -403,7 +392,9 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
     pub fn or_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
-        self.or_insert_yaml("{}")?.into_mapping()
+        self.context
+            .edit(|| self.syntax.or_insert_yaml("{}"))?
+            .into_mapping()
     }
 
     /// Edit the entry's sequence, inserting an empty sequence only if the entry is absent.
@@ -411,7 +402,9 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
     pub fn or_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
-        self.or_insert_yaml("[]")?.into_sequence()
+        self.context
+            .edit(|| self.syntax.or_insert_yaml("[]"))?
+            .into_sequence()
     }
 }
 

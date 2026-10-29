@@ -397,7 +397,10 @@ impl Tree<'_, '_> {
     }
 }
 
-pub(crate) fn skip_trivia(source: &str, mut at: usize) -> usize {
+/// Skip whitespace and comments between YAML tokens.
+#[doc(hidden)]
+#[must_use]
+pub fn skip_trivia(source: &str, mut at: usize) -> usize {
     let bytes = source.as_bytes();
 
     while let Some(&byte) = bytes.get(at) {

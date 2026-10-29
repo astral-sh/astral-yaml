@@ -11,14 +11,3 @@ pub(super) fn edit<T: DeserializeOwned>(
         .unwrap_or_else(|error| panic!("{source:?}: {error}"));
     document
 }
-
-pub(super) fn edit_syntax<T: DeserializeOwned>(
-    source: &str,
-    operation: impl FnOnce(&mut astral_yaml::edit::Editor<'_>) -> Result<(), astral_yaml::Error>,
-) -> Editable<T> {
-    let mut document = Editable::parse(source).unwrap();
-    document
-        .edit_syntax(operation)
-        .unwrap_or_else(|error| panic!("{source:?}: {error}"));
-    document
-}

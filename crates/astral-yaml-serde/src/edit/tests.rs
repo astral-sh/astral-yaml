@@ -1,11 +1,12 @@
 use test_case::test_case;
 
 use super::{Cursor, Error};
-use astral_yaml::{ParseOptions, edit::EditableDocument};
+use crate::syntax::DocumentSyntax;
+use astral_yaml::ParseOptions;
 use astral_yaml_dev::edit_diff;
 
 fn edit(
-    document: &mut EditableDocument,
+    document: &mut DocumentSyntax,
     operation: impl FnOnce(Cursor<'_, '_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
     document.try_edit_syntax(|syntax| super::transaction(syntax, operation))
@@ -19,7 +20,7 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
         "!custom name: tagged\n",
         "!custom name: tagged\nname: old\n",
     ] {
-        let mut document = EditableDocument::parse(source).unwrap();
+        let mut document = DocumentSyntax::parse(source).unwrap();
         edit(&mut document, |root| {
             root.into_mapping()?.set("name", "new")?;
             Ok(())
@@ -68,7 +69,7 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
 
 #[test]
 fn exhausted_mutations_poison_subsequent_setters() {
-    let mut document = EditableDocument::parse_with_options(
+    let mut document = DocumentSyntax::parse_with_options(
         "1",
         ParseOptions {
             max_nodes: 3,
@@ -89,7 +90,7 @@ fn exhausted_mutations_poison_subsequent_setters() {
 #[test_case(false)]
 #[test_case(true)]
 fn cursor_reads_and_mutations_respect_the_syntax_work_budget(mutate: bool) {
-    let mut document = EditableDocument::parse_with_options(
+    let mut document = DocumentSyntax::parse_with_options(
         "1",
         ParseOptions {
             max_nodes: 1,
@@ -122,7 +123,7 @@ fn cursor_reads_and_mutations_respect_the_syntax_work_budget(mutate: bool) {
 #[test_case(5, "$"; "node inspection")]
 fn mapping_views_report_resource_errors_with_paths(operation: usize, path: &str) {
     let source = "key: value";
-    let mut document = EditableDocument::parse_with_options(
+    let mut document = DocumentSyntax::parse_with_options(
         source,
         ParseOptions {
             max_nodes: 12,
@@ -154,7 +155,7 @@ fn mapping_views_report_resource_errors_with_paths(operation: usize, path: &str)
 #[test_case(true)]
 fn sequence_views_report_resource_errors_with_paths(required: bool) {
     let source = "[value]";
-    let mut document = EditableDocument::parse_with_options(
+    let mut document = DocumentSyntax::parse_with_options(
         source,
         ParseOptions {
             max_nodes: 12,

@@ -2,17 +2,17 @@ use std::str::FromStr;
 
 use crate::Error;
 use crate::edit::{self, Cursor, PathSegment};
+use crate::syntax::{DocumentSyntax, Editor};
 use astral_yaml::ParseOptions;
-use astral_yaml::edit::{EditableDocument, Editor as SyntaxEditor};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// A YAML document you can edit without defining a Rust type for the whole document.
 ///
-/// Read and write selected values using Rust types, or edit YAML fragments directly.
+/// Read and write selected values using Rust types.
 /// Parsing and edits still check the document using Serde's YAML rules, including
 /// duplicate-key checks and alias limits. For application tags, use [`Editable<T>`]
-/// with an appropriate type, or edit the syntax with [`EditableDocument`].
+/// with an appropriate type.
 ///
 /// ```
 /// use astral_yaml_serde::{EditableYaml, edit::edit_path};
@@ -50,7 +50,7 @@ pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 #[derive(Debug)]
 pub struct Editable<T> {
     value: T,
-    syntax: EditableDocument,
+    syntax: DocumentSyntax,
 }
 
 impl<T: DeserializeOwned> FromStr for Editable<T> {
@@ -83,12 +83,12 @@ impl<T: DeserializeOwned> Editable<T> {
     /// does not contain exactly one document, cannot be deserialized as `T`, or
     /// exceeds a resource limit.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
-        let syntax = EditableDocument::parse_with_options(source, options)?;
+        let syntax = DocumentSyntax::parse_with_options(source, options)?;
         let value = Self::deserialize_syntax(&syntax)?;
         Ok(Self { value, syntax })
     }
 
-    fn deserialize_syntax(syntax: &EditableDocument) -> Result<T, Error> {
+    fn deserialize_syntax(syntax: &DocumentSyntax) -> Result<T, Error> {
         let stream = astral_yaml::parse_with_options(syntax.source(), syntax.options())?;
         crate::from_stream(&stream)
     }
@@ -120,7 +120,12 @@ impl<T: DeserializeOwned> Editable<T> {
         &mut self,
         edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, E>,
     ) -> Result<R, E> {
-        self.try_edit_syntax(|editor| edit::transaction(editor, edit))
+        let mut editor = Editor::new(&self.syntax);
+        let result = edit::transaction(&mut editor, edit)?;
+        let syntax = editor.finish().map_err(Error::from)?;
+        let value = Self::deserialize_syntax(&syntax)?;
+        *self = Self { value, syntax };
+        Ok(result)
     }
 
     /// Set the value at an existing path, retaining its anchor and compatible style.
@@ -164,47 +169,6 @@ impl<T: DeserializeOwned> Editable<T> {
     ) -> Result<R, E> {
         self.try_edit(|root| edit(root.at(path)?))
     }
-
-    /// Edit the document using YAML fragments and node handles.
-    /// Use this for arbitrary mapping keys or aliases. The output is checked and
-    /// deserialized as `T`, as with [`Self::edit`].
-    ///
-    /// # Errors
-    /// Returns callback, edit, or deserialization errors without changing the document.
-    pub fn edit_syntax<R>(
-        &mut self,
-        edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, astral_yaml::Error>,
-    ) -> Result<R, Error> {
-        self.try_edit_syntax(|editor| edit(editor).map_err(Error::from))
-    }
-
-    /// Like [`Self::edit_syntax`], but allow the callback to return an application error.
-    ///
-    /// # Errors
-    /// Propagates callback, edit, and deserialization errors without committing.
-    pub fn try_edit_syntax<R, E: From<Error>>(
-        &mut self,
-        edit: impl FnOnce(&mut SyntaxEditor<'_>) -> Result<R, E>,
-    ) -> Result<R, E> {
-        let (result, value) = self
-            .syntax
-            .try_edit_syntax_with_validation(
-                |editor| edit(editor).map_err(EditError),
-                |syntax| Self::deserialize_syntax(syntax).map_err(|error| EditError(error.into())),
-            )
-            .map_err(|error: EditError<E>| error.0)?;
-        self.value = value;
-        Ok(result)
-    }
-}
-
-/// Bridge syntax errors without requiring applications to convert them separately.
-struct EditError<E>(E);
-
-impl<E: From<Error>> From<astral_yaml::Error> for EditError<E> {
-    fn from(error: astral_yaml::Error) -> Self {
-        Self(Error::from(error).into())
-    }
 }
 
 impl<T> Editable<T> {
@@ -216,7 +180,7 @@ impl<T> Editable<T> {
 
     /// Return the document's syntax and source.
     #[must_use]
-    pub fn syntax(&self) -> &EditableDocument {
+    pub fn syntax(&self) -> &DocumentSyntax {
         &self.syntax
     }
 

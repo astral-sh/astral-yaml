@@ -286,15 +286,15 @@ fn navigation_errors_identify_the_selected_path(path: &[PathSegment<'_>]) -> Str
 #[test_case(|root| root.into_mapping()?.set("name", "new").map(|_| ()); "upsert")]
 #[test_case(|root| root.into_mapping()?.remove("name").map(|_| ()); "remove")]
 #[test_case(|root| root.into_mapping()?.entry("name").map(|_| ()); "entry")]
-fn ambiguous_string_keys_are_rejected_after_raw_insertions(
+fn ambiguous_string_keys_are_rejected_after_renaming_a_key(
     operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
 ) {
     let mut document = Editable::<Value>::parse("name: old").unwrap();
     let error = document
         .edit(|mut root| {
-            let mut syntax = root.reborrow().into_syntax().into_mapping()?;
-            syntax.set_yaml("other", "other")?;
-            syntax.key_at(1)?.replace_yaml("'name'")?;
+            let mut fields = root.reborrow().into_mapping()?;
+            fields.set("other", "other")?;
+            fields.key_at(1)?.set("name")?;
             operation(root)
         })
         .unwrap_err();
@@ -322,10 +322,6 @@ const MISSING: &str = r#"$["missing"]"#;
 
 #[test_case(|mut root| root.set(FailsSerialization),
     "$", "serialization failed"; "set value")]
-#[test_case(|root| items(root)?.item(0)?.set_yaml("["),
-    ITEM, "unterminated flow sequence"; "set YAML")]
-#[test_case(|mut root| root.replace_yaml("["),
-    "$", "unterminated flow sequence"; "replace YAML")]
 #[test_case(|root| items(root)?.insert(3, "new").map(|_| ()),
     ITEMS, "item index out of bounds"; "insert out of bounds")]
 #[test_case(|root| items(root)?.remove(4),
@@ -348,16 +344,10 @@ const MISSING: &str = r#"$["missing"]"#;
     ITEMS, "serialization failed"; "serialize appended value")]
 #[test_case(|root| root.field("empty")?.into_sequence()?.insert(0, FailsSerialization).map(|_| ()),
     EMPTY, "serialization failed"; "serialize inserted value")]
-#[test_case(|root| root.field("empty")?.into_sequence()?.push_yaml("[").map(|_| ()),
-    EMPTY, "unterminated flow sequence"; "append YAML")]
 #[test_case(|root| root.into_mapping()?.set("missing", FailsSerialization).map(|_| ()),
     MISSING, "serialization failed"; "serialize mapping value")]
-#[test_case(|root| root.into_mapping()?.set_yaml("missing", "[").map(|_| ()),
-    MISSING, "unterminated flow sequence"; "set mapping YAML")]
 #[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert(FailsSerialization).map(|_| ()),
     MISSING, "serialization failed"; "serialize vacant entry")]
-#[test_case(|root| root.into_mapping()?.entry("missing")?.or_insert_yaml("[").map(|_| ()),
-    MISSING, "unterminated flow sequence"; "fill vacant entry with YAML")]
 fn caught_mutation_errors_still_roll_back_the_transaction(
     operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
     path: &str,
@@ -398,7 +388,6 @@ fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
         health.field("interval")?.set("5s")?;
         assert!(health.entry("retries")?.is_occupied());
         health.entry("retries")?.or_insert(FailsSerialization)?;
-        health.entry("interval")?.or_insert_yaml("[invalid")?;
         assert!(!health.entry("timeout")?.is_occupied());
         health.entry("timeout")?.or_insert("10s")?;
         health.entry("timeout")?.or_insert("unused")?;
@@ -426,10 +415,10 @@ fn sequence_views_track_lengths_and_return_borrowed_children() {
         assert!(items.item(0).is_err());
         items.push("first")?;
         items
-            .push_yaml("{value: old}")?
+            .push(json!({"value": "old"}))?
             .field("value")?
             .set("new")?;
-        items.insert_yaml(1, "true")?;
+        items.insert(1, true)?;
         items.get(0)?.unwrap().set("changed")?;
         items.item(1)?.set(false)?;
         assert_eq!(items.len(), 3);
@@ -440,7 +429,7 @@ fn sequence_views_track_lengths_and_return_borrowed_children() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     @@ -1 +1 @@
     -items: []
-    +items: [false, {value: last}]
+    +items: [false, {"value": "last"}]
     "#);
 }
 
@@ -464,32 +453,17 @@ fn indexed_mapping_selection_supports_arbitrary_keys() {
     ");
 }
 
-#[test_case(false)]
-#[test_case(true)]
-fn raw_selected_replacement_controls_style_and_anchor(replace: bool) {
-    // Anchors identify serialization occurrences: https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
-    let source = "value: &old 'old' # keep\n";
-    let document = edit::<Value>(source, |root| {
-        let mut value = root.field("value")?;
-        if replace {
-            value.replace_yaml("&new \"new\"")
-        } else {
-            value.set_yaml("&new \"new\"")
-        }
-    });
-    if replace {
-        insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-        @@ -1 +1 @@
-        -value: &old 'old' # keep
-        +value: &new "new" # keep
-        "#);
-    } else {
-        insta::assert_snapshot!(edit_diff(source, document.source()), @r"
-        @@ -1 +1 @@
-        -value: &old 'old' # keep
-        +value: &old 'new' # keep
-        ");
-    }
+#[test]
+fn setting_a_value_preserves_its_anchor_style_and_comments() {
+    let source = "value: &old 'old' # keep\ncopy: *old\n";
+    let document = edit::<Value>(source, |root| root.field("value")?.set("new"));
+    insta::assert_snapshot!(edit_diff(source, document.source()), @r"
+    @@ -1,2 +1,2 @@
+    -value: &old 'old' # keep
+    +value: &old 'new' # keep
+     copy: *old
+    ");
+    assert_eq!(document.value()["copy"], "new");
 }
 
 #[test]
@@ -593,21 +567,4 @@ fn a_commit_error_at_a_complex_key_identifies_the_mapping_entry() {
         .unwrap_err();
     assert_eq!(error.path.as_deref(), Some("$.value_at(0)"));
     assert_eq!(document.source(), source);
-}
-
-#[test]
-fn handling_a_core_cursor_mutation_error_still_rolls_back_the_typed_edit() {
-    let source = "port: 80 # retained\n";
-    let mut document = Editable::<Value>::parse(source).unwrap();
-    let result = document.edit(|root| {
-        let mut fields = root.into_mapping()?;
-        let mut port = fields.field("port")?.into_syntax();
-        port.set_yaml("81")?;
-        assert!(port.replace_yaml("[").is_err());
-        assert_eq!(fields.len(), 1);
-        Ok(())
-    });
-    assert!(result.is_err());
-    assert_eq!(document.source(), source);
-    assert_eq!(document.value()["port"], 80);
 }

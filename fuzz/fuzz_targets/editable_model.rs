@@ -137,16 +137,10 @@ fn apply(
             if placement == CommentPlacement::Trailing && !comments.nested.is_empty() {
                 set_nested_style(root.reborrow(), CollectionStyle::Flow)?;
             }
-            let index = if placement == CommentPlacement::Leading {
-                0
-            } else {
-                comments.root.len()
-            };
-            root.into_syntax()
-                .insert_comment(index, " model", placement)?;
-            comments
-                .root
-                .insert(index, (" model".to_owned(), placement));
+            if placement != CommentPlacement::Leading || comments.root.is_empty() {
+                root.append_comment(" model", placement)?;
+                comments.root.push((" model".to_owned(), placement));
+            }
         }
         9 => {
             root.field("items")?.set([text])?;
@@ -174,13 +168,7 @@ fn apply(
             " changed".clone_into(&mut comments.root[index].0);
         }
         14 => {
-            nested(root)?
-                .field("value")?
-                .replace_yaml(if selector % 2 == 0 {
-                    "|+\n  new\n\n"
-                } else {
-                    ">+\n  new\n\n"
-                })?;
+            nested(root)?.field("value")?.set("new\n\n")?;
             "new\n\n".clone_into(expected.nested.value_mut());
         }
         15 => {

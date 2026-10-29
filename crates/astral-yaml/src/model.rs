@@ -62,6 +62,20 @@ impl Span {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct NodeId(pub(crate) usize);
 
+impl NodeId {
+    /// Construct an index into a node arena.
+    #[must_use]
+    pub const fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Return the node's zero-based arena index.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// The presentation style of a scalar.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScalarStyle {
@@ -237,6 +251,12 @@ impl<'a> Stream<'a> {
     #[must_use]
     pub fn nodes(&self) -> &[Node<'a>] {
         &self.nodes
+    }
+
+    /// Consume the stream and return its node arena in ID order.
+    #[must_use]
+    pub fn into_nodes(self) -> Vec<Node<'a>> {
+        self.nodes
     }
 
     /// Byte order marks at document boundaries, excluding any inside scalar content.

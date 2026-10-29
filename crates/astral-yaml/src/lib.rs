@@ -2,7 +2,7 @@
 //!
 //! Parsed streams use an arena so aliases do not expand or create recursively
 //! owned values. Scalar resolution is separate from syntax parsing.
-//! Enable the `editable` feature for owned, source-preserving editing.
+//! Use `astral-yaml-serde` for source-preserving editing.
 //!
 //! ```
 //! use astral_yaml::NodeKind;
@@ -23,8 +23,6 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
 pub mod comments;
-#[cfg(feature = "editable")]
-pub mod edit;
 mod error;
 mod model;
 mod parser;

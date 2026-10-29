@@ -128,7 +128,7 @@ def seed_editable(root: Path, inputs: list[Path]) -> None:
     for source in sources:
         for sequence in operations:
             write_seed(corpus, sequence + source)
-    print("Seeded bounded syntax and value-based edit sequences")
+    print("Seeded value edits at the root and nested paths")
 
 
 def seed_editable_model(root: Path) -> None:
@@ -176,7 +176,7 @@ def seed_editable_graph(root: Path) -> None:
                 value
                 for step in range(24)
                 for value in (
-                    ((seed + step * stride) % 256) % 13,
+                    ((seed + step * stride) % 256) % 12,
                     (seed * 13 + step * 23) % 256,
                     step,
                 )

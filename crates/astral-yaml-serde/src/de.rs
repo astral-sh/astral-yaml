@@ -69,7 +69,7 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
 
 #[cfg(feature = "editable")]
 pub(crate) fn from_edit_value<'de, T: Deserialize<'de>>(
-    value: astral_yaml::edit::ValueRef<'de>,
+    value: crate::syntax::ValueRef<'de>,
 ) -> Result<T> {
     from_input(value, value.root())
 }
