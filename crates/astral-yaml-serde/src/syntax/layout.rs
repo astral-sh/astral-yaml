@@ -98,11 +98,11 @@ impl Layout {
             }) {
                 // A nested detached suffix must end inside its collection if
                 // an enclosing trailing comment needs adjacency to the body.
-                if comment.placement == CommentPlacement::Trailing {
-                    if let Tail::Detached(owner) = tail {
-                        layout.presentation[owner.index()] = Presentation::FlowCollection;
-                        tail = Tail::Closed;
-                    }
+                if comment.placement == CommentPlacement::Trailing
+                    && let Tail::Detached(owner) = tail
+                {
+                    layout.presentation[owner.index()] = Presentation::FlowCollection;
+                    tail = Tail::Closed;
                 }
                 // Root suffixes have a separate document-marker plan.
                 if id == document.root {

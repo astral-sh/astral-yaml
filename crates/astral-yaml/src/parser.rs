@@ -163,10 +163,11 @@ impl<'source> Parser<'source> {
     }
 
     fn line_end(&self) -> usize {
-        if let Some(line) = self.line_end_cache.get() {
-            if line.start <= self.pos && self.pos <= line.end {
-                return line.end;
-            }
+        if let Some(line) = self.line_end_cache.get()
+            && line.start <= self.pos
+            && self.pos <= line.end
+        {
+            return line.end;
         }
 
         let end = memchr::memchr2(b'\r', b'\n', &self.source.as_bytes()[self.pos..])

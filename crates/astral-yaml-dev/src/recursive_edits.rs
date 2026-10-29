@@ -306,7 +306,7 @@ impl Builder {
     }
 
     fn document(&mut self) -> Tree {
-        if self.state % 8 != 0 {
+        if !self.state.is_multiple_of(8) {
             return self.tree(3, &[]);
         }
         // Two definitions deliberately reuse a name. Each self reference and
@@ -358,14 +358,14 @@ impl Builder {
     fn value(&mut self, depth: usize) -> Tree {
         let id = self.identity();
         let choice = self.next();
-        let kind = if depth == 0 || choice % 3 == 0 {
+        let kind = if depth == 0 || choice.is_multiple_of(3) {
             Kind::Scalar(match choice % 4 {
                 0 => Scalar::Null,
                 1 => Scalar::Boolean(choice & 4 == 0),
                 2 => Scalar::Integer([0, -1, 42][choice % 3]),
                 _ => Scalar::String(choice % TEXT.len()),
             })
-        } else if choice % 2 == 0 {
+        } else if choice.is_multiple_of(2) {
             Kind::Sequence(
                 (0..(choice >> 8) % 4)
                     .map(|_| self.value(depth - 1))
@@ -401,11 +401,12 @@ impl Builder {
     fn tree(&mut self, depth: usize, ancestors: &[usize]) -> Tree {
         let id = self.identity();
         let choice = self.next();
-        let comments = (choice % 7 == 0)
+        let comments = choice
+            .is_multiple_of(7)
             .then(|| (format!(" generated {id}"), CommentPlacement::Leading))
             .into_iter()
             .collect();
-        if choice % 5 == 0 && !ancestors.is_empty() {
+        if choice.is_multiple_of(5) && !ancestors.is_empty() {
             return Tree {
                 id,
                 anchor: None,
@@ -414,19 +415,19 @@ impl Builder {
                 kind: Kind::Alias(ancestors[choice % ancestors.len()]),
             };
         }
-        let anchor = (choice % 3 == 0).then(|| format!("n{id}"));
+        let anchor = choice.is_multiple_of(3).then(|| format!("n{id}"));
         let mut ancestors = ancestors.to_vec();
         if anchor.is_some() {
             ancestors.push(id);
         }
-        let kind = if depth == 0 || choice % 4 == 0 {
+        let kind = if depth == 0 || choice.is_multiple_of(4) {
             Kind::Scalar(match self.next() % 4 {
                 0 => Scalar::Null,
                 1 => Scalar::Boolean(choice & 4 == 0),
                 2 => Scalar::Integer([0, -1, 42][choice % 3]),
                 _ => Scalar::String(choice % TEXT.len()),
             })
-        } else if choice % 2 == 0 {
+        } else if choice.is_multiple_of(2) {
             Kind::Sequence(
                 (0..(choice >> 8) % 4)
                     .map(|_| self.tree(depth - 1, &ancestors))
@@ -447,7 +448,9 @@ impl Builder {
         Tree {
             id,
             anchor,
-            tag: (choice % 5 == 0).then(|| "tag:example.com,2026:node".to_owned()),
+            tag: choice
+                .is_multiple_of(5)
+                .then(|| "tag:example.com,2026:node".to_owned()),
             comments,
             kind,
         }
@@ -958,10 +961,8 @@ pub fn check_recursive_edits(data: &[u8]) {
         document.syntax().node(id).unwrap()
     });
     let batch = [1, 4, 16][usize::from(data[0] >> 6) % 3];
-    for operations in data[1..]
-        .chunks_exact(3)
-        .take(32)
-        .collect::<Vec<_>>()
+    let (operations, _) = data[1..].as_chunks::<3>();
+    for operations in operations[..operations.len().min(32)]
         .chunks(batch)
         // Commit explicit styles before subsequent edits can require a different
         // presentation. The model generates successful edits, not style errors.

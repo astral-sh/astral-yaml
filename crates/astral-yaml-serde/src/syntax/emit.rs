@@ -297,10 +297,10 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
     }
 
     fn push(&mut self, text: &str) -> Result<(), Error> {
-        if !text.is_empty() {
-            if let EmitterEnding::Comment { indent } = self.ending {
-                self.line(indent)?;
-            }
+        if !text.is_empty()
+            && let EmitterEnding::Comment { indent } = self.ending
+        {
+            self.line(indent)?;
         }
         if text.len()
             > self

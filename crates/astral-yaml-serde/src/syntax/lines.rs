@@ -56,10 +56,10 @@ impl<'a> LineIndex<'a> {
     }
 
     pub(super) fn at(&mut self, at: usize) -> Line {
-        if let Some((_, &line)) = self.by_end.range(at..).next() {
-            if line.start <= at {
-                return line;
-            }
+        if let Some((_, &line)) = self.by_end.range(at..).next()
+            && line.start <= at
+        {
+            return line;
         }
         let line = Line::at(self.source, at);
         self.by_end.insert(line.end, line);
