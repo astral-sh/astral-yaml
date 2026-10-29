@@ -466,6 +466,32 @@ fn setting_a_value_preserves_its_anchor_style_and_comments() {
     assert_eq!(document.value()["copy"], "new");
 }
 
+#[test_case("- first\n\n# gap\n\n- last\n"; "sequence")]
+#[test_case("a: first\n\n# gap\n\nb: last\n"; "mapping")]
+fn replacing_a_collection_with_a_scalar_keeps_its_detached_comment(source: &str) {
+    use astral_yaml_serde::edit::CommentPosition;
+
+    let document = edit::<Value>(source, |mut root| {
+        let node = root.node()?;
+        let following = match node.kind() {
+            NodeKind::Sequence { items, .. } => items[1],
+            NodeKind::Mapping { entries, .. } => entries[1].0,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            node.comments()[0].position(),
+            CommentPosition::BeforeChild(following)
+        );
+        root.set(false)?;
+        assert_eq!(
+            root.node()?.comments()[0].position(),
+            CommentPosition::After
+        );
+        Ok(())
+    });
+    assert_eq!(document.source(), "false\n\n# gap\n");
+}
+
 #[test]
 fn collection_views_expose_node_comments_and_style() {
     let source = "mapping: {value: old} # map\nsequence: [old] # seq\n";

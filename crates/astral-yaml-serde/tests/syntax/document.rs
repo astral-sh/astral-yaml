@@ -30,11 +30,11 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
     let error = document
         .edit_syntax(|editor| {
             let value = if nested {
-                editor.mapping_entries(&editor.root())?.remove(0).1
+                editor.mapping_entries(editor.root())?.remove(0).1
             } else {
                 editor.root()
             };
-            editor.replace(&value, &replacement)
+            editor.replace(value, &replacement)
         })
         .unwrap_err();
     assert_eq!(error.message, "emitted YAML exceeds input byte limit");
@@ -127,8 +127,8 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
 fn root_comments_retain_the_requested_order(source: &str, placement: CommentPlacement) -> String {
     edit(source, |editor| {
         let root = editor.root();
-        editor.insert_comment(&root, 0, " first", placement)?;
-        editor.insert_comment(&root, 2, " last", placement)
+        editor.insert_comment(root, 0, " first", placement)?;
+        editor.insert_comment(root, 2, " last", placement)
     })
 }
 
@@ -141,12 +141,12 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     "};
     let mut document = edited(&source, |editor| {
         let root = editor.root();
-        editor.insert_comment(&root, 0, " discarded", CommentPlacement::Leading)?;
-        editor.replace_comment(&root, 1, " renamed")?;
-        editor.insert_comment(&root, 0, " first", CommentPlacement::Leading)?;
-        editor.remove_comment(&root, 1)?;
-        editor.insert_comment(&root, 2, " last", CommentPlacement::Leading)?;
-        editor.replace(&root, "changed")
+        editor.insert_comment(root, 0, " discarded", CommentPlacement::Leading)?;
+        editor.replace_comment(root, 1, " renamed")?;
+        editor.insert_comment(root, 0, " first", CommentPlacement::Leading)?;
+        editor.remove_comment(root, 1)?;
+        editor.insert_comment(root, 2, " last", CommentPlacement::Leading)?;
+        editor.replace(root, "changed")
     });
     diffs.push(formatdoc! {r"
         initial edits
@@ -155,10 +155,10 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
     });
     let before = document.to_yaml();
     document
-        .edit_syntax(|editor| editor.remove_comment(&editor.root(), 2))
+        .edit_syntax(|editor| editor.remove_comment(editor.root(), 2))
         .unwrap();
     document
-        .edit_syntax(|editor| editor.replace_comment(&editor.root(), 1, " final"))
+        .edit_syntax(|editor| editor.replace_comment(editor.root(), 1, " final"))
         .unwrap();
     diffs.push(formatdoc! {r"
         subsequent edits
@@ -206,7 +206,7 @@ fn block_roots_can_move_off_a_document_marker_line() {
     ] {
         diffs.push(edit(source, |editor| {
             editor.replace(
-                &editor.root(),
+                editor.root(),
                 indoc! {r"
                     - new
                     - values
@@ -229,7 +229,7 @@ fn block_roots_can_move_off_a_document_marker_line() {
         "},
     ] {
         diffs.push(edit(source, |editor| {
-            editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+            editor.set_collection_style(editor.root(), CollectionStyle::Block)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
@@ -293,7 +293,7 @@ fn root_comment_placement_respects_the_document_prefix() {
         ...
     "};
     let diff = edit(source, |editor| {
-        editor.insert_comment(&editor.root(), 0, " leading", CommentPlacement::Leading)
+        editor.insert_comment(editor.root(), 0, " leading", CommentPlacement::Leading)
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,3 +1,4 @@
@@ -310,7 +310,7 @@ fn root_comment_placement_respects_the_document_prefix() {
     // A leading comment cannot follow an inline comment in source order.
     let error = document
         .edit_syntax(|editor| {
-            editor.insert_comment(&editor.root(), 1, " leading", CommentPlacement::Leading)
+            editor.insert_comment(editor.root(), 1, " leading", CommentPlacement::Leading)
         })
         .unwrap_err();
     assert_eq!(
@@ -379,7 +379,7 @@ fn exact_scalar_style_requests_preserve_multiline_values(
     style: ScalarStyle,
 ) -> String {
     edit(source, |editor| {
-        editor.set_scalar_style(&editor.root(), style)
+        editor.set_scalar_style(editor.root(), style)
     })
 }
 
@@ -412,8 +412,8 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
         ],
         |editor| {
             let root = editor.root();
-            editor.replace(&root, "\"\\n\"")?;
-            editor.set_scalar_style(&root, ScalarStyle::Literal)
+            editor.replace(root, "\"\\n\"")?;
+            editor.set_scalar_style(root, ScalarStyle::Literal)
         },
     );
     insta::assert_snapshot!(diffs, @r"
@@ -491,10 +491,10 @@ fn nested_block_scalar_boundaries_stop_before_following_syntax(style: ScalarStyl
         next: retained
     "};
     edit(source, |editor| {
-        let outer = editor.mapping_entries(&editor.root())?.remove(0).1;
-        let value = editor.mapping_entries(&outer)?.remove(0).1;
-        editor.replace(&value, "\"\\n\"")?;
-        editor.set_scalar_style(&value, style)
+        let outer = editor.mapping_entries(editor.root())?.remove(0).1;
+        let value = editor.mapping_entries(outer)?.remove(0).1;
+        editor.replace(value, "\"\\n\"")?;
+        editor.set_scalar_style(value, style)
     })
 }
 
@@ -541,20 +541,20 @@ fn comment_transactions_match_an_ordered_list_model() {
                         let text = format!(" comment {round}/{step}");
                         if operation == 0 || model.is_empty() {
                             let index = usize::try_from(state % (model.len() as u64 + 1)).unwrap();
-                            editor.insert_comment(&root, index, &text, placement)?;
+                            editor.insert_comment(root, index, &text, placement)?;
                             model.insert(index, text);
                         } else {
                             let index = usize::try_from(state % model.len() as u64).unwrap();
                             match operation {
                                 1 => {
-                                    editor.remove_comment(&root, index)?;
+                                    editor.remove_comment(root, index)?;
                                     model.remove(index);
                                 }
                                 2 => {
-                                    editor.replace_comment(&root, index, &text)?;
+                                    editor.replace_comment(root, index, &text)?;
                                     model[index] = text;
                                 }
-                                _ => editor.replace(&root, "updated")?,
+                                _ => editor.replace(root, "updated")?,
                             }
                         }
                     }
@@ -599,7 +599,7 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
         ] {
             let mut document = DocumentSyntax::parse(source).unwrap();
             document
-                .edit_syntax(|editor| editor.replace(&editor.root(), fragment))
+                .edit_syntax(|editor| editor.replace(editor.root(), fragment))
                 .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
             diffs.push(edit_diff(source, document.source()));
         }
@@ -728,8 +728,8 @@ fn edits_preserve_comments_between_headers_properties_and_content(source: &str) 
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
         .edit_syntax(|editor| {
-            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-            editor.replace_preserving_style(&value, "new")
+            let value = editor.mapping_entries(editor.root())?.remove(0).1;
+            editor.replace_preserving_style(value, "new")
         })
         .unwrap_or_else(|error| panic!("{source:?}: {error}"));
     edit_diff(source, document.source())

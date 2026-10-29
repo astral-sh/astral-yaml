@@ -53,13 +53,13 @@ fn field(draft: &mut Draft, parent: NodeId, name: &str) -> NodeId {
 #[test]
 fn composed_mutations_keep_one_owner_and_retire_style_requests() {
     let original = DocumentSyntax::parse(indoc! {r"
-        selected:
+        selected: &root
           - old
 
           # gap
 
           - removed
-        retained: untouched # retained
+        copy: *root # retained
     "})
     .unwrap();
     let mut draft = Draft::from(&original);
@@ -74,32 +74,22 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
     assert_ownership(&draft);
 
     draft
-        .replace(
-            selected,
-            "&root {first: [&leaf value, *leaf], self: *root}",
-            false,
-        )
+        .replace(selected, "{first: [value], second: other}", true)
         .unwrap();
     assert_ownership(&draft);
     let first = field(&mut draft, selected, "first");
-    let items = draft.sequence_items_mut(first).unwrap();
-    let (leaf, alias) = (items[0], items[1]);
-    draft.replace(leaf, "&leaf {nested: value}", false).unwrap();
+    let leaf = draft.sequence_items_mut(first).unwrap()[0];
+    draft.replace(leaf, "{nested: value}", true).unwrap();
     assert_ownership(&draft);
-    let self_alias = field(&mut draft, selected, "self");
-    let links = [
-        matches!(draft.node(alias).kind, NodeKind::Alias { target, .. } if target == leaf),
-        matches!(draft.node(self_alias).kind, NodeKind::Alias { target, .. } if target == selected),
-    ];
+    let alias = field(&mut draft, root, "copy");
+    assert!(matches!(draft.node(alias).kind, NodeKind::Alias { target } if target == selected));
 
     draft
         .set_collection_style(first, CollectionStyle::Block)
         .unwrap();
     draft.remove_entry(selected, 0).unwrap();
     assert_ownership(&draft);
-    draft
-        .insert_entry(selected, 1, "tail", "&tail [*tail]")
-        .unwrap();
+    draft.insert_entry(selected, 1, "tail", "[one]").unwrap();
     assert_ownership(&draft);
     let tail = field(&mut draft, selected, "tail");
     draft.insert_item(tail, 1, "temporary").unwrap();
@@ -109,9 +99,6 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
     draft
         .set_collection_style(tail, CollectionStyle::Flow)
         .unwrap();
-    let imported_alias = draft.sequence_items_mut(tail).unwrap()[0];
-    let inserted_alias =
-        matches!(draft.node(imported_alias).kind, NodeKind::Alias { target, .. } if target == tail);
     assert!(
         draft.contains(selected),
         "replacement retains the occurrence's identity"
@@ -119,19 +106,14 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
     assert!(
         old_children
             .into_iter()
-            .chain([first, leaf, alias])
+            .chain([first, leaf])
             .all(|id| !draft.contains(id))
     );
-    assert!(
-        links.into_iter().all(|linked| linked),
-        "aliases retain replaced targets"
-    );
-    assert!(
-        inserted_alias,
-        "an imported alias targets its own fragment root"
-    );
-    let candidate = draft.freeze().unwrap();
-    assert_eq!(candidate.requested_styles, [tail]);
+    assert_eq!(draft.clone().freeze().unwrap().requested_styles, [tail]);
+    draft.replace(selected, "done", true).unwrap();
+    assert_ownership(&draft);
+    assert!(!draft.contains(tail));
+    assert_eq!(draft.freeze().unwrap().requested_styles, []);
 }
 
 #[test]

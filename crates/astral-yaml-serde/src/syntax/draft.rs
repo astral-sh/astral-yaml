@@ -1,7 +1,9 @@
 //! Mutable syntax for an edit transaction.
 //! [`Draft::freeze`] ends mutation and produces the syntax used to check the output.
 
-use super::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit, view::Syntax};
+use super::{
+    Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit, single_document, view::Syntax,
+};
 use astral_yaml::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span, comments::CommentPlacement,
 };
@@ -56,6 +58,12 @@ pub(super) struct Candidate {
     options: ParseOptions,
     diagnostic_span: Span,
     work: Cell<usize>,
+}
+
+/// A parsed Serde value. Its nodes form a tree, so only child IDs need relocation.
+struct SerializedValue<'s> {
+    root: NodeId,
+    nodes: Vec<astral_yaml::Node<'s>>,
 }
 
 impl From<&DocumentSyntax> for Draft {
@@ -134,12 +142,12 @@ impl Draft {
         Ok(())
     }
 
-    fn fragment(
+    fn parse_value<'s>(
         &mut self,
-        yaml: &str,
+        yaml: &'s str,
         parent: Option<NodeId>,
         available: usize,
-    ) -> Result<DocumentSyntax, Error> {
+    ) -> Result<SerializedValue<'s>, Error> {
         self.introduce(yaml.len())?;
         let mut depth = 0;
         let mut ancestor = parent;
@@ -153,9 +161,13 @@ impl Draft {
         let mut options = self.options;
         options.max_nodes = available;
         options.max_depth -= depth;
-        let document = DocumentSyntax::parse_with_options(yaml, options)?;
-        self.charge(document.source.nodes.len())?;
-        Ok(document)
+        let stream = astral_yaml::parse_with_options(yaml, options)?;
+        self.charge(stream.nodes().len())?;
+        let root = single_document(&stream)?.root;
+        Ok(SerializedValue {
+            root,
+            nodes: stream.into_nodes(),
+        })
     }
 
     fn available(&self) -> usize {
@@ -170,43 +182,41 @@ impl Draft {
         }
     }
 
-    /// Attach `document` to the draft and return its root ID.
-    /// A replacement keeps the destination ID, so aliases to the fragment's root
-    /// can be remapped before its nodes are inserted.
+    /// Insert the serialized tree, reusing the selected node’s ID on replacement.
     fn attach(
         &mut self,
-        document: DocumentSyntax,
+        value: SerializedValue<'_>,
         parent: Option<NodeId>,
         replacement: Option<(NodeId, bool)>,
     ) -> NodeId {
-        let mut document = document.source;
-        let fragment_root = document.root;
+        let SerializedValue {
+            root: value_root,
+            mut nodes,
+        } = value;
         let root = replacement.map_or(NodeId::from_index(self.slots.len()), |(id, _)| id);
         let offset = self.slots.len() + usize::from(replacement.is_none());
+        // Child IDs skip the root, which has its own slot.
         let map = |id: NodeId| {
-            if id == fragment_root {
-                root
-            } else {
-                NodeId::from_index(
-                    offset + id.index() - usize::from(id.index() > fragment_root.index()),
-                )
-            }
+            NodeId::from_index(offset + id.index() - usize::from(id.index() > value_root.index()))
         };
-        let mut node = map_locations(document.nodes.remove(fragment_root.index()), |_| None);
+        let mut node = map_locations(Node::from_parsed(nodes.remove(value_root.index())), |_| {
+            None
+        });
         remap(&mut node, map);
         if let Some((id, preserve)) = replacement {
             let old = self.node(id);
+            node.anchor.clone_from(&old.anchor);
             if preserve {
-                preserve_properties(old, &mut node);
+                preserve_style(old, &mut node);
             }
-            node.comments = merged_comments(old, &node);
+            node.comments = retained_comments(old, &node.kind);
             node.span = old.span;
             self.slots[id.index()] = Slot::live(node, parent);
         } else {
             self.slots.push(Slot::live(node, parent));
         }
-        for node in document.nodes {
-            let mut node = map_locations(node, |_| None);
+        for node in nodes {
+            let mut node = map_locations(Node::from_parsed(node), |_| None);
             remap(&mut node, map);
             self.slots.push(Slot::live(node, None));
         }
@@ -238,7 +248,7 @@ impl Draft {
 
     pub(super) fn replace(&mut self, id: NodeId, yaml: &str, preserve: bool) -> Result<(), Error> {
         let parent = self.parent(id);
-        let document = self.fragment(yaml, parent, self.available() + 1)?;
+        let document = self.parse_value(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
         // Retired slots keep their syntax. Attaching reuses the root's ID and
         // restores its membership, but leaves its former descendants retired.
@@ -277,7 +287,7 @@ impl Draft {
         if index > items.len() {
             return Err(self.error("item index out of bounds"));
         }
-        let document = self.fragment(yaml, Some(id), self.available())?;
+        let document = self.parse_value(yaml, Some(id), self.available())?;
         let child = self.attach(document, Some(id), None);
         self.sequence_items_mut(id)?.insert(index, child);
         Ok(child)
@@ -307,13 +317,13 @@ impl Draft {
         if index > entries.len() {
             return Err(self.error("entry index out of bounds"));
         }
-        // Parse both fragments before attaching either one. Failed parsing cannot
+        // Parse the key and value before attaching either one. Failed parsing cannot
         // leave a live key without an entry owning it.
-        let key = self.fragment(key, Some(id), self.available())?;
-        let value = self.fragment(
+        let key = self.parse_value(key, Some(id), self.available())?;
+        let value = self.parse_value(
             value,
             Some(id),
-            self.available().saturating_sub(key.source.nodes.len()),
+            self.available().saturating_sub(key.nodes.len()),
         )?;
         let key = self.attach(key, Some(id), None);
         let value = self.attach(value, Some(id), None);
@@ -379,41 +389,17 @@ impl Draft {
         index: usize,
         text: &str,
         placement: CommentPlacement,
-        position: Option<CommentPosition>,
     ) -> Result<(), Error> {
         self.comment_text(text)?;
-        if let Some(CommentPosition::BeforeChild(child)) = position {
-            if placement != CommentPlacement::Detached {
-                return Err(self.error("collection gaps require detached comments"));
-            }
-            let direct = match &self.node(id).kind {
-                NodeKind::Sequence { items, .. } => items.contains(&child),
-                NodeKind::Mapping { entries, .. } => entries.iter().any(|&(key, _)| key == child),
-                _ => false,
-            };
-            if !direct {
-                return Err(self.error("comment boundary is not a collection child"));
-            }
-        }
         let comments = &mut self.slots[id.index()].node.comments;
         if index > comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
-        let position = position.unwrap_or_else(|| {
-            if placement == CommentPlacement::Leading {
-                CommentPosition::Before
-            } else if placement == CommentPlacement::Detached {
-                comments[index..]
-                    .iter()
-                    .find_map(|comment| match comment.position {
-                        CommentPosition::BeforeChild(_) => Some(comment.position),
-                        _ => None,
-                    })
-                    .unwrap_or(CommentPosition::After)
-            } else {
-                CommentPosition::After
-            }
-        });
+        let position = if placement == CommentPlacement::Leading {
+            CommentPosition::Before
+        } else {
+            CommentPosition::After
+        };
         comments.insert(
             index,
             Comment {
@@ -449,17 +435,14 @@ impl Draft {
         Ok(())
     }
 
-    /// Finish mutation and check that each remaining alias has a live, anchored target.
+    /// Finish mutation and reject aliases whose targets were removed.
     /// This check runs after all edits so an anchor can be removed before its aliases.
     pub(super) fn freeze(self) -> Result<Candidate, Error> {
         for slot in self.slots.iter().filter(|slot| slot.membership.is_some()) {
-            if let NodeKind::Alias { target } = slot.node.kind {
-                if !self.contains(target) {
-                    return Err(self.error("alias target was removed"));
-                }
-                if self.node(target).anchor.is_none() {
-                    return Err(self.error("alias target has no anchor"));
-                }
+            if let NodeKind::Alias { target } = slot.node.kind
+                && !self.contains(target)
+            {
+                return Err(self.error("alias target was removed"));
             }
         }
 
@@ -569,10 +552,7 @@ fn restore_matching_comments<'a>(
     matched
 }
 
-fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>) {
-    if let Some(anchor) = &old.anchor {
-        replacement.anchor = Some(anchor.clone());
-    }
+fn preserve_style(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>) {
     match (&old.kind, &mut replacement.kind) {
         (
             NodeKind::Scalar {
@@ -601,11 +581,6 @@ fn preserve_properties(old: &Node<Option<Span>>, replacement: &mut Node<Option<S
 }
 
 fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
-    for comment in &mut node.comments {
-        if let CommentPosition::BeforeChild(child) = &mut comment.position {
-            *child = map(*child);
-        }
-    }
     match &mut node.kind {
         NodeKind::Sequence { items, .. } => {
             for item in items {
@@ -618,8 +593,7 @@ fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
                 *value = map(*value);
             }
         }
-        NodeKind::Alias { target, .. } => *target = map(*target),
-        NodeKind::Scalar { .. } => {}
+        NodeKind::Scalar { .. } | NodeKind::Alias { .. } => {}
     }
 }
 
@@ -634,82 +608,31 @@ fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: 
     }
 }
 
-/// Merge retained and imported comments by position, keeping each list's order.
-/// Retained comments come first at a shared position. Collection gaps are matched
-/// by child index in the replacement.
-fn merged_comments(
-    old: &Node<Option<Span>>,
-    replacement: &Node<Option<Span>>,
-) -> Vec<Comment<Option<Span>>> {
-    #[derive(PartialEq, Eq, PartialOrd, Ord)]
-    enum Boundary {
-        InlineBefore,
-        DetachedBefore,
-        LeadingBefore,
-        Header,
-        Opening,
-        BeforeChild(usize),
-        InlineAfter,
-        TrailingAfter,
-        DetachedAfter,
-    }
-    fn boundaries(kind: &NodeKind) -> Vec<NodeId> {
-        match kind {
-            NodeKind::Sequence { items, .. } => items.clone(),
-            NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
-            _ => Vec::new(),
-        }
-    }
-    let old_children = boundaries(&old.kind);
-    let new_children = boundaries(&replacement.kind);
-    let following: HashMap<_, _> = old_children
-        .into_iter()
-        .enumerate()
-        .map(|(index, child)| (child, new_children.get(index).copied()))
-        .collect();
+/// Keep collection-owned gap comments before the corresponding child in the new value.
+fn retained_comments(old: &Node<Option<Span>>, kind: &NodeKind) -> Vec<Comment<Option<Span>>> {
     let mut comments = old.comments.clone();
-    for comment in &mut comments {
-        if let CommentPosition::BeforeChild(child) = comment.position {
-            comment.position =
-                following[&child].map_or(CommentPosition::After, CommentPosition::BeforeChild);
-        }
-    }
-    let positions: HashMap<_, _> = new_children
-        .into_iter()
-        .enumerate()
-        .map(|(index, child)| (child, index))
-        .collect();
-    let boundary = |comment: &Comment<Option<Span>>| match comment.position {
-        CommentPosition::Before => match comment.placement {
-            CommentPlacement::Inline => Boundary::InlineBefore,
-            CommentPlacement::Detached => Boundary::DetachedBefore,
-            _ => Boundary::LeadingBefore,
-        },
-        CommentPosition::Header => Boundary::Header,
-        CommentPosition::Opening => Boundary::Opening,
-        CommentPosition::BeforeChild(child) => Boundary::BeforeChild(positions[&child]),
-        CommentPosition::After if comment.placement == CommentPlacement::Inline => {
-            Boundary::InlineAfter
-        }
-        CommentPosition::After if comment.placement == CommentPlacement::Detached => {
-            Boundary::DetachedAfter
-        }
-        CommentPosition::After => Boundary::TrailingAfter,
-    };
-    let mut retained = comments.into_iter().peekable();
-    let mut imported = replacement.comments.iter().cloned().peekable();
-    let mut merged = Vec::with_capacity(retained.len() + imported.len());
-    while let (Some(left), Some(right)) = (retained.peek(), imported.peek()) {
-        let next = if boundary(left) <= boundary(right) {
-            retained.next()
-        } else {
-            imported.next()
+    if comments
+        .iter()
+        .any(|comment| matches!(comment.position, CommentPosition::BeforeChild(_)))
+    {
+        let keys = |kind: &NodeKind| -> Vec<NodeId> {
+            match kind {
+                NodeKind::Sequence { items, .. } => items.clone(),
+                NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
+                _ => Vec::new(),
+            }
         };
-        merged.push(next.expect("remaining comment"));
+        let corresponding: HashMap<_, _> = keys(&old.kind).into_iter().zip(keys(kind)).collect();
+        for comment in &mut comments {
+            if let CommentPosition::BeforeChild(child) = comment.position {
+                comment.position = corresponding
+                    .get(&child)
+                    .copied()
+                    .map_or(CommentPosition::After, CommentPosition::BeforeChild);
+            }
+        }
     }
-    merged.extend(retained);
-    merged.extend(imported);
-    merged
+    comments
 }
 
 pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {

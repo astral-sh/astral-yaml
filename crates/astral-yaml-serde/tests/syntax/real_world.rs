@@ -2,17 +2,18 @@
 //! YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
 
 use super::support::edit;
-use crate::syntax::{Editor, Handle, NodeKind};
+use crate::syntax::{Editor, NodeKind};
+use astral_yaml::NodeId;
 
-fn mapping_value(editor: &Editor<'_>, path: &[&str]) -> Handle {
+fn mapping_value(editor: &Editor<'_>, path: &[&str]) -> NodeId {
     let mut node = editor.root();
     for name in path {
         node = editor
-            .mapping_entries(&node)
+            .mapping_entries(node)
             .unwrap()
             .into_iter()
             .find(|(key, _)| {
-                matches!(editor.node(key).unwrap().kind(), NodeKind::Scalar { value, .. } if value == name)
+                matches!(editor.node(*key).unwrap().kind(), NodeKind::Scalar { value, .. } if value == name)
             })
             .unwrap_or_else(|| panic!("missing fixture key {name}"))
             .1;
@@ -26,7 +27,7 @@ fn openapi_server_insertion_preserves_surrounding_sections() {
     let diff = edit(source, |editor| {
         let servers = mapping_value(editor, &["servers"]);
         editor
-            .insert_item(&servers, 1, "url: https://staging.example.com/v2")
+            .insert_item(servers, 1, "url: https://staging.example.com/v2")
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
@@ -52,9 +53,9 @@ fn compose_healthcheck_edit_preserves_service_comments_and_siblings() {
     );
     let diff = edit(source, |editor| {
         let healthcheck = mapping_value(editor, &["services", "db", "healthcheck"]);
-        editor.remove_entry(&healthcheck, 2)?;
+        editor.remove_entry(healthcheck, 2)?;
         editor
-            .insert_entry(&healthcheck, 3, "timeout", "5s")
+            .insert_entry(healthcheck, 3, "timeout", "5s")
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @r#"

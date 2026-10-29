@@ -33,8 +33,8 @@ fn layout_changes_keep_comments_after_omitted_mapping_values() {
             let before = document.source().to_owned();
             document
                 .edit_syntax(|editor| {
-                    let outer = editor.mapping_entries(&editor.root())?[0].1.clone();
-                    editor.set_collection_style(&outer, style)
+                    let outer = editor.mapping_entries(editor.root())?[0].1;
+                    editor.set_collection_style(outer, style)
                 })
                 .unwrap();
             diffs.push(edit_diff(&before, document.source()));

@@ -1,9 +1,10 @@
 //! Comments and separation: <https://yaml.org/spec/1.2.2/#66-comments>.
 
+use astral_yaml::NodeId;
 use test_case::test_case;
 
 use super::support::{edit, edited};
-use crate::syntax::{DocumentSyntax, Editor, Handle, NodeKind};
+use crate::syntax::{DocumentSyntax, Editor, NodeKind};
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};
 
@@ -15,8 +16,8 @@ fn scalar_edits_on_long_flow_lines_preserve_their_surroundings() {
     document
         .edit(|root| {
             let mut sequence = root.into_sequence()?;
-            sequence.item(0)?.set_yaml("left")?;
-            sequence.item(80_001)?.set_yaml("right")
+            sequence.item(0)?.set("left")?;
+            sequence.item(80_001)?.set("right")
         })
         .unwrap();
     assert_eq!(
@@ -25,9 +26,9 @@ fn scalar_edits_on_long_flow_lines_preserve_their_surroundings() {
     );
 }
 
-fn collection(editor: &Editor<'_>, nested: bool) -> Handle {
+fn collection(editor: &Editor<'_>, nested: bool) -> NodeId {
     if nested {
-        editor.mapping_entries(&editor.root()).unwrap()[0].1.clone()
+        editor.mapping_entries(editor.root()).unwrap()[0].1
     } else {
         editor.root()
     }
@@ -81,16 +82,16 @@ fn flow_delimiter_comments_survive_collection_edits() {
     ] {
         let mut document = edited(source, |editor| {
             let target = collection(editor, nested);
-            match editor.node(&target)?.kind() {
-                NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
-                _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
+            match editor.node(target)?.kind() {
+                NodeKind::Sequence { .. } => editor.insert_item(target, 1, "new").map(|_| ()),
+                _ => editor.insert_entry(target, 1, "added", "new").map(|_| ()),
             }
         });
         let committed = document.to_yaml();
         document
             .edit_syntax(|editor| {
                 let target = collection(editor, nested);
-                editor.set_collection_style(&target, CollectionStyle::Flow)
+                editor.set_collection_style(target, CollectionStyle::Flow)
             })
             .unwrap();
         assert_eq!(document.source(), committed);
@@ -193,9 +194,9 @@ fn flow_delimiter_comments_survive_collection_edits() {
 fn shrinking_collections_retain_their_comment_boundaries(source: &str) -> String {
     edit(source, |editor| {
         let target = collection(editor, true);
-        match editor.node(&target)?.kind() {
-            NodeKind::Sequence { .. } => editor.remove_item(&target, 0),
-            _ => editor.remove_entry(&target, 0),
+        match editor.node(target)?.kind() {
+            NodeKind::Sequence { .. } => editor.remove_item(target, 0),
+            _ => editor.remove_entry(target, 0),
         }
     })
 }
@@ -210,45 +211,14 @@ fn rewrite_context_is_selected_after_all_mutations() {
         let target = collection(editor, true);
         // The transient block layout needs its parent. The final flow layout
         // fits in the original value region and keeps the surrounding source.
-        editor.set_collection_style(&target, CollectionStyle::Block)?;
-        editor.insert_item(&target, 1, "new")?;
-        editor.set_collection_style(&target, CollectionStyle::Flow)
+        editor.set_collection_style(target, CollectionStyle::Block)?;
+        editor.insert_item(target, 1, "new")?;
+        editor.set_collection_style(target, CollectionStyle::Flow)
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,2 @@
     -outer:   [old]
     +outer:   [old, new]
      untouched:    keep
-    ");
-}
-
-#[test]
-fn retained_opening_comments_merge_with_fragment_prefixes() {
-    let source = indoc! {r"
-        [ # open
-          old
-        ] # close
-    "};
-    let document = edited(source, |editor| {
-        editor.replace(
-            &editor.root(),
-            indoc! {r"
-                # detached
-
-                [new]
-            "},
-        )?;
-        editor.replace_comment(&editor.root(), 1, " updated")
-    });
-    let diff = edit_diff(source, document.source());
-    insta::assert_snapshot!(diff, @"
-    @@ -1,3 +1,4 @@
-    -[ # open
-    -  old
-    -] # close
-    +# detached
-    +
-    +[ # updated
-    +  new] # close
     ");
 }

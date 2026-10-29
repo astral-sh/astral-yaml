@@ -74,7 +74,7 @@ Other bounds limit the model, not the API:
 | Model scope | Complementary checks |
 | --- | --- |
 | One inline comment per node, allowing arbitrary scalar replacements | Bounded layouts with all subsets of tag, anchor, opening, and closing inline comments |
-| Generated detached comments use suffix positions | Corpus reinsertion at captured positions. Gap insertion and child-deletion tests |
+| Generated detached comments use suffix positions | Corpus edits to existing comments. Collection replacement and child-deletion tests |
 
 The bounded layout tests compare equivalent comment edits with independent source
 projections. Explicit block conversions also have parsed block witnesses with the

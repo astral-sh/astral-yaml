@@ -55,11 +55,11 @@ fn generated_collection_prefixes_keep_their_direct_owner() {
         diffs.push(edit(source, |editor| {
             let root = editor.root();
             let owner = match target {
-                Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
-                Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
-                Target::Item => editor.sequence_items(&root)?[0].clone(),
+                Target::Key => editor.mapping_entries(root)?[0].0,
+                Target::Value => editor.mapping_entries(root)?[0].1,
+                Target::Item => editor.sequence_items(root)?[0],
             };
-            editor.insert_comment(&owner, 0, " collection", CommentPlacement::Leading)
+            editor.insert_comment(owner, 0, " collection", CommentPlacement::Leading)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -183,11 +183,11 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers(
     edit(source, |editor| {
         let root = editor.root();
         let owner = match target {
-            Target::Key => editor.mapping_entries(&root)?[0].0.clone(),
-            Target::Value => editor.mapping_entries(&root)?[0].1.clone(),
-            Target::Item => editor.sequence_items(&root)?[0].clone(),
+            Target::Key => editor.mapping_entries(root)?[0].0,
+            Target::Value => editor.mapping_entries(root)?[0].1,
+            Target::Item => editor.sequence_items(root)?[0],
         };
-        editor.insert_comment(&owner, 1, " inline", CommentPlacement::Inline)
+        editor.insert_comment(owner, 1, " inline", CommentPlacement::Inline)
     })
 }
 
@@ -244,7 +244,7 @@ fn collection_prefixes_and_inline_comments_get_distinct_headers(
 )]
 fn collection_suffixes_can_precede_a_closing_inline_comment(source: &str) -> String {
     edit(source, |editor| {
-        let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
-        editor.insert_comment(&inner, 1, " inline", CommentPlacement::Inline)
+        let inner = editor.mapping_entries(editor.root())?[0].1;
+        editor.insert_comment(inner, 1, " inline", CommentPlacement::Inline)
     })
 }

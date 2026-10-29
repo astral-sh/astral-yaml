@@ -4,7 +4,7 @@ mod layouts;
 
 use std::collections::HashMap;
 
-use crate::syntax::{DocumentSyntax, Editor, Handle, NodeKind};
+use crate::syntax::{DocumentSyntax, Editor, NodeKind};
 use astral_yaml::{CollectionStyle, NodeId, comments::CommentPlacement};
 use astral_yaml_dev::fixtures;
 
@@ -97,22 +97,20 @@ fn assert_projection(document: &DocumentSyntax, expected: &[Occurrence], fixture
     }
 }
 
-fn handles(editor: &Editor<'_>) -> Vec<Handle> {
+fn node_order(editor: &Editor<'_>) -> Vec<NodeId> {
     let mut order = Vec::new();
     let mut pending = vec![editor.root()];
-    while let Some(handle) = pending.pop() {
-        match editor.node(&handle).unwrap().kind() {
-            NodeKind::Sequence { .. } => {
-                pending.extend(editor.sequence_items(&handle).unwrap().into_iter().rev());
-            }
-            NodeKind::Mapping { .. } => {
-                for (key, value) in editor.mapping_entries(&handle).unwrap().into_iter().rev() {
+    while let Some(id) = pending.pop() {
+        match editor.node(id).unwrap().kind() {
+            NodeKind::Sequence { items, .. } => pending.extend(items.iter().rev()),
+            NodeKind::Mapping { entries, .. } => {
+                for &(key, value) in entries.iter().rev() {
                     pending.extend([value, key]);
                 }
             }
             _ => {}
         }
-        order.push(handle);
+        order.push(id);
     }
     order
 }
@@ -120,7 +118,6 @@ fn handles(editor: &Editor<'_>) -> Vec<Handle> {
 #[derive(Debug, Clone, Copy)]
 enum CommentEdit {
     Replace,
-    Reinsert,
     Remove,
 }
 
@@ -141,34 +138,22 @@ fn corpus_comment_edits_preserve_the_expected_graph() {
             continue;
         }
         tested += 1;
-        for operation in [
-            CommentEdit::Replace,
-            CommentEdit::Reinsert,
-            CommentEdit::Remove,
-        ] {
+        for operation in [CommentEdit::Replace, CommentEdit::Remove] {
             for flow in [false, true] {
                 let mut document = DocumentSyntax::parse(&source).unwrap();
                 let mut expected = project(&document);
                 let context = format!("{} {operation:?} flow={flow}", fixture.file);
                 document
                     .edit_syntax(|editor| {
-                        for (handle, node) in handles(editor).iter().zip(&mut expected) {
-                            for (index, (text, placement, _)) in
-                                node.comments.iter_mut().enumerate().rev()
+                        for (id, node) in node_order(editor).into_iter().zip(&mut expected) {
+                            for (index, (text, _, _)) in node.comments.iter_mut().enumerate().rev()
                             {
                                 *text = [" edited", "", "\tcomment: [#] é\u{2028}end"][index % 3]
                                     .to_owned();
                                 match operation {
-                                    CommentEdit::Remove => editor.remove_comment(handle, index)?,
-                                    CommentEdit::Reinsert => {
-                                        let position = editor.comment_position(handle, index)?;
-                                        editor.remove_comment(handle, index)?;
-                                        editor.insert_comment_at(
-                                            handle, index, text, *placement, position,
-                                        )?;
-                                    }
+                                    CommentEdit::Remove => editor.remove_comment(id, index)?,
                                     CommentEdit::Replace => {
-                                        editor.replace_comment(handle, index, text)?;
+                                        editor.replace_comment(id, index, text)?;
                                     }
                                 }
                             }
@@ -181,7 +166,7 @@ fn corpus_comment_edits_preserve_the_expected_graph() {
                                     Content::Sequence(_) | Content::Mapping(_)
                                 )
                             {
-                                editor.set_collection_style(handle, CollectionStyle::Flow)?;
+                                editor.set_collection_style(id, CollectionStyle::Flow)?;
                             }
                         }
                         Ok(())
@@ -241,14 +226,14 @@ fn corpus_normalization_and_composed_edits_preserve_the_expected_graph() {
         }
         document
             .edit_syntax(|editor| {
-                let scalars: Vec<_> = handles(editor)
+                let scalars: Vec<_> = node_order(editor)
                     .into_iter()
-                    .filter(|handle| {
-                        matches!(editor.node(handle).unwrap().kind(), NodeKind::Scalar { .. })
+                    .filter(|id| {
+                        matches!(editor.node(*id).unwrap().kind(), NodeKind::Scalar { .. })
                     })
                     .collect();
                 for index in selected {
-                    editor.replace_preserving_style(&scalars[index], "\"edited\"")?;
+                    editor.replace_preserving_style(scalars[index], "\"edited\"")?;
                 }
                 Ok(())
             })
@@ -282,14 +267,14 @@ fn corpus_collection_layout_changes_preserve_the_expected_graph() {
             CollectionStyle::Flow,
         ] {
             let result = document.edit_syntax(|editor| {
-                for handle in handles(editor) {
-                    let empty = match editor.node(&handle)?.kind() {
+                for id in node_order(editor) {
+                    let empty = match editor.node(id)?.kind() {
                         NodeKind::Sequence { items, .. } => items.is_empty(),
                         NodeKind::Mapping { entries, .. } => entries.is_empty(),
                         _ => continue,
                     };
                     editor.set_collection_style(
-                        &handle,
+                        id,
                         if empty { CollectionStyle::Flow } else { style },
                     )?;
                 }

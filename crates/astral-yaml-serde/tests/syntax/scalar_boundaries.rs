@@ -8,7 +8,7 @@ use astral_yaml_dev::indoc;
 fn relocated_inline_headers_keep_detached_suffix_separation() {
     let source = indoc! {"
         --- # property
-        &a [ # open
+        !a [ # open
           old] # close
         # trailing
 
@@ -19,7 +19,7 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
     "};
     let diff = edit(source, |editor| {
         editor.replace(
-            &editor.root(),
+            editor.root(),
             indoc! {r"
                 - new
             "},
@@ -28,7 +28,7 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
     insta::assert_snapshot!(diff, @"
     @@ -1,9 +1,9 @@
      --- # property
-    -&a [ # open
+    -!a [ # open
     -  old] # close
     +- new
     +...  # open
@@ -83,8 +83,8 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
         "};
         diffs.push(edit(source, |editor| {
             let root = editor.root();
-            editor.insert_comment(&root, 0, " detached", CommentPlacement::Detached)?;
-            editor.replace(&root, fragment)
+            editor.insert_comment(root, 0, " detached", CommentPlacement::Detached)?;
+            editor.replace(root, fragment)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -178,7 +178,7 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
 
             "},
         ],
-        |editor| editor.remove_comment(&editor.root(), 0),
+        |editor| editor.remove_comment(editor.root(), 0),
     );
     insta::assert_snapshot!(diffs, @r"
     @@ -1,5 +1,5 @@
@@ -245,8 +245,8 @@ fn trailing_comments_can_reclaim_blank_document_suffixes() {
         |editor| {
             let root = editor.root();
             editor.insert_comment(
-                &root,
-                editor.node(&root)?.comments().len(),
+                root,
+                editor.node(root)?.comments().len(),
                 " tail",
                 CommentPlacement::Trailing,
             )
@@ -283,7 +283,7 @@ fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
     "};
     let diff = edit(source, |editor| {
         editor.replace(
-            &editor.root(),
+            editor.root(),
             indoc! {r"
                 ---
             "},

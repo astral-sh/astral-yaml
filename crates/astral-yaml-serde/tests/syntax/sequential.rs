@@ -16,12 +16,12 @@ fn sequential_replacements_emit_the_final_candidate() {
     let mut document = DocumentSyntax::parse(source).unwrap();
     let result = document
         .edit_syntax(|e| {
-            let value = e.mapping_entries(&e.root())?.remove(0).1;
-            e.replace(&value, "2")?;
-            e.replace(&value, "[3, 4]")?;
-            let first = e.sequence_items(&value)?.remove(0);
-            e.replace(&first, "5")?;
-            e.replace(&first, "6")?;
+            let value = e.mapping_entries(e.root())?.remove(0).1;
+            e.replace(value, "2")?;
+            e.replace(value, "[3, 4]")?;
+            let first = e.sequence_items(value)?.remove(0);
+            e.replace(first, "5")?;
+            e.replace(first, "6")?;
             Ok(42)
         })
         .unwrap();
@@ -61,14 +61,14 @@ fn removed_subtrees_discard_pending_rewrites_and_style_requests(remove: bool) ->
         other: retained
     "};
     edit(source, |e| {
-        let items = e.mapping_entries(&e.root())?.remove(0).1;
-        let old = e.sequence_items(&items)?.remove(0);
-        e.replace(&old, "new")?;
-        e.set_scalar_style(&old, ScalarStyle::SingleQuoted)?;
+        let items = e.mapping_entries(e.root())?.remove(0).1;
+        let old = e.sequence_items(items)?.remove(0);
+        e.replace(old, "new")?;
+        e.set_scalar_style(old, ScalarStyle::SingleQuoted)?;
         if remove {
-            e.remove_item(&items, 0)?;
+            e.remove_item(items, 0)?;
         } else {
-            e.replace(&items, "[replacement]")?;
+            e.replace(items, "[replacement]")?;
         }
         Ok(())
     })
@@ -80,12 +80,12 @@ fn inserted_nodes_can_be_edited_and_removed_before_commit() {
     document
         .edit_syntax(|e| {
             let root = e.root();
-            e.insert_item(&root, 0, "[one]")?;
-            let inserted = e.sequence_items(&root)?.remove(0);
-            let child = e.sequence_items(&inserted)?.remove(0);
-            e.replace(&child, "two")?;
-            e.set_scalar_style(&child, ScalarStyle::DoubleQuoted)?;
-            e.remove_item(&root, 0)
+            e.insert_item(root, 0, "[one]")?;
+            let inserted = e.sequence_items(root)?.remove(0);
+            let child = e.sequence_items(inserted)?.remove(0);
+            e.replace(child, "two")?;
+            e.set_scalar_style(child, ScalarStyle::DoubleQuoted)?;
+            e.remove_item(root, 0)
         })
         .unwrap();
     assert_eq!(document.into_yaml(), "[]");
@@ -123,13 +123,13 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
         ("[]", "42"),
     ] {
         diffs.push(edit(source, |e| {
-            e.replace_preserving_style(&e.root(), replacement)
+            e.replace_preserving_style(e.root(), replacement)
         }));
     }
     let source = "[&value 'old', *value]";
     diffs.push(edit(source, |e| {
-        let value = e.sequence_items(&e.root())?.remove(0);
-        e.replace_preserving_style(&value, "\"new\"")
+        let value = e.sequence_items(e.root())?.remove(0);
+        e.replace_preserving_style(value, "\"new\"")
     }));
     insta::assert_snapshot!(diffs.join("\n"), @r#"
     @@ -1 +1 @@
@@ -198,7 +198,7 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
 fn application_errors_abort_transactions() {
     let mut document = DocumentSyntax::parse("1").unwrap();
     let result: Result<(), Box<dyn std::error::Error>> = document.try_edit_syntax(|e| {
-        e.replace(&e.root(), "2")?;
+        e.replace(e.root(), "2")?;
         Err("application error".into())
     });
     assert_eq!(result.unwrap_err().to_string(), "application error");

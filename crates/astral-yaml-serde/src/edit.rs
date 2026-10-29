@@ -1,9 +1,10 @@
 //! Edit YAML using Rust values inside an [`Editable`](crate::Editable) transaction.
 
-use crate::syntax;
+use crate::syntax::{self, Collection, Mapping, Sequence};
 use crate::{Error, to_string};
-use astral_yaml::Span;
+use astral_yaml::{NodeId, Span};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::marker::PhantomData;
 use std::{
     borrow::Cow,
     fmt::{self, Write},
@@ -76,7 +77,8 @@ pub(crate) fn transaction<R, E: From<Error>>(
         failure: &mut failure,
         path: Cow::Borrowed("$"),
     };
-    let result = edit(context.cursor(editor.root_mut()))?;
+    let root = editor.root();
+    let result = edit(context.cursor(editor, root))?;
     failure.map_or(Ok(result), |error| Err(error.into()))
 }
 
@@ -88,14 +90,16 @@ pub(crate) fn transaction<R, E: From<Error>>(
 /// is handled. Navigation and read errors can be handled without preventing a commit.
 #[derive(Debug)]
 pub struct Cursor<'a, 'doc, State = ()> {
-    syntax: syntax::Cursor<'a, 'doc, State>,
+    editor: &'a mut syntax::Editor<'doc>,
+    id: NodeId,
+    state: State,
     context: EditContext<'a>,
 }
 
 impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Lend this position to an edit, so navigation can start here again afterwards.
     pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
-        self.context.reborrow().cursor(self.syntax.reborrow())
+        self.context.reborrow().cursor(self.editor, self.id)
     }
 
     /// Select a descendant by literal mapping keys and sequence indices.
@@ -122,9 +126,13 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping or more than one key matches.
     pub fn get(self, name: &str) -> Result<Option<Self>, Error> {
-        self.context
-            .at(format_args!("[{name:?}]"))
-            .optional(self.syntax.get(name))
+        let context = self.context.at(format_args!("[{name:?}]"));
+        let field = context.with_path(self.editor.string_field(self.id, name))?;
+        Ok(field.map(|(_, id)| Self {
+            id,
+            context,
+            ..self
+        }))
     }
 
     /// Select the required value at the literal string key `name`.
@@ -132,9 +140,17 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a mapping, or the key is missing or ambiguous.
     pub fn field(self, name: &str) -> Result<Self, Error> {
-        self.context
-            .at(format_args!("[{name:?}]"))
-            .select(self.syntax.field(name))
+        let context = self.context.at(format_args!("[{name:?}]"));
+        let field = context.with_path(
+            self.editor
+                .string_field(self.id, name)
+                .and_then(|field| field.ok_or_else(|| self.editor.error("missing mapping key"))),
+        )?;
+        Ok(Self {
+            id: field.1,
+            context,
+            ..self
+        })
     }
 
     /// Select the sequence item at `index`, accounting for earlier edits.
@@ -142,9 +158,18 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a sequence or `index` is out of bounds.
     pub fn item(self, index: usize) -> Result<Self, Error> {
-        self.context
-            .at(format_args!("[{index}]"))
-            .select(self.syntax.item(index))
+        let context = self.context.at(format_args!("[{index}]"));
+        let id = context.with_path(self.editor.item_ids(self.id).and_then(|items| {
+            items
+                .get(index)
+                .copied()
+                .ok_or_else(|| self.editor.error("item index out of bounds"))
+        }))?;
+        Ok(Self {
+            id,
+            context,
+            ..self
+        })
     }
 
     /// Borrow the selected mapping for repeated edits.
@@ -152,7 +177,11 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the selected node is not a mapping or an editing limit is exceeded.
     pub fn into_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
-        self.context.select(self.syntax.into_mapping())
+        let len = self
+            .context
+            .with_path(self.editor.entry_ids(self.id))?
+            .len();
+        Ok(self.into_collection(len))
     }
 
     /// Borrow the selected sequence for repeated edits.
@@ -160,7 +189,20 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the selected node is not a sequence or an editing limit is exceeded.
     pub fn into_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
-        self.context.select(self.syntax.into_sequence())
+        let len = self.context.with_path(self.editor.item_ids(self.id))?.len();
+        Ok(self.into_collection(len))
+    }
+
+    fn into_collection<Kind>(self, len: usize) -> Cursor<'a, 'doc, Collection<Kind>> {
+        Cursor {
+            editor: self.editor,
+            id: self.id,
+            context: self.context,
+            state: Collection {
+                len,
+                kind: PhantomData,
+            },
+        }
     }
 
     /// Read the selected value as `T`, transform it, and replace it using [`Self::set`].
@@ -179,7 +221,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     ) -> Result<(), Error> {
         let value = self
             .context
-            .mutate(|| crate::de::from_edit_value(self.syntax.value()))?;
+            .mutate(|| crate::de::from_edit_value(self.editor.value(self.id)))?;
         self.set(transform(value))
     }
 
@@ -192,7 +234,8 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
         let yaml = self.context.mutate(|| to_string(&value))?;
-        self.context.mutate(|| self.syntax.set_yaml(&yaml))
+        self.context
+            .mutate(|| self.editor.replace_preserving_style(self.id, &yaml))
     }
 
     /// Request a style for the selected scalar.
@@ -200,7 +243,8 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if the node is not a scalar or the style changes its YAML type.
     pub fn set_scalar_style(&mut self, style: ScalarStyle) -> Result<(), Error> {
-        self.context.mutate(|| self.syntax.set_scalar_style(style))
+        self.context
+            .mutate(|| self.editor.set_scalar_style(self.id, style))
     }
 }
 
@@ -208,7 +252,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
 ///
 /// Child selections borrow the view. Their cursors can replace the selected child
 /// while the mapping itself remains available for later edits.
-pub type MappingMut<'a, 'doc> = Cursor<'a, 'doc, syntax::Collection<syntax::Mapping>>;
+pub type MappingMut<'a, 'doc> = Cursor<'a, 'doc, Collection<Mapping>>;
 
 impl<'doc> MappingMut<'_, 'doc> {
     /// Select the value at string key `name`, or return `None` if absent.
@@ -216,9 +260,7 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn get(&mut self, name: &str) -> Result<Option<Cursor<'_, 'doc>>, Error> {
-        self.context
-            .child(format_args!("[{name:?}]"))
-            .optional(self.syntax.get(name))
+        self.borrow_cursor().get(name)
     }
 
     /// Select the required value at string key `name`.
@@ -226,9 +268,7 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is missing or ambiguous, or an editing limit is exceeded.
     pub fn field(&mut self, name: &str) -> Result<Cursor<'_, 'doc>, Error> {
-        self.context
-            .child(format_args!("[{name:?}]"))
-            .select(self.syntax.field(name))
+        self.borrow_cursor().field(name)
     }
 
     /// Select an occupied or vacant entry at string key `name`.
@@ -237,8 +277,20 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn entry(&mut self, name: &str) -> Result<Entry<'_, 'doc>, Error> {
         let context = self.context.child(format_args!("[{name:?}]"));
-        let syntax = context.with_path(self.syntax.entry(name))?;
-        Ok(Entry { syntax, context })
+        let field = context.with_path(self.editor.string_field(self.id, name))?;
+        let state = match field {
+            Some((_, id)) => EntryState::Occupied(id),
+            None => EntryState::Vacant {
+                mapping: self.id,
+                name: name.to_owned(),
+                len: &mut self.state.len,
+            },
+        };
+        Ok(Entry {
+            editor: self.editor,
+            state,
+            context,
+        })
     }
 
     /// Borrow the mapping at `name`, inserting an empty mapping if the key is absent.
@@ -266,8 +318,18 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// Returns an error if serialization fails, the key is ambiguous, or an editing limit is exceeded.
     pub fn set(&mut self, name: &str, value: impl Serialize) -> Result<Cursor<'_, 'doc>, Error> {
         let mut context = self.context.child(format_args!("[{name:?}]"));
-        let yaml = context.mutate(|| to_string(&value))?;
-        context.edit(|| self.syntax.set_yaml(name, &yaml))
+        let id = context.mutate(|| -> Result<_, Error> {
+            let yaml = to_string(&value)?;
+            if let Some((_, id)) = self.editor.string_field(self.id, name)? {
+                self.editor.replace_preserving_style(id, &yaml)?;
+                Ok(id)
+            } else {
+                Ok(self
+                    .editor
+                    .append_string_entry(self.id, &mut self.state.len, name, &yaml)?)
+            }
+        })?;
+        Ok(context.cursor(self.editor, id))
     }
 
     /// Remove the entry at string key `name`, including its comments.
@@ -276,9 +338,14 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if the key is ambiguous or an editing limit is exceeded.
     pub fn remove(&mut self, name: &str) -> Result<bool, Error> {
-        self.context
-            .child(format_args!("[{name:?}]"))
-            .mutate(|| self.syntax.remove(name))
+        self.context.child(format_args!("[{name:?}]")).mutate(|| {
+            let Some((index, _)) = self.editor.string_field(self.id, name)? else {
+                return Ok(false);
+            };
+            self.editor.remove_entry(self.id, index)?;
+            self.state.len -= 1;
+            Ok::<_, astral_yaml::Error>(true)
+        })
     }
 
     /// Select the key at `index`, including keys that are not strings.
@@ -286,9 +353,9 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn key_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = self.context.with_path(self.syntax.key_at(index))?;
+        let id = self.entry_ids_at(index)?.0;
         let context = self.context.child(format_args!("[entry {index}].key"));
-        Ok(context.cursor(syntax))
+        Ok(context.cursor(self.editor, id))
     }
 
     /// Select the value of the entry at `index`, including entries with non-string keys.
@@ -296,14 +363,24 @@ impl<'doc> MappingMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn value_at(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = self.context.with_path(self.syntax.value_at(index))?;
+        let id = self.entry_ids_at(index)?.1;
         let context = self.context.child(format_args!("[entry {index}].value"));
-        Ok(context.cursor(syntax))
+        Ok(context.cursor(self.editor, id))
+    }
+
+    fn entry_ids_at(&self, index: usize) -> Result<(NodeId, NodeId), Error> {
+        self.context
+            .with_path(self.editor.entry_ids(self.id).and_then(|entries| {
+                entries
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| self.editor.error("entry index out of bounds"))
+            }))
     }
 }
 
 /// A sequence selected for repeated edits.
-pub type SequenceMut<'a, 'doc> = Cursor<'a, 'doc, syntax::Collection<syntax::Sequence>>;
+pub type SequenceMut<'a, 'doc> = Cursor<'a, 'doc, Collection<Sequence>>;
 
 impl<'doc> SequenceMut<'_, 'doc> {
     /// Select the item at `index`, or return `None` if it is absent.
@@ -311,8 +388,12 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if an editing limit is exceeded.
     pub fn get(&mut self, index: usize) -> Result<Option<Cursor<'_, 'doc>>, Error> {
-        let syntax = self.context.with_path(self.syntax.get(index))?;
-        Ok(syntax.map(|syntax| self.context.child(format_args!("[{index}]")).cursor(syntax)))
+        let items = self.context.with_path(self.editor.item_ids(self.id))?;
+        Ok(items.get(index).copied().map(|id| {
+            self.context
+                .child(format_args!("[{index}]"))
+                .cursor(self.editor, id)
+        }))
     }
 
     /// Select the required item at `index`, accounting for earlier edits.
@@ -320,10 +401,15 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn item(&mut self, index: usize) -> Result<Cursor<'_, 'doc>, Error> {
-        let syntax = self.context.with_path(self.syntax.get(index))?;
-        self.context
-            .child(format_args!("[{index}]"))
-            .select(syntax.ok_or_else(|| Error::new("item index out of bounds")))
+        let items = self.context.with_path(self.editor.item_ids(self.id))?;
+        let context = self.context.child(format_args!("[{index}]"));
+        let id = context.with_path(
+            items
+                .get(index)
+                .copied()
+                .ok_or_else(|| Error::new("item index out of bounds")),
+        )?;
+        Ok(context.cursor(self.editor, id))
     }
 
     /// Append a serialized value and return a cursor to the new item.
@@ -344,11 +430,13 @@ impl<'doc> SequenceMut<'_, 'doc> {
         index: usize,
         value: impl Serialize,
     ) -> Result<Cursor<'_, 'doc>, Error> {
-        let yaml = self.context.mutate(|| to_string(&value))?;
-        let syntax = self
-            .context
-            .mutate(|| self.syntax.insert_yaml(index, &yaml))?;
-        Ok(self.context.child(format_args!("[{index}]")).cursor(syntax))
+        let id = self.context.mutate(|| -> Result<_, Error> {
+            let yaml = to_string(&value)?;
+            Ok(self.editor.insert_item(self.id, index, &yaml)?)
+        })?;
+        self.state.len += 1;
+        let context = self.context.child(format_args!("[{index}]"));
+        Ok(context.cursor(self.editor, id))
     }
 
     /// Remove the item at `index`, including its comments. Later indices shift down.
@@ -356,22 +444,36 @@ impl<'doc> SequenceMut<'_, 'doc> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn remove(&mut self, index: usize) -> Result<(), Error> {
-        self.context.mutate(|| self.syntax.remove(index))
+        self.context
+            .mutate(|| self.editor.remove_item(self.id, index))?;
+        self.state.len -= 1;
+        Ok(())
     }
 }
 
 /// An occupied or vacant string-keyed mapping entry.
 #[derive(Debug)]
 pub struct Entry<'a, 'doc> {
-    syntax: syntax::Entry<'a, 'doc>,
+    editor: &'a mut syntax::Editor<'doc>,
+    state: EntryState<'a>,
     context: EditContext<'a>,
+}
+
+#[derive(Debug)]
+enum EntryState<'a> {
+    Occupied(NodeId),
+    Vacant {
+        mapping: NodeId,
+        name: String,
+        len: &'a mut usize,
+    },
 }
 
 impl<'a, 'doc> Entry<'a, 'doc> {
     /// Return whether the mapping already contains the entry.
     #[must_use]
     pub fn is_occupied(&self) -> bool {
-        self.syntax.is_occupied()
+        matches!(self.state, EntryState::Occupied(_))
     }
 
     /// Return the existing value, or insert a serialized default if absent.
@@ -379,12 +481,26 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
-    pub fn or_insert(mut self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
-        if self.is_occupied() {
-            return self.context.edit(|| self.syntax.or_insert_yaml(""));
-        }
-        let yaml = self.context.mutate(|| to_string(&value))?;
-        self.context.edit(|| self.syntax.or_insert_yaml(&yaml))
+    pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
+        self.or_insert_with(|| to_string(&value))
+    }
+
+    fn or_insert_with<S: AsRef<str>>(
+        mut self,
+        default: impl FnOnce() -> Result<S, Error>,
+    ) -> Result<Cursor<'a, 'doc>, Error> {
+        let id = self.context.mutate(|| -> Result<_, Error> {
+            match self.state {
+                EntryState::Occupied(id) => Ok(id),
+                EntryState::Vacant { mapping, name, len } => {
+                    let yaml = default()?;
+                    Ok(self
+                        .editor
+                        .append_string_entry(mapping, len, &name, yaml.as_ref())?)
+                }
+            }
+        })?;
+        Ok(self.context.cursor(self.editor, id))
     }
 
     /// Edit the entry's mapping, inserting an empty mapping only if the entry is absent.
@@ -392,9 +508,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
     pub fn or_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
-        self.context
-            .edit(|| self.syntax.or_insert_yaml("{}"))?
-            .into_mapping()
+        self.or_insert_with(|| Ok("{}"))?.into_mapping()
     }
 
     /// Edit the entry's sequence, inserting an empty sequence only if the entry is absent.
@@ -402,9 +516,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
     pub fn or_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
-        self.context
-            .edit(|| self.syntax.or_insert_yaml("[]"))?
-            .into_sequence()
+        self.or_insert_with(|| Ok("[]"))?.into_sequence()
     }
 }
 
@@ -421,7 +533,7 @@ impl<State> Cursor<'_, '_, State> {
     /// was removed, or a resource limit is exceeded.
     pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
         self.context
-            .with_path(crate::de::from_edit_value(self.syntax.value()))
+            .with_path(crate::de::from_edit_value(self.editor.value(self.id)))
     }
 
     /// Return the selected node, including pending edits.
@@ -430,7 +542,7 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if an editing limit is exceeded.
     pub fn node(&self) -> Result<&Node<Option<Span>>, Error> {
-        self.context.with_path(self.syntax.node())
+        self.context.with_path(self.editor.node(self.id))
     }
 
     /// Request block or flow style for this collection. Empty collections use flow style.
@@ -439,7 +551,7 @@ impl<State> Cursor<'_, '_, State> {
     /// Returns an error if the node is not a collection or an editing limit is exceeded.
     pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
         self.context
-            .mutate(|| self.syntax.set_collection_style(style))
+            .mutate(|| self.editor.set_collection_style(self.id, style))
     }
 
     /// Append a comment. `text` is everything after `#`, including any leading space.
@@ -448,8 +560,10 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if `text` contains a line break or an editing limit is exceeded.
     pub fn append_comment(&mut self, text: &str, placement: CommentPlacement) -> Result<(), Error> {
-        self.context
-            .mutate(|| self.syntax.append_comment(text, placement))
+        self.context.mutate(|| {
+            let index = self.editor.node(self.id)?.comments().len();
+            self.editor.insert_comment(self.id, index, text, placement)
+        })
     }
 
     /// Replace the comment at `index`, keeping its placement.
@@ -458,7 +572,7 @@ impl<State> Cursor<'_, '_, State> {
     /// Returns an error if `index` is out of bounds or `text` contains a line break.
     pub fn replace_comment(&mut self, index: usize, text: &str) -> Result<(), Error> {
         self.context
-            .mutate(|| self.syntax.replace_comment(index, text))
+            .mutate(|| self.editor.replace_comment(self.id, index, text))
     }
 
     /// Remove the comment at `index`.
@@ -466,27 +580,32 @@ impl<State> Cursor<'_, '_, State> {
     /// # Errors
     /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
     pub fn remove_comment(&mut self, index: usize) -> Result<(), Error> {
-        self.context.mutate(|| self.syntax.remove_comment(index))
+        self.context
+            .mutate(|| self.editor.remove_comment(self.id, index))
     }
 }
 
-impl<'a, 'doc, Kind> Cursor<'a, 'doc, syntax::Collection<Kind>> {
+impl<'a, 'doc, Kind> Cursor<'a, 'doc, Collection<Kind>> {
+    fn borrow_cursor(&mut self) -> Cursor<'_, 'doc> {
+        self.context.reborrow().cursor(self.editor, self.id)
+    }
+
     /// Return the number of entries or items, accounting for pending edits.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.syntax.len()
+        self.state.len
     }
 
     /// Return whether the collection is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.syntax.is_empty()
+        self.len() == 0
     }
 
     /// Return a cursor at this collection, allowing navigation or replacement.
     #[must_use]
     pub fn into_cursor(self) -> Cursor<'a, 'doc> {
-        self.context.cursor(self.syntax.into_cursor())
+        self.context.cursor(self.editor, self.id)
     }
 }
 
@@ -499,6 +618,15 @@ struct EditContext<'a> {
 }
 
 impl<'a> EditContext<'a> {
+    fn cursor<'doc>(self, editor: &'a mut syntax::Editor<'doc>, id: NodeId) -> Cursor<'a, 'doc> {
+        Cursor {
+            editor,
+            id,
+            state: (),
+            context: self,
+        }
+    }
+
     fn reborrow(&mut self) -> EditContext<'_> {
         EditContext {
             path: Cow::Borrowed(&self.path),
@@ -513,40 +641,6 @@ impl<'a> EditContext<'a> {
 
     fn child(&mut self, segment: fmt::Arguments<'_>) -> EditContext<'_> {
         self.reborrow().at(segment)
-    }
-
-    fn cursor<'doc, State>(
-        self,
-        syntax: syntax::Cursor<'a, 'doc, State>,
-    ) -> Cursor<'a, 'doc, State> {
-        Cursor {
-            syntax,
-            context: self,
-        }
-    }
-
-    fn select<'doc, State>(
-        self,
-        result: Result<syntax::Cursor<'a, 'doc, State>, impl Into<Error>>,
-    ) -> Result<Cursor<'a, 'doc, State>, Error> {
-        let syntax = self.with_path(result)?;
-        Ok(self.cursor(syntax))
-    }
-
-    fn optional<'doc>(
-        self,
-        result: Result<Option<syntax::Cursor<'a, 'doc>>, astral_yaml::Error>,
-    ) -> Result<Option<Cursor<'a, 'doc>>, Error> {
-        let syntax = self.with_path(result)?;
-        Ok(syntax.map(|syntax| self.cursor(syntax)))
-    }
-
-    fn edit<'doc>(
-        mut self,
-        operation: impl FnOnce() -> Result<syntax::Cursor<'a, 'doc>, astral_yaml::Error>,
-    ) -> Result<Cursor<'a, 'doc>, Error> {
-        let syntax = self.mutate(operation)?;
-        Ok(self.cursor(syntax))
     }
 
     fn with_path<T>(&self, result: Result<T, impl Into<Error>>) -> Result<T, Error> {

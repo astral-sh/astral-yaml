@@ -1058,7 +1058,6 @@ fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
                 0,
                 " added",
                 astral_yaml::comments::CommentPlacement::Trailing,
-                None,
             )
             .unwrap();
         outputs.push(render_draft(&original, candidate));
@@ -1134,7 +1133,6 @@ fn omitted_roots_own_their_line_when_comments_are_emitted() {
                 0,
                 " added",
                 astral_yaml::comments::CommentPlacement::Leading,
-                None,
             )
             .unwrap();
         outputs.push(render_draft(&original, candidate));
@@ -1174,7 +1172,6 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
                     candidate.node(inner).comments.len(),
                     " added",
                     placement,
-                    None,
                 )
                 .unwrap();
             diffs.push(astral_yaml_dev::edit_diff(

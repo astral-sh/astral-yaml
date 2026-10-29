@@ -119,14 +119,6 @@ struct Case {
     detached_prefix: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Edit {
-    Replace,
-    Reinsert,
-    ReinsertUnchanged,
-    Fragment,
-}
-
 impl Case {
     fn source(self, block: bool) -> String {
         let mut body = body(self.kind, self.properties, self.mask, self.leading, block);
@@ -193,72 +185,25 @@ impl Case {
             let witness = DocumentSyntax::parse(&self.source(true)).unwrap();
             assert_projection(&witness, &expected, &source);
         }
-        for edit in [
-            Edit::Replace,
-            Edit::Reinsert,
-            Edit::ReinsertUnchanged,
-            Edit::Fragment,
-        ] {
-            self.edit(&source, edit, block);
-        }
-    }
-
-    fn edit(self, source: &str, edit: Edit, block: bool) {
-        let mut document = DocumentSyntax::parse(source).unwrap();
+        let mut document = DocumentSyntax::parse(&source).unwrap();
         let mut expected = project(&document);
         let comments = &mut expected[self.slot.index()].comments;
-        match edit {
-            Edit::Fragment => comments.insert(
-                usize::from(self.leading) + usize::from(self.detached_prefix),
-                (" imported".to_owned(), CommentPlacement::Leading, None),
-            ),
-            Edit::ReinsertUnchanged => {}
-            _ => {
-                for (text, _, _) in comments {
-                    text.push_str(" edited");
-                }
-            }
+        for (text, _, _) in comments.iter_mut() {
+            text.push_str(" edited");
         }
         document
             .edit_syntax(|editor| {
-                let handles = super::handles(editor);
-                let owner = &handles[self.slot.index()];
-                if matches!(edit, Edit::Fragment) {
-                    let fragment = format!(
-                        "# imported\n{}",
-                        body(self.kind, self.properties, 0, false, false)
-                    );
-                    editor.replace_preserving_style(owner, &fragment)?;
-                } else {
-                    for (index, (text, placement, _)) in expected[self.slot.index()]
-                        .comments
-                        .iter()
-                        .enumerate()
-                        .rev()
-                    {
-                        if matches!(edit, Edit::Reinsert | Edit::ReinsertUnchanged) {
-                            let position = editor.comment_position(owner, index)?;
-                            editor.remove_comment(owner, index)?;
-                            editor.insert_comment_at(owner, index, text, *placement, position)?;
-                        } else {
-                            editor.replace_comment(owner, index, text)?;
-                        }
-                    }
+                let owner = super::node_order(editor)[self.slot.index()];
+                for (index, (text, _, _)) in comments.iter().enumerate() {
+                    editor.replace_comment(owner, index, text)?;
                 }
-                if block && !matches!(edit, Edit::ReinsertUnchanged) {
+                if block {
                     editor.set_collection_style(owner, CollectionStyle::Block)?;
                 }
                 Ok(())
             })
-            .unwrap_or_else(|error| panic!("{error}\n{source}\n{self:?} {edit:?} block={block}"));
-        assert_projection(&document, &expected, source);
-        if matches!(edit, Edit::ReinsertUnchanged) {
-            assert_eq!(
-                document.source(),
-                source,
-                "canceled reinsertion retains source"
-            );
-        }
+            .unwrap_or_else(|error| panic!("{error}\n{source}\n{self:?} block={block}"));
+        assert_projection(&document, &expected, &source);
     }
 }
 
@@ -314,8 +259,8 @@ fn a_nested_suffix_then_inline_comment_requires_a_closing_delimiter() {
             let mut document = DocumentSyntax::parse(&source).unwrap();
             let error = document
                 .edit_syntax(|editor| {
-                    let owner = super::handles(editor)[slot.index()].clone();
-                    editor.set_collection_style(&owner, CollectionStyle::Block)
+                    let owner = super::node_order(editor)[slot.index()];
+                    editor.set_collection_style(owner, CollectionStyle::Block)
                 })
                 .unwrap_err();
             assert_eq!(document.source(), source);

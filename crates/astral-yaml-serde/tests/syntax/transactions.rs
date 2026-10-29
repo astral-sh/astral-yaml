@@ -1,8 +1,9 @@
 //! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
+use astral_yaml::NodeId;
 use test_case::test_case;
 
 use super::support::{edit, edited, edits};
-use crate::syntax::{DocumentSyntax, Editor, Handle, NodeKind};
+use crate::syntax::{DocumentSyntax, Editor, NodeKind};
 use astral_yaml::{CollectionStyle, Error, ParseOptions, ScalarStyle, comments::CommentPlacement};
 use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
@@ -13,14 +14,13 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         items: []
     "};
     let document = edited(source, |editor| {
-        let entries = editor.mapping_entries(&editor.root())?;
-        let existing = &entries[0].1;
-        let items = &entries[1].1;
+        let entries = editor.mapping_entries(editor.root())?;
+        let existing = entries[0].1;
+        let items = entries[1].1;
         let empty_origin = editor.node(existing)?.span().unwrap();
         editor.replace(existing, "new")?;
-        editor.insert_item(items, 0, "'' # imported")?;
+        let item = editor.insert_item(items, 0, "''")?;
         editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
-        let item = &editor.sequence_items(items)?[0];
         editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
 
         let replacement = editor.node(existing)?;
@@ -46,10 +46,10 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
           |
         ");
         let item = editor.node(item)?;
-        let [inserted, imported] = item.comments() else {
-            panic!("expected inserted and imported comments");
+        let [inserted] = item.comments() else {
+            panic!("expected inserted comment");
         };
-        assert_eq!([item.span(), inserted.span(), imported.span()], [None; 3]);
+        assert_eq!([item.span(), inserted.span()], [None; 2]);
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
@@ -59,7 +59,7 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
     +existing: new # keep
     +items:
     +  # inserted
-    +  - '' # imported
+    +  - ''
     ");
 }
 
@@ -71,8 +71,8 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
         other:    'untouched'
     "};
     let mut document = edited(source, |editor| {
-        let entries = editor.mapping_entries(&editor.root())?;
-        editor.replace(&entries[0].1, "600")
+        let entries = editor.mapping_entries(editor.root())?;
+        editor.replace(entries[0].1, "600")
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     @@ -1,3 +1,3 @@
@@ -84,9 +84,9 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
     let before = document.to_yaml();
     document
         .edit_syntax(|editor| {
-            let entries = editor.mapping_entries(&editor.root())?;
-            editor.replace(&entries[0].1, "1000")?;
-            editor.replace(&entries[1].1, "'updated'")
+            let entries = editor.mapping_entries(editor.root())?;
+            editor.replace(entries[0].1, "1000")?;
+            editor.replace(entries[1].1, "'updated'")
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff(&before, document.source()), @"
@@ -108,12 +108,12 @@ fn structural_edits_preserve_comments_and_accept_complex_keys() {
     "};
     let diff = edit(source, |editor| {
         let root = editor.root();
-        let entries = editor.mapping_entries(&root)?;
-        editor.remove_entry(&root, 0)?;
-        editor.remove_item(&entries[1].1, 0)?;
-        editor.insert_item(&entries[1].1, 1, "4")?;
+        let entries = editor.mapping_entries(root)?;
+        editor.remove_entry(root, 0)?;
+        editor.remove_item(entries[1].1, 0)?;
+        editor.insert_item(entries[1].1, 1, "4")?;
         editor
-            .insert_entry(&root, 1, "[x, y]", "{enabled: true}")
+            .insert_entry(root, 1, "[x, y]", "{enabled: true}")
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
@@ -134,9 +134,9 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
         items: [1, 2]
     "};
     let diff = edit(source, |editor| {
-        let entries = editor.mapping_entries(&editor.root())?;
-        editor.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)?;
-        editor.set_collection_style(&entries[1].1, CollectionStyle::Block)
+        let entries = editor.mapping_entries(editor.root())?;
+        editor.set_scalar_style(entries[0].1, ScalarStyle::DoubleQuoted)?;
+        editor.set_collection_style(entries[1].1, CollectionStyle::Block)
     });
     insta::assert_snapshot!(diff, @r#"
     @@ -1,2 +1,4 @@
@@ -155,7 +155,7 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
         let mut document = DocumentSyntax::parse(source).unwrap();
         assert!(
             document
-                .edit_syntax(|e| e.set_scalar_style(&e.root(), style))
+                .edit_syntax(|e| e.set_scalar_style(e.root(), style))
                 .is_err()
         );
         assert_eq!(document.source(), source);
@@ -164,44 +164,11 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
     assert!(
         document
             .edit_syntax(|e| {
-                let item = e.sequence_items(&e.root())?.remove(0);
-                e.set_scalar_style(&item, ScalarStyle::Literal)
+                let item = e.sequence_items(e.root())?.remove(0);
+                e.set_scalar_style(item, ScalarStyle::Literal)
             })
             .is_err()
     );
-}
-
-#[test]
-fn edits_are_atomic_and_handles_expire() {
-    let mut document = DocumentSyntax::parse("[1, 2]").unwrap();
-    let stale = document.edit_syntax(|editor| Ok(editor.root())).unwrap();
-    assert!(
-        document
-            .edit_syntax(|editor| editor.insert_item(&stale, 0, "3"))
-            .is_err()
-    );
-    assert!(
-        document
-            .edit_syntax(|editor| {
-                let root = editor.root();
-                let first = editor.sequence_items(&root)?.remove(0);
-                editor.remove_item(&root, 0)?;
-                editor.replace(&first, "3")
-            })
-            .is_err()
-    );
-    assert!(
-        document
-            .edit_syntax(|editor| {
-                let root = editor.root();
-                editor.insert_item(&root, 0, "3")?;
-                let error = editor.remove_item(&root, 20).unwrap_err();
-                assert_eq!(editor.insert_item(&root, 0, "1").unwrap_err(), error);
-                Ok(())
-            })
-            .is_err()
-    );
-    assert_eq!(document.source(), "[1, 2]");
 }
 
 #[test]
@@ -210,32 +177,21 @@ fn aliases_cannot_be_dangled_or_silently_rebound() {
         let mut document = DocumentSyntax::parse(source).unwrap();
         assert!(
             document
-                .edit_syntax(|e| e.remove_item(&e.root(), index))
+                .edit_syntax(|e| e.remove_item(e.root(), index))
                 .is_err()
         );
         assert_eq!(document.source(), source);
     }
     let source = "[&a 1, *a]";
-    let mut document = edited(source, |e| {
-        let first = e.sequence_items(&e.root())?.remove(0);
-        e.replace(&first, "&a 2")
+    let document = edited(source, |e| {
+        let first = e.sequence_items(e.root())?.remove(0);
+        e.replace(first, "2")
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
     @@ -1 +1 @@
     -[&a 1, *a]
     \ No newline at end of file
     +[&a 2, *a]
-    \ No newline at end of file
-    ");
-    let before = document.to_yaml();
-    document
-        .edit_syntax(|e| e.insert_item(&e.root(), 2, "&b [*b]"))
-        .unwrap();
-    insta::assert_snapshot!(edit_diff(&before, document.source()), @r"
-    @@ -1 +1 @@
-    -[&a 2, *a]
-    \ No newline at end of file
-    +[&a 2, *a, &b [*b]]
     \ No newline at end of file
     ");
 }
@@ -249,8 +205,8 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
     "};
     let document = edited(source, |e| {
         let root = e.root();
-        e.replace_comment(&root, 0, " updated")?;
-        e.remove_comment(&root, 1)
+        e.replace_comment(root, 0, " updated")?;
+        e.remove_comment(root, 1)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     @@ -1,3 +1,3 @@
@@ -265,9 +221,9 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
         b: 2
     "};
     let document = edited(source, |e| {
-        let entries = e.mapping_entries(&e.root())?;
-        e.insert_comment(&entries[0].1, 0, " first", CommentPlacement::Leading)?;
-        e.insert_comment(&entries[1].1, 0, " second", CommentPlacement::Inline)
+        let entries = e.mapping_entries(e.root())?;
+        e.insert_comment(entries[0].1, 0, " first", CommentPlacement::Leading)?;
+        e.insert_comment(entries[1].1, 0, " second", CommentPlacement::Inline)
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     @@ -1,2 +1,3 @@
@@ -296,24 +252,24 @@ fn comment_edits_keep_document_markers_and_source_outside_the_node() {
 #[test_case("42", |e, h| e.remove_comment(h, 0); "remove absent comment")]
 #[test_case("value: 42 # old", |e, h| {
     let value = e.mapping_entries(h)?.remove(0).1;
-    e.insert_comment(&value, 0, " note", CommentPlacement::Inline)
+    e.insert_comment(value, 0, " note", CommentPlacement::Inline)
 }; "insert excess inline comment")]
 #[test_case("42", |e, h| e.insert_comment(h, 0, "bad\ncomment", CommentPlacement::Leading); "insert multiline comment")]
 #[test_case("42", |e, h| {
     e.replace(h, "[1]")?;
     let old = e.sequence_items(h)?.remove(0);
     e.replace(h, "[2]")?;
-    e.replace(&old, "3")
+    e.replace(old, "3")
 }; "replace child of replaced node")]
 #[test_case("42", |e, h| e.mapping_entries(h).map(|_| ()); "read mapping entries from scalar")]
 #[test_case("42", |e, h| e.sequence_items(h).map(|_| ()); "read sequence items from scalar")]
 fn invalid_operations_roll_back(
     source: &str,
-    operation: fn(&mut Editor<'_>, &Handle) -> Result<(), Error>,
+    operation: fn(&mut Editor<'_>, NodeId) -> Result<(), Error>,
 ) {
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
-        .edit_syntax(|editor| operation(editor, &editor.root()))
+        .edit_syntax(|editor| operation(editor, editor.root()))
         .unwrap_err();
     assert_eq!(document.source(), source);
 }
@@ -336,8 +292,8 @@ fn local_collection_edits_leave_siblings_untouched() {
             "},
         ],
         |e| {
-            let entries = e.mapping_entries(&e.root())?;
-            e.insert_item(&entries[1].1, 2, "3").map(|_| ())
+            let entries = e.mapping_entries(e.root())?;
+            e.insert_item(entries[1].1, 2, "3").map(|_| ())
         },
     );
     insta::assert_snapshot!(diffs, @"
@@ -359,8 +315,8 @@ fn local_collection_edits_leave_siblings_untouched() {
           b: 2
     "};
     let diff = edit(source, |e| {
-        let item = e.sequence_items(&e.root())?.remove(0);
-        e.insert_entry(&item, 2, "c", "3").map(|_| ())
+        let item = e.sequence_items(e.root())?.remove(0);
+        e.insert_entry(item, 2, "c", "3").map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,4 @@
@@ -378,11 +334,11 @@ fn inserted_nodes_can_be_edited() {
     document
         .edit_syntax(|e| {
             let root = e.root();
-            e.insert_item(&root, 0, "{a: 1}")?;
-            let item = e.sequence_items(&root)?.remove(0);
-            e.insert_entry(&item, 1, "b", "2")?;
-            let entries = e.mapping_entries(&item)?;
-            e.replace(&entries[0].1, "3")
+            e.insert_item(root, 0, "{a: 1}")?;
+            let item = e.sequence_items(root)?.remove(0);
+            e.insert_entry(item, 1, "b", "2")?;
+            let entries = e.mapping_entries(item)?;
+            e.replace(entries[0].1, "3")
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff("[]", document.source()), @r"
@@ -400,7 +356,7 @@ fn inserted_nodes_can_be_edited() {
 #[test_case(ScalarStyle::Literal, "|3-\n  hello\n"; "literal")]
 #[test_case(ScalarStyle::Folded, ">3-\n  hello\n"; "folded")]
 fn scalar_styles_can_be_changed(style: ScalarStyle, expected: &str) {
-    let document = edited("'hello'", |e| e.set_scalar_style(&e.root(), style));
+    let document = edited("'hello'", |e| e.set_scalar_style(e.root(), style));
     assert_eq!(document.source(), expected);
 }
 
@@ -410,7 +366,7 @@ fn empty_collections_remain_in_flow_style(source: &str) {
     use astral_yaml::CollectionStyle;
 
     let document = edited(source, |e| {
-        e.set_collection_style(&e.root(), CollectionStyle::Block)
+        e.set_collection_style(e.root(), CollectionStyle::Block)
     });
     assert_eq!(document.source(), source);
 }
@@ -425,8 +381,8 @@ fn scalar_style_changes_retain_header_comments() {
         other: true
     "};
     let diff = edit(source, |e| {
-        let entries = e.mapping_entries(&e.root())?;
-        e.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)
+        let entries = e.mapping_entries(e.root())?;
+        e.set_scalar_style(entries[0].1, ScalarStyle::DoubleQuoted)
     });
     insta::assert_snapshot!(diff, @r#"
     @@ -1,3 +1,2 @@
@@ -449,7 +405,7 @@ fn small_resource_limits_are_rejected() {
     .unwrap();
     assert!(
         document
-            .edit_syntax(|e| e.insert_item(&e.root(), 0, "1"))
+            .edit_syntax(|e| e.insert_item(e.root(), 0, "1"))
             .is_err()
     );
     let mut document = DocumentSyntax::parse_with_options(
@@ -462,7 +418,7 @@ fn small_resource_limits_are_rejected() {
     .unwrap();
     assert!(
         document
-            .edit_syntax(|e| e.insert_item(&e.root(), 0, "1"))
+            .edit_syntax(|e| e.insert_item(e.root(), 0, "1"))
             .is_err()
     );
     for comment in [false, true] {
@@ -478,9 +434,9 @@ fn small_resource_limits_are_rejected() {
             document
                 .edit_syntax(|e| {
                     if comment {
-                        e.insert_comment(&e.root(), 0, "long", CommentPlacement::Leading)
+                        e.insert_comment(e.root(), 0, "long", CommentPlacement::Leading)
                     } else {
-                        e.replace(&e.root(), "long")
+                        e.replace(e.root(), "long")
                     }
                 })
                 .is_err()
@@ -489,17 +445,17 @@ fn small_resource_limits_are_rejected() {
 }
 
 #[test]
-fn fragment_comments_and_nested_comment_updates_are_retained() {
+fn nested_comment_updates_are_retained() {
     let source = indoc! {r"
         a: 1 # old
         b: 2 # remove
     "};
     let diff = edit(source, |e| {
-        let entries = e.mapping_entries(&e.root())?;
-        e.replace_comment(&entries[0].1, 0, " new")?;
-        e.remove_comment(&entries[1].1, 0)?;
-        e.insert_entry(&e.root(), 2, "c", "3 # imported")
-            .map(|_| ())
+        let entries = e.mapping_entries(e.root())?;
+        e.replace_comment(entries[0].1, 0, " new")?;
+        e.remove_comment(entries[1].1, 0)?;
+        let (_, value) = e.insert_entry(e.root(), 2, "c", "3")?;
+        e.insert_comment(value, 0, " added", CommentPlacement::Inline)
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,3 @@
@@ -507,16 +463,16 @@ fn fragment_comments_and_nested_comment_updates_are_retained() {
     -b: 2 # remove
     +a: 1 # new
     +b: 2
-    +c: 3 # imported
+    +c: 3 # added
     ");
     let source = indoc! {r"
         --- # marker
         a: 1
     "};
     let diff = edit(source, |e| {
-        e.replace_comment(&e.root(), 0, " updated")?;
-        let entries = e.mapping_entries(&e.root())?;
-        e.replace(&entries[0].1, "2")
+        e.replace_comment(e.root(), 0, " updated")?;
+        let entries = e.mapping_entries(e.root())?;
+        e.replace(entries[0].1, "2")
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,2 @@
@@ -536,7 +492,7 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     "})
     .unwrap();
     document
-        .edit_syntax(|e| e.replace(&e.root(), "'updated'"))
+        .edit_syntax(|e| e.replace(e.root(), "'updated'"))
         .unwrap();
     insta::assert_snapshot!(edit_diff(indoc! {r"
         |
@@ -550,8 +506,8 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     let mut document = DocumentSyntax::parse("{a: text}").unwrap();
     document
         .edit_syntax(|e| {
-            let entries = e.mapping_entries(&e.root())?;
-            e.set_scalar_style(&entries[0].1, ScalarStyle::DoubleQuoted)
+            let entries = e.mapping_entries(e.root())?;
+            e.set_scalar_style(entries[0].1, ScalarStyle::DoubleQuoted)
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff("{a: text}", document.source()), @r#"
@@ -565,9 +521,9 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     document
         .edit_syntax(|e| {
             let root = e.root();
-            let item = e.sequence_items(&root)?.remove(0);
-            e.set_scalar_style(&item, ScalarStyle::SingleQuoted)?;
-            e.remove_item(&root, 0)
+            let item = e.sequence_items(root)?.remove(0);
+            e.set_scalar_style(item, ScalarStyle::SingleQuoted)?;
+            e.remove_item(root, 0)
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff("[one]", document.source()), @r"
@@ -581,8 +537,8 @@ fn changes_preserve_terminators_and_discard_removed_style_requests() {
     assert!(
         document
             .edit_syntax(|e| {
-                let item = e.sequence_items(&e.root())?.remove(0);
-                e.set_collection_style(&item, CollectionStyle::Block)
+                let item = e.sequence_items(e.root())?.remove(0);
+                e.set_collection_style(item, CollectionStyle::Block)
             })
             .is_err()
     );
@@ -598,8 +554,8 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
     assert!(
         document
             .edit_syntax(|e| {
-                let entries = e.mapping_entries(&e.root())?;
-                e.insert_comment(&entries[0].1, 0, " trailing", CommentPlacement::Trailing)
+                let entries = e.mapping_entries(e.root())?;
+                e.insert_comment(entries[0].1, 0, " trailing", CommentPlacement::Trailing)
             })
             .is_err()
     );
@@ -615,8 +571,8 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
     assert!(
         document
             .edit_syntax(|e| {
-                let items = e.sequence_items(&e.root())?;
-                e.replace(&items[1], "12345")
+                let items = e.sequence_items(e.root())?;
+                e.replace(items[1], "12345")
             })
             .is_err()
     );
@@ -637,8 +593,8 @@ fn repeated_navigation_is_bounded() {
         document
             .edit_syntax(|e| {
                 let root = e.root();
-                e.node(&root)?;
-                e.node(&root)?;
+                e.node(root)?;
+                e.node(root)?;
                 Ok(())
             })
             .is_err()
@@ -692,45 +648,38 @@ fn repeated_navigation_is_bounded() {
 fn replacing_implicit_nulls_adds_required_separation(source: &str) -> String {
     edit(source, |e| {
         let root = e.root();
-        let target = match e.node(&root)?.kind() {
-            NodeKind::Mapping { .. } => e.mapping_entries(&root)?.remove(0).1,
-            NodeKind::Sequence { .. } => e.sequence_items(&root)?.remove(0),
+        let target = match e.node(root)?.kind() {
+            NodeKind::Mapping { .. } => e.mapping_entries(root)?.remove(0).1,
+            NodeKind::Sequence { .. } => e.sequence_items(root)?.remove(0),
             _ => root,
         };
-        e.replace(&target, "42")
+        e.replace(target, "42")
     })
 }
 
 #[test]
-fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
+fn transactions_keep_lf_source_for_noops_and_rollback() {
     let source = indoc! {r"
         # retained
         key: old # inline
         other: retained
     "};
-    let fragment = indoc! {r"
-        |-
-          first
-          second
-    "};
-    let mut document = DocumentSyntax::parse(&source.replace('\n', "\r\n")).unwrap();
-    document.edit_syntax(|_| Ok(())).unwrap();
-    assert_eq!(document.to_yaml(), source);
+    let mut document = crate::EditableYaml::parse(&source.replace('\n', "\r\n")).unwrap();
+    document.edit(|_| Ok(())).unwrap();
+    assert_eq!(document.source(), source);
 
-    let result = document.edit_syntax(|editor| {
-        let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-        editor.replace(&value, &fragment.replace('\n', "\r"))?;
-        editor.replace(&editor.root(), "[")
+    let update = |mut value: crate::edit::Cursor<'_, '_>| {
+        value.set("first\nsecond")?;
+        value.set_scalar_style(ScalarStyle::Literal)
+    };
+    let result = document.edit(|mut root| {
+        update(root.reborrow().field("key")?)?;
+        root.set_scalar_style(ScalarStyle::Plain)
     });
     assert!(result.is_err());
     assert_eq!(document.source(), source);
 
-    document
-        .edit_syntax(|editor| {
-            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-            editor.replace(&value, &fragment.replace('\n', "\r"))
-        })
-        .unwrap();
+    document.edit_at(["key"], update).unwrap();
     insta::assert_snapshot!(edit_diff(source, document.source()), @"
     @@ -1,3 +1,5 @@
      # retained
@@ -739,51 +688,6 @@ fn transactions_keep_lf_source_for_noops_fragments_and_rollback() {
     +  first
     +  second
      other: retained
-    ");
-}
-
-#[test]
-fn replacement_handles_survive_composed_structural_edits() {
-    use astral_yaml::{CollectionStyle, ScalarStyle};
-
-    let source = indoc! {r"
-        selected: [old, removed] # keep
-        retained: untouched
-    "};
-    let diff = edit(source, |editor| {
-        let selected = editor.mapping_entries(&editor.root())?[0].1.clone();
-        let old_children = editor.sequence_items(&selected)?;
-        for child in &old_children {
-            editor.set_scalar_style(child, ScalarStyle::SingleQuoted)?;
-        }
-        editor.replace(
-            &selected,
-            "&root {first: [&leaf value, *leaf], self: *root}",
-        )?;
-        let first = editor.mapping_entries(&selected)?[0].1.clone();
-        let leaf = editor.sequence_items(&first)?[0].clone();
-        editor.replace(&leaf, "&leaf {nested: value}")?;
-        editor.set_collection_style(&first, CollectionStyle::Block)?;
-        editor.remove_entry(&selected, 0)?;
-        editor.insert_entry(&selected, 1, "tail", "&tail [*tail]")?;
-        let tail = editor.mapping_entries(&selected)?[1].1.clone();
-        editor.insert_item(&tail, 1, "temporary")?;
-        let temporary = editor.sequence_items(&tail)?[1].clone();
-        editor.remove_item(&tail, 1)?;
-        editor.set_collection_style(&tail, CollectionStyle::Flow)?;
-        for removed in old_children.into_iter().chain([first, leaf, temporary]) {
-            assert!(
-                editor.node(&removed).is_err(),
-                "a retired handle cannot revive"
-            );
-        }
-        Ok(())
-    });
-    insta::assert_snapshot!(diff, @"
-    @@ -1,2 +1,2 @@
-    -selected: [old, removed] # keep
-    +selected: &root {self: *root, tail: &tail [*tail]} # keep
-     retained: untouched
     ");
 }
 
@@ -798,18 +702,18 @@ fn canceled_edits_do_not_expand_the_final_rewrite() {
     let mut diffs = Vec::new();
     for replacement in [None, Some("new")] {
         let document = edited(source, |editor| {
-            let value = editor.mapping_entries(&editor.root())?[0].1.clone();
-            editor.set_scalar_style(&value, ScalarStyle::Literal)?;
-            editor.set_scalar_style(&value, ScalarStyle::Plain)?;
-            editor.insert_comment(&value, 0, "temporary", CommentPlacement::Leading)?;
-            editor.remove_comment(&value, 0)?;
-            let items = editor.mapping_entries(&editor.root())?[1].1.clone();
-            editor.insert_item(&items, 1, "temporary")?;
-            editor.remove_item(&items, 1)?;
-            editor.set_collection_style(&items, astral_yaml::CollectionStyle::Block)?;
-            editor.set_collection_style(&items, astral_yaml::CollectionStyle::Flow)?;
+            let value = editor.mapping_entries(editor.root())?[0].1;
+            editor.set_scalar_style(value, ScalarStyle::Literal)?;
+            editor.set_scalar_style(value, ScalarStyle::Plain)?;
+            editor.insert_comment(value, 0, "temporary", CommentPlacement::Leading)?;
+            editor.remove_comment(value, 0)?;
+            let items = editor.mapping_entries(editor.root())?[1].1;
+            editor.insert_item(items, 1, "temporary")?;
+            editor.remove_item(items, 1)?;
+            editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
+            editor.set_collection_style(items, astral_yaml::CollectionStyle::Flow)?;
             if let Some(replacement) = replacement {
-                editor.replace(&value, replacement)?;
+                editor.replace(value, replacement)?;
             }
             Ok(())
         });

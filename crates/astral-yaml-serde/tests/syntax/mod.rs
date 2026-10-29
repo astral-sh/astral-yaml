@@ -1,10 +1,7 @@
-mod aliases;
 mod boundaries;
 mod collection_headers;
 mod collection_suffixes;
 mod comment_boundaries;
-mod comment_merge;
-mod comment_positions;
 mod comments;
 mod composition;
 mod corpus;

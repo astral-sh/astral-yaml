@@ -53,15 +53,12 @@ impl Changes {
                 continue;
             }
             let new = &syntax.nodes[index];
-            let content = old.kind != new.kind || old.anchor != new.anchor || old.tag != new.tag;
+            let content = old.kind != new.kind || old.tag != new.tag;
             let comments = !same_comments(&old.comments, &new.comments);
             let resolved = original_layout.flow(id) != layout.flow(id)
                 || match (&old.kind, &new.kind) {
                     (NodeKind::Scalar { style: old, .. }, NodeKind::Scalar { style: new, .. }) => {
                         original_layout.scalar_style(id, *old) != layout.scalar_style(id, *new)
-                    }
-                    (NodeKind::Alias { target: old }, NodeKind::Alias { target: new }) => {
-                        original.nodes[old.index()].anchor != syntax.nodes[new.index()].anchor
                     }
                     _ => false,
                 };

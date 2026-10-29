@@ -36,14 +36,14 @@ fn a_rendering_copy_cannot_redefine_the_committed_edit() {
     "};
     let document = DocumentSyntax::parse(source).unwrap();
     let mut editor = Editor::new(&document);
-    let value = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
-    editor.replace(&value, "requested").unwrap();
+    let value = editor.mapping_entries(editor.root()).unwrap()[0].1;
+    editor.replace(value, "requested").unwrap();
 
     // A broken planning or rendering pass must not change the draft against
     // which commit is checked. Deliberately corrupt only the rendering copy.
     let candidate = editor.draft.freeze().unwrap();
     let mut planned = Syntax::from(&candidate).nodes.to_vec();
-    planned[value.id.index()].kind = NodeKind::Scalar {
+    planned[value.index()].kind = NodeKind::Scalar {
         value: "incorrect".to_owned(),
         style: ScalarStyle::Plain,
     };
@@ -90,8 +90,8 @@ fn overlapping_rewrite_regions_expand_to_their_common_ancestor() {
     // ranges expanded by trivia ownership, before slicing the original source.
     document.source.nodes[first.index()].span = Span::new(2, 10).unwrap();
     let mut editor = Editor::new(&document);
-    editor.replace(&editor.handle(first), "new_a").unwrap();
-    editor.replace(&editor.handle(last), "new_c").unwrap();
+    editor.replace(first, "new_a").unwrap();
+    editor.replace(last, "new_c").unwrap();
     let candidate = editor.draft.freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source = &document.source;
@@ -148,8 +148,8 @@ fn inserting_outer_comments_obeys_the_output_limit() {
     let mut document = DocumentSyntax::parse_with_options(source, options).unwrap();
     let error = document
         .edit(|mut root| {
-            for index in 0..3 {
-                root.insert_comment(index, " new", CommentPlacement::Leading)?;
+            for _ in 0..3 {
+                root.append_comment(" new", CommentPlacement::Leading)?;
             }
             Ok(())
         })
@@ -240,11 +240,11 @@ fn collection_rewrites_include_their_comment_context() {
         let mut document = DocumentSyntax::parse(source).unwrap();
         document
             .edit_syntax(|editor| {
-                let target = editor.mapping_entries(&editor.root())?[0].1.clone();
-                editor.set_collection_style(&target, CollectionStyle::Flow)?;
-                match editor.node(&target)?.kind() {
-                    NodeKind::Sequence { .. } => editor.insert_item(&target, 1, "new").map(|_| ()),
-                    _ => editor.insert_entry(&target, 1, "added", "new").map(|_| ()),
+                let target = editor.mapping_entries(editor.root())?[0].1;
+                editor.set_collection_style(target, CollectionStyle::Flow)?;
+                match editor.node(target)?.kind() {
+                    NodeKind::Sequence { .. } => editor.insert_item(target, 1, "new").map(|_| ()),
+                    _ => editor.insert_entry(target, 1, "added", "new").map(|_| ()),
                 }
             })
             .unwrap();
@@ -303,11 +303,11 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
     "})
     .unwrap();
     let mut editor = Editor::new(&document);
-    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
-    let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
+    let inner = editor.mapping_entries(editor.root()).unwrap()[0].1;
+    let value = editor.mapping_entries(inner).unwrap()[0].1;
     editor
         .replace(
-            &value,
+            value,
             indoc! {r"
                 |+
                   new
@@ -351,16 +351,16 @@ fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
     ] {
         let document = DocumentSyntax::parse(source).unwrap();
         let mut editor = Editor::new(&document);
-        let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
-        let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
+        let inner = editor.mapping_entries(editor.root()).unwrap()[0].1;
+        let value = editor.mapping_entries(inner).unwrap()[0].1;
         let multiline_before =
-            Layout::new(&document.source).multiline(value.id, editor.node(&value).unwrap().kind());
+            Layout::new(&document.source).multiline(value, editor.node(value).unwrap().kind());
         editor
-            .insert_comment(&inner, 0, " detached", CommentPlacement::Detached)
+            .insert_comment(inner, 0, " detached", CommentPlacement::Detached)
             .unwrap();
         let candidate = editor.draft.clone().freeze().unwrap();
         let layout = Layout::new(&candidate);
-        let multiline_after = layout.multiline(value.id, editor.node(&value).unwrap().kind());
+        let multiline_after = layout.multiline(value, editor.node(value).unwrap().kind());
         let edited = editor.finish().unwrap();
         results.push(format!(
             "Scalar multiline: {multiline_before} -> {multiline_after}\n{}",
@@ -400,9 +400,9 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
     "})
     .unwrap();
     let mut editor = Editor::new(&document);
-    let inner = editor.mapping_entries(&editor.root()).unwrap()[0].1.clone();
-    let value = editor.mapping_entries(&inner).unwrap()[0].1.clone();
-    editor.replace(&value, "new").unwrap();
+    let inner = editor.mapping_entries(editor.root()).unwrap()[0].1;
+    let value = editor.mapping_entries(inner).unwrap()[0].1;
+    editor.replace(value, "new").unwrap();
     let candidate = editor.draft.clone().freeze().unwrap();
     let syntax = Layout::new(&candidate);
     let source = &document.source;

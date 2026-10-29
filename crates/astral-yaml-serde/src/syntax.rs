@@ -15,10 +15,7 @@ mod tests;
 mod transaction;
 mod view;
 
-#[cfg(test)]
-pub(crate) use transaction::Handle;
-pub(crate) use transaction::{Collection, Mapping, Sequence};
-pub(crate) use transaction::{Cursor, Editor, Entry, ValueRef};
+pub(crate) use transaction::{Editor, ValueRef};
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -27,6 +24,21 @@ use astral_yaml::{
     CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
     comments::{CommentIndex, CommentPlacement},
 };
+
+/// The state of a selected collection.
+#[derive(Debug)]
+pub struct Collection<Kind> {
+    pub(crate) len: usize,
+    pub(crate) kind: std::marker::PhantomData<Kind>,
+}
+
+/// Mapping cursor state.
+#[derive(Debug)]
+pub enum Mapping {}
+
+/// Sequence cursor state.
+#[derive(Debug)]
+pub enum Sequence {}
 
 /// An owned YAML document, including its source and comments.
 ///
@@ -103,9 +115,8 @@ pub struct Comment<Location = Span> {
 /// these headers, but detached comments stay before their named child.
 ///
 /// [`Comment::position`] identifies children by [`NodeId`].
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CommentPosition<Child = NodeId> {
+pub enum CommentPosition {
     /// Before the node's properties and content.
     Before,
     /// Between the node's properties and its content.
@@ -113,25 +124,9 @@ pub enum CommentPosition<Child = NodeId> {
     /// An inline comment after a flow collection's opening delimiter.
     Opening,
     /// A collection-owned comment before an item or mapping key.
-    BeforeChild(Child),
+    BeforeChild(NodeId),
     /// After the node's content.
     After,
-}
-
-#[cfg(test)]
-impl<Child> CommentPosition<Child> {
-    fn try_map<T>(
-        self,
-        map: impl FnOnce(Child) -> Result<T, Error>,
-    ) -> Result<CommentPosition<T>, Error> {
-        Ok(match self {
-            Self::Before => CommentPosition::Before,
-            Self::Header => CommentPosition::Header,
-            Self::Opening => CommentPosition::Opening,
-            Self::BeforeChild(child) => CommentPosition::BeforeChild(map(child)?),
-            Self::After => CommentPosition::After,
-        })
-    }
 }
 
 impl CommentPosition {
@@ -199,6 +194,18 @@ fn charge_work(work: &Cell<usize>, amount: usize, span: Span) -> Result<(), Erro
     Ok(())
 }
 
+fn single_document<'a, 's>(
+    stream: &'a astral_yaml::Stream<'s>,
+) -> Result<&'a astral_yaml::Document<'s>, Error> {
+    match stream.documents() {
+        [document] => Ok(document),
+        _ => Err(Error {
+            span: stream.span(),
+            message: "expected exactly one document",
+        }),
+    }
+}
+
 impl DocumentSyntax {
     #[cfg(test)]
     pub(crate) fn parse(source: &str) -> Result<Self, Error> {
@@ -214,12 +221,7 @@ impl DocumentSyntax {
             lf_source(source)
         };
         let stream = astral_yaml::parse_with_options(&source, options)?;
-        let [document] = stream.documents() else {
-            return Err(Error {
-                span: stream.span(),
-                message: "expected exactly one document",
-            });
-        };
+        let document = single_document(&stream)?;
         let contents = source::contents(&source, stream.nodes());
         let comments = CommentIndex::new(&stream, 0)?;
         let root = document.root;

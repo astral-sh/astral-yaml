@@ -6,16 +6,16 @@ use super::support::{edit, edits};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use std::fmt::Write;
 
-use crate::syntax::{DocumentSyntax, Editor, Handle, NodeKind};
+use crate::syntax::{DocumentSyntax, Editor, NodeKind};
 use astral_yaml::{NodeId, ScalarStyle, comments::CommentPlacement};
 
-fn first_leaf(editor: &Editor<'_>) -> Handle {
-    let mut handle = editor.root();
+fn first_leaf(editor: &Editor<'_>) -> NodeId {
+    let mut id = editor.root();
     loop {
-        handle = match editor.node(&handle).unwrap().kind() {
-            NodeKind::Mapping { .. } => editor.mapping_entries(&handle).unwrap().remove(0).1,
-            NodeKind::Sequence { .. } => editor.sequence_items(&handle).unwrap().remove(0),
-            _ => return handle,
+        id = match editor.node(id).unwrap().kind() {
+            NodeKind::Mapping { .. } => editor.mapping_entries(id).unwrap().remove(0).1,
+            NodeKind::Sequence { .. } => editor.sequence_items(id).unwrap().remove(0),
+            _ => return id,
         };
     }
 }
@@ -68,7 +68,7 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
         ],
         |editor| {
             editor.replace(
-                &first_leaf(editor),
+                first_leaf(editor),
                 indoc! {r"
                     |+
                       new
@@ -151,7 +151,7 @@ fn explicit_block_style_requests_still_require_representable_separation() {
             "#};
             let mut document = DocumentSyntax::parse(&source).unwrap();
             let result =
-                document.edit_syntax(|editor| editor.set_scalar_style(&first_leaf(editor), style));
+                document.edit_syntax(|editor| editor.set_scalar_style(first_leaf(editor), style));
             outcomes.push(match result {
                 Ok(()) => edit_diff(&source, document.source()),
                 Err(error) => {
@@ -260,7 +260,7 @@ fn scalar_layouts_preserve_values_and_comment_owners_at_each_depth(depth: usize)
                     let mut document = DocumentSyntax::parse(&source).unwrap();
                     let expected_comments = comments(&document);
                     document
-                        .edit_syntax(|editor| editor.replace(&first_leaf(editor), fragment))
+                        .edit_syntax(|editor| editor.replace(first_leaf(editor), fragment))
                         .unwrap_or_else(|error| panic!("{source:?}, {fragment:?}: {error}"));
                     assert_eq!(comments(&document), expected_comments);
                     let mut id = document.root();
@@ -315,11 +315,11 @@ impl Operation {
 
     fn apply(self, editor: &mut Editor<'_>) -> Result<(), astral_yaml::Error> {
         let root = editor.root();
-        let inner = editor.mapping_entries(&root)?[0].1.clone();
-        let entries = editor.mapping_entries(&inner)?;
+        let inner = editor.mapping_entries(root)?[0].1;
+        let entries = editor.mapping_entries(inner)?;
         match self {
             Self::Scalar => editor.replace(
-                &entries[0].1,
+                entries[0].1,
                 indoc! {r"
                     |+
                       new
@@ -327,14 +327,14 @@ impl Operation {
                 "},
             ),
             Self::Sequence => editor.replace(
-                &entries[0].1,
+                entries[0].1,
                 indoc! {r"
                     - |+
                         new
 
                 "},
             ),
-            Self::Plain => editor.replace(&entries[0].1, "old"),
+            Self::Plain => editor.replace(entries[0].1, "old"),
             Self::RootComment | Self::InnerComment => {
                 let owner = if matches!(self, Self::RootComment) {
                     root
@@ -342,8 +342,8 @@ impl Operation {
                     inner
                 };
                 editor.insert_comment(
-                    &owner,
-                    editor.node(&owner)?.comments().len(),
+                    owner,
+                    editor.node(owner)?.comments().len(),
                     " added",
                     CommentPlacement::Detached,
                 )
@@ -354,20 +354,20 @@ impl Operation {
                 } else {
                     inner
                 };
-                if editor.node(&owner)?.comments().is_empty() {
+                if editor.node(owner)?.comments().is_empty() {
                     Ok(())
                 } else {
-                    editor.remove_comment(&owner, 0)
+                    editor.remove_comment(owner, 0)
                 }
             }
             Self::AddSibling => editor
-                .insert_entry(&inner, entries.len(), "next", "sibling")
+                .insert_entry(inner, entries.len(), "next", "sibling")
                 .map(|_| ()),
             Self::RemoveSibling if entries.len() > 1 => {
-                editor.remove_entry(&inner, entries.len() - 1)
+                editor.remove_entry(inner, entries.len() - 1)
             }
-            Self::Flow => editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Flow),
-            Self::Block => editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block),
+            Self::Flow => editor.set_collection_style(inner, astral_yaml::CollectionStyle::Flow),
+            Self::Block => editor.set_collection_style(inner, astral_yaml::CollectionStyle::Block),
             Self::RemoveSibling => Ok(()),
         }
     }
@@ -615,9 +615,9 @@ fn nested_detached_comments_keep_enclosing_trailing_attachments() {
         diffs.push(edit(source, |editor| {
             let mut owner = editor.root();
             for _ in 0..depth {
-                owner = editor.mapping_entries(&owner)?[0].1.clone();
+                owner = editor.mapping_entries(owner)?[0].1;
             }
-            editor.insert_comment(&owner, 0, " detached", CommentPlacement::Detached)
+            editor.insert_comment(owner, 0, " detached", CommentPlacement::Detached)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
@@ -680,9 +680,9 @@ fn required_collection_boundaries_do_not_override_explicit_styles() {
         let mut document = DocumentSyntax::parse(source).unwrap();
         let error = document
             .edit_syntax(|editor| {
-                let inner = editor.mapping_entries(&editor.root())?[0].1.clone();
-                editor.insert_comment(&inner, index, " added", placement)?;
-                editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)
+                let inner = editor.mapping_entries(editor.root())?[0].1;
+                editor.insert_comment(inner, index, " added", placement)?;
+                editor.set_collection_style(inner, astral_yaml::CollectionStyle::Block)
             })
             .unwrap_err();
         assert_eq!(document.source(), source);
@@ -701,9 +701,9 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
 
     "};
     let diff = edit(source, |editor| {
-        editor.remove_comment(&editor.root(), 0)?;
+        editor.remove_comment(editor.root(), 0)?;
         editor.replace(
-            &first_leaf(editor),
+            first_leaf(editor),
             indoc! {r"
                 |+
                   new
@@ -751,19 +751,17 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
         document
             .edit_syntax(|editor| {
                 let mut pending = vec![editor.root()];
-                while let Some(handle) = pending.pop() {
-                    match editor.node(&handle)?.kind() {
+                while let Some(id) = pending.pop() {
+                    match editor.node(id)?.kind() {
                         NodeKind::Mapping { .. } => {
-                            pending.extend(
-                                editor.mapping_entries(&handle)?.into_iter().map(|(_, v)| v),
-                            );
+                            pending.extend(editor.mapping_entries(id)?.into_iter().map(|(_, v)| v));
                         }
                         NodeKind::Sequence { .. } => {
-                            pending.extend(editor.sequence_items(&handle)?);
+                            pending.extend(editor.sequence_items(id)?);
                         }
                         _ => continue,
                     }
-                    editor.set_collection_style(&handle, astral_yaml::CollectionStyle::Block)?;
+                    editor.set_collection_style(id, astral_yaml::CollectionStyle::Block)?;
                 }
                 Ok(())
             })
@@ -836,13 +834,13 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     ] {
         diffs.push(edit(source, |editor| {
             let root = editor.root();
-            let inner = editor.mapping_entries(&root)?[0].1.clone();
-            let leaf = editor.mapping_entries(&inner)?[0].1.clone();
-            editor.remove_comment(&root, editor.node(&root)?.comments().len() - 1)?;
-            editor.set_collection_style(&root, astral_yaml::CollectionStyle::Block)?;
-            editor.set_collection_style(&inner, astral_yaml::CollectionStyle::Block)?;
+            let inner = editor.mapping_entries(root)?[0].1;
+            let leaf = editor.mapping_entries(inner)?[0].1;
+            editor.remove_comment(root, editor.node(root)?.comments().len() - 1)?;
+            editor.set_collection_style(root, astral_yaml::CollectionStyle::Block)?;
+            editor.set_collection_style(inner, astral_yaml::CollectionStyle::Block)?;
             editor.replace(
-                &leaf,
+                leaf,
                 indoc! {r"
                     |+
                       new
@@ -940,9 +938,9 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
         ],
         |editor| {
             let root = editor.root();
-            editor.remove_comment(&root, 0)?;
+            editor.remove_comment(root, 0)?;
             editor.replace(
-                &first_leaf(editor),
+                first_leaf(editor),
                 indoc! {r"
                     |+
                       new
@@ -1046,20 +1044,20 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
         ],
         |editor| {
             let root = editor.root();
-            editor.remove_comment(&root, 1)?;
-            let mut node = root.clone();
+            editor.remove_comment(root, 1)?;
+            let mut node = root;
             loop {
-                node = match editor.node(&node)?.kind() {
-                    NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
-                    NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
+                node = match editor.node(node)?.kind() {
+                    NodeKind::Mapping { .. } => editor.mapping_entries(node)?[0].1,
+                    NodeKind::Sequence { .. } => editor.sequence_items(node)?[0],
                     _ => break,
                 };
-                while !editor.node(&node)?.comments().is_empty() {
-                    editor.remove_comment(&node, 0)?;
+                while !editor.node(node)?.comments().is_empty() {
+                    editor.remove_comment(node, 0)?;
                 }
             }
             editor.replace(
-                &node,
+                node,
                 indoc! {r"
                     |+
                       new

@@ -67,7 +67,7 @@ fn root_edits_create_missing_document_boundaries() {
         ),
         (
             indoc! {r"
-                &a # property
+                !a # property
                 [ # open
                   old
                 ] # close
@@ -79,7 +79,7 @@ fn root_edits_create_missing_document_boundaries() {
         ),
         (
             indoc! {r"
-                &a # property
+                !a # property
                 [ # open
                   old
                 ] # close
@@ -99,7 +99,7 @@ fn root_edits_create_missing_document_boundaries() {
     let mut diffs = Vec::new();
     for (source, fragment) in cases {
         diffs.push(edit(source, |editor| {
-            editor.replace(&editor.root(), fragment)
+            editor.replace(editor.root(), fragment)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r"
@@ -141,7 +141,7 @@ fn root_edits_create_missing_document_boundaries() {
     +... # close
 
     @@ -1,5 +1,5 @@
-    -&a # property
+    -!a # property
     -[ # open
     -  old
     -] # close
@@ -152,7 +152,7 @@ fn root_edits_create_missing_document_boundaries() {
      # tail
 
     @@ -1,5 +1,5 @@
-    -&a # property
+    -!a # property
     -[ # open
     -  old
     -] # close
@@ -198,7 +198,7 @@ fn inserted_comments_can_create_document_boundaries() {
         ),
     ] {
         diffs.push(edit(source, |editor| {
-            editor.insert_comment(&editor.root(), 0, " added", placement)
+            editor.insert_comment(editor.root(), 0, " added", placement)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -232,7 +232,7 @@ fn generated_boundaries_obey_the_output_limit_and_roll_back() {
     )
     .unwrap();
     let error = document
-        .edit_syntax(|editor| editor.replace(&editor.root(), "- a"))
+        .edit_syntax(|editor| editor.replace(editor.root(), "- a"))
         .unwrap_err();
     assert_eq!(document.source(), source);
     insta::assert_snapshot!(error.message, @"emitted YAML exceeds input byte limit");
@@ -245,8 +245,8 @@ fn nested_edits_leave_sufficient_root_framing_unchanged() {
         [old, keep]
     "};
     let diff = edit(source, |editor| {
-        let items = editor.sequence_items(&editor.root())?;
-        editor.replace(&items[0], "new")
+        let items = editor.sequence_items(editor.root())?;
+        editor.replace(items[0], "new")
     });
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,2 @@
@@ -278,8 +278,8 @@ fn root_inline_comments_can_use_additional_marker_lines() {
             document
                 .edit_syntax(|editor| {
                     let root = editor.root();
-                    let index = editor.node(&root)?.comments().len();
-                    editor.insert_comment(&root, index, text, CommentPlacement::Inline)
+                    let index = editor.node(root)?.comments().len();
+                    editor.insert_comment(root, index, text, CommentPlacement::Inline)
                 })
                 .unwrap();
         }
@@ -337,8 +337,8 @@ fn root_inline_comments_can_use_additional_marker_lines() {
 )]
 fn nested_inline_comments_can_use_available_syntax_headers(source: &str) -> String {
     edit(source, |editor| {
-        let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-        editor.insert_comment(&value, 1, " second", CommentPlacement::Inline)
+        let value = editor.mapping_entries(editor.root())?.remove(0).1;
+        editor.insert_comment(value, 1, " second", CommentPlacement::Inline)
     })
 }
 
@@ -350,9 +350,9 @@ fn detached_suffix_comments_follow_inserted_root_content() {
     "};
     let document = edited(source, |editor| {
         let root = editor.root();
-        editor.insert_comment(&root, 0, " gap", CommentPlacement::Detached)?;
-        editor.insert_comment(&root, 1, " end", CommentPlacement::Inline)?;
-        editor.replace(&root, "new")
+        editor.insert_comment(root, 0, " gap", CommentPlacement::Detached)?;
+        editor.insert_comment(root, 1, " end", CommentPlacement::Inline)?;
+        editor.replace(root, "new")
     });
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
@@ -407,7 +407,7 @@ fn detached_suffix_comments_follow_inserted_root_content() {
 fn generated_start_markers_preserve_root_prefixes(source: &str) -> String {
     edit(source, |editor| {
         let root = editor.root();
-        let index = editor.node(&root)?.comments().len();
-        editor.insert_comment(&root, index, " added", CommentPlacement::Inline)
+        let index = editor.node(root)?.comments().len();
+        editor.insert_comment(root, index, " added", CommentPlacement::Inline)
     })
 }

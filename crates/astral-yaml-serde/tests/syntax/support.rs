@@ -1,6 +1,5 @@
-use crate::edit::PathSegment;
-use crate::syntax::{Cursor, DocumentSyntax, Editor};
-use astral_yaml::Error;
+use crate::syntax::{DocumentSyntax, Editor};
+use astral_yaml::{Error, NodeId};
 use astral_yaml_dev::edit_diff;
 
 pub(super) fn normalize(source: &str) -> String {
@@ -50,25 +49,9 @@ pub(super) fn edits<const N: usize>(
 impl DocumentSyntax {
     pub(crate) fn edit<R>(
         &mut self,
-        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
-    ) -> Result<R, Error> {
-        self.edit_syntax(|editor| edit(editor.root_mut()))
-    }
-
-    pub(crate) fn set_yaml_at<'p>(
-        &mut self,
-        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
-        yaml: &str,
-    ) -> Result<(), Error> {
-        self.edit_at(path, |mut node| node.set_yaml(yaml))
-    }
-
-    pub(crate) fn edit_at<'p, R>(
-        &mut self,
-        path: impl IntoIterator<Item = impl Into<PathSegment<'p>>>,
-        edit: impl FnOnce(Cursor<'_, '_>) -> Result<R, Error>,
-    ) -> Result<R, Error> {
-        self.edit(|root| edit(root.at(path)?))
+        edit: impl FnOnce(crate::edit::Cursor<'_, '_>) -> Result<R, crate::Error>,
+    ) -> Result<R, crate::Error> {
+        self.try_edit_syntax(|editor| crate::edit::transaction(editor, edit))
     }
 
     pub(crate) fn edit_syntax<R>(
@@ -86,5 +69,15 @@ impl DocumentSyntax {
         let result = edit(&mut editor)?;
         *self = editor.finish()?;
         Ok(result)
+    }
+}
+
+impl Editor<'_> {
+    pub(crate) fn mapping_entries(&self, id: NodeId) -> Result<Vec<(NodeId, NodeId)>, Error> {
+        Ok(self.entry_ids(id)?.to_vec())
+    }
+
+    pub(crate) fn sequence_items(&self, id: NodeId) -> Result<Vec<NodeId>, Error> {
+        Ok(self.item_ids(id)?.to_vec())
     }
 }

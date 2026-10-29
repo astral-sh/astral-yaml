@@ -13,7 +13,9 @@ use astral_yaml_dev::{edit_diff, indoc};
 #[test_case("# before\n\u{feff}\u{feff}")]
 fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
     let mut document = DocumentSyntax::parse(&format!("{prefix}old")).unwrap();
-    document.edit(|mut root| root.replace_yaml("---")).unwrap();
+    document
+        .edit_syntax(|e| e.replace(e.root(), "---"))
+        .unwrap();
     assert_eq!(document.source(), format!("{prefix}---\n"));
 }
 
@@ -29,7 +31,7 @@ fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
 fn replacing_a_root_keeps_its_stream_marks(source: &str, replacement: &str) -> String {
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
-        .edit(|mut root| root.replace_yaml(replacement))
+        .edit_syntax(|e| e.replace(e.root(), replacement))
         .unwrap();
     document.into_yaml()
 }
@@ -58,8 +60,8 @@ fn an_inserted_end_marker_shares_a_line_with_the_stream_mark() {
     let source = "\u{feff}# first\n\n\u{feff}\u{feff}old # inline\n\u{feff}";
     let document = edited(source, |editor| {
         let root = editor.root();
-        let count = editor.node(&root)?.comments().len();
-        editor.insert_comment(&root, count, " audit", CommentPlacement::Inline)
+        let count = editor.node(root)?.comments().len();
+        editor.insert_comment(root, count, " audit", CommentPlacement::Inline)
     });
     assert_eq!(
         document.source(),
@@ -96,7 +98,7 @@ fn retained_stream_marks_count_toward_the_edit_limit(
     )
     .unwrap();
     let error = document
-        .edit(|mut root| root.replace_yaml("[x, y]"))
+        .edit_syntax(|e| e.replace(e.root(), "[x, y]"))
         .err()
         .map(|err| err.message);
     (error, document.into_yaml())
@@ -123,11 +125,11 @@ fn descendant_inline_comments_are_separate_from_document_markers() {
         ],
         |editor| {
             let root = editor.root();
-            let child = match editor.node(&root)?.kind() {
-                NodeKind::Mapping { .. } => editor.mapping_entries(&root)?[0].0.clone(),
-                _ => editor.sequence_items(&root)?[0].clone(),
+            let child = match editor.node(root)?.kind() {
+                NodeKind::Mapping { .. } => editor.mapping_entries(root)?[0].0,
+                _ => editor.sequence_items(root)?[0],
             };
-            editor.insert_comment(&child, 0, " added", CommentPlacement::Inline)
+            editor.insert_comment(child, 0, " added", CommentPlacement::Inline)
         },
     );
     insta::assert_snapshot!(diff, @"
@@ -177,7 +179,7 @@ fn leading_comments_remain_adjacent_across_document_markers() {
                 &root {key: value}
             "},
         ],
-        |editor| editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading),
+        |editor| editor.insert_comment(editor.root(), 0, " added", CommentPlacement::Leading),
     );
     insta::assert_snapshot!(diff, @"
     @@ -1,3 +1,3 @@
@@ -231,14 +233,14 @@ fn suffix_boundaries_preserve_detached_comments() {
                 let root = editor.root();
                 if omit {
                     editor.replace(
-                        &root,
+                        root,
                         indoc! {r"
                             ---
                         "},
                     )
                 } else {
-                    let index = editor.node(&root)?.comments().len() - 1;
-                    editor.insert_comment(&root, index, " added", CommentPlacement::Trailing)
+                    let index = editor.node(root)?.comments().len() - 1;
+                    editor.insert_comment(root, index, " added", CommentPlacement::Trailing)
                 }
             }));
         }
@@ -365,8 +367,8 @@ fn structural_edits_preserve_framing_and_outer_comments(source: &str) -> String 
     // Document markers: https://yaml.org/spec/1.2.2/#922-document-markers
     edit(source, |editor| {
         let root = editor.root();
-        editor.insert_entry(&root, 0, "added", "new")?;
-        editor.remove_entry(&root, 1)
+        editor.insert_entry(root, 0, "added", "new")?;
+        editor.remove_entry(root, 1)
     })
 }
 
@@ -397,7 +399,7 @@ fn inserted_roots_are_separated_from_end_markers() {
         "};
 
         diffs.push(edit(source, |editor| {
-            editor.replace(&editor.root(), replacement)
+            editor.replace(editor.root(), replacement)
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
@@ -468,7 +470,7 @@ fn comment_terminators_compose_with_retained_suffixes(source: &str) {
     for _ in 0..3 {
         document
             .edit_syntax(|editor| {
-                editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+                editor.set_collection_style(editor.root(), CollectionStyle::Block)
             })
             .unwrap();
         assert_eq!(document.source(), source);
@@ -505,16 +507,16 @@ fn detached_comment_gaps_survive_collection_mutations() {
             true,
         ),
     ] {
-        for operation in 0..4 {
+        for operation in 0..3 {
             diffs.push(edit(source, |editor| {
                 let root = editor.root();
                 match (sequence, operation) {
-                    (true, 0) => editor.insert_item(&root, 0, "new").map(|_| ()),
-                    (false, 0) => editor.insert_entry(&root, 0, "added", "new").map(|_| ()),
-                    (true, 1) => editor.remove_item(&root, 1),
-                    (false, 1) => editor.remove_entry(&root, 1),
-                    (true, 2) => editor.replace(
-                        &root,
+                    (true, 0) => editor.insert_item(root, 0, "new").map(|_| ()),
+                    (false, 0) => editor.insert_entry(root, 0, "added", "new").map(|_| ()),
+                    (true, 1) => editor.remove_item(root, 1),
+                    (false, 1) => editor.remove_entry(root, 1),
+                    (true, _) => editor.replace(
+                        root,
                         indoc! {r"
                             - new
                             - |+
@@ -522,8 +524,8 @@ fn detached_comment_gaps_survive_collection_mutations() {
 
                         "},
                     ),
-                    (false, 2) => editor.replace(
-                        &root,
+                    (false, _) => editor.replace(
+                        root,
                         indoc! {r"
                             a: new
                             b: |+
@@ -531,16 +533,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
 
                         "},
                     ),
-                    _ => {
-                        // Import into a nonzero arena offset, then mutate the
-                        // imported collection before committing it.
-                        editor.replace(&root, source)?;
-                        if sequence {
-                            editor.insert_item(&root, 0, "new").map(|_| ())
-                        } else {
-                            editor.insert_entry(&root, 0, "added", "new").map(|_| ())
-                        }
-                    }
                 }
             }));
         }
@@ -580,21 +572,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     +  other
     +  ⏎
 
-    @@ -1,7 +1,11 @@
-    +added: new
-     a: old
-     ⏎
-     # detached
-     ⏎
-    -b: |+
-    +
-    +# detached
-    +
-    +b: |2+
-       text
-    -
-    +  ⏎
-
     @@ -1,7 +1,8 @@
     +- new
      - old
@@ -627,21 +604,6 @@ fn detached_comment_gaps_survive_collection_mutations() {
     -
     +- |2+
     +  other
-    +  ⏎
-
-    @@ -1,7 +1,11 @@
-    +- new
-     - old
-     ⏎
-     # detached
-     ⏎
-    -- |+
-    +
-    +# detached
-    +
-    +- |2+
-       text
-    -
     +  ⏎
     ");
 }
@@ -693,43 +655,11 @@ fn removed_children_leave_their_comments_in_the_surviving_gap(
     edit(source, |editor| {
         let root = editor.root();
         if sequence {
-            editor.remove_item(&root, 1)
+            editor.remove_item(root, 1)
         } else {
-            editor.remove_entry(&root, 1)
+            editor.remove_entry(root, 1)
         }
     })
-}
-
-#[test]
-fn new_detached_comments_share_the_following_comment_gap() {
-    use astral_yaml::comments::CommentPlacement;
-    let source = indoc! {r"
-        a: old
-
-        # retained
-
-        b: |+
-          text
-
-    "};
-    let diff = edit(source, |editor| {
-        editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Detached)
-    });
-    insta::assert_snapshot!(diff, @"
-    @@ -1,7 +1,10 @@
-     a: old
-     ⏎
-    +# added
-    +
-    +
-     # retained
-     ⏎
-    -b: |+
-    +b: |2+
-       text
-    -
-    +  ⏎
-    ");
 }
 
 #[test_case(
@@ -785,9 +715,9 @@ fn removing_the_last_gap_preserves_block_scalar_content(source: &str, sequence: 
     edit(source, |editor| {
         let root = editor.root();
         if sequence {
-            editor.remove_item(&root, 1)
+            editor.remove_item(root, 1)
         } else {
-            editor.remove_entry(&root, 1)
+            editor.remove_entry(root, 1)
         }
     })
 }
@@ -815,10 +745,10 @@ fn root_comments_can_use_framing_without_retained_comment_anchors() {
     ] {
         diffs.push(edit(source, |editor| {
             let root = editor.root();
-            let count = editor.node(&root)?.comments().len();
-            editor.insert_comment(&root, count, " added", CommentPlacement::Trailing)?;
+            let count = editor.node(root)?.comments().len();
+            editor.insert_comment(root, count, " added", CommentPlacement::Trailing)?;
             for _ in 0..count {
-                editor.remove_comment(&root, 0)?;
+                editor.remove_comment(root, 0)?;
             }
             Ok(())
         }));
@@ -887,12 +817,12 @@ fn block_roots_can_use_the_document_marker_for_inline_comments(source: &str) -> 
 
     edit(source, |editor| {
         let root = editor.root();
-        while !editor.node(&root)?.comments().is_empty() {
-            editor.remove_comment(&root, 0)?;
+        while !editor.node(root)?.comments().is_empty() {
+            editor.remove_comment(root, 0)?;
         }
-        editor.insert_comment(&root, 0, " added", CommentPlacement::Inline)?;
+        editor.insert_comment(root, 0, " added", CommentPlacement::Inline)?;
         editor.replace(
-            &root,
+            root,
             indoc! {r"
                 a: new
             "},
@@ -947,7 +877,7 @@ fn root_leading_comments_use_the_start_marker_boundary(source: &str) -> String {
     use astral_yaml::comments::CommentPlacement;
 
     edit(source, |editor| {
-        editor.insert_comment(&editor.root(), 0, " added", CommentPlacement::Leading)
+        editor.insert_comment(editor.root(), 0, " added", CommentPlacement::Leading)
     })
 }
 
@@ -1002,7 +932,7 @@ fn root_omission_retains_comments_at_document_boundaries() {
     ] {
         diffs.push(edit(source, |editor| {
             editor.replace(
-                &editor.root(),
+                editor.root(),
                 indoc! {r"
                     ---
                 "},
@@ -1105,7 +1035,7 @@ fn root_omission_retains_comments_at_document_boundaries() {
 )]
 fn collection_comments_can_use_both_document_marker_headers(source: &str) -> String {
     edit(source, |editor| {
-        editor.set_collection_style(&editor.root(), CollectionStyle::Block)
+        editor.set_collection_style(editor.root(), CollectionStyle::Block)
     })
 }
 
@@ -1128,7 +1058,7 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
             astral_yaml::ScalarStyle::Folded,
         ] {
             diffs.push(edit(source, |editor| {
-                editor.set_scalar_style(&editor.root(), style)
+                editor.set_scalar_style(editor.root(), style)
             }));
         }
     }
@@ -1171,7 +1101,7 @@ fn framing_text_edits_retain_the_unchanged_body_layout() {
         # tail
     "};
     let document = edited(source, |editor| {
-        editor.replace_comment(&editor.root(), 1, " changed")
+        editor.replace_comment(editor.root(), 1, " changed")
     });
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
@@ -1234,7 +1164,7 @@ fn replaced_inline_comments_reuse_the_root_line_terminator(source: &str) -> Stri
 
     edit(source, |editor| {
         let root = editor.root();
-        editor.remove_comment(&root, 0)?;
-        editor.insert_comment(&root, 0, " new", CommentPlacement::Inline)
+        editor.remove_comment(root, 0)?;
+        editor.insert_comment(root, 0, " new", CommentPlacement::Inline)
     })
 }

@@ -863,11 +863,7 @@ fn marker_anchor(
             Some(Anchor {
                 at: marker.start(),
                 before: String::new(),
-                after: "\n".repeat(if comment.placement == CommentPlacement::Detached {
-                    2
-                } else {
-                    1
-                }),
+                after: marker_separation(comment.placement),
             })
         }
         (CommentPlacement::Trailing, _) | (CommentPlacement::Detached, CommentPosition::After) => {
@@ -897,34 +893,32 @@ fn marker_anchor(
             let at = line_end(&original.text, marker.end());
             Some(Anchor {
                 at,
-                before: "\n".repeat(if comment.placement == CommentPlacement::Detached {
-                    2
-                } else {
-                    1
-                }),
+                before: marker_separation(comment.placement),
                 after: String::new(),
             })
         }
-        (CommentPlacement::Inline, _) => {
-            if let Ok(slot) = layout.inline.end.binary_search(&index) {
-                let marker = layout.inline.slots.get(slot)?.marker()?;
-                return Some(Anchor {
-                    at: line_end(&original.text, marker.end()),
-                    before: " ".to_owned(),
-                    after: String::new(),
-                });
-            }
-            if layout.inline.start != Some(index) {
-                return None;
-            }
-            let marker = original.start_marker?;
+        _ => {
+            // Only inline comments have slots on document markers.
+            let marker = if layout.inline.start == Some(index) {
+                original.start_marker?
+            } else {
+                let slot = layout.inline.end.binary_search(&index).ok()?;
+                layout.inline.slots.get(slot)?.marker()?
+            };
             Some(Anchor {
                 at: line_end(&original.text, marker.end()),
                 before: " ".to_owned(),
                 after: String::new(),
             })
         }
-        _ => None,
+    }
+}
+
+fn marker_separation(placement: CommentPlacement) -> String {
+    if placement == CommentPlacement::Detached {
+        "\n\n".to_owned()
+    } else {
+        "\n".to_owned()
     }
 }
 
@@ -1040,7 +1034,6 @@ mod tests {
                     candidate.node(candidate.root()).comments.len(),
                     text,
                     CommentPlacement::Inline,
-                    None,
                 )
                 .unwrap();
         }

@@ -471,7 +471,13 @@ fn multiline_edits_budget_continuation_indentation(header: &str, line: &str) {
         format!("{header}\n{}", line.repeat(2048))
     };
     assert_eq!(
-        document.set_yaml_at(["k"], &fragment).unwrap_err().message,
+        document
+            .edit_syntax(|e| {
+                let key = e.entry_ids(e.root())?[0].1;
+                e.replace_preserving_style(key, &fragment)
+            })
+            .unwrap_err()
+            .message,
         "emitted YAML exceeds input byte limit"
     );
     assert_eq!(document.source(), source);

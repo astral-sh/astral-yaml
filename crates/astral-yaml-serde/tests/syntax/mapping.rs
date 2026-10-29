@@ -6,12 +6,20 @@ use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test_case("", "[]")]
-#[test_case("  ", "[new]")]
+#[test_case("  ", r#"["new"]"#)]
 fn bom_preserves_indentless_sequence_columns(indent: &str, replacement: &str) {
     let source = format!("\u{feff}{indent}v:\n{indent}- old");
     let mut document = DocumentSyntax::parse(&source).unwrap();
     document
-        .edit(|root| root.at(["v"])?.replace_yaml(replacement))
+        .edit(|root| {
+            let mut value = root.field("v")?;
+            if replacement == "[]" {
+                value.set([(); 0])?;
+            } else {
+                value.set(["new"])?;
+            }
+            value.set_collection_style(CollectionStyle::Flow)
+        })
         .unwrap();
     assert_eq!(
         document.source(),
@@ -37,7 +45,7 @@ fn key_edits_count_retained_padding(compact: bool, padding: usize) {
     document
         .edit(|root| {
             let mapping = if compact { root.at([0])? } else { root };
-            mapping.into_mapping()?.key_at(0)?.set_yaml("éé")
+            mapping.into_mapping()?.key_at(0)?.set("éé")
         })
         .unwrap();
     let expected = if padding == 1022 {
@@ -66,9 +74,19 @@ fn key_edits_fit_the_original_byte_budget(open: &str, tag: &str, length: usize, 
     )
     .unwrap();
     let replacement = "b".repeat(length);
-    let yaml = format!("{tag}{replacement}");
     document
-        .edit(|root| root.into_mapping()?.key_at(0)?.set_yaml(&yaml))
+        .edit(|root| {
+            let mut fields = root.into_mapping()?;
+            let mut key = fields.key_at(0)?;
+            if tag.is_empty() {
+                key.set(&replacement)
+            } else {
+                key.set(crate::Tagged {
+                    tag: "!".to_owned(),
+                    value: &replacement,
+                })
+            }
+        })
         .unwrap();
     assert_eq!(document.source(), mapping(&replacement));
     assert_eq!(document.normalized_yaml().unwrap(), document.source());
@@ -80,7 +98,7 @@ fn block_mapping_with_a_braced_first_key_counts_later_key_padding() {
     let source = format!("{{x: y}}: first\na{}: v", " ".repeat(1023));
     let mut document = DocumentSyntax::parse(&source).unwrap();
     document
-        .edit(|root| root.into_mapping()?.key_at(1)?.set_yaml("bb"))
+        .edit(|root| root.into_mapping()?.key_at(1)?.set("bb"))
         .unwrap();
     insta::assert_snapshot!(document.source(), @"
     ? {x: y}
@@ -104,9 +122,9 @@ fn long_explicit_key_edits_preserve_surrounding_source(prefix: &str, suffix: &st
                 root.at([0])?
                     .into_mapping()?
                     .key_at(0)?
-                    .set_yaml(&replacement)
+                    .set("b".repeat(1025))
             } else {
-                root.into_mapping()?.key_at(1)?.set_yaml(&replacement)
+                root.into_mapping()?.key_at(1)?.set("b".repeat(1025))
             }
         })
         .unwrap();
@@ -133,9 +151,9 @@ fn flow_conversion_uses_content_indentation_after_properties() {
             "},
         ],
         |editor| {
-            let mapping = editor.mapping_entries(&editor.root())?[0].1.clone();
-            let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
-            editor.set_collection_style(&sequence, CollectionStyle::Flow)
+            let mapping = editor.mapping_entries(editor.root())?[0].1;
+            let sequence = editor.mapping_entries(mapping)?[0].1;
+            editor.set_collection_style(sequence, CollectionStyle::Flow)
         },
     );
     insta::assert_snapshot!(results, @"
@@ -174,12 +192,12 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
             "},
         ],
         |editor| {
-            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-            let mapping = editor.sequence_items(&key)?[0].clone();
-            let sequence = editor.mapping_entries(&mapping)?[0].1.clone();
-            let value = editor.sequence_items(&sequence)?[0].clone();
-            editor.replace(&value, "changed")?;
-            editor.insert_item(&sequence, 1, "{child: yes}").map(|_| ())
+            let key = editor.mapping_entries(editor.root())?[0].0;
+            let mapping = editor.sequence_items(key)?[0];
+            let sequence = editor.mapping_entries(mapping)?[0].1;
+            let value = editor.sequence_items(sequence)?[0];
+            editor.replace(value, "changed")?;
+            editor.insert_item(sequence, 1, "{child: yes}").map(|_| ())
         },
     );
     insta::assert_snapshot!(results, @"
@@ -204,8 +222,8 @@ fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
         {"old":value, untouched:   [a,b]}
     "#};
     let diff = edit(source, |editor| {
-        let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-        editor.replace(&key, "new, key")
+        let key = editor.mapping_entries(editor.root())?[0].0;
+        editor.replace(key, "new, key")
     });
     insta::assert_snapshot!(diff, @r#"
     @@ -1 +1 @@
@@ -228,8 +246,8 @@ fn omitted_keys_retain_entries_without_value_indicators() {
             "},
         ],
         |editor| {
-            let key = editor.mapping_entries(&editor.root())?[0].0.clone();
-            editor.replace(&key, "---")
+            let key = editor.mapping_entries(editor.root())?[0].0;
+            editor.replace(key, "---")
         },
     );
     insta::assert_snapshot!(results, @"
@@ -284,15 +302,15 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
             diffs.push(edit(source, |editor| {
                 let mut mapping = editor.root();
                 if source.starts_with("outer:") {
-                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                    mapping = editor.mapping_entries(mapping)?.remove(0).1;
                 } else if source.starts_with('-') {
-                    mapping = editor.sequence_items(&mapping)?.remove(0);
+                    mapping = editor.sequence_items(mapping)?.remove(0);
                 }
-                let sequence = editor.mapping_entries(&mapping)?.remove(0).1;
+                let sequence = editor.mapping_entries(mapping)?.remove(0).1;
                 if remove {
-                    editor.remove_item(&sequence, 0)
+                    editor.remove_item(sequence, 0)
                 } else {
-                    editor.set_collection_style(&sequence, CollectionStyle::Flow)
+                    editor.set_collection_style(sequence, CollectionStyle::Flow)
                 }
             }));
         }
@@ -420,8 +438,8 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
 fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> String {
     // Empty nodes: https://yaml.org/spec/1.2.2/#72-empty-nodes
     edit(source, |editor| {
-        let key = editor.mapping_entries(&editor.root())?.remove(1).0;
-        editor.replace(&key, "next")
+        let key = editor.mapping_entries(editor.root())?.remove(1).0;
+        editor.replace(key, "next")
     })
 }
 
@@ -472,16 +490,16 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite(source: &str) -> String {
     edit(source, |editor| {
         let mut sequence = editor.root();
         if source.starts_with("outer:") {
-            sequence = editor.mapping_entries(&sequence)?.remove(0).1;
+            sequence = editor.mapping_entries(sequence)?.remove(0).1;
         }
-        while let Ok(items) = editor.sequence_items(&sequence) {
-            let item = &items[0];
+        while let Ok(items) = editor.sequence_items(sequence) {
+            let item = items[0];
             let Ok(entries) = editor.mapping_entries(item) else {
                 break;
             };
-            sequence = entries[0].0.clone();
+            sequence = entries[0].0;
         }
-        editor.insert_item(&sequence, 0, "new").map(|_| ())
+        editor.insert_item(sequence, 0, "new").map(|_| ())
     })
 }
 
@@ -516,8 +534,8 @@ fn mapping_scalar_replacement_adds_omitted_value_indicators() {
             "},
         ],
         |editor| {
-            let value = editor.mapping_entries(&editor.root())?.remove(0).1;
-            editor.replace(&value, "42")
+            let value = editor.mapping_entries(editor.root())?.remove(0).1;
+            editor.replace(value, "42")
         },
     );
     insta::assert_snapshot!(diffs, @"
@@ -659,8 +677,8 @@ fn mapping_scalar_key_replacement_preserves_required_separation(
 ) -> String {
     // JSON-like keys: https://yaml.org/spec/1.2.2/#742-flow-mappings
     edit(source, |editor| {
-        let key = editor.mapping_entries(&editor.root())?.remove(0).0;
-        editor.replace(&key, replacement)
+        let key = editor.mapping_entries(editor.root())?.remove(0).0;
+        editor.replace(key, replacement)
     })
 }
 
@@ -674,8 +692,8 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
     let replacement = format!("\"{}\"", "\\u0001".repeat(103));
     document
         .edit_syntax(|editor| {
-            let key = editor.mapping_entries(&editor.root())?.remove(0).0;
-            editor.replace(&key, &replacement)
+            let key = editor.mapping_entries(editor.root())?.remove(0).0;
+            editor.replace(key, &replacement)
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
@@ -693,9 +711,9 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
         other : 'untouched'
     "#};
     let diff = edit(source, |editor| {
-        let mapping = editor.mapping_entries(&editor.root())?.remove(0).1;
-        let key = editor.mapping_entries(&mapping)?.remove(0).0;
-        editor.set_scalar_style(&key, ScalarStyle::Plain)
+        let mapping = editor.mapping_entries(editor.root())?.remove(0).1;
+        let key = editor.mapping_entries(mapping)?.remove(0).0;
+        editor.set_scalar_style(key, ScalarStyle::Plain)
     });
     insta::assert_snapshot!(diff, @r#"
     @@ -1,2 +1,2 @@
@@ -751,17 +769,17 @@ fn explicit_keys_accept_block_style_requests() {
         diffs.push(edit(source, |editor| {
             let mut mapping = editor.root();
             if source.starts_with("outer:") {
-                mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                mapping = editor.mapping_entries(mapping)?.remove(0).1;
             }
-            let (key, value) = editor.mapping_entries(&mapping)?.remove(0);
-            match editor.node(&key)?.kind() {
+            let (key, value) = editor.mapping_entries(mapping)?.remove(0);
+            match editor.node(key)?.kind() {
                 crate::syntax::NodeKind::Scalar { style, .. } => {
-                    editor.set_scalar_style(&key, *style)?;
+                    editor.set_scalar_style(key, *style)?;
                 }
-                _ => editor.set_collection_style(&key, CollectionStyle::Block)?,
+                _ => editor.set_collection_style(key, CollectionStyle::Block)?,
             }
             // Force a visible change even when the key already has its requested style.
-            editor.replace(&value, "updated")
+            editor.replace(value, "updated")
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
@@ -839,10 +857,10 @@ fn implicit_block_keys_keep_their_own_scalar_context() {
             diffs.push(edit(source, |editor| {
                 let mut mapping = editor.root();
                 if source.starts_with("outer:") {
-                    mapping = editor.mapping_entries(&mapping)?.remove(0).1;
+                    mapping = editor.mapping_entries(mapping)?.remove(0).1;
                 }
-                let key_handle = editor.mapping_entries(&mapping)?.remove(0).0;
-                editor.replace_preserving_style(&key_handle, key)
+                let key_handle = editor.mapping_entries(mapping)?.remove(0).0;
+                editor.replace_preserving_style(key_handle, key)
             }));
         }
     }
@@ -929,23 +947,23 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
         diffs.push(edit(source, |editor| {
             let mut node = editor.root();
             loop {
-                node = match editor.node(&node)?.kind() {
-                    NodeKind::Sequence { .. } => editor.sequence_items(&node)?[0].clone(),
-                    NodeKind::Mapping { .. } => editor.mapping_entries(&node)?[0].1.clone(),
+                node = match editor.node(node)?.kind() {
+                    NodeKind::Sequence { .. } => editor.sequence_items(node)?[0],
+                    NodeKind::Mapping { .. } => editor.mapping_entries(node)?[0].1,
                     _ => break,
                 };
             }
             if matches!(
-                editor.node(&node)?.kind(),
+                editor.node(node)?.kind(),
                 NodeKind::Scalar {
                     style: ScalarStyle::DoubleQuoted,
                     ..
                 }
             ) {
-                return editor.set_scalar_style(&node, ScalarStyle::SingleQuoted);
+                return editor.set_scalar_style(node, ScalarStyle::SingleQuoted);
             }
             editor.replace_preserving_style(
-                &node,
+                node,
                 indoc! {r"
                     |+
                       new

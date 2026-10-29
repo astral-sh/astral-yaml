@@ -21,48 +21,16 @@ fn reinserted_comments_keep_their_layout_during_descendant_edits(
 ) -> String {
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
-        .edit_at(scope.iter().copied(), |mut root| {
+        .edit(|root| {
+            let mut root = root.at(scope)?;
             root.remove_comment(0)?;
-            root.reborrow()
-                .get("nested")?
-                .unwrap()
-                .get("value")?
-                .unwrap()
-                .replace_yaml("|+\n  new\n\n")?;
+            let mut value = root.reborrow().at(["nested", "value"])?;
+            value.set("new\n\n")?;
+            value.set_scalar_style(astral_yaml::ScalarStyle::Literal)?;
             root.append_comment(" model", CommentPlacement::Trailing)
         })
         .unwrap();
     document.into_yaml()
-}
-
-#[test_case(true; "new leading comment before the restored comment")]
-#[test_case(false; "new trailing comment after the restored comment")]
-fn restoring_one_comment_preserves_its_source_when_a_neighbor_is_added(leading: bool) {
-    let source = "nested:\n  value: old\n# keep\n# keep\n";
-    let render = |cancel| {
-        let mut document = DocumentSyntax::parse(source).unwrap();
-        document
-            .edit(|mut root| {
-                let index = usize::from(!leading);
-                if cancel {
-                    root.remove_comment(index)?;
-                    root.insert_comment(index, " keep", CommentPlacement::Trailing)?;
-                }
-                if leading {
-                    root.insert_comment(0, " added", CommentPlacement::Leading)?;
-                } else {
-                    root.append_comment(" added", CommentPlacement::Trailing)?;
-                }
-                root.get("nested")?
-                    .unwrap()
-                    .get("value")?
-                    .unwrap()
-                    .replace_yaml("|+\n  new\n\n")
-            })
-            .unwrap();
-        document.into_yaml()
-    };
-    assert_eq!(render(true), render(false));
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -80,7 +48,7 @@ enum Operation {
     SetMapping,
     SetFlowSequence,
     SetLiteral,
-    SetEmpty,
+    SetNull,
     SetTailSequence,
     SetTailMapping,
 }
@@ -89,9 +57,9 @@ impl Operation {
     fn apply(self, editor: &mut Editor<'_>) -> Result<(), Error> {
         let root = editor.root();
         if let Some(fragment) = self.content() {
-            return editor.replace(&root, fragment);
+            return editor.replace(root, fragment);
         }
-        let count = editor.node(&root)?.comments().len();
+        let count = editor.node(root)?.comments().len();
         match self {
             Self::ReplaceFirst | Self::ReplaceLast if count > 0 => {
                 let index = if matches!(self, Self::ReplaceFirst) {
@@ -99,7 +67,7 @@ impl Operation {
                 } else {
                     count - 1
                 };
-                editor.replace_comment(&root, index, " changed")
+                editor.replace_comment(root, index, " changed")
             }
             Self::RemoveFirst | Self::RemoveLast if count > 0 => {
                 let index = if matches!(self, Self::RemoveFirst) {
@@ -107,19 +75,19 @@ impl Operation {
                 } else {
                     count - 1
                 };
-                editor.remove_comment(&root, index)
+                editor.remove_comment(root, index)
             }
             Self::PrependLeading => {
-                editor.insert_comment(&root, 0, " leading", CommentPlacement::Leading)
+                editor.insert_comment(root, 0, " leading", CommentPlacement::Leading)
             }
             Self::AppendTrailing => {
-                editor.insert_comment(&root, count, " trailing", CommentPlacement::Trailing)
+                editor.insert_comment(root, count, " trailing", CommentPlacement::Trailing)
             }
             Self::AppendInline => {
-                editor.insert_comment(&root, count, " inline", CommentPlacement::Inline)
+                editor.insert_comment(root, count, " inline", CommentPlacement::Inline)
             }
             Self::AppendDetached => {
-                editor.insert_comment(&root, count, " detached", CommentPlacement::Detached)
+                editor.insert_comment(root, count, " detached", CommentPlacement::Detached)
             }
             _ => Ok(()),
         }
@@ -150,9 +118,7 @@ impl Operation {
                   new
 
             "}),
-            Self::SetEmpty => Some(indoc! {r"
-                ---
-            "}),
+            Self::SetNull => Some("null"),
             _ => None,
         }
     }
@@ -207,7 +173,7 @@ fn framing_comment_edits_compose_with_content_edits() {
     // Every case must succeed. Rejections are failures, not discarded samples.
     use Operation::{
         AppendInline, AppendTrailing, PrependLeading, RemoveFirst, RemoveLast, ReplaceFirst,
-        ReplaceLast, SetEmpty, SetFlowSequence, SetLiteral, SetMapping, SetScalar, SetSequence,
+        ReplaceLast, SetFlowSequence, SetLiteral, SetMapping, SetNull, SetScalar, SetSequence,
     };
     let operations = [
         AppendInline,
@@ -222,7 +188,7 @@ fn framing_comment_edits_compose_with_content_edits() {
         SetMapping,
         SetFlowSequence,
         SetLiteral,
-        SetEmpty,
+        SetNull,
     ];
 
     for &(source, initial) in root_cases() {
@@ -286,7 +252,7 @@ fn root_cases() -> &'static [(&'static str, &'static [(&'static str, CommentPlac
         ),
         (
             indoc! {r"
-                &a # property
+                !a # property
                 [ # open
                   old
                 ] # close
@@ -405,7 +371,7 @@ fn longer_root_edits_match_the_independent_model() {
         SetMapping,
         SetFlowSequence,
         SetLiteral,
-        SetEmpty,
+        SetNull,
         SetTailSequence,
         SetTailMapping,
     ];
@@ -480,7 +446,7 @@ fn check_root_sequence<const N: usize>(
         }
         separate
             .edit_syntax(|editor| operation.apply(editor))
-            .unwrap_or_else(|error| panic!("{source:?}, {sequence:?}: {error}"));
+            .unwrap_or_else(|error| panic!("{operation:?} on {:?}: {error}", separate.source()));
         assert_eq!(
             comments(&separate),
             step_comments,
@@ -572,10 +538,10 @@ enum NestedOperation {
 impl NestedOperation {
     fn apply(self, editor: &mut Editor<'_>) -> Result<(), Error> {
         use astral_yaml::{CollectionStyle, ScalarStyle};
-        let root_items = editor.sequence_items(&editor.root())?;
-        let fields = editor.mapping_entries(&root_items[0])?;
-        let items = &fields[0].1;
-        let mapping = &fields[1].1;
+        let root_items = editor.sequence_items(editor.root())?;
+        let fields = editor.mapping_entries(root_items[0])?;
+        let items = fields[0].1;
+        let mapping = fields[1].1;
         let children = editor.sequence_items(items)?;
         let entries = editor.mapping_entries(mapping)?;
         match self {
@@ -587,11 +553,9 @@ impl NestedOperation {
             Self::RemoveLastItem if !children.is_empty() => {
                 editor.remove_item(items, children.len() - 1)
             }
-            Self::ReplaceFirstItem if !children.is_empty() => {
-                editor.replace(&children[0], "'a: b'")
-            }
+            Self::ReplaceFirstItem if !children.is_empty() => editor.replace(children[0], "'a: b'"),
             Self::QuoteLastItem if !children.is_empty() => {
-                editor.set_scalar_style(children.last().unwrap(), ScalarStyle::DoubleQuoted)
+                editor.set_scalar_style(*children.last().unwrap(), ScalarStyle::DoubleQuoted)
             }
             Self::FlowItems => editor.set_collection_style(items, CollectionStyle::Flow),
             Self::PrependEntry => editor
@@ -602,7 +566,7 @@ impl NestedOperation {
                 .map(|_| ()),
             Self::RemoveFirstEntry if !entries.is_empty() => editor.remove_entry(mapping, 0),
             Self::ReplaceLastValue if !entries.is_empty() => {
-                editor.replace(&entries.last().unwrap().1, "'false'")
+                editor.replace(entries.last().unwrap().1, "'false'")
             }
             Self::FlowMapping => editor.set_collection_style(mapping, CollectionStyle::Flow),
             _ => Ok(()),
@@ -798,15 +762,15 @@ fn interleaved_suffixes_remain_ordered_across_longer_sequences() {
         document
             .edit_syntax(|editor| {
                 let root = editor.root();
-                let count = editor.node(&root)?.comments().len();
-                editor.insert_comment(&root, count, &text, placement)
+                let count = editor.node(root)?.comments().len();
+                editor.insert_comment(root, count, &text, placement)
             })
             .unwrap();
         expected.push((text, placement));
         assert_eq!(comments(&document), expected);
     }
     document
-        .edit_syntax(|editor| editor.replace(&editor.root(), "'false'"))
+        .edit_syntax(|editor| editor.replace(editor.root(), "'false'"))
         .unwrap();
     assert_eq!(comments(&document), expected);
     assert_eq!(
