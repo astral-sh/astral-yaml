@@ -47,11 +47,8 @@ fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(
                 2 => CommentPlacement::Trailing,
                 _ => CommentPlacement::Detached,
             };
-            if placement == CommentPlacement::Leading {
-                node.insert_comment(0, " fuzz", placement)
-            } else {
-                node.append_comment(" fuzz", placement)
-            }
+            let index = usize::from(selector >> 6) % (node.node()?.comments().len() + 1);
+            node.insert_comment(index, " fuzz", placement)
         }
     }
 }

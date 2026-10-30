@@ -520,6 +520,36 @@ fn inserting_a_leading_comment_preserves_the_inline_comment() {
     ");
 }
 
+#[test_case("--- # start\na: b\n"; "block mapping")]
+#[test_case("--- # start\n- item\n... # end\n"; "block sequence")]
+#[test_case("--- # start\n...\n"; "empty document body")]
+fn inserting_an_inline_comment_before_the_start_marker_comment_rolls_back(source: &str) {
+    let mut document = EditableYaml::parse(source).unwrap();
+    let error = document
+        .edit(|mut root| root.insert_comment(0, " new", CommentPlacement::Inline))
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "emission changed comment ownership or placement"
+    );
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn inserting_an_inline_comment_between_prefix_comments_preserves_their_order() {
+    let source = "# prefix\n\n--- # start\na: b\n";
+    let document = edit::<Value>(source, |mut root| {
+        root.insert_comment(1, " inserted", CommentPlacement::Inline)
+    });
+    insta::assert_snapshot!(document.source(), @"
+    # prefix
+
+    ... # inserted
+    --- # start
+    a: b
+    ");
+}
+
 #[test]
 fn inserting_a_detached_comment_reuses_the_following_child_boundary() {
     let source = "a: first\n\n# gap\n\nb: last\n";
