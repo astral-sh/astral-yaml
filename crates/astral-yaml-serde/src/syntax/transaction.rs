@@ -1,4 +1,4 @@
-use super::draft::Draft;
+use super::draft::{Draft, ReplacementStyle};
 use super::emit;
 use super::layout::Layout;
 use super::plan::{Changes, Plan};
@@ -130,11 +130,15 @@ impl<'doc> Editor<'doc> {
 
     #[cfg(test)]
     pub(crate) fn replace(&mut self, id: NodeId, yaml: &str) -> Result<(), Error> {
-        self.mutate(id, |draft, id| draft.replace(id, yaml, false))
+        self.mutate(id, |draft, id| {
+            draft.replace(id, yaml, ReplacementStyle::FromValue)
+        })
     }
 
     pub(crate) fn replace_preserving_style(&mut self, id: NodeId, yaml: &str) -> Result<(), Error> {
-        self.mutate(id, |draft, id| draft.replace(id, yaml, true))
+        self.mutate(id, |draft, id| {
+            draft.replace(id, yaml, ReplacementStyle::Preserve)
+        })
     }
 
     pub(crate) fn insert_item(

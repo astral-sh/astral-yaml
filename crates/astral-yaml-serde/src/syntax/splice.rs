@@ -16,12 +16,18 @@ use std::borrow::Cow;
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum OuterComments {
+    Include,
+    Exclude,
+}
+
 /// Return the source range covering `id` and its descendants' comments.
-/// Set `outer` to include comments outside `id`'s own span.
+/// `outer` controls whether the node's own comments extend this range.
 pub(super) fn region<'syntax>(
     document: impl Into<Syntax<'syntax, Span>>,
     id: NodeId,
-    outer: bool,
+    outer: OuterComments,
 ) -> Span {
     let document = document.into();
     let root = &document.nodes[id.index()];
@@ -30,7 +36,7 @@ pub(super) fn region<'syntax>(
     let mut pending = vec![id];
     while let Some(current) = pending.pop() {
         let node = &document.nodes[current.index()];
-        if current != id || outer {
+        if current != id || outer == OuterComments::Include {
             for comment in &node.comments {
                 start = start.min(comment.span.start());
                 end = end.max(comment.span.end());
@@ -226,7 +232,6 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
     document: impl Into<Emission<'syntax, Location>>,
     id: NodeId,
     region: Span,
-    flow: bool,
 ) -> Result<Replacement, Error> {
     let document = document.into();
     let Emission { syntax, source } = document;
@@ -245,7 +250,7 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         document,
         id,
         &boundary,
-        Context::value(indent, flow, if root { 0 } else { indent }),
+        Context::block(indent, if root { 0 } else { indent }),
         &node.comments,
         &Layout::new(syntax),
     )

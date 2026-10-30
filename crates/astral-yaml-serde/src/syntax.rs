@@ -20,6 +20,7 @@ pub(crate) use transaction::{Editor, ValueRef};
 use std::borrow::Cow;
 use std::cell::Cell;
 
+use self::splice::OuterComments;
 use astral_yaml::comments::{CommentIndex, CommentPlacement};
 use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 
@@ -288,8 +289,8 @@ impl DocumentSyntax {
     /// Returns an error if rendering exceeds a resource limit or changes scalar
     /// content, alias targets, or comment ownership, placement, or order.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
-        let region = splice::region(self, self.source.root, false);
-        let rendered = splice::render(self, self.source.root, region, false)?;
+        let region = splice::region(self, self.source.root, OuterComments::Exclude);
+        let rendered = splice::render(self, self.source.root, region)?;
         let output = splice::apply(&self.source, vec![(rendered.span, rendered.text)], region)?;
         emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?;
         Ok(output)

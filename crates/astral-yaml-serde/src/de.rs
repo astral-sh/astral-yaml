@@ -193,9 +193,8 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         }
     }
 
-    fn metadata<V: Visitor<'de>>(self, visitor: V, comments: bool) -> Result<V::Value> {
-        let span = self.raw_node()?.span();
-        let metadata = Metadata::new(span, comments)?;
+    fn metadata<V: Visitor<'de>>(self, visitor: V, metadata: Metadata) -> Result<V::Value> {
+        let span = metadata.span();
         let mut access = MetadataAccess {
             de: Self {
                 depth: self.depth + 1,
@@ -991,11 +990,16 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
         visitor: V,
     ) -> Result<V::Value> {
         if name == spanned::NAME {
-            return self.metadata(visitor, false);
+            let span = self
+                .raw_node()?
+                .span()
+                .ok_or_else(|| Error::new("new node has no source span until the edit commits"))?;
+            return self.metadata(visitor, Metadata::Span(span));
         }
 
         if name == commented::NAME {
-            return self.metadata(visitor, true);
+            let span = self.raw_node()?.span();
+            return self.metadata(visitor, Metadata::Comments(span));
         }
 
         if name == tagged::NAME {
@@ -1104,23 +1108,21 @@ struct MetadataAccess<'input, I> {
 #[derive(Clone, Copy)]
 enum Metadata {
     Span(Span),
-    Comments,
+    Comments(Option<Span>),
 }
 
 impl Metadata {
-    fn new(span: Option<Span>, comments: bool) -> Result<Self> {
-        if comments {
-            Ok(Self::Comments)
-        } else {
-            span.map(Self::Span)
-                .ok_or_else(|| Error::new("new node has no source span until the edit commits"))
+    fn span(self) -> Option<Span> {
+        match self {
+            Self::Span(span) => Some(span),
+            Self::Comments(span) => span,
         }
     }
 
     fn len(self) -> usize {
         match self {
             Self::Span(_) => 3,
-            Self::Comments => 2,
+            Self::Comments(_) => 2,
         }
     }
 }
@@ -1132,8 +1134,8 @@ impl<'input, 'de: 'input, I: Input<'de>> SeqAccess<'de> for &mut MetadataAccess<
         let value = match (self.metadata, self.index) {
             (Metadata::Span(span), 0) => seed.deserialize(span.start().into_deserializer()),
             (Metadata::Span(span), 1) => seed.deserialize(span.end().into_deserializer()),
-            (Metadata::Span(_), 2) | (Metadata::Comments, 0) => seed.deserialize(self.de),
-            (Metadata::Comments, 1) => self.de.comments(seed),
+            (Metadata::Span(_), 2) | (Metadata::Comments(_), 0) => seed.deserialize(self.de),
+            (Metadata::Comments(_), 1) => self.de.comments(seed),
             _ => return Ok(None),
         }?;
 
