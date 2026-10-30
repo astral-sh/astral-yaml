@@ -20,7 +20,7 @@ pub enum CommentPlacement {
 }
 
 /// A source comment and its placement, with text borrowed from the input.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AttachedComment<'source> {
     /// Text excludes `#`. The span includes it and excludes the line break.
     pub comment: Comment<'source>,
@@ -119,7 +119,7 @@ impl<'source> CommentIndex<'source> {
                 Ok((
                     owner,
                     AttachedComment {
-                        comment: comment.clone(),
+                        comment: *comment,
                         placement,
                     },
                 ))

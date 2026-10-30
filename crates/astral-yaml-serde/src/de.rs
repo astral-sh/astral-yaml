@@ -1593,7 +1593,7 @@ mod tests {
         ] {
             let comment = crate::AttachedComment {
                 placement,
-                ..comment.clone()
+                ..comment
             };
             let mut access = super::CommentAccess {
                 comment: &comment,

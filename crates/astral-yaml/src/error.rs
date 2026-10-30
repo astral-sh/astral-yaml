@@ -2,7 +2,7 @@ use crate::Span;
 use std::fmt;
 
 /// An error and its source span.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Error {
     /// The range in the input to the failing operation. Decoding uses the original bytes.
     pub span: Span,

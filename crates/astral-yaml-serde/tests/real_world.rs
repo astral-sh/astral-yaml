@@ -30,7 +30,7 @@ fn real_world_values_comments_and_serialization() {
             let comments: Vec<_> = wrapped
                 .comments
                 .iter()
-                .map(|attached| attached.comment.clone())
+                .map(|attached| attached.comment)
                 .collect();
             assert_eq!(comments, stream.comments(), "root comments: {name}");
         }
