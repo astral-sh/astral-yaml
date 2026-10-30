@@ -210,14 +210,16 @@ impl Draft {
         });
         remap(&mut node, map);
         if let Some((id, style)) = replacement {
-            let old = self.node(id);
-            node.anchor.clone_from(&old.anchor);
+            let slot = &mut self.slots[id.index()];
+            let old = &mut slot.node;
+            node.anchor = old.anchor.take();
             if style == ReplacementStyle::Preserve {
                 preserve_style(old, &mut node);
             }
-            node.comments = retained_comments(old, &node.kind);
+            node.comments = std::mem::take(&mut old.comments);
+            remap_comment_positions(&mut node.comments, &old.kind, &node.kind);
             node.span = old.span;
-            self.slots[id.index()] = Slot::live(node, parent);
+            *slot = Slot::live(node, parent);
         } else {
             self.slots.push(Slot::live(node, parent));
         }
@@ -623,22 +625,29 @@ fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: 
     }
 }
 
+/// A gap comment precedes a sequence item or a mapping key.
+fn comment_boundaries(kind: &NodeKind) -> impl Iterator<Item = NodeId> {
+    let (items, entries): (&[NodeId], &[(NodeId, NodeId)]) = match kind {
+        NodeKind::Sequence { items, .. } => (items, &[]),
+        NodeKind::Mapping { entries, .. } => (&[], entries),
+        NodeKind::Scalar { .. } | NodeKind::Alias { .. } => (&[], &[]),
+    };
+    items
+        .iter()
+        .copied()
+        .chain(entries.iter().map(|&(key, _)| key))
+}
+
 /// Keep collection-owned gap comments before the corresponding child in the new value.
-fn retained_comments(old: &Node<Option<Span>>, kind: &NodeKind) -> Vec<Comment<Option<Span>>> {
-    let mut comments = old.comments.clone();
+fn remap_comment_positions(comments: &mut [Comment<Option<Span>>], old: &NodeKind, new: &NodeKind) {
     if comments
         .iter()
         .any(|comment| matches!(comment.position, CommentPosition::BeforeChild(_)))
     {
-        let keys = |kind: &NodeKind| -> Vec<NodeId> {
-            match kind {
-                NodeKind::Sequence { items, .. } => items.clone(),
-                NodeKind::Mapping { entries, .. } => entries.iter().map(|&(key, _)| key).collect(),
-                _ => Vec::new(),
-            }
-        };
-        let corresponding: HashMap<_, _> = keys(&old.kind).into_iter().zip(keys(kind)).collect();
-        for comment in &mut comments {
+        let corresponding: HashMap<_, _> = comment_boundaries(old)
+            .zip(comment_boundaries(new))
+            .collect();
+        for comment in comments {
             if let CommentPosition::BeforeChild(child) = comment.position {
                 comment.position = corresponding
                     .get(&child)
@@ -647,7 +656,6 @@ fn retained_comments(old: &Node<Option<Span>>, kind: &NodeKind) -> Vec<Comment<O
             }
         }
     }
-    comments
 }
 
 pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {
