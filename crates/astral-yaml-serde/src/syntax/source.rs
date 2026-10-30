@@ -1,9 +1,8 @@
 //! Track source ranges as document markers and line breaks are inserted.
 //! The original and edited syntax use the same offset mapping.
 
-use super::Node;
-use super::draft;
 use super::view::{Emission, Syntax};
+use super::{Node, draft};
 use astral_yaml::{NodeId, ParseOptions, Span};
 
 /// Return each node's content range, excluding tags, anchors, and intervening trivia.

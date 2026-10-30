@@ -1,8 +1,7 @@
 use super::draft::{Draft, ReplacementStyle};
-use super::emit;
 use super::layout::Layout;
 use super::plan::{Changes, Plan};
-use super::{DocumentSyntax, Node, NodeKind};
+use super::{DocumentSyntax, Node, NodeKind, emit};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::schema::{self, ScalarType};
 use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle, Span};

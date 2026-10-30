@@ -7,8 +7,11 @@ Development requires `rustup` and `uv`. Run commands from the repository root.
 Use stable `rustfmt` and the workspace Clippy lints. For API and implementation
 choices, consult [Google's Rust style guide](https://google.github.io/styleguide/rustguide.html).
 
-Group each module’s imports in its own `use` statement. Qualify calls to
-free functions when the module helps identify what they do.
+Stable rustfmt sorts imports. Clippy flags redundant imports, unnecessary
+import braces, and redundant path qualifiers. During review, check that each
+module’s imports share a `use` statement and that calls to free functions are
+qualified when the module helps identify what they do. Import traits inside
+the functions that use them unless they are used throughout the module.
 
 Keep the fixed YAML 1.2 scalar and collection styles exhaustively matchable.
 Keep `ParseOptions` constructible with `..Default::default()` so callers can
@@ -24,7 +27,8 @@ uv run --only-dev --locked ty check --python .venv scripts
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings
 
 cargo test --workspace --all-features --locked
 cargo test --workspace --no-default-features --locked

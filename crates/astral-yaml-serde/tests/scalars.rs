@@ -202,7 +202,7 @@ fn quoted_scalar_folding_and_escapes() {
 #[test_case("-0012", &json!(-12))]
 #[test_case("+0012", &json!(12))]
 #[test_case("'0755'", &json!("0755"))]
-fn decimal_integers_can_have_leading_zeroes(source: &str, expected: &serde_json::Value) {
+fn decimal_integers_can_have_leading_zeroes(source: &str, expected: &Value) {
     assert_eq!(&from_str::<Value>(source).unwrap(), expected, "{source}");
 }
 

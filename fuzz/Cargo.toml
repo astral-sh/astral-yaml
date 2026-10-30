@@ -7,6 +7,19 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+# Keep the import and clone lints in sync with the root workspace.
+[lints.rust]
+redundant_imports = "warn"
+unused_import_braces = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+enum_glob_use = "warn"
+macro_use_imports = "warn"
+redundant_clone = "warn"
+unnecessary_self_imports = "warn"
+wildcard_imports = "warn"
+
 [dependencies]
 libfuzzer-sys = "0.4"
 serde = { version = "1.0", features = ["derive"] }
