@@ -102,9 +102,9 @@ pub enum CollectionStyle {
 
 /// A decoded scalar and its source range.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Scalar<'a> {
+pub struct Scalar<'source> {
     /// Text after YAML quoting, escaping, and line folding have been applied.
-    pub value: Cow<'a, str>,
+    pub value: Cow<'source, str>,
     /// The presentation used to spell the value in the source.
     pub style: ScalarStyle,
     /// The scalar token, including its delimiters and excluding node properties.
@@ -114,9 +114,9 @@ pub struct Scalar<'a> {
 /// An anchor name or expanded tag, with its source range.
 /// Percent escapes in tag URIs retain their original spelling.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Property<'a> {
+pub struct Property<'source> {
     /// The name after `&`, or the tag after expanding its handle.
-    pub value: Cow<'a, str>,
+    pub value: Cow<'source, str>,
     /// The original spelling, including the leading `&` or `!`.
     pub span: Span,
 }
@@ -134,9 +134,9 @@ pub struct Entry {
 
 /// Node content. Aliases retain identity without expanding their targets.
 #[derive(Clone, Debug, PartialEq)]
-pub enum NodeKind<'a> {
+pub enum NodeKind<'source> {
     /// A scalar's text and presentation before schema resolution.
-    Scalar(Scalar<'a>),
+    Scalar(Scalar<'source>),
     /// An ordered collection of nodes.
     Sequence {
         /// Item IDs in source order.
@@ -154,7 +154,7 @@ pub enum NodeKind<'a> {
     /// A reference to the most recent preceding anchor with this name.
     Alias {
         /// The name after `*`.
-        name: &'a str,
+        name: &'source str,
         /// The anchored node, which can be an ancestor of the alias.
         target: NodeId,
     },
@@ -162,40 +162,40 @@ pub enum NodeKind<'a> {
 
 /// A syntax node, including any anchor and tag properties.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Node<'a> {
+pub struct Node<'source> {
     /// The source range covering both the node's properties and its content.
     pub span: Span,
     /// The anchor introduced on this node, if present.
-    pub anchor: Option<Property<'a>>,
+    pub anchor: Option<Property<'source>>,
     /// The explicit tag on this node, if present.
-    pub tag: Option<Property<'a>>,
+    pub tag: Option<Property<'source>>,
     /// Scalar or collection contents, or a reference to an anchored node.
-    pub kind: NodeKind<'a>,
+    pub kind: NodeKind<'source>,
 }
 
 /// A comment's text and source range.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Comment<'a> {
+pub struct Comment<'source> {
     /// Includes `#` and excludes the line break.
     pub span: Span,
     /// Excludes `#` and the line break. Preserves whitespace after `#`.
-    pub text: &'a str,
+    pub text: &'source str,
 }
 
 /// A directive line, excluding its trailing comment and line break.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Directive<'a> {
+pub struct Directive<'source> {
     /// The directive's source range, starting at `%`.
     pub span: Span,
     /// The directive name without its leading `%`.
-    pub name: &'a str,
+    pub name: &'source str,
     /// The arguments with their internal whitespace and without any trailing comment.
-    pub arguments: &'a str,
+    pub arguments: &'source str,
 }
 
 /// One document in a YAML stream.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Document<'a> {
+pub struct Document<'source> {
     /// Begins at the first directive, start marker, or root. An explicit end marker is included.
     pub span: Span,
     /// The root's arena ID. An empty document has an empty scalar as its root.
@@ -205,24 +205,24 @@ pub struct Document<'a> {
     /// The three bytes of the `...` that ends this document, if present.
     pub end_marker: Option<Span>,
     /// Directives preceding this document's start marker, in source order.
-    pub directives: Vec<Directive<'a>>,
+    pub directives: Vec<Directive<'source>>,
 }
 
 /// A parsed stream with flat ownership of all nodes, including cyclic aliases.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Stream<'a> {
-    pub(crate) source: &'a str,
-    pub(crate) nodes: Vec<Node<'a>>,
-    pub(crate) documents: Vec<Document<'a>>,
-    pub(crate) comments: Vec<Comment<'a>>,
+pub struct Stream<'source> {
+    pub(crate) source: &'source str,
+    pub(crate) nodes: Vec<Node<'source>>,
+    pub(crate) documents: Vec<Document<'source>>,
+    pub(crate) comments: Vec<Comment<'source>>,
     pub(crate) byte_order_marks: Vec<Span>,
     pub(crate) document_end_markers: Vec<Span>,
 }
 
-impl<'a> Stream<'a> {
+impl<'source> Stream<'source> {
     /// The complete UTF-8 input against which parser spans are measured.
     #[must_use]
-    pub fn source(&self) -> &'a str {
+    pub fn source(&self) -> &'source str {
         self.source
     }
 
@@ -237,25 +237,25 @@ impl<'a> Stream<'a> {
 
     /// Documents in source order. An empty or comment-only stream has none.
     #[must_use]
-    pub fn documents(&self) -> &[Document<'a>] {
+    pub fn documents(&self) -> &[Document<'source>] {
         &self.documents
     }
 
     /// Comments in source order, including those outside any document.
     #[must_use]
-    pub fn comments(&self) -> &[Comment<'a>] {
+    pub fn comments(&self) -> &[Comment<'source>] {
         &self.comments
     }
 
     /// All nodes across all documents. Use [`Self::node`] to follow a node ID.
     #[must_use]
-    pub fn nodes(&self) -> &[Node<'a>] {
+    pub fn nodes(&self) -> &[Node<'source>] {
         &self.nodes
     }
 
     /// Consume the stream and return its node arena in ID order.
     #[must_use]
-    pub fn into_nodes(self) -> Vec<Node<'a>> {
+    pub fn into_nodes(self) -> Vec<Node<'source>> {
         self.nodes
     }
 
@@ -273,7 +273,7 @@ impl<'a> Stream<'a> {
 
     /// Returns a node when the ID lies within this stream's arena.
     #[must_use]
-    pub fn node(&self, id: NodeId) -> Option<&Node<'a>> {
+    pub fn node(&self, id: NodeId) -> Option<&Node<'source>> {
         self.nodes.get(id.0)
     }
 

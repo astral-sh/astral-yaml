@@ -146,9 +146,9 @@ struct Deserializer<C> {
     yaml_tag: bool,
 }
 
-impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
+impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     #[inline]
-    fn raw_node(self) -> Result<I::Node<'s>> {
+    fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
         if self.depth >= 64 || self.context.budget.get() == 0 {
             return Err(Error::at(
@@ -172,7 +172,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
     }
 
     #[inline]
-    fn node(mut self) -> Result<I::Node<'s>> {
+    fn node(mut self) -> Result<I::Node<'input>> {
         loop {
             let node = self.raw_node()?;
             let NodeKind::Alias { target } = node.kind() else {
@@ -231,8 +231,8 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
 
     fn tagged_mapping<V: Visitor<'de>>(
         self,
-        node: I::Node<'s>,
-        variant: &'s str,
+        node: I::Node<'input>,
+        variant: &'input str,
         visitor: V,
     ) -> Result<V::Value> {
         // Serde's untagged-enum buffer accepts maps but rejects enum input.
@@ -281,7 +281,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         seed.deserialize(de::value::SeqDeserializer::new(records))
     }
 
-    fn scalar(self, expected: ScalarType) -> Result<(ScalarOf<'s, 'de, I>, ScalarType)> {
+    fn scalar(self, expected: ScalarType) -> Result<(ScalarOf<'input, 'de, I>, ScalarType)> {
         let node = self.node()?;
 
         // Text destinations accept every untagged scalar spelling, so they do
@@ -301,7 +301,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Ok(value)
     }
 
-    fn reject_tag(self, node: I::Node<'s>) -> Result<()> {
+    fn reject_tag(self, node: I::Node<'input>) -> Result<()> {
         if self.tag_state == TagState::Unconsumed && node.tag().is_some_and(|tag| !is_core_tag(tag))
         {
             return Err(Error::at(
@@ -313,14 +313,14 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Ok(())
     }
 
-    fn enum_tag(self, node: I::Node<'s>) -> Option<&'s str> {
+    fn enum_tag(self, node: I::Node<'input>) -> Option<&'input str> {
         node.tag()
             .filter(|_| self.yaml_tag && self.tag_state == TagState::Unconsumed)
             .and_then(|tag| tag.strip_prefix('!'))
             .filter(|name| !name.is_empty())
     }
 
-    fn variant_name(self, name: &'s str) -> Result<de::value::StrDeserializer<'s, Error>> {
+    fn variant_name(self, name: &'input str) -> Result<de::value::StrDeserializer<'input, Error>> {
         let remaining = self
             .context
             .scalar_budget
@@ -336,7 +336,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
     }
 
     #[inline]
-    fn scalar_value(self, node: I::Node<'s>) -> Result<(ScalarOf<'s, 'de, I>, ScalarType)> {
+    fn scalar_value(self, node: I::Node<'input>) -> Result<(ScalarOf<'input, 'de, I>, ScalarType)> {
         let NodeKind::Scalar(s) = node.kind() else {
             return Err(Error::at("expected a scalar", node.span()));
         };
@@ -372,22 +372,25 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Self::visit_text(scalar, visitor)
     }
 
-    fn visit_text<V: Visitor<'de>>(scalar: ScalarOf<'s, 'de, I>, visitor: V) -> Result<V::Value> {
+    fn visit_text<V: Visitor<'de>>(
+        scalar: ScalarOf<'input, 'de, I>,
+        visitor: V,
+    ) -> Result<V::Value> {
         match scalar.borrowed() {
             Some(text) => visitor.visit_borrowed_str(text),
             None => visitor.visit_str(scalar.value()),
         }
     }
 
-    fn integer(self) -> Result<(&'s str, u32, Option<Span>)> {
+    fn integer(self) -> Result<(&'input str, u32, Option<Span>)> {
         let (scalar, kind) = self.scalar(ScalarType::Int)?;
         Self::integer_value(scalar, kind)
     }
 
     fn integer_value(
-        s: ScalarOf<'s, 'de, I>,
+        s: ScalarOf<'input, 'de, I>,
         kind: ScalarType,
-    ) -> Result<(&'s str, u32, Option<Span>)> {
+    ) -> Result<(&'input str, u32, Option<Span>)> {
         if kind != ScalarType::Int {
             return Err(Error::at("expected an integer", s.span()));
         }
@@ -409,7 +412,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Self::float_value(scalar, kind)
     }
 
-    fn radix_integer_value(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
+    fn radix_integer_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
         if kind != ScalarType::Int || !(s.value().starts_with("0x") || s.value().starts_with("0o"))
         {
             return Ok(None);
@@ -421,7 +424,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
             .map_err(|_| Error::at("integer out of range", span))
     }
 
-    fn wide_radix_float(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<f64> {
+    fn wide_radix_float(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
         let (digits, radix, span) = Self::integer_value(s, kind)?;
         let digit_bits = if radix == 16 { 4 } else { 3 };
         let mut significand = 0_u64;
@@ -475,7 +478,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Ok(value)
     }
 
-    fn float_value(s: ScalarOf<'s, 'de, I>, kind: ScalarType) -> Result<f64> {
+    fn float_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
         if !matches!(kind, ScalarType::Float | ScalarType::Int) {
             return Err(Error::at("expected a number", s.span()));
         }
@@ -514,7 +517,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Ok(value)
     }
 
-    fn check_core_tag(self, node: I::Node<'s>, expected: YamlType) -> Result<()> {
+    fn check_core_tag(self, node: I::Node<'input>, expected: YamlType) -> Result<()> {
         if self.tag_state == TagState::ConsumedApplication {
             return Ok(());
         }
@@ -532,7 +535,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         Ok(())
     }
 
-    fn key(self) -> Result<Key<'s>> {
+    fn key(self) -> Result<Key<'input>> {
         let node = self.raw_node()?;
 
         if let Some(tag) = node
@@ -680,7 +683,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         self.map_node(self.node()?, visitor)
     }
 
-    fn map_node<V: Visitor<'de>>(self, node: I::Node<'s>, visitor: V) -> Result<V::Value> {
+    fn map_node<V: Visitor<'de>>(self, node: I::Node<'input>, visitor: V) -> Result<V::Value> {
         self.reject_tag(node)?;
         let NodeKind::Mapping { entries, .. } = node.kind() else {
             return Err(Error::at("expected a mapping", node.span()));
@@ -711,7 +714,7 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
         self.seq_node(self.node()?, visitor)
     }
 
-    fn seq_node<V: Visitor<'de>>(self, node: I::Node<'s>, visitor: V) -> Result<V::Value> {
+    fn seq_node<V: Visitor<'de>>(self, node: I::Node<'input>, visitor: V) -> Result<V::Value> {
         self.reject_tag(node)?;
         let NodeKind::Sequence { items, .. } = node.kind() else {
             return Err(Error::at("expected a sequence", node.span()));
@@ -737,15 +740,15 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
 }
 
 #[derive(Eq, Hash, Ord, PartialEq, PartialOrd)]
-enum Key<'a> {
+enum Key<'input> {
     Null,
     Bool(bool),
-    String(&'a str),
+    String(&'input str),
     Integer(bool, u128),
     Float(u64),
     Sequence(Vec<Self>),
     Mapping(Vec<(Self, Self)>),
-    Tagged(&'a str, Box<Self>),
+    Tagged(&'input str, Box<Self>),
 }
 
 impl Key<'_> {
@@ -803,7 +806,9 @@ macro_rules! integer_methods {
     };
 }
 
-impl<'s, 'de: 's, I: Input<'de>> de::Deserializer<'de> for Deserializer<&'s Context<I>> {
+impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
+    for Deserializer<&'input Context<I>>
+{
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -1090,8 +1095,8 @@ impl<'s, 'de: 's, I: Input<'de>> de::Deserializer<'de> for Deserializer<&'s Cont
     }
 }
 
-struct MetadataAccess<'s, I> {
-    de: Deserializer<&'s Context<I>>,
+struct MetadataAccess<'input, I> {
+    de: Deserializer<&'input Context<I>>,
     metadata: Metadata,
     index: usize,
 }
@@ -1120,7 +1125,7 @@ impl Metadata {
     }
 }
 
-impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut MetadataAccess<'s, I> {
+impl<'input, 'de: 'input, I: Input<'de>> SeqAccess<'de> for &mut MetadataAccess<'input, I> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
@@ -1141,8 +1146,8 @@ impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut MetadataAccess<'s, I> {
     }
 }
 
-struct CommentAccess<'s, 'de> {
-    comment: &'s AttachedComment<'de>,
+struct CommentAccess<'input, 'de> {
+    comment: &'input AttachedComment<'de>,
     index: usize,
 }
 
@@ -1178,13 +1183,13 @@ impl<'de> SeqAccess<'de> for CommentAccess<'_, 'de> {
     }
 }
 
-struct Sequence<'s, I> {
-    de: Deserializer<&'s Context<I>>,
-    items: &'s [NodeId],
+struct Sequence<'input, I> {
+    de: Deserializer<&'input Context<I>>,
+    items: &'input [NodeId],
     index: usize,
 }
 
-impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'s, I> {
+impl<'input, 'de: 'input, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'input, I> {
     type Error = Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>> {
@@ -1204,14 +1209,14 @@ impl<'s, 'de: 's, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'s, I> {
     }
 }
 
-struct Mapping<'s, I, E> {
-    de: Deserializer<&'s Context<I>>,
-    entries: &'s [E],
+struct Mapping<'input, I, E> {
+    de: Deserializer<&'input Context<I>>,
+    entries: &'input [E],
     index: usize,
-    pending: Option<&'s E>,
+    pending: Option<&'input E>,
 }
 
-impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> Mapping<'s, I, E> {
+impl<'input, 'de: 'input, I: Input<'de, Entry = E>, E: Entry + 'input> Mapping<'input, I, E> {
     fn value_error(&self, key: NodeId, error: Error) -> Error {
         let key = self
             .de
@@ -1228,8 +1233,8 @@ impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> Mapping<'s, I, E> {
     }
 }
 
-impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> MapAccess<'de>
-    for &mut Mapping<'s, I, E>
+impl<'input, 'de: 'input, I: Input<'de, Entry = E>, E: Entry + 'input> MapAccess<'de>
+    for &mut Mapping<'input, I, E>
 {
     type Error = Error;
 
@@ -1265,8 +1270,8 @@ impl<'s, 'de: 's, I: Input<'de, Entry = E>, E: Entry + 's> MapAccess<'de>
     }
 }
 
-struct TagMapping<'s, I> {
-    enumeration: Enumeration<'s, I>,
+struct TagMapping<'input, I> {
+    enumeration: Enumeration<'input, I>,
     state: TagMappingState,
 }
 
@@ -1277,7 +1282,7 @@ enum TagMappingState {
     End,
 }
 
-impl<'s, 'de: 's, I: Input<'de>> MapAccess<'de> for TagMapping<'s, I> {
+impl<'input, 'de: 'input, I: Input<'de>> MapAccess<'de> for TagMapping<'input, I> {
     type Error = Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
@@ -1307,9 +1312,9 @@ impl<'s, 'de: 's, I: Input<'de>> MapAccess<'de> for TagMapping<'s, I> {
     }
 }
 
-struct Enumeration<'s, I> {
-    de: Deserializer<&'s Context<I>>,
-    variant: &'s str,
+struct Enumeration<'input, I> {
+    de: Deserializer<&'input Context<I>>,
+    variant: &'input str,
     value: VariantValue,
 }
 
@@ -1319,8 +1324,8 @@ enum VariantValue {
     Tagged(NodeId),
 }
 
-impl<'s, 'de: 's, I: Input<'de>> Enumeration<'s, I> {
-    fn payload(&self) -> Result<Deserializer<&'s Context<I>>> {
+impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
+    fn payload(&self) -> Result<Deserializer<&'input Context<I>>> {
         let (VariantValue::Node(id) | VariantValue::Tagged(id)) = self.value else {
             return Err(Error::new("expected a variant payload"));
         };
@@ -1344,7 +1349,7 @@ impl<'s, 'de: 's, I: Input<'de>> Enumeration<'s, I> {
     }
 }
 
-impl<'s, 'de: 's, I: Input<'de>> EnumAccess<'de> for Enumeration<'s, I> {
+impl<'input, 'de: 'input, I: Input<'de>> EnumAccess<'de> for Enumeration<'input, I> {
     type Error = Error;
     type Variant = Self;
 
@@ -1354,7 +1359,7 @@ impl<'s, 'de: 's, I: Input<'de>> EnumAccess<'de> for Enumeration<'s, I> {
     }
 }
 
-impl<'s, 'de: 's, I: Input<'de>> VariantAccess<'de> for Enumeration<'s, I> {
+impl<'input, 'de: 'input, I: Input<'de>> VariantAccess<'de> for Enumeration<'input, I> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {

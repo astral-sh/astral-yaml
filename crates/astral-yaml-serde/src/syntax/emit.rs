@@ -21,11 +21,11 @@ pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
 
 /// Render `id` using the supplied placement.
 /// Source ranges are selected by the splice planner before this function runs.
-pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    document: Syntax<'a, Location>,
+pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
+    document: Syntax<'syntax, Location>,
     options: ParseOptions,
     id: NodeId,
-    placement: &super::splice::Placement<'a, Location>,
+    placement: &super::splice::Placement<'syntax, Location>,
     layout: &Layout,
 ) -> Result<Fragment, Error> {
     let mut emitter = Emitter {
@@ -138,11 +138,11 @@ impl Context {
 /// A cursor over the node's comments.
 /// Pass it through the node's indicators, properties, and content to keep
 /// interleaved leading and inline comments in order.
-struct Comments<'a, Location> {
-    remaining: &'a [Comment<Location>],
+struct Comments<'comments, Location> {
+    remaining: &'comments [Comment<Location>],
 }
 
-impl<'a, Location> Comments<'a, Location> {
+impl<'comments, Location> Comments<'comments, Location> {
     fn at_opening(&self) -> bool {
         self.remaining
             .first()
@@ -155,14 +155,14 @@ impl<'a, Location> Comments<'a, Location> {
             .is_some_and(|comment| comment.placement == placement)
     }
 
-    fn take(&mut self, placement: CommentPlacement) -> Option<&'a Comment<Location>> {
+    fn take(&mut self, placement: CommentPlacement) -> Option<&'comments Comment<Location>> {
         self.take_if(|comment| comment.placement == placement)
     }
 
     fn take_if(
         &mut self,
         matches: impl FnOnce(&Comment<Location>) -> bool,
-    ) -> Option<&'a Comment<Location>> {
+    ) -> Option<&'comments Comment<Location>> {
         let (next, rest) = self.remaining.split_first()?;
         if matches(next) {
             self.remaining = rest;
@@ -181,14 +181,14 @@ impl<'a, Location> Comments<'a, Location> {
         })
     }
 
-    fn take_header(&mut self) -> Option<&'a Comment<Location>> {
+    fn take_header(&mut self) -> Option<&'comments Comment<Location>> {
         self.take_if(|comment| {
             comment.position == CommentPosition::Header
                 && comment.placement != CommentPlacement::Inline
         })
     }
 
-    fn take_detached_prefix(&mut self) -> Option<&'a Comment<Location>> {
+    fn take_detached_prefix(&mut self) -> Option<&'comments Comment<Location>> {
         self.take_if(|comment| {
             comment.position == CommentPosition::Before
                 && comment.placement == CommentPlacement::Detached
@@ -275,12 +275,12 @@ enum EmitterEnding {
     BlockScalar,
 }
 
-struct Emitter<'a, 'layout, Location> {
-    document: Syntax<'a, Location>,
+struct Emitter<'syntax, 'layout, Location> {
+    document: Syntax<'syntax, Location>,
     options: ParseOptions,
     layout: &'layout Layout,
     root: NodeId,
-    root_comments: &'a [Comment<Location>],
+    root_comments: &'syntax [Comment<Location>],
     region: Span,
     at_column_zero: bool,
     output: String,
@@ -288,7 +288,7 @@ struct Emitter<'a, 'layout, Location> {
     ending: EmitterEnding,
 }
 
-impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
+impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: self.region,
@@ -408,7 +408,7 @@ impl<'a, Location: Copy + Into<Option<Span>>> Emitter<'a, '_, Location> {
         Ok(())
     }
 
-    fn node_comments(&self, id: NodeId) -> Comments<'a, Location> {
+    fn node_comments(&self, id: NodeId) -> Comments<'syntax, Location> {
         let comments = if id == self.root {
             self.root_comments
         } else {
@@ -1169,8 +1169,8 @@ pub(super) fn parse_rendered<Location: Copy>(
 
 /// Match nodes by traversal order and check that aliases reach matching targets.
 /// Node IDs can differ between trees. Alias targets are compared without expansion.
-pub(super) fn correspondence<'a, Location: 'a>(
-    expected: impl Into<Syntax<'a, Location>>,
+pub(super) fn correspondence<'syntax, Location: 'syntax>(
+    expected: impl Into<Syntax<'syntax, Location>>,
     actual: &DocumentSyntax,
 ) -> Option<Vec<Option<NodeId>>> {
     let expected = expected.into();
@@ -1226,8 +1226,8 @@ pub(super) fn correspondence<'a, Location: 'a>(
         .then_some(correspondence)
 }
 
-pub(super) fn comments_preserved<'a, Location: 'a>(
-    expected: impl Into<Syntax<'a, Location>>,
+pub(super) fn comments_preserved<'syntax, Location: 'syntax>(
+    expected: impl Into<Syntax<'syntax, Location>>,
     actual: &DocumentSyntax,
     correspondence: &[Option<NodeId>],
 ) -> bool {

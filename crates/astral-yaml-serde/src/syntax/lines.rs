@@ -42,13 +42,13 @@ impl Line {
 
 /// Index only lines visited by the planner. A multiline scalar or a run of blank
 /// lines can occupy most of the input while contributing just one node.
-pub(super) struct LineIndex<'a> {
-    source: &'a str,
+pub(super) struct LineIndex<'source> {
+    source: &'source str,
     by_end: BTreeMap<usize, Line>,
 }
 
-impl<'a> LineIndex<'a> {
-    pub(super) fn new(source: &'a str) -> Self {
+impl<'source> LineIndex<'source> {
+    pub(super) fn new(source: &'source str) -> Self {
         Self {
             source,
             by_end: BTreeMap::new(),

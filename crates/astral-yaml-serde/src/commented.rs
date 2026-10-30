@@ -34,9 +34,9 @@ pub(crate) const NAME: &str = "$astral_yaml::Commented";
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize)]
-/// struct Config<'a> {
+/// struct Config<'source> {
 ///     #[serde(borrow)]
-///     timeout: Commented<'a, u64>,
+///     timeout: Commented<'source, u64>,
 /// }
 ///
 /// let source = "timeout: 30 # seconds\n";
@@ -46,11 +46,11 @@ pub(crate) const NAME: &str = "$astral_yaml::Commented";
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Commented<'a, T> {
+pub struct Commented<'source, T> {
     /// The deserialized value.
     pub value: T,
     /// Comments belonging to this node and its syntax descendants, in source order.
-    pub comments: Vec<AttachedComment<'a>>,
+    pub comments: Vec<AttachedComment<'source>>,
 }
 
 impl<T> Commented<'_, T> {
@@ -81,16 +81,16 @@ impl<T: Serialize> Serialize for Commented<'_, T> {
     }
 }
 
-impl<'de: 'a, 'a, T: Deserialize<'de>> Deserialize<'de> for Commented<'a, T> {
+impl<'de: 'source, 'source, T: Deserialize<'de>> Deserialize<'de> for Commented<'source, T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_newtype_struct(NAME, CommentedVisitor(PhantomData))
     }
 }
 
-struct CommentedVisitor<'a, T>(PhantomData<(&'a (), T)>);
+struct CommentedVisitor<'source, T>(PhantomData<(&'source (), T)>);
 
-impl<'de: 'a, 'a, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<'a, T> {
-    type Value = Commented<'a, T>;
+impl<'de: 'source, 'source, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<'source, T> {
+    type Value = Commented<'source, T>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a commented value from astral-yaml-serde")
@@ -100,7 +100,7 @@ impl<'de: 'a, 'a, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<'a, T> 
         let value = seq
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-        let comments: Vec<CommentMetadata<'a>> = seq
+        let comments: Vec<CommentMetadata<'source>> = seq
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(1, &self))?;
         if seq.next_element::<de::IgnoredAny>()?.is_some() {
@@ -114,12 +114,12 @@ impl<'de: 'a, 'a, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<'a, T> 
     }
 }
 
-struct CommentMetadata<'a>(AttachedComment<'a>);
+struct CommentMetadata<'source>(AttachedComment<'source>);
 
-impl<'de: 'a, 'a> Deserialize<'de> for CommentMetadata<'a> {
+impl<'de: 'source, 'source> Deserialize<'de> for CommentMetadata<'source> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let (start, end, text, placement) =
-            <(usize, usize, &'a str, u8)>::deserialize(deserializer)?;
+            <(usize, usize, &'source str, u8)>::deserialize(deserializer)?;
         let span = Span::new(start, end)
             .ok_or_else(|| de::Error::custom("comment span starts after its end"))?;
         let placement = match placement {

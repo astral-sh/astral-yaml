@@ -14,18 +14,18 @@ use astral_yaml::{Error, NodeId, Span};
 use std::cell::Cell;
 use std::collections::HashSet;
 
-pub(super) struct Plan<'a> {
-    pub(super) original: &'a Source,
-    pub(super) candidate: Syntax<'a, Option<Span>>,
-    pub(super) parents: &'a [Option<NodeId>],
+pub(super) struct Plan<'plan> {
+    pub(super) original: &'plan Source,
+    pub(super) candidate: Syntax<'plan, Option<Span>>,
+    pub(super) parents: &'plan [Option<NodeId>],
     pub(super) changes: Changes,
-    pub(super) work: &'a Cell<usize>,
+    pub(super) work: &'plan Cell<usize>,
 }
 
 /// A subtree and the source range reserved for its replacement.
-pub(super) struct Rewrite<'a> {
+pub(super) struct Rewrite<'source> {
     pub(super) id: NodeId,
-    pub(super) boundary: Boundary<'a>,
+    pub(super) boundary: Boundary<'source>,
     context: emit::Context,
 }
 

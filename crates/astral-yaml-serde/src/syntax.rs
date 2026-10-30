@@ -192,9 +192,9 @@ fn charge_work(work: &Cell<usize>, amount: usize, span: Span) -> Result<(), Erro
     Ok(())
 }
 
-fn single_document<'a, 's>(
-    stream: &'a astral_yaml::Stream<'s>,
-) -> Result<&'a astral_yaml::Document<'s>, Error> {
+fn single_document<'stream, 'source>(
+    stream: &'stream astral_yaml::Stream<'source>,
+) -> Result<&'stream astral_yaml::Document<'source>, Error> {
     match stream.documents() {
         [document] => Ok(document),
         _ => Err(Error {

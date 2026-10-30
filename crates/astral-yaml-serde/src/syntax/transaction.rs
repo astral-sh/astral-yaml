@@ -16,12 +16,12 @@ mod tests;
 /// targets outside the selected subtree. Source spans refer to the original
 /// document and are absent on newly inserted nodes.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ValueRef<'a> {
-    draft: &'a Draft,
+pub(crate) struct ValueRef<'draft> {
+    draft: &'draft Draft,
     root: NodeId,
 }
 
-impl<'a> ValueRef<'a> {
+impl<'draft> ValueRef<'draft> {
     /// Return the ID of the selected node.
     #[must_use]
     pub(crate) fn root(self) -> NodeId {
@@ -32,7 +32,7 @@ impl<'a> ValueRef<'a> {
     ///
     /// # Errors
     /// Returns an error if the node was removed or the work limit is exceeded.
-    pub(crate) fn node(self, id: NodeId) -> Result<&'a Node<Option<Span>>, Error> {
+    pub(crate) fn node(self, id: NodeId) -> Result<&'draft Node<Option<Span>>, Error> {
         self.draft.charge(1)?;
         if !self.draft.contains(id) {
             return Err(self.draft.error("node is no longer in the document"));
@@ -42,13 +42,13 @@ impl<'a> ValueRef<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct Editor<'a> {
-    original: &'a DocumentSyntax,
+pub(crate) struct Editor<'doc> {
+    original: &'doc DocumentSyntax,
     draft: Draft,
 }
 
-impl<'a> Editor<'a> {
-    pub(crate) fn new(original: &'a DocumentSyntax) -> Self {
+impl<'doc> Editor<'doc> {
+    pub(crate) fn new(original: &'doc DocumentSyntax) -> Self {
         Self {
             original,
             draft: Draft::from(original),

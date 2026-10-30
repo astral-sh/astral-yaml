@@ -62,18 +62,18 @@ struct Slot {
     outer_comments: bool,
 }
 
-pub(super) struct Scopes<'a> {
-    original: &'a Source,
-    candidate: Syntax<'a, Option<Span>>,
-    layout: &'a Layout,
+pub(super) struct Scopes<'plan> {
+    original: &'plan Source,
+    candidate: Syntax<'plan, Option<Span>>,
+    layout: &'plan Layout,
     slots: Vec<Slot>,
 }
 
-impl<'a> Scopes<'a> {
+impl<'plan> Scopes<'plan> {
     pub(super) fn new(
-        original: &'a Source,
-        candidate: Syntax<'a, Option<Span>>,
-        layout: &'a Layout,
+        original: &'plan Source,
+        candidate: Syntax<'plan, Option<Span>>,
+        layout: &'plan Layout,
         lines: &mut LineIndex<'_>,
     ) -> Self {
         let mut slots = vec![None; original.nodes.len()];

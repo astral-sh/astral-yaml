@@ -42,8 +42,8 @@ pub(super) struct Source {
     pub(super) extra_end_markers: Vec<Span>,
 }
 
-impl<'a> From<&'a Source> for Syntax<'a, Span> {
-    fn from(source: &'a Source) -> Self {
+impl<'source> From<&'source Source> for Syntax<'source, Span> {
+    fn from(source: &'source Source) -> Self {
         Self {
             nodes: &source.nodes,
             root: source.root,
@@ -52,10 +52,10 @@ impl<'a> From<&'a Source> for Syntax<'a, Span> {
 }
 
 impl Source {
-    pub(super) fn emission<'a, Location>(
-        &'a self,
-        syntax: Syntax<'a, Location>,
-    ) -> Emission<'a, Location> {
+    pub(super) fn emission<'source, Location>(
+        &'source self,
+        syntax: Syntax<'source, Location>,
+    ) -> Emission<'source, Location> {
         Emission {
             syntax,
             source: self,
@@ -109,8 +109,8 @@ struct Marker {
 }
 
 /// Source text with inserted markers and line breaks, and a map of the offset changes.
-pub(super) struct Frame<'a> {
-    original: &'a Source,
+pub(super) struct Frame<'source> {
+    original: &'source Source,
     text: String,
     locations: Locations,
     start: Option<Marker>,
@@ -133,8 +133,8 @@ impl Prepared {
     }
 }
 
-impl<'a> Frame<'a> {
-    pub(super) fn new(original: &'a Source) -> Self {
+impl<'source> Frame<'source> {
+    pub(super) fn new(original: &'source Source) -> Self {
         Self {
             original,
             text: original.text.clone(),
