@@ -41,15 +41,15 @@ macro_rules! edit_path {
 
 /// One step in an edit path. Strings are literal mapping keys, not path expressions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PathSegment<'a> {
+pub enum PathSegment<'key> {
     /// A literal string key in a mapping.
-    Key(&'a str),
+    Key(&'key str),
     /// A zero-based position in a sequence.
     Index(usize),
 }
 
-impl<'a> From<&'a str> for PathSegment<'a> {
-    fn from(key: &'a str) -> Self {
+impl<'key> From<&'key str> for PathSegment<'key> {
+    fn from(key: &'key str) -> Self {
         Self::Key(key)
     }
 }
@@ -90,14 +90,14 @@ pub(crate) fn transaction<R, E: From<Error>>(
 /// A failed mutation prevents the transaction from committing, even if its error
 /// is handled. Navigation and read errors can be handled without preventing a commit.
 #[derive(Debug)]
-pub struct Cursor<'a, 'doc, State = ()> {
-    editor: &'a mut syntax::Editor<'doc>,
+pub struct Cursor<'edit, 'doc, State = ()> {
+    editor: &'edit mut syntax::Editor<'doc>,
     id: NodeId,
     state: State,
-    context: EditContext<'a>,
+    context: EditContext<'edit>,
 }
 
-impl<'a, 'doc> Cursor<'a, 'doc> {
+impl<'edit, 'doc> Cursor<'edit, 'doc> {
     /// Lend this position to an edit, so navigation can start here again afterwards.
     pub fn reborrow(&mut self) -> Cursor<'_, 'doc> {
         self.context.reborrow().cursor(self.editor, self.id)
@@ -177,7 +177,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if the selected node is not a mapping or an editing limit is exceeded.
-    pub fn into_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
+    pub fn into_mapping(self) -> Result<MappingMut<'edit, 'doc>, Error> {
         let len = self
             .context
             .with_path(self.editor.entry_ids(self.id))?
@@ -189,12 +189,12 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if the selected node is not a sequence or an editing limit is exceeded.
-    pub fn into_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
+    pub fn into_sequence(self) -> Result<SequenceMut<'edit, 'doc>, Error> {
         let len = self.context.with_path(self.editor.item_ids(self.id))?.len();
         Ok(self.into_collection(len))
     }
 
-    fn into_collection<Kind>(self, len: usize) -> Cursor<'a, 'doc, Collection<Kind>> {
+    fn into_collection<Kind>(self, len: usize) -> Cursor<'edit, 'doc, Collection<Kind>> {
         Cursor {
             editor: self.editor,
             id: self.id,
@@ -253,7 +253,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
 ///
 /// Child selections borrow the view. Their cursors can replace the selected child
 /// while the mapping itself remains available for later edits.
-pub type MappingMut<'a, 'doc> = Cursor<'a, 'doc, Collection<Mapping>>;
+pub type MappingMut<'edit, 'doc> = Cursor<'edit, 'doc, Collection<Mapping>>;
 
 impl<'doc> MappingMut<'_, 'doc> {
     /// Select the value at string key `name`, or return `None` if absent.
@@ -393,7 +393,7 @@ impl<'doc> MappingMut<'_, 'doc> {
 }
 
 /// A sequence selected for repeated edits.
-pub type SequenceMut<'a, 'doc> = Cursor<'a, 'doc, Collection<Sequence>>;
+pub type SequenceMut<'edit, 'doc> = Cursor<'edit, 'doc, Collection<Sequence>>;
 
 impl<'doc> SequenceMut<'_, 'doc> {
     /// Select the item at `index`, or return `None` if it is absent.
@@ -466,23 +466,23 @@ impl<'doc> SequenceMut<'_, 'doc> {
 
 /// An occupied or vacant string-keyed mapping entry.
 #[derive(Debug)]
-pub struct Entry<'a, 'doc> {
-    editor: &'a mut syntax::Editor<'doc>,
-    state: EntryState<'a>,
-    context: EditContext<'a>,
+pub struct Entry<'edit, 'doc> {
+    editor: &'edit mut syntax::Editor<'doc>,
+    state: EntryState<'edit>,
+    context: EditContext<'edit>,
 }
 
 #[derive(Debug)]
-enum EntryState<'a> {
+enum EntryState<'edit> {
     Occupied(NodeId),
     Vacant {
         mapping: NodeId,
         name: String,
-        len: &'a mut usize,
+        len: &'edit mut usize,
     },
 }
 
-impl<'a, 'doc> Entry<'a, 'doc> {
+impl<'edit, 'doc> Entry<'edit, 'doc> {
     /// Return whether the mapping already contains the entry.
     #[must_use]
     pub fn is_occupied(&self) -> bool {
@@ -494,14 +494,14 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
-    pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
+    pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'edit, 'doc>, Error> {
         self.or_insert_with(|| crate::to_string(&value))
     }
 
     fn or_insert_with<S: AsRef<str>>(
         mut self,
         default: impl FnOnce() -> Result<S, Error>,
-    ) -> Result<Cursor<'a, 'doc>, Error> {
+    ) -> Result<Cursor<'edit, 'doc>, Error> {
         let id = self.context.mutate(|| -> Result<_, Error> {
             match self.state {
                 EntryState::Occupied(id) => Ok(id),
@@ -520,7 +520,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
-    pub fn or_mapping(self) -> Result<MappingMut<'a, 'doc>, Error> {
+    pub fn or_mapping(self) -> Result<MappingMut<'edit, 'doc>, Error> {
         self.or_insert_with(|| Ok("{}"))?.into_mapping()
     }
 
@@ -528,7 +528,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     ///
     /// # Errors
     /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
-    pub fn or_sequence(self) -> Result<SequenceMut<'a, 'doc>, Error> {
+    pub fn or_sequence(self) -> Result<SequenceMut<'edit, 'doc>, Error> {
         self.or_insert_with(|| Ok("[]"))?.into_sequence()
     }
 }
@@ -617,7 +617,7 @@ impl<State> Cursor<'_, '_, State> {
     }
 }
 
-impl<'a, 'doc, Kind> Cursor<'a, 'doc, Collection<Kind>> {
+impl<'edit, 'doc, Kind> Cursor<'edit, 'doc, Collection<Kind>> {
     fn borrow_cursor(&mut self) -> Cursor<'_, 'doc> {
         self.context.reborrow().cursor(self.editor, self.id)
     }
@@ -636,7 +636,7 @@ impl<'a, 'doc, Kind> Cursor<'a, 'doc, Collection<Kind>> {
 
     /// Return a cursor at this collection, allowing navigation or replacement.
     #[must_use]
-    pub fn into_cursor(self) -> Cursor<'a, 'doc> {
+    pub fn into_cursor(self) -> Cursor<'edit, 'doc> {
         self.context.cursor(self.editor, self.id)
     }
 }
@@ -644,13 +644,17 @@ impl<'a, 'doc, Kind> Cursor<'a, 'doc, Collection<Kind>> {
 /// The path of this edit and the first mutation error in the transaction.
 /// Navigation and reads report their path without recording a failure.
 #[derive(Debug)]
-struct EditContext<'a> {
-    failure: &'a mut Option<Error>,
-    path: Cow<'a, str>,
+struct EditContext<'edit> {
+    failure: &'edit mut Option<Error>,
+    path: Cow<'edit, str>,
 }
 
-impl<'a> EditContext<'a> {
-    fn cursor<'doc>(self, editor: &'a mut syntax::Editor<'doc>, id: NodeId) -> Cursor<'a, 'doc> {
+impl<'edit> EditContext<'edit> {
+    fn cursor<'doc>(
+        self,
+        editor: &'edit mut syntax::Editor<'doc>,
+        id: NodeId,
+    ) -> Cursor<'edit, 'doc> {
         Cursor {
             editor,
             id,

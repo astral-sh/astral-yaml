@@ -202,16 +202,16 @@ macro_rules! integer {
     };
 }
 
-impl<'a> ser::Serializer for &'a mut Serializer {
+impl<'ser> ser::Serializer for &'ser mut Serializer {
     type Ok = ();
     type Error = Error;
-    type SerializeSeq = Compound<'a>;
-    type SerializeTuple = Compound<'a>;
-    type SerializeTupleStruct = Compound<'a>;
-    type SerializeTupleVariant = Compound<'a>;
-    type SerializeMap = Compound<'a>;
-    type SerializeStruct = Compound<'a>;
-    type SerializeStructVariant = Compound<'a>;
+    type SerializeSeq = Compound<'ser>;
+    type SerializeTuple = Compound<'ser>;
+    type SerializeTupleStruct = Compound<'ser>;
+    type SerializeTupleVariant = Compound<'ser>;
+    type SerializeMap = Compound<'ser>;
+    type SerializeStruct = Compound<'ser>;
+    type SerializeStructVariant = Compound<'ser>;
 
     integer! {
         serialize_i8: i8,
@@ -355,15 +355,15 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         SerializeMap::end(map)
     }
 
-    fn serialize_seq(self, _: Option<usize>) -> Result<Compound<'a>> {
+    fn serialize_seq(self, _: Option<usize>) -> Result<Compound<'ser>> {
         self.compound(false)
     }
 
-    fn serialize_tuple(self, _: usize) -> Result<Compound<'a>> {
+    fn serialize_tuple(self, _: usize) -> Result<Compound<'ser>> {
         self.compound(false)
     }
 
-    fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Compound<'a>> {
+    fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Compound<'ser>> {
         if name == tagged::NAME {
             if len != 2 {
                 return Err(Error::new("a tagged value requires a tag and payload"));
@@ -391,15 +391,15 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _: u32,
         variant: &'static str,
         _: usize,
-    ) -> Result<Compound<'a>> {
+    ) -> Result<Compound<'ser>> {
         self.variant(variant, false)
     }
 
-    fn serialize_map(self, _: Option<usize>) -> Result<Compound<'a>> {
+    fn serialize_map(self, _: Option<usize>) -> Result<Compound<'ser>> {
         self.compound(true)
     }
 
-    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Compound<'a>> {
+    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Compound<'ser>> {
         self.compound(true)
     }
 
@@ -409,7 +409,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         _: u32,
         variant: &'static str,
         _: usize,
-    ) -> Result<Compound<'a>> {
+    ) -> Result<Compound<'ser>> {
         self.variant(variant, true)
     }
 }
@@ -424,8 +424,8 @@ enum CompoundState {
     TaggedEnd,
 }
 
-struct Compound<'a> {
-    serializer: &'a mut Serializer,
+struct Compound<'ser> {
+    serializer: &'ser mut Serializer,
     first: bool,
     key_scope: keys::Scope,
     state: CompoundState,

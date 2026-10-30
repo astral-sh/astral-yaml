@@ -18,7 +18,11 @@ mod tests;
 
 /// Return the source range covering `id` and its descendants' comments.
 /// Set `outer` to include comments outside `id`'s own span.
-pub(super) fn region<'a>(document: impl Into<Syntax<'a, Span>>, id: NodeId, outer: bool) -> Span {
+pub(super) fn region<'syntax>(
+    document: impl Into<Syntax<'syntax, Span>>,
+    id: NodeId,
+    outer: bool,
+) -> Span {
     let document = document.into();
     let root = &document.nodes[id.index()];
     let mut start = root.span.start();
@@ -48,8 +52,8 @@ pub(super) enum Separator {
 }
 
 /// Formatting needed to join a rendered node to the surrounding source.
-pub(super) struct Placement<'a, Location> {
-    pub(super) comments: &'a [Comment<Location>],
+pub(super) struct Placement<'comments, Location> {
+    pub(super) comments: &'comments [Comment<Location>],
     pub(super) context: Context,
     pub(super) before: Separator,
     pub(super) at_column_zero: bool,
@@ -66,8 +70,8 @@ enum RootLine {
 ///
 /// This includes adjacent whitespace needed to end a scalar or comment. Reserve
 /// it before checking overlap, even if rendering later leaves some of it unused.
-pub(super) struct Boundary<'a> {
-    source: &'a str,
+pub(super) struct Boundary<'source> {
+    source: &'source str,
     body: Span,
     reserved: Span,
     line: Line,
@@ -75,9 +79,9 @@ pub(super) struct Boundary<'a> {
     end_marker: Option<Span>,
 }
 
-impl<'a> Boundary<'a> {
+impl<'source> Boundary<'source> {
     pub(super) fn new(
-        source: &'a str,
+        source: &'source str,
         body: Span,
         line: Line,
         erase_root: bool,
@@ -218,8 +222,8 @@ pub(super) struct Replacement {
     pub(super) span: Span,
 }
 
-pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    document: impl Into<Emission<'a, Location>>,
+pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
+    document: impl Into<Emission<'syntax, Location>>,
     id: NodeId,
     region: Span,
     flow: bool,
@@ -247,12 +251,12 @@ pub(super) fn render<'a, Location: Copy + Into<Option<Span>> + 'a>(
     )
 }
 
-pub(super) fn render_with_comments<'a, Location: Copy + Into<Option<Span>> + 'a>(
-    Emission { syntax, source }: Emission<'a, Location>,
+pub(super) fn render_with_comments<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
+    Emission { syntax, source }: Emission<'syntax, Location>,
     id: NodeId,
     boundary: &Boundary<'_>,
     context: Context,
-    root_comments: &'a [Comment<Location>],
+    root_comments: &'syntax [Comment<Location>],
     layout: &Layout,
 ) -> Result<Replacement, Error> {
     let region = boundary.body();
@@ -382,14 +386,14 @@ pub(super) fn apply(
 ///
 /// Construction checks for overlapping ranges, invalid UTF-8 boundaries, and
 /// excessive output size. Applying the patches only concatenates the checked segments.
-struct PatchSet<'a> {
-    segments: Vec<Cow<'a, str>>,
+struct PatchSet<'source> {
+    segments: Vec<Cow<'source, str>>,
     length: usize,
 }
 
-impl<'a> PatchSet<'a> {
+impl<'source> PatchSet<'source> {
     fn new(
-        source: &'a str,
+        source: &'source str,
         mut patches: Vec<(Span, String)>,
         limit: usize,
     ) -> Result<Self, &'static str> {

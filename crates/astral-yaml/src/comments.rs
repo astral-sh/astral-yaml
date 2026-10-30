@@ -21,28 +21,28 @@ pub enum CommentPlacement {
 
 /// A source comment and its placement, with text borrowed from the input.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct AttachedComment<'a> {
+pub struct AttachedComment<'source> {
     /// Text excludes `#`. The span includes it and excludes the line break.
-    pub comment: Comment<'a>,
+    pub comment: Comment<'source>,
     /// Placement relative to the direct owner, even in an ancestor's comment list.
     pub placement: CommentPlacement,
 }
 
 /// An index of comments and the nodes that own them within a document.
 #[derive(Debug, Default)]
-pub struct CommentIndex<'de> {
+pub struct CommentIndex<'source> {
     ranges: HashMap<NodeId, Range<usize>>,
-    comments: Vec<AttachedComment<'de>>,
+    comments: Vec<AttachedComment<'source>>,
     owners: Vec<NodeId>,
 }
 
-impl<'de> CommentIndex<'de> {
+impl<'source> CommentIndex<'source> {
     /// Assign comments in `stream.documents()[document]` to their owning nodes.
     /// Use [`Self::with_budget`] to control or share the work limit.
     ///
     /// # Errors
     /// Returns an error if `document` is out of bounds or the work limit is exceeded.
-    pub fn new(stream: &Stream<'de>, document: usize) -> Result<Self, Error> {
+    pub fn new(stream: &Stream<'source>, document: usize) -> Result<Self, Error> {
         Self::with_budget(stream, document, &Cell::new(1_000_000))
     }
 
@@ -52,7 +52,7 @@ impl<'de> CommentIndex<'de> {
     /// # Errors
     /// Returns an error if `document` is out of bounds or `budget` is exhausted.
     pub fn with_budget(
-        stream: &Stream<'de>,
+        stream: &Stream<'source>,
         document: usize,
         budget: &Cell<usize>,
     ) -> Result<Self, Error> {
@@ -167,14 +167,14 @@ impl<'de> CommentIndex<'de> {
     /// Return comments owned by `id` and its descendants, grouped by owner.
     /// This grouping does not preserve source order across different owners.
     #[must_use]
-    pub fn subtree(&self, id: NodeId) -> &[AttachedComment<'de>] {
+    pub fn subtree(&self, id: NodeId) -> &[AttachedComment<'source>] {
         self.ranges
             .get(&id)
             .map_or(&[], |range| &self.comments[range.clone()])
     }
 
     /// Iterate over comments and their owning node IDs, visiting each comment once.
-    pub fn direct(&self) -> impl Iterator<Item = (NodeId, &AttachedComment<'de>)> {
+    pub fn direct(&self) -> impl Iterator<Item = (NodeId, &AttachedComment<'source>)> {
         self.owners.iter().copied().zip(&self.comments)
     }
 }
@@ -201,10 +201,10 @@ struct Slot {
     value: usize,
 }
 
-struct Tree<'a, 'b> {
-    source: &'a str,
+struct Tree<'source, 'budget> {
+    source: &'source str,
     lines: Lines,
-    budget: &'b Cell<usize>,
+    budget: &'budget Cell<usize>,
     nodes: Vec<Node>,
     slots: Vec<Slot>,
 }

@@ -60,9 +60,9 @@ pub(super) struct Candidate {
 }
 
 /// A parsed Serde value. Its nodes form a tree, so only child IDs need relocation.
-struct SerializedValue<'s> {
+struct SerializedValue<'source> {
     root: NodeId,
-    nodes: Vec<astral_yaml::Node<'s>>,
+    nodes: Vec<astral_yaml::Node<'source>>,
 }
 
 impl From<&DocumentSyntax> for Draft {
@@ -141,12 +141,12 @@ impl Draft {
         Ok(())
     }
 
-    fn parse_value<'s>(
+    fn parse_value<'source>(
         &mut self,
-        yaml: &'s str,
+        yaml: &'source str,
         parent: Option<NodeId>,
         available: usize,
-    ) -> Result<SerializedValue<'s>, Error> {
+    ) -> Result<SerializedValue<'source>, Error> {
         self.introduce(yaml.len())?;
         let mut depth = 0;
         let mut ancestor = parent;

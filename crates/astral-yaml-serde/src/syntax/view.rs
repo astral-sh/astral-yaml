@@ -6,13 +6,13 @@ use astral_yaml::{NodeId, Span};
 
 /// A borrowed syntax tree, independent of its source text.
 #[derive(Clone, Copy)]
-pub(super) struct Syntax<'a, Location> {
-    pub(super) nodes: &'a [Node<Location>],
+pub(super) struct Syntax<'syntax, Location> {
+    pub(super) nodes: &'syntax [Node<Location>],
     pub(super) root: NodeId,
 }
 
-impl<'a> From<&'a DocumentSyntax> for Syntax<'a, Span> {
-    fn from(document: &'a DocumentSyntax) -> Self {
+impl<'syntax> From<&'syntax DocumentSyntax> for Syntax<'syntax, Span> {
+    fn from(document: &'syntax DocumentSyntax) -> Self {
         (&document.source).into()
     }
 }
@@ -20,13 +20,13 @@ impl<'a> From<&'a DocumentSyntax> for Syntax<'a, Span> {
 /// Syntax and source text used to render a replacement.
 /// Node and comment spans refer to this source. Generated syntax has no span.
 #[derive(Clone, Copy)]
-pub(super) struct Emission<'a, Location> {
-    pub(super) syntax: Syntax<'a, Location>,
-    pub(super) source: &'a Source,
+pub(super) struct Emission<'syntax, Location> {
+    pub(super) syntax: Syntax<'syntax, Location>,
+    pub(super) source: &'syntax Source,
 }
 
-impl<'a> From<&'a DocumentSyntax> for Emission<'a, Span> {
-    fn from(document: &'a DocumentSyntax) -> Self {
+impl<'syntax> From<&'syntax DocumentSyntax> for Emission<'syntax, Span> {
+    fn from(document: &'syntax DocumentSyntax) -> Self {
         document.source.emission(document.into())
     }
 }

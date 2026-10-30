@@ -10,10 +10,10 @@ use std::cell::Cell;
 /// document can then be deserialized directly from its syntax tree, even when
 /// support for deserializing pending edits is enabled.
 pub(super) trait Input<'de> {
-    type Node<'s>: Node<'s, 'de, Entry = Self::Entry>
+    type Node<'input>: Node<'input, 'de, Entry = Self::Entry>
     where
-        Self: 's,
-        'de: 's;
+        Self: 'input,
+        'de: 'input;
     type Entry: Entry;
 
     fn node(&self, id: NodeId) -> Result<Self::Node<'_>, Error>;
@@ -24,22 +24,22 @@ pub(super) trait Input<'de> {
     ) -> Result<Vec<AttachedComment<'de>>, Error>;
 }
 
-pub(super) trait Node<'s, 'de>: Copy {
-    type Scalar: Scalar<'s, 'de>;
-    type Entry: Entry + 's;
+pub(super) trait Node<'input, 'de>: Copy {
+    type Scalar: Scalar<'input, 'de>;
+    type Entry: Entry + 'input;
 
-    fn kind(self) -> Kind<'s, Self::Scalar, Self::Entry>;
-    fn tag(self) -> Option<&'s str>;
+    fn kind(self) -> Kind<'input, Self::Scalar, Self::Entry>;
+    fn tag(self) -> Option<&'input str>;
     fn span(self) -> Option<Span>;
 }
 
-pub(super) struct Parsed<'s, 'de> {
-    stream: &'s Stream<'de>,
+pub(super) struct Parsed<'input, 'de> {
+    stream: &'input Stream<'de>,
     comments: CommentCache<'de>,
 }
 
-impl<'s, 'de> Parsed<'s, 'de> {
-    pub(super) fn new(stream: &'s Stream<'de>, document: usize) -> Self {
+impl<'input, 'de> Parsed<'input, 'de> {
+    pub(super) fn new(stream: &'input Stream<'de>, document: usize) -> Self {
         Self {
             stream,
             comments: CommentCache::new(document),
@@ -48,11 +48,11 @@ impl<'s, 'de> Parsed<'s, 'de> {
 }
 
 impl<'de> Input<'de> for Parsed<'_, 'de> {
-    type Node<'s>
-        = &'s astral_yaml::Node<'de>
+    type Node<'input>
+        = &'input astral_yaml::Node<'de>
     where
-        Self: 's,
-        'de: 's;
+        Self: 'input,
+        'de: 'input;
     type Entry = astral_yaml::Entry;
 
     #[inline]
@@ -69,12 +69,12 @@ impl<'de> Input<'de> for Parsed<'_, 'de> {
     }
 }
 
-impl<'s, 'de: 's> Node<'s, 'de> for &'s astral_yaml::Node<'de> {
-    type Scalar = &'s astral_yaml::Scalar<'de>;
+impl<'input, 'de: 'input> Node<'input, 'de> for &'input astral_yaml::Node<'de> {
+    type Scalar = &'input astral_yaml::Scalar<'de>;
     type Entry = astral_yaml::Entry;
 
     #[inline]
-    fn kind(self) -> Kind<'s, Self::Scalar, Self::Entry> {
+    fn kind(self) -> Kind<'input, Self::Scalar, Self::Entry> {
         use astral_yaml::NodeKind as Parsed;
 
         match &self.kind {
@@ -85,7 +85,7 @@ impl<'s, 'de: 's> Node<'s, 'de> for &'s astral_yaml::Node<'de> {
         }
     }
 
-    fn tag(self) -> Option<&'s str> {
+    fn tag(self) -> Option<&'input str> {
         self.tag.as_ref().map(|tag| tag.value.as_ref())
     }
 
@@ -96,10 +96,10 @@ impl<'s, 'de: 's> Node<'s, 'de> for &'s astral_yaml::Node<'de> {
 
 #[cfg(feature = "editable")]
 impl<'de> Input<'de> for crate::syntax::ValueRef<'de> {
-    type Node<'s>
+    type Node<'input>
         = &'de crate::syntax::Node<Option<Span>>
     where
-        'de: 's;
+        'de: 'input;
     type Entry = (NodeId, NodeId);
 
     fn node(&self, id: NodeId) -> Result<Self::Node<'_>, Error> {
@@ -145,12 +145,12 @@ impl<'de> Input<'de> for crate::syntax::ValueRef<'de> {
 }
 
 #[cfg(feature = "editable")]
-impl<'s, 'de: 's> Node<'s, 'de> for &'de crate::syntax::Node<Option<Span>> {
+impl<'input, 'de: 'input> Node<'input, 'de> for &'de crate::syntax::Node<Option<Span>> {
     type Scalar = EditedScalar<'de>;
     type Entry = (NodeId, NodeId);
 
     #[inline]
-    fn kind(self) -> Kind<'s, Self::Scalar, Self::Entry> {
+    fn kind(self) -> Kind<'input, Self::Scalar, Self::Entry> {
         use crate::syntax::NodeKind as Edited;
 
         match (*self).kind() {
@@ -165,7 +165,7 @@ impl<'s, 'de: 's> Node<'s, 'de> for &'de crate::syntax::Node<Option<Span>> {
         }
     }
 
-    fn tag(self) -> Option<&'s str> {
+    fn tag(self) -> Option<&'input str> {
         (*self).tag()
     }
 
@@ -175,10 +175,10 @@ impl<'s, 'de: 's> Node<'s, 'de> for &'de crate::syntax::Node<Option<Span>> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Kind<'s, S, E> {
+pub(super) enum Kind<'input, S, E> {
     Scalar(S),
-    Sequence { items: &'s [NodeId] },
-    Mapping { entries: &'s [E] },
+    Sequence { items: &'input [NodeId] },
+    Mapping { entries: &'input [E] },
     Alias { target: NodeId },
 }
 
@@ -199,10 +199,11 @@ impl Entry for (NodeId, NodeId) {
     }
 }
 
-pub(super) type ScalarOf<'s, 'de, I> = <<I as Input<'de>>::Node<'s> as Node<'s, 'de>>::Scalar;
+pub(super) type ScalarOf<'input, 'de, I> =
+    <<I as Input<'de>>::Node<'input> as Node<'input, 'de>>::Scalar;
 
-pub(super) trait Scalar<'s, 'de>: Copy {
-    fn value(self) -> &'s str;
+pub(super) trait Scalar<'input, 'de>: Copy {
+    fn value(self) -> &'input str;
 
     /// Text the result can borrow for the full deserialization lifetime.
     /// This includes decoded strings when reading an edit transaction.
@@ -212,8 +213,8 @@ pub(super) trait Scalar<'s, 'de>: Copy {
     fn span(self) -> Option<Span>;
 }
 
-impl<'s, 'de> Scalar<'s, 'de> for &'s astral_yaml::Scalar<'de> {
-    fn value(self) -> &'s str {
+impl<'input, 'de> Scalar<'input, 'de> for &'input astral_yaml::Scalar<'de> {
+    fn value(self) -> &'input str {
         &self.value
     }
 
@@ -242,8 +243,8 @@ pub(super) struct EditedScalar<'de> {
 }
 
 #[cfg(feature = "editable")]
-impl<'s, 'de: 's> Scalar<'s, 'de> for EditedScalar<'de> {
-    fn value(self) -> &'s str {
+impl<'input, 'de: 'input> Scalar<'input, 'de> for EditedScalar<'de> {
+    fn value(self) -> &'input str {
         self.value
     }
 

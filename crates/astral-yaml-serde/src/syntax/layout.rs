@@ -31,7 +31,9 @@ pub(super) struct Layout {
 }
 
 impl Layout {
-    pub(super) fn new<'a, Location: 'a>(document: impl Into<Syntax<'a, Location>>) -> Self {
+    pub(super) fn new<'syntax, Location: 'syntax>(
+        document: impl Into<Syntax<'syntax, Location>>,
+    ) -> Self {
         let document = document.into();
         let mut order = Vec::new();
         let mut pending = vec![(document.root, false)];

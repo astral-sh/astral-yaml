@@ -22,9 +22,9 @@ pub enum Encoding {
 /// string, which parsed scalars can borrow. Parser spans refer to [`Self::text`].
 /// Use [`Self::original_span`] to map them back to the encoded input.
 #[derive(Clone, Debug)]
-pub struct Source<'a> {
-    bytes: &'a [u8],
-    text: Cow<'a, str>,
+pub struct Source<'bytes> {
+    bytes: &'bytes [u8],
+    text: Cow<'bytes, str>,
     encoding: Encoding,
 }
 
@@ -37,13 +37,13 @@ impl<'input> TryFrom<&'input [u8]> for Source<'input> {
     }
 }
 
-impl<'a> Source<'a> {
+impl<'bytes> Source<'bytes> {
     /// Decode UTF-8, UTF-16, or UTF-32 input, with or without a byte order mark.
     ///
     /// # Errors
     /// Returns an error if the input is malformed or exceeds the default size limit.
     /// Decoding errors use offsets in the original bytes.
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
+    pub fn from_bytes(bytes: &'bytes [u8]) -> Result<Self, Error> {
         Self::with_limit(bytes, ParseOptions::default().max_input_bytes)
     }
 
@@ -52,7 +52,7 @@ impl<'a> Source<'a> {
     /// # Errors
     /// Returns an error if the input is malformed or either length exceeds `max_bytes`.
     /// Decoding errors use offsets in the original bytes.
-    pub fn with_limit(bytes: &'a [u8], max_bytes: usize) -> Result<Self, Error> {
+    pub fn with_limit(bytes: &'bytes [u8], max_bytes: usize) -> Result<Self, Error> {
         enum CodeUnit {
             Utf16,
             Utf32,
@@ -145,7 +145,7 @@ impl<'a> Source<'a> {
 
     /// The original bytes before decoding, including any byte order mark.
     #[must_use]
-    pub fn bytes(&self) -> &'a [u8] {
+    pub fn bytes(&self) -> &'bytes [u8] {
         self.bytes
     }
 

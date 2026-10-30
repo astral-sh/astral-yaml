@@ -31,8 +31,8 @@ struct Anchor {
 
 /// A retained comment with a known source span.
 #[derive(Clone, Copy)]
-struct LocatedComment<'a> {
-    comment: &'a Comment<Option<Span>>,
+struct LocatedComment<'comments> {
+    comment: &'comments Comment<Option<Span>>,
     span: Span,
 }
 
