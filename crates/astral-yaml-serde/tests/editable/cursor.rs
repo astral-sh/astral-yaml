@@ -4,14 +4,13 @@ use test_case::test_case;
 
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
-use astral_yaml_serde::{
-    Editable, EditableYaml, Error,
-    edit::{
-        CollectionStyle, CommentPlacement, Cursor, NodeKind, PathSegment, ScalarStyle, SequenceMut,
-        edit_path,
-    },
+use astral_yaml_serde::edit::{
+    CollectionStyle, CommentPlacement, Cursor, NodeKind, PathSegment, ScalarStyle, SequenceMut,
+    edit_path,
 };
-use serde::{Deserialize, Serialize, de::IgnoredAny};
+use astral_yaml_serde::{Editable, EditableYaml, Error};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 #[test_case("!custom name: old\n", "name"; "plain tagged key")]

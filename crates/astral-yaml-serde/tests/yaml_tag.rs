@@ -3,9 +3,12 @@ use test_case::test_case;
 mod support;
 
 use astral_yaml_dev::diagnostic_snapshot;
-use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string, with::yaml_tag};
-use serde::{Deserialize, Serialize, de::IgnoredAny};
-use std::{collections::BTreeMap, fmt::Write};
+use astral_yaml_serde::with::yaml_tag;
+use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt::Write;
 use support::{YamlTag, from_tag};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]

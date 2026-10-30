@@ -5,7 +5,8 @@ mod layouts;
 use std::collections::HashMap;
 
 use crate::syntax::{DocumentSyntax, Editor, NodeKind};
-use astral_yaml::{CollectionStyle, NodeId, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, NodeId};
 use astral_yaml_dev::fixtures;
 
 #[derive(Debug, PartialEq)]

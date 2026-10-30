@@ -4,7 +4,8 @@ use test_case::test_case;
 
 use super::support::{edit, edited, edits};
 use crate::syntax::{DocumentSyntax, Editor, NodeKind};
-use astral_yaml::{CollectionStyle, Error, ParseOptions, ScalarStyle, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, Error, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
 #[test]

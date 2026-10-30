@@ -1,6 +1,7 @@
 //! Borrowed syntax used to compare trees and render replacements.
 
-use super::{DocumentSyntax, Node, source::Source};
+use super::source::Source;
+use super::{DocumentSyntax, Node};
 use astral_yaml::{NodeId, Span};
 
 /// A borrowed syntax tree, independent of its source text.

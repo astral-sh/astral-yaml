@@ -6,9 +6,11 @@ use super::support::edit;
 use astral_yaml::NodeId;
 use astral_yaml_serde::edit::{CollectionStyle, DocumentSyntax, NodeKind};
 use astral_yaml_serde::{Editable, Spanned, from_str};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]

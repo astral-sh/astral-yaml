@@ -2,7 +2,7 @@ use test_case::test_case;
 
 use super::{DocumentSyntax, NodeKind, correspondence};
 use crate::syntax::draft::Draft;
-use crate::syntax::splice::{region, render};
+use crate::syntax::splice;
 use astral_yaml::ScalarStyle;
 use astral_yaml_dev::indoc;
 
@@ -11,8 +11,8 @@ fn render_draft(original: &DocumentSyntax, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
     let source = &original.source;
-    let region = region(original, source.root, false);
-    let rendered = render(source.emission(syntax), source.root, region, false).unwrap();
+    let region = splice::region(original, source.root, false);
+    let rendered = splice::render(source.emission(syntax), source.root, region, false).unwrap();
     let output = format!(
         "{}{}{}",
         &source.text[..rendered.span.start()],
@@ -25,8 +25,10 @@ fn render_draft(original: &DocumentSyntax, draft: Draft) -> String {
 
 #[test]
 fn emission_accepts_syntax_without_source_locations() {
-    use crate::syntax::{Comment, CommentPosition, Node, view::Syntax};
-    use astral_yaml::{NodeId, ScalarStyle, comments::CommentPlacement};
+    use crate::syntax::view::Syntax;
+    use crate::syntax::{Comment, CommentPosition, Node};
+    use astral_yaml::comments::CommentPlacement;
+    use astral_yaml::{NodeId, ScalarStyle};
 
     let source = indoc! {"
         --- old
@@ -52,7 +54,7 @@ fn emission_accepts_syntax_without_source_locations() {
         nodes: &nodes,
         root: NodeId::from_index(0),
     };
-    let rendered = render(
+    let rendered = splice::render(
         original.source.emission(syntax),
         syntax.root,
         original.source.nodes[original.source.root.index()].span,
@@ -347,11 +349,11 @@ fn rendering_obeys_work_and_output_budgets(
     document.source.options.max_input_bytes = bytes;
     let source = &document.source;
     let draft = Draft::from(&document).freeze().unwrap();
-    let region = region(&document, source.root, false);
+    let region = splice::region(&document, source.root, false);
     // Both committed syntax and drafts obey the same rendering limits.
     for result in [
-        render(&document, source.root, region, false),
-        render(source.emission((&draft).into()), source.root, region, false),
+        splice::render(&document, source.root, region, false),
+        splice::render(source.emission((&draft).into()), source.root, region, false),
     ] {
         assert_eq!(result.unwrap_err().message, expected);
     }
@@ -885,8 +887,8 @@ fn detached_prefixes_are_emitted_before_content() {
         let document = DocumentSyntax::parse(source).unwrap();
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
-        let span = region(&document, document.source.root, true);
-        let rendered = render(&document, document.source.root, span, false).unwrap();
+        let span = splice::region(&document, document.source.root, true);
+        let rendered = splice::render(&document, document.source.root, span, false).unwrap();
         let parsed = DocumentSyntax::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
         assert!(super::comments_preserved(
@@ -1097,8 +1099,8 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
             value: "old".to_owned(),
             style: astral_yaml::ScalarStyle::Literal,
         };
-        let region = region(&candidate, candidate.source.root, true);
-        let rendered = render(&candidate, candidate.source.root, region, false).unwrap();
+        let region = splice::region(&candidate, candidate.source.root, true);
+        let rendered = splice::render(&candidate, candidate.source.root, region, false).unwrap();
         let output = format!(
             "{}{}{}",
             &source[..rendered.span.start()],

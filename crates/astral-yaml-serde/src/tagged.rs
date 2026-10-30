@@ -1,13 +1,9 @@
-use serde::{
-    Deserialize, Deserializer, Serialize, Serializer,
-    de::{EnumAccess, VariantAccess, Visitor},
-    ser::SerializeTupleStruct,
-};
-use std::{
-    fmt,
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-};
+use serde::de::{EnumAccess, VariantAccess, Visitor};
+use serde::ser::SerializeTupleStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 pub(crate) const NAME: &str = "$astral_yaml::Tagged";
 

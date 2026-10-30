@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 #[inline]
 pub(crate) fn write_quoted(output: &mut String, value: &str) {
     if value.len() >= 64 {
@@ -100,6 +98,8 @@ fn quoted_long(output: &mut String, value: &str) {
 #[cold]
 #[inline(never)]
 fn write_escaped(output: &mut String, mut value: &str) {
+    use std::fmt::Write;
+
     const ESCAPE: [bool; 256] = {
         let mut escape = [false; 256];
         let mut byte = 0;

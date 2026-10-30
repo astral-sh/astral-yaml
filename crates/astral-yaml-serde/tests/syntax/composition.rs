@@ -1,7 +1,8 @@
 //! Transaction composition against an independently maintained comment model.
 
 use crate::syntax::{DocumentSyntax, Editor};
-use astral_yaml::{Error, comments::CommentPlacement};
+use astral_yaml::Error;
+use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
 use test_case::test_case;
 

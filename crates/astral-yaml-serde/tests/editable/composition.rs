@@ -2,10 +2,8 @@
 
 use super::support::edit;
 use astral_yaml_dev::indoc;
-use astral_yaml_serde::{
-    Editable, Error,
-    edit::{CollectionStyle, Cursor, NodeKind},
-};
+use astral_yaml_serde::edit::{CollectionStyle, Cursor, NodeKind};
+use astral_yaml_serde::{Editable, Error};
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug)]

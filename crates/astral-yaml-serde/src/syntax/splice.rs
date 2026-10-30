@@ -3,15 +3,14 @@
 //! Reserve each region before rendering so its whitespace cannot overlap another
 //! replacement. [`PatchSet`] checks ranges and output size before assembling the result.
 
-use super::{
-    Comment,
-    emit::{self, Context, Ending, Fragment},
-    layout::Layout,
-    lines::Line,
-    source::Source,
-    view::{Emission, Syntax},
-};
-use astral_yaml::{Error, NodeId, Span, comments::CommentPlacement};
+use super::Comment;
+use super::emit::{self, Context, Ending, Fragment};
+use super::layout::Layout;
+use super::lines::Line;
+use super::source::Source;
+use super::view::{Emission, Syntax};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{Error, NodeId, Span};
 use std::borrow::Cow;
 
 #[cfg(test)]

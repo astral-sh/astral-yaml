@@ -1,7 +1,9 @@
 //! Choose headers and separators needed to preserve comments during rendering.
 
-use super::{CommentPosition, NodeKind, emit, view::Syntax};
-use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, comments::CommentPlacement};
+use super::view::Syntax;
+use super::{CommentPosition, NodeKind, emit};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, NodeId, ScalarStyle};
 
 #[derive(Clone, Copy)]
 enum Tail {

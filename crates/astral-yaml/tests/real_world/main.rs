@@ -3,11 +3,8 @@ mod fixtures;
 
 use std::fs;
 
-use astral_yaml_dev::{
-    diagnostic_snapshot,
-    fixtures::{manifest, root, with_line_breaks},
-    validate_spans,
-};
+use astral_yaml_dev::fixtures::{manifest, root, with_line_breaks};
+use astral_yaml_dev::{diagnostic_snapshot, validate_spans};
 
 fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
     for node in stream.nodes() {

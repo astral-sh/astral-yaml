@@ -1,12 +1,10 @@
 #![no_main]
 
-use astral_yaml::{CollectionStyle, ScalarStyle, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, ScalarStyle};
 use astral_yaml_dev::Value;
-use astral_yaml_serde::{
-    Editable, Error,
-    edit::{Cursor, NodeKind},
-    from_str, to_string,
-};
+use astral_yaml_serde::edit::{Cursor, NodeKind};
+use astral_yaml_serde::{Editable, Error, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
 
 fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(), Error> {

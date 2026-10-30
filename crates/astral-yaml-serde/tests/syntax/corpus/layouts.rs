@@ -2,7 +2,8 @@ use test_case::test_case;
 
 use super::{assert_projection, project};
 use crate::syntax::DocumentSyntax;
-use astral_yaml::{CollectionStyle, comments::CommentPlacement};
+use astral_yaml::CollectionStyle;
+use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::{formatdoc, indoc};
 use std::fmt::Write;
 

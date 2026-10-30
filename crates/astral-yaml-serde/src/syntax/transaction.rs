@@ -1,15 +1,11 @@
-use super::{
-    DocumentSyntax, Node, NodeKind,
-    draft::Draft,
-    emit::quoted,
-    layout::Layout,
-    plan::{Changes, Plan},
-};
-use astral_yaml::{
-    CollectionStyle, Error, NodeId, ScalarStyle, Span,
-    comments::CommentPlacement,
-    schema::{ScalarType, classify},
-};
+use super::draft::Draft;
+use super::emit;
+use super::layout::Layout;
+use super::plan::{Changes, Plan};
+use super::{DocumentSyntax, Node, NodeKind};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::schema::{self, ScalarType};
+use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle, Span};
 
 #[cfg(test)]
 mod tests;
@@ -127,7 +123,7 @@ impl<'a> Editor<'a> {
         name: &str,
         yaml: &str,
     ) -> Result<NodeId, Error> {
-        let (_, value) = self.insert_entry(id, *len, &quoted(name), yaml)?;
+        let (_, value) = self.insert_entry(id, *len, &emit::quoted(name), yaml)?;
         *len += 1;
         Ok(value)
     }
@@ -239,7 +235,7 @@ fn string_key<Location>(node: &Node<Location>) -> Option<&str> {
     let kind = match node.tag() {
         Some("!" | "tag:yaml.org,2002:str") => ScalarType::String,
         Some(_) => return None,
-        None if *style == ScalarStyle::Plain => classify(value),
+        None if *style == ScalarStyle::Plain => schema::classify(value),
         None => ScalarType::String,
     };
     (kind == ScalarType::String).then_some(value)

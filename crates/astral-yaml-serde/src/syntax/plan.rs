@@ -1,19 +1,18 @@
 //! Choose source regions to rewrite by comparing the original and edited syntax.
 
-use super::{
-    Comment, Node, NodeKind,
-    draft::Candidate,
-    emit,
-    framing::{RootComments, RootLayout},
-    layout::Layout,
-    lines::LineIndex,
-    scope::Scopes,
-    source::Source,
-    splice::{self, Boundary},
-    view::Syntax,
-};
-use astral_yaml::{Error, NodeId, Span, comments::CommentPlacement};
-use std::{cell::Cell, collections::HashSet};
+use super::draft::Candidate;
+use super::framing::{RootComments, RootLayout};
+use super::layout::Layout;
+use super::lines::LineIndex;
+use super::scope::Scopes;
+use super::source::Source;
+use super::splice::{self, Boundary};
+use super::view::Syntax;
+use super::{Comment, Node, NodeKind, emit};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{Error, NodeId, Span};
+use std::cell::Cell;
+use std::collections::HashSet;
 
 pub(super) struct Plan<'a> {
     pub(super) original: &'a Source,

@@ -1,5 +1,6 @@
 use crate::Error;
-use astral_yaml::{NodeId, Stream, comments::CommentIndex};
+use astral_yaml::comments::CommentIndex;
+use astral_yaml::{NodeId, Stream};
 use std::cell::{Cell, OnceCell};
 
 pub use astral_yaml::comments::{AttachedComment, CommentPlacement};

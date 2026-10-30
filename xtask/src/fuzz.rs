@@ -1,9 +1,7 @@
-use std::{
-    ffi::OsString,
-    io,
-    path::Path,
-    process::{Command, ExitCode},
-};
+use std::ffi::OsString;
+use std::io;
+use std::path::Path;
+use std::process::{Command, ExitCode};
 
 fn command(root: &Path, program: &str, args: &[&str]) -> Command {
     let mut command = Command::new(program);

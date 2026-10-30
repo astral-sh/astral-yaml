@@ -2,14 +2,12 @@
 //! A changed node may need its parent rewritten to supply YAML indicators or
 //! preserve comments. Edits within a mapping key can also change the key's notation.
 
-use super::{
-    Comment, CommentPosition, Node, NodeKind,
-    emit::{self, Context, KeyForm},
-    layout::Layout,
-    lines::LineIndex,
-    source::Source,
-    view::Syntax,
-};
+use super::emit::{self, Context, KeyForm};
+use super::layout::Layout;
+use super::lines::LineIndex;
+use super::source::Source;
+use super::view::Syntax;
+use super::{Comment, CommentPosition, Node, NodeKind};
 use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, Span};
 
 #[derive(Clone, Copy, Debug)]

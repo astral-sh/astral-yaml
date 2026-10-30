@@ -1,4 +1,5 @@
-use crate::{Error, schema::YamlType};
+use crate::Error;
+use crate::schema::YamlType;
 use serde::{Serialize, ser};
 
 pub(super) enum Constraint {

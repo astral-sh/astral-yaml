@@ -1,4 +1,4 @@
-use astral_yaml::schema::{ScalarType, classify};
+use astral_yaml::schema::{self, ScalarType};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum YamlType {
@@ -12,10 +12,10 @@ impl YamlType {
         match self {
             Self::Scalar(ScalarType::String) => true,
             Self::Scalar(ScalarType::Float) => {
-                matches!(classify(value), ScalarType::Float | ScalarType::Int)
+                matches!(schema::classify(value), ScalarType::Float | ScalarType::Int)
                     && !(value.starts_with("0x") || value.starts_with("0o"))
             }
-            Self::Scalar(kind) => classify(value) == kind,
+            Self::Scalar(kind) => schema::classify(value) == kind,
             Self::Sequence | Self::Mapping => false,
         }
     }

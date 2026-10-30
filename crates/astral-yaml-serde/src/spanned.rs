@@ -1,13 +1,9 @@
 use astral_yaml::Span;
-use serde::{
-    Deserialize, Deserializer, Serialize, Serializer,
-    de::{self, SeqAccess, Visitor},
-};
-use std::{
-    fmt,
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 // The private newtype protocol requests (start, end, value) from the
 // deserializer. Offsets come from the parser, not YAML fields.

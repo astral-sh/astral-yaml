@@ -6,10 +6,8 @@ use std::collections::BTreeMap;
 
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::formatdoc;
-use astral_yaml_serde::{
-    Editable, Error,
-    edit::{CollectionStyle, Cursor, NodeKind, ScalarStyle},
-};
+use astral_yaml_serde::edit::{CollectionStyle, Cursor, NodeKind, ScalarStyle};
+use astral_yaml_serde::{Editable, Error};
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
 

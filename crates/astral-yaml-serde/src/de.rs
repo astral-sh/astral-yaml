@@ -1,19 +1,17 @@
 mod input;
 
 use self::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarOf};
-use crate::{
-    AttachedComment, CommentPlacement, Error, commented, schema::YamlType, spanned, tagged,
-    with::yaml_tag,
-};
-use astral_yaml::{
-    NodeId, ScalarStyle, Span, Stream,
-    schema::{ScalarType, classify},
-};
+use crate::schema::YamlType;
+use crate::with::yaml_tag;
+use crate::{AttachedComment, CommentPlacement, Error, commented, spanned, tagged};
+use astral_yaml::schema::{self, ScalarType};
+use astral_yaml::{NodeId, ScalarStyle, Span, Stream};
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-use std::{cell::Cell, collections::HashSet};
+use std::cell::Cell;
+use std::collections::HashSet;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -355,12 +353,12 @@ impl<'s, 'de: 's, I: Input<'de>> Deserializer<&'s Context<I>> {
                 Some(YamlType::Scalar(kind)) => kind,
                 _ => return Err(Error::at("unsupported scalar tag", node.span())),
             },
-            None if s.style() == ScalarStyle::Plain => classify(s.value()),
+            None if s.style() == ScalarStyle::Plain => schema::classify(s.value()),
             None => ScalarType::String,
         };
 
         if tag.is_some() && kind != ScalarType::String {
-            let actual = classify(s.value());
+            let actual = schema::classify(s.value());
             if actual != kind && !(kind == ScalarType::Float && actual == ScalarType::Int) {
                 return Err(Error::at("scalar does not match its tag", s.span()));
             }
@@ -1386,7 +1384,8 @@ impl<'s, 'de: 's, I: Input<'de>> VariantAccess<'de> for Enumeration<'s, I> {
 #[cfg(test)]
 mod tests {
     use super::{Cell, Context, Deserializer, ScalarType, TagState, VariantValue};
-    use serde::{Deserialize, de::SeqAccess};
+    use serde::Deserialize;
+    use serde::de::SeqAccess;
 
     #[test]
     fn metadata_protocols_can_be_ignored() {

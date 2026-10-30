@@ -1,8 +1,10 @@
 //! Borrowed syntax used by the deserializer, from a parsed stream or a pending edit.
 
-use crate::{AttachedComment, Error, comments::CommentCache};
+use crate::comments::CommentCache;
+use crate::{AttachedComment, Error};
 use astral_yaml::{NodeId, ScalarStyle, Span, Stream};
-use std::{borrow::Cow, cell::Cell};
+use std::borrow::Cow;
+use std::cell::Cell;
 
 /// The input chooses a borrowed node representation at compile time. A parsed
 /// document can then be deserialized directly from its syntax tree, even when

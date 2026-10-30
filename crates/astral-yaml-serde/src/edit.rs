@@ -1,21 +1,21 @@
 //! Edit YAML using Rust values inside an [`Editable`](crate::Editable) transaction.
 
+use crate::Error;
 use crate::syntax::{self, Collection, Mapping, Sequence};
-use crate::{Error, to_string};
 use astral_yaml::{NodeId, Span};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::fmt;
 use std::marker::PhantomData;
-use std::{
-    borrow::Cow,
-    fmt::{self, Write},
-};
 
 #[cfg(test)]
 mod tests;
 
 pub use crate::edit_path;
 pub use crate::syntax::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind};
-pub use astral_yaml::{CollectionStyle, ScalarStyle, comments::CommentPlacement};
+pub use astral_yaml::comments::CommentPlacement;
+pub use astral_yaml::{CollectionStyle, ScalarStyle};
 
 /// Build an edit path from literal mapping keys and zero-based sequence indices.
 ///
@@ -23,7 +23,8 @@ pub use astral_yaml::{CollectionStyle, ScalarStyle, comments::CommentPlacement};
 /// works without this macro. Keys containing `.` or `/` are always taken literally.
 ///
 /// ```
-/// use astral_yaml_serde::{EditableYaml, edit::edit_path};
+/// use astral_yaml_serde::edit::edit_path;
+/// use astral_yaml_serde::EditableYaml;
 ///
 /// let mut doc = EditableYaml::parse("servers: [{host: 'old'}]\n")?;
 /// doc.set_at(edit_path!["servers", 0, "host"], "new")?;
@@ -233,7 +234,7 @@ impl<'a, 'doc> Cursor<'a, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
-        let yaml = self.context.mutate(|| to_string(&value))?;
+        let yaml = self.context.mutate(|| crate::to_string(&value))?;
         self.context
             .mutate(|| self.editor.replace_preserving_style(self.id, &yaml))
     }
@@ -319,7 +320,7 @@ impl<'doc> MappingMut<'_, 'doc> {
     pub fn set(&mut self, name: &str, value: impl Serialize) -> Result<Cursor<'_, 'doc>, Error> {
         let mut context = self.context.child(format_args!("[{name:?}]"));
         let id = context.mutate(|| -> Result<_, Error> {
-            let yaml = to_string(&value)?;
+            let yaml = crate::to_string(&value)?;
             if let Some((_, id)) = self.editor.string_field(self.id, name)? {
                 self.editor.replace_preserving_style(id, &yaml)?;
                 Ok(id)
@@ -443,7 +444,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
         value: impl Serialize,
     ) -> Result<Cursor<'_, 'doc>, Error> {
         let id = self.context.mutate(|| -> Result<_, Error> {
-            let yaml = to_string(&value)?;
+            let yaml = crate::to_string(&value)?;
             Ok(self.editor.insert_item(self.id, index, &yaml)?)
         })?;
         self.state.len += 1;
@@ -494,7 +495,7 @@ impl<'a, 'doc> Entry<'a, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'a, 'doc>, Error> {
-        self.or_insert_with(|| to_string(&value))
+        self.or_insert_with(|| crate::to_string(&value))
     }
 
     fn or_insert_with<S: AsRef<str>>(
@@ -666,6 +667,8 @@ impl<'a> EditContext<'a> {
     }
 
     fn at(mut self, segment: fmt::Arguments<'_>) -> Self {
+        use std::fmt::Write;
+
         self.path.to_mut().write_fmt(segment).expect("String write");
         self
     }

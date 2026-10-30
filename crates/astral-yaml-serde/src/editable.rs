@@ -15,7 +15,8 @@ use serde::de::DeserializeOwned;
 /// with an appropriate type.
 ///
 /// ```
-/// use astral_yaml_serde::{EditableYaml, edit::edit_path};
+/// use astral_yaml_serde::edit::edit_path;
+/// use astral_yaml_serde::EditableYaml;
 ///
 /// let mut doc = EditableYaml::parse("servers: [{host: 'old'}]\n")?;
 /// doc.set_at(edit_path!["servers", 0, "host"], "new")?;

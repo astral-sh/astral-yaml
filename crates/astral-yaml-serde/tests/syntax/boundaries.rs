@@ -4,7 +4,8 @@ use test_case::test_case;
 
 use super::support::{edit, edited};
 use crate::syntax::DocumentSyntax;
-use astral_yaml::{ParseOptions, comments::CommentPlacement};
+use astral_yaml::ParseOptions;
+use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
