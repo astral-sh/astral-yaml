@@ -382,7 +382,7 @@ fn rendering_obeys_work_and_output_budgets(
 fn plain_scalar_fallback_cannot_introduce_documents_or_collections(value: &str, flow: bool) {
     let output = scalar(
         value,
-        astral_yaml::ScalarStyle::Plain,
+        ScalarStyle::Plain,
         if flow {
             super::ScalarPosition::Flow
         } else {
@@ -688,7 +688,7 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
                 - b"},
             "x: one, y",
         ] {
-            let text = scalar(value, astral_yaml::ScalarStyle::Plain, position, 0);
+            let text = scalar(value, ScalarStyle::Plain, position, 0);
             let source = if position == ScalarPosition::BlockKey {
                 format!("{text}: value")
             } else {
@@ -1021,7 +1021,7 @@ fn omitted_roots_own_their_erased_line() {
         let mut candidate = DocumentSyntax::parse(source).unwrap();
         candidate.source.nodes[candidate.source.root.index()].kind = NodeKind::Scalar {
             value: String::new(),
-            style: astral_yaml::ScalarStyle::Plain,
+            style: ScalarStyle::Plain,
         };
         outputs.push(candidate.normalized_yaml().unwrap());
     }
@@ -1096,7 +1096,7 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
         let mut candidate = DocumentSyntax::parse(source).unwrap();
         candidate.source.nodes[candidate.source.root.index()].kind = NodeKind::Scalar {
             value: "old".to_owned(),
-            style: astral_yaml::ScalarStyle::Literal,
+            style: ScalarStyle::Literal,
         };
         let region = splice::region(&candidate, candidate.source.root, OuterComments::Include);
         let rendered = splice::render(&candidate, candidate.source.root, region).unwrap();

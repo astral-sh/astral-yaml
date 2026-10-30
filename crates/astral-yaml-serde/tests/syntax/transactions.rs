@@ -21,7 +21,7 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         let empty_origin = editor.node(existing)?.span().unwrap();
         editor.replace(existing, "new")?;
         let item = editor.insert_item(items, 0, "''")?;
-        editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
+        editor.set_collection_style(items, CollectionStyle::Block)?;
         editor.insert_comment(item, 0, " inserted", CommentPlacement::Leading)?;
 
         let replacement = editor.node(existing)?;
@@ -711,8 +711,8 @@ fn canceled_edits_do_not_expand_the_final_rewrite() {
             let items = editor.mapping_entries(editor.root())?[1].1;
             editor.insert_item(items, 1, "temporary")?;
             editor.remove_item(items, 1)?;
-            editor.set_collection_style(items, astral_yaml::CollectionStyle::Block)?;
-            editor.set_collection_style(items, astral_yaml::CollectionStyle::Flow)?;
+            editor.set_collection_style(items, CollectionStyle::Block)?;
+            editor.set_collection_style(items, CollectionStyle::Flow)?;
             if let Some(replacement) = replacement {
                 editor.replace(value, replacement)?;
             }

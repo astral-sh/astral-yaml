@@ -722,7 +722,7 @@ fn serialization_recursion_limit() {
 fn serialization_rejects_duplicate_mapping_keys(left: &str, right: &str, duplicate: bool) {
     use astral_yaml_dev::Value;
 
-    let key = |source| astral_yaml_serde::from_str::<Value>(source).unwrap();
+    let key = |source| from_str::<Value>(source).unwrap();
     for preceding in [0, 30, 31] {
         let mut entries: Vec<_> = (0..preceding)
             .map(|index| (Value::String(format!("prefix-{index}")), Value::Null))
@@ -732,7 +732,7 @@ fn serialization_rejects_duplicate_mapping_keys(left: &str, right: &str, duplica
             (key(right), Value::Integer(2)),
         ]);
         let value = Value::Mapping(entries);
-        let result = astral_yaml_serde::to_string(&value);
+        let result = to_string(&value);
         if duplicate {
             assert_eq!(
                 result.unwrap_err().message,
@@ -741,10 +741,7 @@ fn serialization_rejects_duplicate_mapping_keys(left: &str, right: &str, duplica
             );
         } else {
             let source = result.unwrap();
-            assert_eq!(
-                astral_yaml_serde::from_str::<Value>(&source).unwrap(),
-                value
-            );
+            assert_eq!(from_str::<Value>(&source).unwrap(), value);
         }
     }
 }
@@ -799,7 +796,7 @@ fn mapping_key_uniqueness_uses_core_types() {
     ] {
         let error = from_str::<Anything>(source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
-        let ignored_error = from_str::<serde::de::IgnoredAny>(source).unwrap_err();
+        let ignored_error = from_str::<de::IgnoredAny>(source).unwrap_err();
         assert_eq!(
             diagnostic_snapshot(source, error),
             diagnostic_snapshot(source, ignored_error),

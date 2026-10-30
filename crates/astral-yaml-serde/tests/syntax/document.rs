@@ -16,7 +16,7 @@ fn emission_limits_roll_back_root_and_subtree_rewrites(nested: bool) {
             key: {quoted}
         "}
     } else {
-        quoted.clone()
+        quoted
     };
     let mut document = DocumentSyntax::parse_with_options(
         &source,
