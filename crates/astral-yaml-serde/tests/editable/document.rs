@@ -18,12 +18,7 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     "};
     let mut config: Editable<Config> = source.parse().unwrap();
     let before = config.to_yaml();
-    config
-        .edit_syntax(|e| {
-            let entries = e.mapping_entries(&e.root())?;
-            e.replace(&entries[0].1, "100")
-        })
-        .unwrap();
+    config.set_at(["timeout"], 100).unwrap();
     let timeout = &config.value().timeout;
     let field = (format!("timeout = {}", timeout.value), timeout.span);
     insta::assert_snapshot!(span_snapshot(config.syntax().source(), [field]), @"
@@ -43,26 +38,28 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
 }
 
 #[test_case(0; "integer overflow")]
-#[test_case(1; "invalid syntax")]
-#[test_case(2; "duplicate field")]
-#[test_case(3; "missing field")]
-#[test_case(4; "sequence type mismatch")]
-#[test_case(5; "mapping type mismatch")]
-fn syntax_type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
+#[test_case(1; "duplicate field")]
+#[test_case(2; "missing field")]
+#[test_case(3; "sequence type mismatch")]
+#[test_case(4; "mapping type mismatch")]
+fn type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
     let source = indoc! {r"
         timeout: 30 # seconds
     "};
     let mut config = Editable::<Config>::parse(source).unwrap();
-    let result = config.edit_syntax(|e| {
-        let root = e.root();
-        let entries = e.mapping_entries(&root)?;
+    let result = config.edit(|root| {
+        let mut fields = root.into_mapping()?;
         match operation {
-            0 => e.replace(&entries[0].1, "256"),
-            1 => e.replace(&entries[0].1, "["),
-            2 => e.insert_entry(&root, 1, "timeout", "60").map(|_| ()),
-            3 => e.remove_entry(&root, 0),
-            4 => e.replace(&entries[0].1, "[60]"),
-            _ => e.replace(&entries[0].1, "{value: 60}"),
+            0 => fields.field("timeout")?.set(256),
+            1 => {
+                fields.set("other", 60)?;
+                fields.key_at(1)?.set("timeout")
+            }
+            2 => fields.remove("timeout").map(|_| ()),
+            3 => fields.field("timeout")?.set([60]),
+            _ => fields
+                .field("timeout")?
+                .set(serde_json::json!({"value": 60})),
         }
     });
     assert!(result.is_err());
@@ -90,7 +87,12 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     assert_eq!(value.value().value, None);
     let before = value.to_yaml();
     value
-        .edit_syntax(|e| e.replace(&e.root(), "!!int 42"))
+        .edit(|mut root| {
+            root.set(Tagged {
+                tag: "tag:yaml.org,2002:int".to_owned(),
+                value: 42,
+            })
+        })
         .unwrap();
     assert_eq!(value.value().value, Some(42));
     assert_eq!(value.value().tag, "tag:yaml.org,2002:int");
@@ -101,7 +103,7 @@ fn tags_and_nulls_use_the_existing_deserialization_policy() {
     +!<tag:yaml.org,2002:int> 42
     \ No newline at end of file
     ");
-    assert!(value.edit_syntax(|e| e.replace(&e.root(), "42")).is_err());
+    assert!(value.edit(|mut root| root.set(42)).is_err());
     assert_eq!(value.value().value, Some(42));
 }
 
@@ -201,7 +203,7 @@ fn application_errors_preserve_their_payload_and_roll_back_both_views() {
 fn application_errors_wrap_failed_mutations(handled: bool) {
     let mut config = Editable::<Config>::parse("timeout: 30\n").unwrap();
     let result: Result<(), ApplicationError> = config.try_edit(|root| {
-        let error = root.field("timeout")?.set_yaml("[");
+        let error = root.field("timeout")?.remove_comment(0);
         if handled {
             assert!(error.is_err());
         } else {
@@ -213,7 +215,7 @@ fn application_errors_wrap_failed_mutations(handled: bool) {
     let ApplicationError::Yaml(error) = result.unwrap_err() else {
         panic!("expected a YAML error");
     };
-    assert!(error.message.contains("flow sequence"));
+    assert_eq!(error.message, "comment index out of bounds");
     assert_eq!(config.source(), "timeout: 30\n");
     assert_eq!(config.value().timeout.value, 30);
 }

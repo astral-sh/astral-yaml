@@ -2,11 +2,23 @@
 
 use std::collections::{HashMap, HashSet};
 
-use astral_yaml::{
-    CollectionStyle, NodeId, ScalarStyle,
-    comments::CommentPlacement,
-    edit::{EditableDocument, Editor, Handle, Node, NodeKind},
+use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, comments::CommentPlacement};
+
+use crate::Value;
+use astral_yaml_serde::{
+    Editable,
+    edit::{Cursor, Node, NodeKind},
 };
+
+/// Some source graphs contain cycles. This projection leaves them available
+/// for syntax inspection without expanding aliases during deserialization.
+struct Graph;
+
+impl<'de> serde::Deserialize<'de> for Graph {
+    fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Ok(Self)
+    }
+}
 
 const TEXT: &[&str] = &[
     "old",
@@ -36,6 +48,7 @@ const TEXT: &[&str] = &[
 #[derive(Clone, Debug)]
 enum Scalar {
     String(usize),
+    Key(usize),
     Null,
     Boolean(bool),
     Integer(i64),
@@ -45,6 +58,7 @@ impl Scalar {
     fn value(&self) -> String {
         match self {
             Self::String(index) => TEXT[*index].to_owned(),
+            Self::Key(id) => format!("added-{id}"),
             Self::Null => "null".to_owned(),
             Self::Boolean(value) => value.to_string(),
             Self::Integer(value) => value.to_string(),
@@ -54,6 +68,7 @@ impl Scalar {
     fn yaml(&self) -> String {
         match self {
             Self::String(index) => serde_json::to_string(TEXT[*index]).unwrap(),
+            Self::Key(_) => serde_json::to_string(&self.value()).unwrap(),
             _ => self.value(),
         }
     }
@@ -88,7 +103,6 @@ type Path = Vec<Step>;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Operation {
     Replace,
-    Preserve,
     InsertItem,
     RemoveItem,
     InsertEntry,
@@ -104,9 +118,8 @@ enum Operation {
 
 impl Operation {
     fn from_byte(byte: u8) -> Self {
-        const OPERATIONS: [Operation; 13] = [
+        const OPERATIONS: [Operation; 12] = [
             Operation::Replace,
-            Operation::Preserve,
             Operation::InsertItem,
             Operation::RemoveItem,
             Operation::InsertEntry,
@@ -255,24 +268,20 @@ impl Tree {
         }
     }
 
-    fn remap_root(&mut self, previous: usize, retained: usize) {
-        if self.id == previous {
-            self.id = retained;
-        }
-        match &mut self.kind {
-            Kind::Alias(target) if *target == previous => *target = retained,
-            Kind::Sequence(items) => {
-                for item in items {
-                    item.remap_root(previous, retained);
-                }
-            }
-            Kind::Mapping(entries) => {
-                for (key, value) in entries {
-                    key.remap_root(previous, retained);
-                    value.remap_root(previous, retained);
-                }
-            }
-            _ => {}
+    fn value(&self) -> Value {
+        match &self.kind {
+            Kind::Scalar(Scalar::Null) => Value::Null,
+            Kind::Scalar(Scalar::Boolean(value)) => Value::Bool(*value),
+            Kind::Scalar(Scalar::Integer(value)) => Value::Integer(*value),
+            Kind::Scalar(text) => Value::String(text.value()),
+            Kind::Sequence(items) => Value::Sequence(items.iter().map(Self::value).collect()),
+            Kind::Mapping(entries) => Value::Mapping(
+                entries
+                    .iter()
+                    .map(|(k, v)| (k.value(), v.value()))
+                    .collect(),
+            ),
+            Kind::Alias(_) => unreachable!("generated data has no aliases"),
         }
     }
 
@@ -297,7 +306,7 @@ impl Builder {
     }
 
     fn document(&mut self) -> Tree {
-        if self.state % 8 != 0 {
+        if !self.state.is_multiple_of(8) {
             return self.tree(3, &[]);
         }
         // Two definitions deliberately reuse a name. Each self reference and
@@ -346,14 +355,58 @@ impl Builder {
         usize::try_from(self.state >> 32).unwrap()
     }
 
+    fn value(&mut self, depth: usize) -> Tree {
+        let id = self.identity();
+        let choice = self.next();
+        let kind = if depth == 0 || choice.is_multiple_of(3) {
+            Kind::Scalar(match choice % 4 {
+                0 => Scalar::Null,
+                1 => Scalar::Boolean(choice & 4 == 0),
+                2 => Scalar::Integer([0, -1, 42][choice % 3]),
+                _ => Scalar::String(choice % TEXT.len()),
+            })
+        } else if choice.is_multiple_of(2) {
+            Kind::Sequence(
+                (0..(choice >> 8) % 4)
+                    .map(|_| self.value(depth - 1))
+                    .collect(),
+            )
+        } else {
+            Kind::Mapping(
+                (0..(choice >> 8) % 4)
+                    .map(|_| (self.key(), self.value(depth - 1)))
+                    .collect(),
+            )
+        };
+        Tree {
+            id,
+            anchor: None,
+            tag: None,
+            comments: Vec::new(),
+            kind,
+        }
+    }
+
+    fn key(&mut self) -> Tree {
+        let id = self.identity();
+        Tree {
+            id,
+            anchor: None,
+            tag: None,
+            comments: Vec::new(),
+            kind: Kind::Scalar(Scalar::Key(id)),
+        }
+    }
+
     fn tree(&mut self, depth: usize, ancestors: &[usize]) -> Tree {
         let id = self.identity();
         let choice = self.next();
-        let comments = (choice % 7 == 0)
+        let comments = choice
+            .is_multiple_of(7)
             .then(|| (format!(" generated {id}"), CommentPlacement::Leading))
             .into_iter()
             .collect();
-        if choice % 5 == 0 && !ancestors.is_empty() {
+        if choice.is_multiple_of(5) && !ancestors.is_empty() {
             return Tree {
                 id,
                 anchor: None,
@@ -362,19 +415,19 @@ impl Builder {
                 kind: Kind::Alias(ancestors[choice % ancestors.len()]),
             };
         }
-        let anchor = (choice % 3 == 0).then(|| format!("n{id}"));
+        let anchor = choice.is_multiple_of(3).then(|| format!("n{id}"));
         let mut ancestors = ancestors.to_vec();
         if anchor.is_some() {
             ancestors.push(id);
         }
-        let kind = if depth == 0 || choice % 4 == 0 {
+        let kind = if depth == 0 || choice.is_multiple_of(4) {
             Kind::Scalar(match self.next() % 4 {
                 0 => Scalar::Null,
-                1 => Scalar::Boolean(choice % 2 == 0),
+                1 => Scalar::Boolean(choice & 4 == 0),
                 2 => Scalar::Integer([0, -1, 42][choice % 3]),
                 _ => Scalar::String(choice % TEXT.len()),
             })
-        } else if choice % 2 == 0 {
+        } else if choice.is_multiple_of(2) {
             Kind::Sequence(
                 (0..(choice >> 8) % 4)
                     .map(|_| self.tree(depth - 1, &ancestors))
@@ -395,23 +448,32 @@ impl Builder {
         Tree {
             id,
             anchor,
-            tag: (choice % 5 == 0).then(|| "tag:example.com,2026:node".to_owned()),
+            tag: choice
+                .is_multiple_of(5)
+                .then(|| "tag:example.com,2026:node".to_owned()),
             comments,
             kind,
         }
     }
 }
 
-fn handle(editor: &Editor<'_>, path: &[Step]) -> Handle {
-    let mut handle = editor.root();
-    for step in path {
-        handle = match step {
-            Step::Item(i) => editor.sequence_item(&handle, *i).unwrap().unwrap(),
-            Step::Key(i) => editor.mapping_entry(&handle, *i).unwrap().unwrap().0,
-            Step::Value(i) => editor.mapping_entry(&handle, *i).unwrap().unwrap().1,
-        };
+fn with_node<R>(cursor: Cursor<'_, '_>, path: &[Step], f: impl FnOnce(Cursor<'_, '_>) -> R) -> R {
+    let Some((step, rest)) = path.split_first() else {
+        return f(cursor);
+    };
+    match *step {
+        Step::Item(index) => with_node(cursor.item(index).unwrap(), rest, f),
+        Step::Key(index) => with_node(
+            cursor.into_mapping().unwrap().key_at(index).unwrap(),
+            rest,
+            f,
+        ),
+        Step::Value(index) => with_node(
+            cursor.into_mapping().unwrap().value_at(index).unwrap(),
+            rest,
+            f,
+        ),
     }
-    handle
 }
 
 fn check<'a, Location: 'a>(
@@ -451,7 +513,7 @@ fn check<'a, Location: 'a>(
                         ScalarStyle::Plain,
                         "string must not acquire an implicit null/bool/number type"
                     ),
-                    Scalar::String(_) => {}
+                    Scalar::String(_) | Scalar::Key(_) => {}
                     _ => assert_eq!(*style, ScalarStyle::Plain),
                 }
             }
@@ -480,42 +542,47 @@ fn check<'a, Location: 'a>(
     }
 }
 
-fn check_draft(model: &Tree, root: NodeId, editor: &Editor<'_>) {
+fn check_draft(model: &Tree, root: NodeId, editor: &mut Cursor<'_, '_>) {
     let mut nodes = HashMap::new();
-    let mut pending = vec![(root, editor.root())];
-    while let Some((id, handle)) = pending.pop() {
-        let node = editor.node(&handle).unwrap();
+    let mut pending = vec![(root, Vec::new())];
+    while let Some((id, path)) = pending.pop() {
+        let node = with_node(editor.reborrow(), &path, |cursor| {
+            cursor.node().unwrap().clone()
+        });
+        let mut add = |child, step| {
+            let mut path = path.clone();
+            path.push(step);
+            pending.push((child, path));
+        };
         match node.kind() {
-            NodeKind::Sequence { items, .. } => pending.extend(
-                items
-                    .iter()
-                    .copied()
-                    .zip(editor.sequence_items(&handle).unwrap()),
-            ),
+            NodeKind::Sequence { items, .. } => {
+                for (index, &item) in items.iter().enumerate() {
+                    add(item, Step::Item(index));
+                }
+            }
             NodeKind::Mapping { entries, .. } => {
-                for (&(key, value), (a, b)) in
-                    entries.iter().zip(editor.mapping_entries(&handle).unwrap())
-                {
-                    pending.extend([(key, a), (value, b)]);
+                for (index, &(key, value)) in entries.iter().enumerate() {
+                    add(key, Step::Key(index));
+                    add(value, Step::Value(index));
                 }
             }
             _ => {}
         }
         assert!(nodes.insert(id, node).is_none(), "one structural owner");
     }
-    check(model, root, |id| nodes[&id]);
+    check(model, root, |id| &nodes[&id]);
 }
 
-fn set_layout(model: &Tree, editor: &mut Editor<'_>, style: CollectionStyle) {
+fn set_layout(model: &Tree, editor: &mut Cursor<'_, '_>, style: CollectionStyle) {
     for path in model.paths() {
         let kind = &model.at(&path).kind;
         let empty = match kind {
             Kind::Sequence(items) => items.is_empty(),
             Kind::Mapping(entries) => entries.is_empty(),
             Kind::Scalar(Scalar::String(_)) if style == CollectionStyle::Flow => {
-                editor
-                    .set_scalar_style(&handle(editor, &path), ScalarStyle::DoubleQuoted)
-                    .unwrap();
+                with_node(editor.reborrow(), &path, |mut node| {
+                    node.set_scalar_style(ScalarStyle::DoubleQuoted).unwrap();
+                });
                 continue;
             }
             _ => continue,
@@ -556,19 +623,13 @@ fn set_layout(model: &Tree, editor: &mut Editor<'_>, style: CollectionStyle) {
         } else {
             style
         };
-        editor
-            .set_collection_style(&handle(editor, &path), requested)
-            .unwrap();
+        with_node(editor.reborrow(), &path, |mut node| {
+            node.set_collection_style(requested).unwrap();
+        });
     }
 }
 
-fn replace(
-    model: &mut Tree,
-    editor: &mut Editor<'_>,
-    builder: &mut Builder,
-    selector: usize,
-    preserve: bool,
-) {
+fn replace(model: &mut Tree, editor: &mut Cursor<'_, '_>, builder: &mut Builder, selector: usize) {
     let paths: Vec<_> = model
         .paths()
         .into_iter()
@@ -585,7 +646,7 @@ fn replace(
         .collect();
     let path = &paths[selector % paths.len()];
     let old = model.at(path);
-    let mut replacement = builder.tree(selector % 3, &[]);
+    let mut replacement = builder.value(selector % 3);
     // Nested scalar suffixes have no attachment boundary. Keep an enclosing
     // collection when the replaced occurrence owns full-line suffixes.
     if !path.is_empty()
@@ -605,38 +666,21 @@ fn replace(
             kind: Kind::Sequence(vec![child]),
         };
     }
-    // Merging a fragment prefix with retained property comments depends on source
-    // headers. Keep those replacement fragments free of root comments.
-    if old
-        .comments
-        .iter()
-        .any(|(_, placement)| *placement != CommentPlacement::Leading)
-    {
-        replacement.comments.clear();
-    }
-    let yaml = replacement.yaml();
-    let handle = handle(editor, path);
-    if preserve {
-        editor.replace_preserving_style(&handle, &yaml).unwrap();
-        if old.anchor.is_some() {
-            replacement.anchor.clone_from(&old.anchor);
-        }
-    } else {
-        // Existing incoming aliases still need a definition. Retain an anchor
-        // for that identity, while allowing its presentation name to change.
-        if old.anchor.is_some() && replacement.anchor.is_none() {
-            replacement.anchor = Some(format!("n{}", replacement.id));
-        }
-        editor.replace(&handle, &replacement.yaml()).unwrap();
-    }
-    replacement.remap_root(replacement.id, old.id);
-    let mut comments = old.comments.clone();
-    comments.append(&mut replacement.comments);
-    replacement.comments = comments;
+    with_node(editor.reborrow(), path, |mut cursor| {
+        cursor.set(replacement.value()).unwrap();
+    });
+    replacement.id = old.id;
+    replacement.anchor.clone_from(&old.anchor);
+    replacement.comments.clone_from(&old.comments);
     *model.at_mut(path) = replacement;
 }
 
-fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, operation: Operation) {
+fn comment_edit(
+    model: &mut Tree,
+    editor: &mut Cursor<'_, '_>,
+    selector: usize,
+    operation: Operation,
+) {
     let paths: Vec<_> = model
         .paths()
         .into_iter()
@@ -651,7 +695,6 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
         return;
     }
     let path = &paths[selector % paths.len()];
-    let owner = handle(editor, path);
     let children = match &model.at(path).kind {
         Kind::Sequence(items) => Some(items.len()),
         Kind::Mapping(entries) => Some(entries.len()),
@@ -699,34 +742,33 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
                 CommentPlacement::Trailing => 2,
                 CommentPlacement::Detached => 3,
             };
-            let first = comments.partition_point(|(_, existing)| rank(*existing) < rank(placement));
-            let end = comments.partition_point(|(_, existing)| rank(*existing) <= rank(placement));
-            let index = first + selector % (end - first + 1);
-            editor
-                .insert_comment(&owner, index, &text, placement)
-                .unwrap();
-            if operation == Operation::CancelComment {
-                editor.remove_comment(&owner, index).unwrap();
-            } else {
-                comments.insert(index, (text, placement));
+            if comments
+                .last()
+                .is_some_and(|(_, existing)| rank(*existing) > rank(placement))
+            {
+                return;
             }
+            with_node(editor.reborrow(), path, |mut node| {
+                node.append_comment(&text, placement).unwrap();
+                if operation == Operation::CancelComment {
+                    node.remove_comment(comments.len()).unwrap();
+                } else {
+                    comments.push((text, placement));
+                }
+            });
         }
         Operation::ReplaceComment => {
             let index = selector % comments.len();
-            if selector & 4 == 0 {
-                editor.replace_comment(&owner, index, &text).unwrap();
-            } else {
-                let position = editor.comment_position(&owner, index).unwrap();
-                editor.remove_comment(&owner, index).unwrap();
-                editor
-                    .insert_comment_at(&owner, index, &text, comments[index].1, position)
-                    .unwrap();
-            }
+            with_node(editor.reborrow(), path, |mut node| {
+                node.replace_comment(index, &text).unwrap();
+            });
             comments[index].0 = text;
         }
         Operation::RemoveComment => {
             let index = selector % comments.len();
-            editor.remove_comment(&owner, index).unwrap();
+            with_node(editor.reborrow(), path, |mut node| {
+                node.remove_comment(index).unwrap();
+            });
             comments.remove(index);
         }
         _ => unreachable!("comment operation"),
@@ -735,7 +777,7 @@ fn comment_edit(model: &mut Tree, editor: &mut Editor<'_>, selector: usize, oper
 
 fn sequence_edit(
     model: &mut Tree,
-    editor: &mut Editor<'_>,
+    editor: &mut Cursor<'_, '_>,
     builder: &mut Builder,
     selector: usize,
     operation: Operation,
@@ -749,7 +791,6 @@ fn sequence_edit(
         return;
     }
     let path = &paths[selector % paths.len()];
-    let parent = handle(editor, path);
     let Kind::Sequence(items) = &model.at(path).kind else {
         unreachable!()
     };
@@ -776,35 +817,29 @@ fn sequence_edit(
             return;
         }
         let index = indices[selector % indices.len()];
-        editor
-            .cursor_mut(&parent)
-            .unwrap()
-            .into_sequence()
-            .unwrap()
-            .remove(index)
-            .unwrap();
+        with_node(editor.reborrow(), path, |node| {
+            node.into_sequence().unwrap().remove(index).unwrap();
+        });
         let Kind::Sequence(items) = &mut model.at_mut(path).kind else {
             unreachable!()
         };
         items.remove(index);
         if items.is_empty() {
-            editor
-                .set_collection_style(&parent, CollectionStyle::Flow)
-                .unwrap();
+            with_node(editor.reborrow(), path, |mut node| {
+                node.set_collection_style(CollectionStyle::Flow).unwrap();
+            });
         }
     } else {
         let index = selector % (items.len() + 1);
-        let item = builder.tree(1, &[]);
-        editor
-            .cursor_mut(&parent)
-            .unwrap()
-            .into_sequence()
-            .unwrap()
-            .insert_yaml(index, &item.yaml())
-            .unwrap();
-        if operation == Operation::CancelInsertion {
-            editor.remove_item(&parent, index).unwrap();
-        } else {
+        let item = builder.value(1);
+        with_node(editor.reborrow(), path, |node| {
+            let mut sequence = node.into_sequence().unwrap();
+            sequence.insert(index, item.value()).unwrap();
+            if operation == Operation::CancelInsertion {
+                sequence.remove(index).unwrap();
+            }
+        });
+        if operation != Operation::CancelInsertion {
             let Kind::Sequence(items) = &mut model.at_mut(path).kind else {
                 unreachable!()
             };
@@ -815,7 +850,7 @@ fn sequence_edit(
 
 fn mapping_edit(
     model: &mut Tree,
-    editor: &mut Editor<'_>,
+    editor: &mut Cursor<'_, '_>,
     builder: &mut Builder,
     selector: usize,
     operation: Operation,
@@ -829,7 +864,6 @@ fn mapping_edit(
         return;
     }
     let path = &paths[selector % paths.len()];
-    let parent = handle(editor, path);
     let Kind::Mapping(entries) = &model.at(path).kind else {
         unreachable!()
     };
@@ -861,27 +895,34 @@ fn mapping_edit(
             return;
         }
         let index = indices[selector % indices.len()];
-        editor.remove_entry(&parent, index).unwrap();
+        with_node(editor.reborrow(), path, |node| {
+            node.into_mapping().unwrap().remove_at(index).unwrap();
+        });
         let Kind::Mapping(entries) = &mut model.at_mut(path).kind else {
             unreachable!()
         };
         entries.remove(index);
         if entries.is_empty() {
-            editor
-                .set_collection_style(&parent, CollectionStyle::Flow)
-                .unwrap();
+            with_node(editor.reborrow(), path, |mut node| {
+                node.set_collection_style(CollectionStyle::Flow).unwrap();
+            });
         }
     } else {
-        let index = selector % (entries.len() + 1);
-        let key = builder.tree(1, &[]);
-        let value = builder.tree(1, &[]);
-        editor
-            .insert_entry(&parent, index, &key.yaml(), &value.yaml())
-            .unwrap();
+        let key = builder.key();
+        let Kind::Scalar(name) = &key.kind else {
+            unreachable!()
+        };
+        let value = builder.value(1);
+        with_node(editor.reborrow(), path, |node| {
+            node.into_mapping()
+                .unwrap()
+                .set(&name.value(), value.value())
+                .unwrap();
+        });
         let Kind::Mapping(entries) = &mut model.at_mut(path).kind else {
             unreachable!()
         };
-        entries.insert(index, (key, value));
+        entries.push((key, value));
     }
 }
 
@@ -911,13 +952,13 @@ pub fn check_recursive_edits(data: &[u8]) {
         2 => format!("%YAML 1.2\n---\n{yaml}\n...\n"),
         _ => format!("\u{feff}---\n{yaml}\n"),
     };
-    let mut document = EditableDocument::parse(&source).unwrap();
-    check(&model, document.root(), |id| document.node(id).unwrap());
+    let mut document = Editable::<Graph>::parse(&source).unwrap();
+    check(&model, document.syntax().root(), |id| {
+        document.syntax().node(id).unwrap()
+    });
     let batch = [1, 4, 16][usize::from(data[0] >> 6) % 3];
-    for operations in data[1..]
-        .chunks_exact(3)
-        .take(32)
-        .collect::<Vec<_>>()
+    let (operations, _) = data[1..].as_chunks::<3>();
+    for operations in operations[..operations.len().min(32)]
         .chunks(batch)
         // Commit explicit styles before subsequent edits can require a different
         // presentation. The model generates successful edits, not style errors.
@@ -930,7 +971,7 @@ pub fn check_recursive_edits(data: &[u8]) {
             })
         })
     {
-        let root = document.root();
+        let root = document.syntax().root();
         let unchanged = operations
             .iter()
             .all(|op| {
@@ -941,17 +982,12 @@ pub fn check_recursive_edits(data: &[u8]) {
             })
             .then(|| document.source().to_owned());
         document
-            .edit_syntax(|editor| {
+            .edit(|mut cursor| {
+                let editor = &mut cursor;
                 for operation in operations {
                     let selector = usize::from(operation[1]) * 256 + usize::from(operation[2]);
                     match Operation::from_byte(operation[0]) {
-                        op @ (Operation::Replace | Operation::Preserve) => replace(
-                            &mut model,
-                            editor,
-                            &mut builder,
-                            selector,
-                            op == Operation::Preserve,
-                        ),
+                        Operation::Replace => replace(&mut model, editor, &mut builder, selector),
                         op @ (Operation::InsertItem
                         | Operation::RemoveItem
                         | Operation::CancelInsertion) => {
@@ -979,7 +1015,9 @@ pub fn check_recursive_edits(data: &[u8]) {
                     document.source()
                 )
             });
-        check(&model, document.root(), |id| document.node(id).unwrap());
+        check(&model, document.syntax().root(), |id| {
+            document.syntax().node(id).unwrap()
+        });
         if let Some(source) = unchanged {
             assert_eq!(document.source(), source, "canceled edits retain source");
         }

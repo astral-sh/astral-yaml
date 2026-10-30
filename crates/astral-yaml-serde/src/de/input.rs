@@ -93,9 +93,9 @@ impl<'s, 'de: 's> Node<'s, 'de> for &'s astral_yaml::Node<'de> {
 }
 
 #[cfg(feature = "editable")]
-impl<'de> Input<'de> for astral_yaml::edit::ValueRef<'de> {
+impl<'de> Input<'de> for crate::syntax::ValueRef<'de> {
     type Node<'s>
-        = &'de astral_yaml::edit::Node<Option<Span>>
+        = &'de crate::syntax::Node<Option<Span>>
     where
         'de: 's;
     type Entry = (NodeId, NodeId);
@@ -109,7 +109,7 @@ impl<'de> Input<'de> for astral_yaml::edit::ValueRef<'de> {
         id: NodeId,
         _budget: &Cell<usize>,
     ) -> Result<Vec<AttachedComment<'de>>, Error> {
-        use astral_yaml::edit::NodeKind;
+        use crate::syntax::NodeKind;
 
         let mut comments = Vec::new();
         let mut pending = vec![id];
@@ -143,13 +143,13 @@ impl<'de> Input<'de> for astral_yaml::edit::ValueRef<'de> {
 }
 
 #[cfg(feature = "editable")]
-impl<'s, 'de: 's> Node<'s, 'de> for &'de astral_yaml::edit::Node<Option<Span>> {
+impl<'s, 'de: 's> Node<'s, 'de> for &'de crate::syntax::Node<Option<Span>> {
     type Scalar = EditedScalar<'de>;
     type Entry = (NodeId, NodeId);
 
     #[inline]
     fn kind(self) -> Kind<'s, Self::Scalar, Self::Entry> {
-        use astral_yaml::edit::NodeKind as Edited;
+        use crate::syntax::NodeKind as Edited;
 
         match (*self).kind() {
             Edited::Scalar { value, style } => Kind::Scalar(EditedScalar {

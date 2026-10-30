@@ -142,8 +142,7 @@ fn apply(
             } else {
                 comments.root.len()
             };
-            root.into_syntax()
-                .insert_comment(index, " model", placement)?;
+            root.insert_comment(index, " model", placement)?;
             comments
                 .root
                 .insert(index, (" model".to_owned(), placement));
@@ -174,13 +173,7 @@ fn apply(
             " changed".clone_into(&mut comments.root[index].0);
         }
         14 => {
-            nested(root)?
-                .field("value")?
-                .replace_yaml(if selector % 2 == 0 {
-                    "|+\n  new\n\n"
-                } else {
-                    ">+\n  new\n\n"
-                })?;
+            nested(root)?.field("value")?.set("new\n\n")?;
             "new\n\n".clone_into(expected.nested.value_mut());
         }
         15 => {

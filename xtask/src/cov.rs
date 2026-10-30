@@ -133,10 +133,9 @@ fn artifacts(messages: &str, members: &BTreeSet<String>) -> Result<BTreeSet<Path
             package_id,
             executable: Some(path),
         } = serde_json::from_str(line)?
+            && members.contains(&package_id)
         {
-            if members.contains(&package_id) {
-                executables.insert(path);
-            }
+            executables.insert(path);
         }
     }
 

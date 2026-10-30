@@ -13,6 +13,8 @@ mod error;
 mod schema;
 mod ser;
 mod spanned;
+#[cfg(feature = "editable")]
+mod syntax;
 mod tagged;
 
 #[cfg(feature = "editable")]

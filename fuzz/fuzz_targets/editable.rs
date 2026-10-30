@@ -1,36 +1,56 @@
 #![no_main]
 
-use astral_yaml::{
-    CollectionStyle, ScalarStyle,
-    comments::CommentPlacement,
-    edit::{Editor, Handle, NodeKind},
-};
+use astral_yaml::{CollectionStyle, ScalarStyle, comments::CommentPlacement};
 use astral_yaml_dev::Value;
-use astral_yaml_serde::{Editable, from_str, to_string};
+use astral_yaml_serde::{
+    Editable, Error,
+    edit::{Cursor, NodeKind},
+    from_str, to_string,
+};
 use libfuzzer_sys::fuzz_target;
 
-fn select(editor: &Editor<'_>, selector: u8) -> Result<Handle, astral_yaml::Error> {
-    let mut handle = editor.root();
-    for depth in 0..usize::from(selector >> 6) {
+fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(), Error> {
+    if depth < usize::from(selector >> 6) {
         let index = usize::from(selector >> (depth * 2));
-        handle = match editor.node(&handle)?.kind() {
+        match cursor.node()?.kind() {
             NodeKind::Sequence { items, .. } if !items.is_empty() => {
-                let items = editor.sequence_items(&handle)?;
-                items[index % items.len()].clone()
+                let index = index % items.len();
+                return edit_selected(cursor.item(index)?, selector, depth + 1);
             }
             NodeKind::Mapping { entries, .. } if !entries.is_empty() => {
-                let entries = editor.mapping_entries(&handle)?;
-                let (key, value) = &entries[index % entries.len()];
-                if selector & 16 == 0 {
-                    value.clone()
+                let index = index % entries.len();
+                let mut mapping = cursor.into_mapping()?;
+                let child = if selector & 16 == 0 {
+                    mapping.value_at(index)?
                 } else {
-                    key.clone()
-                }
+                    mapping.key_at(index)?
+                };
+                return edit_selected(child, selector, depth + 1);
             }
-            _ => break,
-        };
+            _ => {}
+        }
     }
-    Ok(handle)
+    let mut node = cursor;
+    match selector % 8 {
+        0 if selector & 8 == 0 => node.set(42),
+        0 => node.set("null"),
+        1 => node.into_sequence()?.insert(0, (1, "two")).map(|_| ()),
+        2 => node.into_sequence()?.remove(0),
+        3 => node.into_mapping()?.set("added", true).map(|_| ()),
+        4 => node.into_mapping()?.remove_at(0),
+        5 => node.set_scalar_style(ScalarStyle::SingleQuoted),
+        6 => node.set_collection_style(CollectionStyle::Block),
+        _ => {
+            let placement = match (selector >> 3) & 3 {
+                0 => CommentPlacement::Leading,
+                1 => CommentPlacement::Inline,
+                2 => CommentPlacement::Trailing,
+                _ => CommentPlacement::Detached,
+            };
+            let index = usize::from(selector >> 6) % (node.node()?.comments().len() + 1);
+            node.insert_comment(index, " fuzz", placement)
+        }
+    }
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -58,32 +78,7 @@ fuzz_target!(|data: &[u8]| {
         let before = document.to_yaml();
         let value_before = to_string(document.value());
         let result = if operation & 32 == 0 {
-            document.edit_syntax(|editor| {
-                let node = select(editor, operation)?;
-                match operation % 8 {
-                    0 => editor.replace(&node, if operation & 8 == 0 { "42" } else { "'null'" }),
-                    1 => editor.insert_item(&node, 0, "[1, 'two']").map(|_| ()),
-                    2 => editor.remove_item(&node, 0),
-                    3 => editor.insert_entry(&node, 0, "added", "true").map(|_| ()),
-                    4 => editor.remove_entry(&node, 0),
-                    5 => editor.set_scalar_style(&node, ScalarStyle::SingleQuoted),
-                    6 => editor.set_collection_style(&node, CollectionStyle::Block),
-                    _ => {
-                        let placement = match (operation >> 3) & 3 {
-                            0 => CommentPlacement::Leading,
-                            1 => CommentPlacement::Inline,
-                            2 => CommentPlacement::Trailing,
-                            _ => CommentPlacement::Detached,
-                        };
-                        let index = if placement == CommentPlacement::Leading {
-                            0
-                        } else {
-                            editor.node(&node)?.comments().len()
-                        };
-                        editor.insert_comment(&node, index, " fuzz", placement)
-                    }
-                }
-            })
+            document.edit(|root| edit_selected(root, operation, 0))
         } else {
             document.edit(|mut root| {
                 let index = usize::from(operation >> 6);

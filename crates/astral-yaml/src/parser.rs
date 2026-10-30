@@ -36,7 +36,7 @@ impl Default for ParseOptions {
 }
 
 impl ParseOptions {
-    pub(crate) fn check_input(self, bytes: usize) -> Result<()> {
+    fn check_input(self, bytes: usize) -> Result<()> {
         let error = |message| Error {
             span: Span { start: 0, end: 0 },
             message,
@@ -65,15 +65,6 @@ pub fn parse(source: &str) -> Result<Stream<'_>> {
 /// # Errors
 /// Returns a located error for invalid syntax, invalid options, or an exceeded limit.
 pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<'_>> {
-    let mut remaining_tag_bytes = options.max_input_bytes;
-    parse_with_tag_budget(source, options, &mut remaining_tag_bytes)
-}
-
-pub(crate) fn parse_with_tag_budget<'source>(
-    source: &'source str,
-    options: ParseOptions,
-    remaining_tag_bytes: &mut usize,
-) -> Result<Stream<'source>> {
     options.check_input(source.len())?;
 
     let stream = Parser {
@@ -87,7 +78,7 @@ pub(crate) fn parse_with_tag_budget<'source>(
         comments: Vec::new(),
         anchors: HashMap::new(),
         tags: HashMap::new(),
-        remaining_tag_bytes,
+        remaining_tag_bytes: options.max_input_bytes,
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
         elements: 0,
@@ -102,7 +93,7 @@ pub(crate) fn parse_with_tag_budget<'source>(
     Ok(stream)
 }
 
-struct Parser<'source, 'budget> {
+struct Parser<'source> {
     source: &'source str,
     pos: usize,
     options: ParseOptions,
@@ -111,7 +102,7 @@ struct Parser<'source, 'budget> {
     comments: Vec<Comment<'source>>,
     anchors: HashMap<&'source str, NodeId>,
     tags: HashMap<&'source str, &'source str>,
-    remaining_tag_bytes: &'budget mut usize,
+    remaining_tag_bytes: usize,
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
     elements: usize,
@@ -143,7 +134,7 @@ enum SequenceIndent {
     Optional,
 }
 
-impl<'source> Parser<'source, '_> {
+impl<'source> Parser<'source> {
     fn error(&self, message: &'static str) -> Error {
         Error {
             span: Span {
@@ -172,10 +163,11 @@ impl<'source> Parser<'source, '_> {
     }
 
     fn line_end(&self) -> usize {
-        if let Some(line) = self.line_end_cache.get() {
-            if line.start <= self.pos && self.pos <= line.end {
-                return line.end;
-            }
+        if let Some(line) = self.line_end_cache.get()
+            && line.start <= self.pos
+            && self.pos <= line.end
+        {
+            return line.end;
         }
 
         let end = memchr::memchr2(b'\r', b'\n', &self.source.as_bytes()[self.pos..])
@@ -1078,7 +1070,7 @@ impl<'source> Parser<'source, '_> {
         }
 
         let suffix = tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
-        *self.remaining_tag_bytes = self
+        self.remaining_tag_bytes = self
             .remaining_tag_bytes
             .checked_sub(prefix.len() + suffix.len())
             .ok_or_else(|| self.error("expanded tag byte limit exceeded"))?;

@@ -55,12 +55,7 @@ fn nested_layout_changes_keep_the_typed_model_current(source: &str) {
                             root.field("outer")?.field("value")?.set("null")?;
                         }
                         1 => {
-                            let yaml = indoc! {r"
-                                &a |+
-                                  new
-
-                            "};
-                            root.at(["outer", "value"])?.replace_yaml(yaml)?;
+                            root.at(["outer", "value"])?.set("new\n\n")?;
                         }
                         2 | 3 => root
                             .field("outer")?
@@ -112,7 +107,8 @@ fn nested_layout_changes_keep_the_typed_model_current(source: &str) {
 fn check_comments(document: &Editable<serde_json::Value>, comments: &[Vec<&str>; 2]) {
     let syntax = document.syntax();
     let root = syntax.root();
-    let astral_yaml::edit::NodeKind::Mapping { entries, .. } = syntax.node(root).unwrap().kind()
+    let astral_yaml_serde::edit::NodeKind::Mapping { entries, .. } =
+        syntax.node(root).unwrap().kind()
     else {
         panic!("expected mapping")
     };

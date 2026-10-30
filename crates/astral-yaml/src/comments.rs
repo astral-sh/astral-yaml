@@ -323,31 +323,28 @@ impl Tree<'_, '_> {
         let slots = &self.slots[collection.slots.clone()];
         let next = slots.partition_point(|slot| slot.start <= at);
         let previous = next.checked_sub(1).map(|i| &slots[i]);
-        if let Some(slot) = previous {
-            if at < slot.end || (inline && self.lines.line(slot.end) == self.lines.line(at)) {
-                return self.slot_owner(slot, comment);
-            }
+        if let Some(slot) = previous
+            && (at < slot.end || (inline && self.lines.line(slot.end) == self.lines.line(at)))
+        {
+            return self.slot_owner(slot, comment);
         }
 
         let following = slots.get(next);
-        if let Some(slot) = following {
-            if !inline
-                && (collection.flow || self.lines.column(at) == self.lines.column(collection.start))
-                && !self.lines.blank_between(comment.span.end(), slot.start)
-            {
-                return (slot.value, CommentPlacement::Leading);
-            }
+        if let Some(slot) = following
+            && !inline
+            && (collection.flow || self.lines.column(at) == self.lines.column(collection.start))
+            && !self.lines.blank_between(comment.span.end(), slot.start)
+        {
+            return (slot.value, CommentPlacement::Leading);
         }
 
-        if let Some(slot) = previous {
-            if let Some(child) = &self.nodes[slot.value].collection {
-                if !child.flow
-                    && self.lines.column(child.start) > self.lines.column(collection.start)
-                    && self.lines.column(at) >= self.lines.column(child.start)
-                {
-                    return self.owner(slot.value, comment);
-                }
-            }
+        if let Some(slot) = previous
+            && let Some(child) = &self.nodes[slot.value].collection
+            && !child.flow
+            && self.lines.column(child.start) > self.lines.column(collection.start)
+            && self.lines.column(at) >= self.lines.column(child.start)
+        {
+            return self.owner(slot.value, comment);
         }
 
         let placement = if inline {
@@ -365,10 +362,10 @@ impl Tree<'_, '_> {
 
     fn slot_owner(&self, slot: &Slot, comment: &Comment<'_>) -> (usize, CommentPlacement) {
         let at = comment.span.start();
-        if let Some(key) = slot.key {
-            if at < self.nodes[key].span.end() || slot.colon.is_some_and(|colon| at < colon) {
-                return self.owner(key, comment);
-            }
+        if let Some(key) = slot.key
+            && (at < self.nodes[key].span.end() || slot.colon.is_some_and(|colon| at < colon))
+        {
+            return self.owner(key, comment);
         }
 
         let value = &self.nodes[slot.value];
@@ -397,7 +394,10 @@ impl Tree<'_, '_> {
     }
 }
 
-pub(crate) fn skip_trivia(source: &str, mut at: usize) -> usize {
+/// Skip whitespace and comments between YAML tokens.
+#[doc(hidden)]
+#[must_use]
+pub fn skip_trivia(source: &str, mut at: usize) -> usize {
     let bytes = source.as_bytes();
 
     while let Some(&byte) = bytes.get(at) {
