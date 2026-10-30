@@ -3,6 +3,7 @@ use super::view::Syntax;
 use super::{Comment, CommentPosition, DocumentSyntax, NodeKind};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
+use std::borrow::Cow;
 
 #[cfg(test)]
 mod tests;
@@ -1099,12 +1100,12 @@ fn scalar(
         }
     };
     let source = match position {
-        ScalarPosition::Document => candidate.clone(),
-        ScalarPosition::Flow => format!("[{candidate}]"),
-        ScalarPosition::BlockKey => format!("{candidate}: value"),
-        ScalarPosition::FlowKey => format!("{{{candidate}: value}}"),
+        ScalarPosition::Document => Cow::Borrowed(candidate.as_str()),
+        ScalarPosition::Flow => Cow::Owned(format!("[{candidate}]")),
+        ScalarPosition::BlockKey => Cow::Owned(format!("{candidate}: value")),
+        ScalarPosition::FlowKey => Cow::Owned(format!("{{{candidate}: value}}")),
         // The sequence supplies the parent indentation used by block scalars.
-        ScalarPosition::Block => format!("{}- {candidate}", " ".repeat(indent)),
+        ScalarPosition::Block => Cow::Owned(format!("{}- {candidate}", " ".repeat(indent))),
     };
     let matches = astral_yaml::parse(&source).is_ok_and(|stream| {
         let [document] = stream.documents() else {
