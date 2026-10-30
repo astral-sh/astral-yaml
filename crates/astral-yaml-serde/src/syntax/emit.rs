@@ -89,13 +89,17 @@ enum Position {
 
 impl Context {
     pub(super) fn value(indent: usize, flow: bool, parent_indent: usize) -> Self {
+        if flow {
+            Self::flow(indent)
+        } else {
+            Self::block(indent, parent_indent)
+        }
+    }
+
+    pub(super) fn block(indent: usize, parent_indent: usize) -> Self {
         Self {
             indent,
-            position: if flow {
-                Position::Flow
-            } else {
-                Position::Block { parent_indent }
-            },
+            position: Position::Block { parent_indent },
         }
     }
 

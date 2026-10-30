@@ -88,6 +88,13 @@ impl From<&DocumentSyntax> for Draft {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum ReplacementStyle {
+    Preserve,
+    #[cfg(test)]
+    FromValue,
+}
+
 impl Draft {
     pub(super) fn root(&self) -> NodeId {
         self.root
@@ -186,7 +193,7 @@ impl Draft {
         &mut self,
         value: SerializedValue<'_>,
         parent: Option<NodeId>,
-        replacement: Option<(NodeId, bool)>,
+        replacement: Option<(NodeId, ReplacementStyle)>,
     ) -> NodeId {
         let SerializedValue {
             root: value_root,
@@ -202,10 +209,10 @@ impl Draft {
             None
         });
         remap(&mut node, map);
-        if let Some((id, preserve)) = replacement {
+        if let Some((id, style)) = replacement {
             let old = self.node(id);
             node.anchor.clone_from(&old.anchor);
-            if preserve {
+            if style == ReplacementStyle::Preserve {
                 preserve_style(old, &mut node);
             }
             node.comments = retained_comments(old, &node.kind);
@@ -245,14 +252,19 @@ impl Draft {
         }
     }
 
-    pub(super) fn replace(&mut self, id: NodeId, yaml: &str, preserve: bool) -> Result<(), Error> {
+    pub(super) fn replace(
+        &mut self,
+        id: NodeId,
+        yaml: &str,
+        style: ReplacementStyle,
+    ) -> Result<(), Error> {
         let parent = self.parent(id);
         let document = self.parse_value(yaml, parent, self.available() + 1)?;
         let removed = self.removal([id])?;
         // Retired slots keep their syntax. Attaching reuses the root's ID and
         // restores its membership, but leaves its former descendants retired.
         self.retire(removed);
-        self.attach(document, parent, Some((id, preserve)));
+        self.attach(document, parent, Some((id, style)));
         Ok(())
     }
 

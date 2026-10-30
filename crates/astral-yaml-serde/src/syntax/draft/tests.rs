@@ -1,4 +1,4 @@
-use super::Draft;
+use super::{Draft, ReplacementStyle};
 use crate::syntax::{CommentPosition, DocumentSyntax, NodeKind};
 use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle};
 use astral_yaml_dev::indoc;
@@ -76,12 +76,18 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
     assert_ownership(&draft);
 
     draft
-        .replace(selected, "{first: [value], second: other}", true)
+        .replace(
+            selected,
+            "{first: [value], second: other}",
+            ReplacementStyle::Preserve,
+        )
         .unwrap();
     assert_ownership(&draft);
     let first = field(&mut draft, selected, "first");
     let leaf = draft.sequence_items_mut(first).unwrap()[0];
-    draft.replace(leaf, "{nested: value}", true).unwrap();
+    draft
+        .replace(leaf, "{nested: value}", ReplacementStyle::Preserve)
+        .unwrap();
     assert_ownership(&draft);
     let alias = field(&mut draft, root, "copy");
     assert!(matches!(draft.node(alias).kind, NodeKind::Alias { target } if target == selected));
@@ -112,7 +118,9 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
             .all(|id| !draft.contains(id))
     );
     assert_eq!(draft.clone().freeze().unwrap().requested_styles, [tail]);
-    draft.replace(selected, "done", true).unwrap();
+    draft
+        .replace(selected, "done", ReplacementStyle::Preserve)
+        .unwrap();
     assert_ownership(&draft);
     assert!(!draft.contains(tail));
     assert_eq!(draft.freeze().unwrap().requested_styles, []);
@@ -127,7 +135,7 @@ fn failed_mutations_leave_the_tree_and_membership_unchanged() {
         }),
         ("replacement removal budget", "[a, b]", |draft| {
             draft.work.set(2);
-            draft.replace(draft.root(), "new", false)
+            draft.replace(draft.root(), "new", ReplacementStyle::FromValue)
         }),
         ("sequence removal budget", "[[a, b]]", |draft| {
             draft.work.set(1);

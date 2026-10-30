@@ -4,7 +4,7 @@ use crate::syntax::draft::{Candidate, same_style};
 use crate::syntax::framing::RootLayout;
 use crate::syntax::plan::{Changes, Plan};
 use crate::syntax::source::Source;
-use crate::syntax::splice;
+use crate::syntax::splice::{self, OuterComments};
 use crate::syntax::view::Syntax;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle};
@@ -326,7 +326,7 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             .collect::<Vec<_>>(),
         [(
             document.source.root,
-            splice::region(&document, document.source.root, true)
+            splice::region(&document, document.source.root, OuterComments::Include)
         )]
     );
 }
@@ -414,7 +414,7 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
             .collect::<Vec<_>>(),
         [(
             document.source.root,
-            splice::region(&document, document.source.root, true)
+            splice::region(&document, document.source.root, OuterComments::Include)
         )]
     );
     editor.finish().unwrap();

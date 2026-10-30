@@ -48,6 +48,12 @@ struct Serializer {
     keys: keys::Keys,
 }
 
+#[derive(Clone, Copy)]
+enum CollectionKind {
+    Sequence,
+    Mapping,
+}
+
 impl Serializer {
     fn enter(&mut self) -> Result<()> {
         if self.depth >= MAX_DEPTH {
@@ -63,50 +69,50 @@ impl Serializer {
     }
 
     #[inline]
-    fn compound(&mut self, mapping: bool) -> Result<Compound<'_>> {
+    fn compound(&mut self, kind: CollectionKind) -> Result<Compound<'_>> {
         // Nested collections without a core tag only need a depth increment.
         let tag = self.take_core_tag();
         if self.depth == 0 || self.depth >= MAX_DEPTH || tag.is_some() {
-            self.enter_compound(mapping, tag)?;
+            self.enter_compound(kind, tag)?;
         } else {
             self.depth += 1;
         }
 
-        self.output.push(if mapping { '{' } else { '[' });
+        let (opening, state) = match kind {
+            CollectionKind::Sequence => ('[', CompoundState::Sequence),
+            CollectionKind::Mapping => ('{', CompoundState::MapKey),
+        };
+        self.output.push(opening);
         let key_scope = self.keys.scope();
         Ok(Compound {
             serializer: self,
             first: true,
             key_scope,
-            state: if mapping {
-                CompoundState::MapKey
-            } else {
-                CompoundState::Sequence
-            },
+            state,
             variant: false,
         })
     }
 
     #[cold]
-    fn enter_compound(&mut self, mapping: bool, tag: Option<YamlType>) -> Result<()> {
-        Self::check_collection_tag(tag, mapping)?;
+    fn enter_compound(&mut self, kind: CollectionKind, tag: Option<YamlType>) -> Result<()> {
+        Self::check_collection_tag(tag, kind)?;
         self.enter()
     }
 
-    fn variant(&mut self, name: &str, mapping: bool) -> Result<Compound<'_>> {
+    fn variant(&mut self, name: &str, kind: CollectionKind) -> Result<Compound<'_>> {
         if std::mem::take(&mut self.yaml_tag) {
             self.enum_tag(name)?;
             self.output.push(' ');
-            return self.compound(mapping);
+            return self.compound(kind);
         }
 
         self.enter()?;
-        Self::check_collection_tag(self.take_core_tag(), true)?;
+        Self::check_collection_tag(self.take_core_tag(), CollectionKind::Mapping)?;
         self.output.push('{');
         write_quoted(&mut self.output, name);
         self.output.push_str(": ");
 
-        let mut compound = self.compound(mapping)?;
+        let mut compound = self.compound(kind)?;
         compound.variant = true;
         Ok(compound)
     }
@@ -154,12 +160,11 @@ impl Serializer {
         Ok(())
     }
 
-    fn check_collection_tag(tag: Option<YamlType>, mapping: bool) -> Result<()> {
+    fn check_collection_tag(tag: Option<YamlType>, kind: CollectionKind) -> Result<()> {
         if let Some(tag) = tag {
-            let actual = if mapping {
-                YamlType::Mapping
-            } else {
-                YamlType::Sequence
+            let actual = match kind {
+                CollectionKind::Sequence => YamlType::Sequence,
+                CollectionKind::Mapping => YamlType::Mapping,
             };
             if tag != actual {
                 return Err(Error::new("serialized value does not match its YAML tag"));
@@ -278,7 +283,7 @@ impl<'ser> ser::Serializer for &'ser mut Serializer {
     }
 
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
-        let mut seq = self.compound(false)?;
+        let mut seq = self.compound(CollectionKind::Sequence)?;
 
         for byte in value {
             seq.separator();
@@ -350,17 +355,17 @@ impl<'ser> ser::Serializer for &'ser mut Serializer {
             return self.serialize_some(value);
         }
 
-        let mut map = self.compound(true)?;
+        let mut map = self.compound(CollectionKind::Mapping)?;
         map.serialize_entry(variant, value)?;
         SerializeMap::end(map)
     }
 
     fn serialize_seq(self, _: Option<usize>) -> Result<Compound<'ser>> {
-        self.compound(false)
+        self.compound(CollectionKind::Sequence)
     }
 
     fn serialize_tuple(self, _: usize) -> Result<Compound<'ser>> {
-        self.compound(false)
+        self.compound(CollectionKind::Sequence)
     }
 
     fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Compound<'ser>> {
@@ -382,7 +387,7 @@ impl<'ser> ser::Serializer for &'ser mut Serializer {
             });
         }
 
-        self.compound(false)
+        self.compound(CollectionKind::Sequence)
     }
 
     fn serialize_tuple_variant(
@@ -392,15 +397,15 @@ impl<'ser> ser::Serializer for &'ser mut Serializer {
         variant: &'static str,
         _: usize,
     ) -> Result<Compound<'ser>> {
-        self.variant(variant, false)
+        self.variant(variant, CollectionKind::Sequence)
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Compound<'ser>> {
-        self.compound(true)
+        self.compound(CollectionKind::Mapping)
     }
 
     fn serialize_struct(self, _: &'static str, _: usize) -> Result<Compound<'ser>> {
-        self.compound(true)
+        self.compound(CollectionKind::Mapping)
     }
 
     fn serialize_struct_variant(
@@ -410,7 +415,7 @@ impl<'ser> ser::Serializer for &'ser mut Serializer {
         variant: &'static str,
         _: usize,
     ) -> Result<Compound<'ser>> {
-        self.variant(variant, true)
+        self.variant(variant, CollectionKind::Mapping)
     }
 }
 

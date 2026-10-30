@@ -5,8 +5,9 @@
 use super::layout::Layout;
 use super::lines::Line;
 use super::source::{Frame, Prepared, Source};
+use super::splice::{self, OuterComments};
 use super::view::Syntax;
-use super::{Comment, CommentPosition, emit, splice};
+use super::{Comment, CommentPosition, emit};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{Error, Span};
 use std::collections::{HashMap, HashSet};
@@ -92,7 +93,7 @@ pub(super) fn prepare(
     // A descendant's prefix may begin before the root token (for example a
     // leading comment on the first item of a flow collection). Keep generated
     // framing outside the complete subtree rewrite, not just the root token.
-    let root_start = splice::region(original, original.root, false).start();
+    let root_start = splice::region(original, original.root, OuterComments::Exclude).start();
     let root_line = (layout.inline.start.is_some()
         || syntax.separate_root()
         || (original.nodes[original.root.index()].span.is_empty() && !insertions.is_empty()))
@@ -714,7 +715,7 @@ impl RootLayout {
         // Descendant suffix comments can extend past the root's token span.
         // Keep a generated boundary outside the entire subtree rewrite so
         // removing those comments cannot erase the marker with them.
-        let end = splice::region(original, original.root, false).end();
+        let end = splice::region(original, original.root, OuterComments::Exclude).end();
         let boundary = original.end_marker.map_or(original.text.len(), Span::start);
         let retained: HashSet<_> = root
             .comments
@@ -1041,7 +1042,11 @@ mod tests {
         let before = RootComments::plan(
             &original,
             candidate,
-            Some(splice::region(&original, original.root, true)),
+            Some(splice::region(
+                &original,
+                original.root,
+                OuterComments::Include,
+            )),
             &RootLayout::new(&original, candidate, &Layout::new(candidate)),
         )
         .unwrap();
@@ -1074,7 +1079,7 @@ mod tests {
         let after = RootComments::plan(
             framed,
             prepared.syntax(),
-            Some(splice::region(framed, framed.root, true)),
+            Some(splice::region(framed, framed.root, OuterComments::Include)),
             &RootLayout::new(framed, prepared.syntax(), &syntax),
         )
         .unwrap();

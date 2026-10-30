@@ -1,8 +1,8 @@
 use test_case::test_case;
 
 use super::{DocumentSyntax, NodeKind, correspondence};
-use crate::syntax::draft::Draft;
-use crate::syntax::splice;
+use crate::syntax::draft::{Draft, ReplacementStyle};
+use crate::syntax::splice::{self, OuterComments};
 use astral_yaml::ScalarStyle;
 use astral_yaml_dev::indoc;
 
@@ -11,8 +11,8 @@ fn render_draft(original: &DocumentSyntax, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
     let source = &original.source;
-    let region = splice::region(original, source.root, false);
-    let rendered = splice::render(source.emission(syntax), source.root, region, false).unwrap();
+    let region = splice::region(original, source.root, OuterComments::Exclude);
+    let rendered = splice::render(source.emission(syntax), source.root, region).unwrap();
     let output = format!(
         "{}{}{}",
         &source.text[..rendered.span.start()],
@@ -58,7 +58,6 @@ fn emission_accepts_syntax_without_source_locations() {
         original.source.emission(syntax),
         syntax.root,
         original.source.nodes[original.source.root.index()].span,
-        false,
     )
     .unwrap();
     let output = format!(
@@ -349,11 +348,11 @@ fn rendering_obeys_work_and_output_budgets(
     document.source.options.max_input_bytes = bytes;
     let source = &document.source;
     let draft = Draft::from(&document).freeze().unwrap();
-    let region = splice::region(&document, source.root, false);
+    let region = splice::region(&document, source.root, OuterComments::Exclude);
     // Both committed syntax and drafts obey the same rendering limits.
     for result in [
-        splice::render(&document, source.root, region, false),
-        splice::render(source.emission((&draft).into()), source.root, region, false),
+        splice::render(&document, source.root, region),
+        splice::render(source.emission((&draft).into()), source.root, region),
     ] {
         assert_eq!(result.unwrap_err().message, expected);
     }
@@ -887,8 +886,8 @@ fn detached_prefixes_are_emitted_before_content() {
         let document = DocumentSyntax::parse(source).unwrap();
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
-        let span = splice::region(&document, document.source.root, true);
-        let rendered = splice::render(&document, document.source.root, span, false).unwrap();
+        let span = splice::region(&document, document.source.root, OuterComments::Include);
+        let rendered = splice::render(&document, document.source.root, span).unwrap();
         let parsed = DocumentSyntax::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
         assert!(super::comments_preserved(
@@ -1099,8 +1098,8 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
             value: "old".to_owned(),
             style: astral_yaml::ScalarStyle::Literal,
         };
-        let region = splice::region(&candidate, candidate.source.root, true);
-        let rendered = splice::render(&candidate, candidate.source.root, region, false).unwrap();
+        let region = splice::region(&candidate, candidate.source.root, OuterComments::Include);
+        let rendered = splice::render(&candidate, candidate.source.root, region).unwrap();
         let output = format!(
             "{}{}{}",
             &source[..rendered.span.start()],
@@ -1128,7 +1127,9 @@ fn omitted_roots_own_their_line_when_comments_are_emitted() {
     for source in ["---\nold\n...\n", "--- old\n...\n"] {
         let original = DocumentSyntax::parse(source).unwrap();
         let mut candidate = Draft::from(&original);
-        candidate.replace(candidate.root(), "---", false).unwrap();
+        candidate
+            .replace(candidate.root(), "---", ReplacementStyle::FromValue)
+            .unwrap();
         candidate
             .insert_comment(
                 candidate.root(),
