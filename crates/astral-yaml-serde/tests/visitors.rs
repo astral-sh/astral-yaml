@@ -4,12 +4,11 @@ mod support;
 
 use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Error, Tagged, from_str, to_string};
-use serde::{
-    Deserialize, Serialize,
-    de::{self, MapAccess, SeqAccess, Visitor},
-    ser::{self, SerializeMap},
-};
-use std::{collections::BTreeMap, fmt};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::ser::{self, SerializeMap};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
 use support::YamlTag;
 
 #[test]

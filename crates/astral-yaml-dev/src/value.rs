@@ -1,10 +1,8 @@
 use std::fmt;
 
-use serde::{
-    Deserialize, Deserializer, Serialize, Serializer,
-    de::{MapAccess, SeqAccess, Visitor},
-    ser::SerializeMap,
-};
+use serde::de::{MapAccess, SeqAccess, Visitor};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A common deserialization target for tests, fuzzing, and benchmarks.
 ///

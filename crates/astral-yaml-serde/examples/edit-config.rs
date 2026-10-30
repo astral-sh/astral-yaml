@@ -1,8 +1,6 @@
 //! Run with `cargo run -p astral-yaml-serde --features editable --example edit-config`.
-use astral_yaml_serde::{
-    Editable,
-    edit::{CollectionStyle, CommentPlacement},
-};
+use astral_yaml_serde::Editable;
+use astral_yaml_serde::edit::{CollectionStyle, CommentPlacement};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

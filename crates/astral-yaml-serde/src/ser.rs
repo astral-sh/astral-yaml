@@ -4,11 +4,11 @@ mod tag;
 
 pub(crate) use quoted::write_quoted;
 
-use crate::{Error, schema::YamlType, tagged, with::yaml_tag};
-use serde::{
-    Serialize,
-    ser::{self, SerializeMap, SerializeSeq},
-};
+use crate::schema::YamlType;
+use crate::with::yaml_tag;
+use crate::{Error, tagged};
+use serde::Serialize;
+use serde::ser::{self, SerializeMap, SerializeSeq};
 use std::fmt::Write;
 
 type Result<T> = std::result::Result<T, Error>;

@@ -2,7 +2,8 @@
 mod cov;
 mod fuzz;
 
-use std::{ffi::OsString, process::ExitCode};
+use std::ffi::OsString;
+use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 

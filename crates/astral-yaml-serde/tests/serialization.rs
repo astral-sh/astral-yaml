@@ -1,9 +1,11 @@
 use test_case::test_case;
 
-use std::{collections::BTreeMap, fmt::Debug};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use astral_yaml_serde::{from_str, to_string};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 fn roundtrip<T>(value: &T)
 where

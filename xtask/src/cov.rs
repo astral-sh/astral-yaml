@@ -1,12 +1,9 @@
-use std::{
-    collections::BTreeSet,
-    env,
-    error::Error,
-    ffi::OsString,
-    fs,
-    path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
-};
+use std::collections::BTreeSet;
+use std::error::Error;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::{env, fs};
 
 use serde::Deserialize;
 

@@ -2,7 +2,8 @@ use test_case::test_case;
 
 use super::support::{edit, edited, edits};
 use crate::syntax::DocumentSyntax;
-use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 
 #[test_case(false)]

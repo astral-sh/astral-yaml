@@ -1,4 +1,5 @@
-use astral_yaml_serde::{Editable, Error, edit::Cursor};
+use astral_yaml_serde::edit::Cursor;
+use astral_yaml_serde::{Editable, Error};
 use serde::de::DeserializeOwned;
 
 pub(super) fn edit<T: DeserializeOwned>(

@@ -1,13 +1,12 @@
 //! Mutable syntax for an edit transaction.
 //! [`Draft::freeze`] ends mutation and produces the syntax used to check the output.
 
-use super::{
-    Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit, single_document, view::Syntax,
-};
-use astral_yaml::{
-    CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span, comments::CommentPlacement,
-};
-use std::{cell::Cell, collections::HashMap};
+use super::view::Syntax;
+use super::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
+use std::cell::Cell;
+use std::collections::HashMap;
 
 #[cfg(test)]
 mod tests;
@@ -163,7 +162,7 @@ impl Draft {
         options.max_depth -= depth;
         let stream = astral_yaml::parse_with_options(yaml, options)?;
         self.charge(stream.nodes().len())?;
-        let root = single_document(&stream)?.root;
+        let root = super::single_document(&stream)?.root;
         Ok(SerializedValue {
             root,
             nodes: stream.into_nodes(),

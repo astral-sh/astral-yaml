@@ -37,8 +37,10 @@
 //!
 //! YAML tag handling requires this crate's serializer and deserializer.
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
-use std::{fmt, marker::PhantomData};
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::marker::PhantomData;
 
 pub(crate) const NAME: &str = "$astral_yaml::with::yaml_tag";
 

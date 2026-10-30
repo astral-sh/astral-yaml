@@ -1,4 +1,4 @@
-use crate::{Error, ParseOptions, Span, Stream, parse};
+use crate::{Error, ParseOptions, Span, Stream};
 use std::borrow::Cow;
 
 /// An encoding recognized by YAML 1.2's byte-pattern detection rules.
@@ -160,7 +160,7 @@ impl<'a> Source<'a> {
     /// # Errors
     /// Returns an error if the YAML is invalid or a parser resource limit is exceeded.
     pub fn parse(&self) -> Result<Stream<'_>, Error> {
-        parse(&self.text)
+        crate::parse(&self.text)
     }
 
     /// Map a span in the decoded text to the original encoded bytes.

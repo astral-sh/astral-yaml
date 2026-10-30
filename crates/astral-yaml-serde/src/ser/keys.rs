@@ -1,4 +1,5 @@
-use std::{num::NonZeroUsize, ops::Range};
+use std::num::NonZeroUsize;
+use std::ops::Range;
 
 use crate::{Error, de};
 

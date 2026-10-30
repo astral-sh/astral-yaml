@@ -1,7 +1,6 @@
 use super::support::{edited, normalize};
 use astral_yaml::CollectionStyle;
-use astral_yaml_dev::edit_diff;
-use astral_yaml_dev::indoc;
+use astral_yaml_dev::{edit_diff, indoc};
 
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]

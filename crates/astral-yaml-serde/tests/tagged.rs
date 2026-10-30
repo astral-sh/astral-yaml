@@ -2,8 +2,11 @@ use test_case::test_case;
 
 use astral_yaml_dev::{Value, diagnostic_snapshot, span_snapshot};
 use astral_yaml_serde::{Commented, Spanned, Tagged, from_str, to_string};
-use serde::{Deserialize, Serialize, de::DeserializeOwned, ser::SerializeTupleStruct};
-use std::{collections::BTreeMap, fmt::Debug};
+use serde::de::DeserializeOwned;
+use serde::ser::SerializeTupleStruct;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 fn roundtrip<T>(value: &Tagged<T>)
 where

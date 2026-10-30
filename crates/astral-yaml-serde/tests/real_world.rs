@@ -1,4 +1,5 @@
-use astral_yaml_dev::{Value, fixtures::manifest};
+use astral_yaml_dev::Value;
+use astral_yaml_dev::fixtures::manifest;
 
 #[test]
 fn real_world_values_comments_and_serialization() {

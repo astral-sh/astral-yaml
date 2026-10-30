@@ -7,7 +7,8 @@ use astral_yaml_dev::{edit_diff, formatdoc, indoc};
 use std::fmt::Write;
 
 use crate::syntax::{DocumentSyntax, Editor, NodeKind};
-use astral_yaml::{NodeId, ScalarStyle, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{NodeId, ScalarStyle};
 
 fn first_leaf(editor: &Editor<'_>) -> NodeId {
     let mut id = editor.root();

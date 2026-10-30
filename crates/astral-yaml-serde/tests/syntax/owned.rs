@@ -1,9 +1,7 @@
 //! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
 use crate::syntax::{DocumentSyntax, NodeKind};
-use astral_yaml::{
-    ParseOptions,
-    comments::{CommentIndex, CommentPlacement},
-};
+use astral_yaml::ParseOptions;
+use astral_yaml::comments::{CommentIndex, CommentPlacement};
 use astral_yaml_dev::{indoc, span_snapshot};
 
 #[test]

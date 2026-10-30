@@ -1,7 +1,9 @@
 //! Comment attachment to syntax nodes.
 
 use crate::{CollectionStyle, Comment, Error, NodeId, NodeKind, Span, Stream};
-use std::{cell::Cell, collections::HashMap, ops::Range};
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::ops::Range;
 
 /// A comment's placement relative to the node that owns it.
 /// Collecting the comment through an ancestor does not change its placement.

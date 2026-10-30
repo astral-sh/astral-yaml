@@ -1,7 +1,5 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use astral_yaml_dev::{events, validate_spans};
 

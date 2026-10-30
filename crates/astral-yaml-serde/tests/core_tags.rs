@@ -4,8 +4,10 @@ mod support;
 
 use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Spanned, Tagged, from_str};
-use serde::{Deserialize, de::IgnoredAny};
-use std::{collections::BTreeMap, fmt::Write};
+use serde::Deserialize;
+use serde::de::IgnoredAny;
+use std::collections::BTreeMap;
+use std::fmt::Write;
 use support::from_tag;
 
 #[derive(Deserialize)]

@@ -1,4 +1,5 @@
-use astral_yaml_serde::{Commented, Editable, Spanned, Tagged, edit::CommentPlacement, from_str};
+use astral_yaml_serde::edit::CommentPlacement;
+use astral_yaml_serde::{Commented, Editable, Spanned, Tagged, from_str};
 use serde_json::Value;
 
 #[test]

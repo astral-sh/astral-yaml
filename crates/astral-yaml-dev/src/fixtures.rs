@@ -1,6 +1,7 @@
 //! Pinned real-world inputs shared by parser and construction tests.
 
-use std::{fs, path::PathBuf};
+use std::fs;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 

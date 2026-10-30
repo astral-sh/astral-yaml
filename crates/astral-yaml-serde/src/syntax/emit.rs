@@ -1,8 +1,8 @@
-use super::{Comment, CommentPosition, DocumentSyntax, NodeKind, layout::Layout, view::Syntax};
-use astral_yaml::{
-    CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span, comments::CommentPlacement,
-};
-use std::fmt::Write;
+use super::layout::Layout;
+use super::view::Syntax;
+use super::{Comment, CommentPosition, DocumentSyntax, NodeKind};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 
 #[cfg(test)]
 mod tests;
@@ -958,6 +958,8 @@ fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
 }
 
 pub(super) fn quoted(value: &str) -> String {
+    use std::fmt::Write;
+
     let mut result = String::from("\"");
     for character in value.chars() {
         match character {
@@ -1281,7 +1283,7 @@ pub(super) fn same_scalar_type(
     after: ScalarStyle,
 ) -> bool {
     use ScalarStyle::Plain;
-    use astral_yaml::schema::{ScalarType, classify};
+    use astral_yaml::schema::{self, ScalarType};
     if before == after || (before != Plain && after != Plain) {
         return true;
     }
@@ -1294,5 +1296,5 @@ pub(super) fn same_scalar_type(
                 | "tag:yaml.org,2002:int"
                 | "tag:yaml.org,2002:float"
         )
-    ) || classify(value) == ScalarType::String
+    ) || schema::classify(value) == ScalarType::String
 }

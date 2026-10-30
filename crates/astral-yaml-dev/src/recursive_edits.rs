@@ -2,13 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, comments::CommentPlacement};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{CollectionStyle, NodeId, ScalarStyle};
 
 use crate::Value;
-use astral_yaml_serde::{
-    Editable,
-    edit::{Cursor, Node, NodeKind},
-};
+use astral_yaml_serde::Editable;
+use astral_yaml_serde::edit::{Cursor, Node, NodeKind};
 
 /// Some source graphs contain cycles. This projection leaves them available
 /// for syntax inspection without expanding aliases during deserialization.

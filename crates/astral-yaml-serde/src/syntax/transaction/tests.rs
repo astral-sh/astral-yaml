@@ -1,13 +1,11 @@
 use test_case::test_case;
 
-use crate::syntax::{
-    draft::{Candidate, same_style},
-    framing::RootLayout,
-    plan::{Changes, Plan},
-    source::Source,
-    splice,
-    view::Syntax,
-};
+use crate::syntax::draft::{Candidate, same_style};
+use crate::syntax::framing::RootLayout;
+use crate::syntax::plan::{Changes, Plan};
+use crate::syntax::source::Source;
+use crate::syntax::splice;
+use crate::syntax::view::Syntax;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc};

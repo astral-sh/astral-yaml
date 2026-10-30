@@ -4,7 +4,8 @@ use test_case::test_case;
 
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
-use astral_yaml_serde::{Editable, edit::CollectionStyle};
+use astral_yaml_serde::Editable;
+use astral_yaml_serde::edit::CollectionStyle;
 use serde_json::json;
 
 #[test_case(

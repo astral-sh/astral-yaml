@@ -7,11 +7,10 @@ use astral_yaml_dev::span_snapshot;
 use astral_yaml_serde::{
     AttachedComment, CommentPlacement, Commented, from_document, from_str, to_string,
 };
-use serde::{Deserialize, de::DeserializeOwned};
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Write,
-};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 
 use CommentPlacement::{Detached, Inline, Leading, Trailing};
 

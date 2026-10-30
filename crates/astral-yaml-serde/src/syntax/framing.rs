@@ -2,15 +2,13 @@
 //! Plan markers separately so removing a comment cannot remove a marker needed
 //! by another comment.
 
-use super::{
-    Comment, CommentPosition, emit,
-    layout::Layout,
-    lines::Line,
-    source::{Frame, Prepared, Source},
-    splice,
-    view::Syntax,
-};
-use astral_yaml::{Error, Span, comments::CommentPlacement};
+use super::layout::Layout;
+use super::lines::Line;
+use super::source::{Frame, Prepared, Source};
+use super::view::Syntax;
+use super::{Comment, CommentPosition, emit, splice};
+use astral_yaml::comments::CommentPlacement;
+use astral_yaml::{Error, Span};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]

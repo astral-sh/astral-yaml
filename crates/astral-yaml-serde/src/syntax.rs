@@ -20,10 +20,8 @@ pub(crate) use transaction::{Editor, ValueRef};
 use std::borrow::Cow;
 use std::cell::Cell;
 
-use astral_yaml::{
-    CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span,
-    comments::{CommentIndex, CommentPlacement},
-};
+use astral_yaml::comments::{CommentIndex, CommentPlacement};
+use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 
 /// The state of a selected collection.
 #[derive(Debug)]

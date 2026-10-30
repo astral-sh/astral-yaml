@@ -2,10 +2,8 @@ use test_case::{test_case, test_matrix};
 
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
-use astral_yaml_serde::{
-    Editable, Tagged,
-    edit::{CollectionStyle, CommentPlacement, ScalarStyle},
-};
+use astral_yaml_serde::edit::{CollectionStyle, CommentPlacement, ScalarStyle};
+use astral_yaml_serde::{Editable, Tagged};
 use serde::Deserialize;
 
 #[test]

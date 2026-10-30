@@ -5,11 +5,11 @@ use test_case::test_case;
 mod support;
 
 use astral_yaml_serde::{from_str, from_stream, to_string};
-use serde::{
-    Deserialize, Serialize,
-    de::{self, MapAccess, SeqAccess, Visitor},
-};
-use std::{collections::BTreeMap, fmt, fmt::Write};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::fmt::Write;
 use support::from_tag;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

@@ -3,11 +3,10 @@
 
 use astral_yaml_serde::{Commented, Spanned, from_str, from_stream, to_string};
 use libfuzzer_sys::fuzz_target;
-use serde::{
-    Deserialize, Serialize,
-    de::{self, SeqAccess, Visitor},
-};
-use std::{collections::BTreeMap, fmt};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
 
 #[derive(Deserialize, Serialize)]
 struct Newtype(u64);
