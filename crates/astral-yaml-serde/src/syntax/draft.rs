@@ -395,10 +395,14 @@ impl Draft {
         if index > comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
-        let position = if placement == CommentPlacement::Leading {
-            CommentPosition::Before
-        } else {
-            CommentPosition::After
+        let position = match placement {
+            CommentPlacement::Leading => CommentPosition::Before,
+            CommentPlacement::Detached => comments[index..]
+                .iter()
+                .map(|comment| comment.position)
+                .find(|position| matches!(position, CommentPosition::BeforeChild(_)))
+                .unwrap_or(CommentPosition::After),
+            CommentPlacement::Inline | CommentPlacement::Trailing => CommentPosition::After,
         };
         comments.insert(
             index,

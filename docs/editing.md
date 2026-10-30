@@ -142,6 +142,10 @@ Parsing converts CR and CRLF line endings to LF. Edits preserve text outside
 the regions they rewrite. Within those regions, spacing and scalar spelling
 can change.
 
+To add a leading comment to a node that already has an inline comment, use
+`node.insert_comment(0, " explanation", CommentPlacement::Leading)?`. The
+existing inline comment stays on its line.
+
 The configuration example uses `update()` to increment a timeout, adds a
 comment, and switches a sequence to block style. Run it from the repository
 root. [Example source](../crates/astral-yaml-serde/examples/edit-config.rs)
@@ -160,7 +164,8 @@ fails at an alias, the error path identifies its use in the proposed document
 and the byte span can point to its target.
 
 If a mapping has non-string keys, use `key_at()` and `value_at()` to select
-an existing entry by index.
+its keys and values by index. Use `remove_at(index)` to delete the entry.
+Indices follow the current entry order, including earlier edits in the callback.
 
 Both Serde editors check for duplicate keys and limit alias expansion.
 `parse_with_options()` configures the separate parser limits for loading and

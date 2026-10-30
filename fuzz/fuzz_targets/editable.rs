@@ -37,7 +37,7 @@ fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(
         1 => node.into_sequence()?.insert(0, (1, "two")).map(|_| ()),
         2 => node.into_sequence()?.remove(0),
         3 => node.into_mapping()?.set("added", true).map(|_| ()),
-        4 => node.into_mapping()?.remove("added").map(|_| ()),
+        4 => node.into_mapping()?.remove_at(0),
         5 => node.set_scalar_style(ScalarStyle::SingleQuoted),
         6 => node.set_collection_style(CollectionStyle::Block),
         _ => {
@@ -47,7 +47,11 @@ fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(
                 2 => CommentPlacement::Trailing,
                 _ => CommentPlacement::Detached,
             };
-            node.append_comment(" fuzz", placement)
+            if placement == CommentPlacement::Leading {
+                node.insert_comment(0, " fuzz", placement)
+            } else {
+                node.append_comment(" fuzz", placement)
+            }
         }
     }
 }

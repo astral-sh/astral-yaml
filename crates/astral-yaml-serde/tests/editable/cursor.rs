@@ -326,8 +326,12 @@ const MISSING: &str = r#"$["missing"]"#;
     ITEMS, "item index out of bounds"; "insert out of bounds")]
 #[test_case(|root| items(root)?.remove(4),
     ITEMS, "item index out of bounds"; "remove out of bounds")]
+#[test_case(|root| root.into_mapping()?.remove_at(2),
+    "$", "entry index out of bounds"; "remove entry out of bounds")]
 #[test_case(|root| items(root)?.append_comment("bad\ncomment", CommentPlacement::Inline),
     ITEMS, "comment text contains a line break"; "append comment")]
+#[test_case(|root| items(root)?.insert_comment(1, " new", CommentPlacement::Leading),
+    ITEMS, "comment index out of bounds"; "insert comment out of bounds")]
 #[test_case(|root| {
     let mut sequence = items(root)?;
     let mut item = sequence.item(0)?;
@@ -454,6 +458,19 @@ fn indexed_mapping_selection_supports_arbitrary_keys() {
 }
 
 #[test]
+fn removing_non_string_keys_by_index_preserves_other_entries() {
+    let source = "1: old\n? [a, b]\n: complex\n'1': keep # existing\n";
+    let document = edit::<IgnoredAny>(source, |root| {
+        let mut mapping = root.into_mapping()?;
+        mapping.remove_at(0)?;
+        mapping.remove_at(0)?;
+        assert_eq!(mapping.len(), 1);
+        Ok(())
+    });
+    insta::assert_snapshot!(document.source(), @"'1': keep # existing");
+}
+
+#[test]
 fn setting_a_value_preserves_its_anchor_style_and_comments() {
     let source = "value: &old 'old' # keep\ncopy: *old\n";
     let document = edit::<Value>(source, |root| root.field("value")?.set("new"));
@@ -490,6 +507,36 @@ fn replacing_a_collection_with_a_scalar_keeps_its_detached_comment(source: &str)
         Ok(())
     });
     assert_eq!(document.source(), "false\n\n# gap\n");
+}
+
+#[test]
+fn inserting_a_leading_comment_preserves_the_inline_comment() {
+    let document = edit::<String>("old # existing\n", |mut root| {
+        root.insert_comment(0, " explanation", CommentPlacement::Leading)
+    });
+    insta::assert_snapshot!(document.source(), @"
+    # explanation
+    old # existing
+    ");
+}
+
+#[test]
+fn inserting_a_detached_comment_reuses_the_following_child_boundary() {
+    let source = "a: first\n\n# gap\n\nb: last\n";
+    let document = edit::<Value>(source, |root| {
+        root.into_mapping()?
+            .insert_comment(0, " added", CommentPlacement::Detached)
+    });
+    insta::assert_snapshot!(document.source(), @"
+    a: first
+
+    # added
+
+
+    # gap
+
+    b: last
+    ");
 }
 
 #[test]

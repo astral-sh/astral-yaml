@@ -137,10 +137,15 @@ fn apply(
             if placement == CommentPlacement::Trailing && !comments.nested.is_empty() {
                 set_nested_style(root.reborrow(), CollectionStyle::Flow)?;
             }
-            if placement != CommentPlacement::Leading || comments.root.is_empty() {
-                root.append_comment(" model", placement)?;
-                comments.root.push((" model".to_owned(), placement));
-            }
+            let index = if placement == CommentPlacement::Leading {
+                0
+            } else {
+                comments.root.len()
+            };
+            root.insert_comment(index, " model", placement)?;
+            comments
+                .root
+                .insert(index, (" model".to_owned(), placement));
         }
         9 => {
             root.field("items")?.set([text])?;

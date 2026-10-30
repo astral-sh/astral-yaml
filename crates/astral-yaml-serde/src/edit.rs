@@ -348,6 +348,18 @@ impl<'doc> MappingMut<'_, 'doc> {
         })
     }
 
+    /// Remove the entry at `index`, including its key, value, and their comments.
+    /// Later indices shift down. The key can be any YAML value.
+    ///
+    /// # Errors
+    /// Returns an error if `index` is out of bounds or an editing limit is exceeded.
+    pub fn remove_at(&mut self, index: usize) -> Result<(), Error> {
+        self.context
+            .mutate(|| self.editor.remove_entry(self.id, index))?;
+        self.state.len -= 1;
+        Ok(())
+    }
+
     /// Select the key at `index`, including keys that are not strings.
     ///
     /// # Errors
@@ -564,6 +576,25 @@ impl<State> Cursor<'_, '_, State> {
             let index = self.editor.node(self.id)?.comments().len();
             self.editor.insert_comment(self.id, index, text, placement)
         })
+    }
+
+    /// Insert a comment before the comment at `index`, or append it at the end of the list.
+    /// As in [`Self::append_comment`], `text` starts immediately after `#`.
+    /// A detached comment uses the next gap between children in the comment list,
+    /// or follows the node if there is no such gap.
+    /// The comment order and placement must be representable in the committed YAML.
+    ///
+    /// # Errors
+    /// Returns an error if `index` exceeds the number of comments, `text` contains a line
+    /// break, or an editing limit is exceeded.
+    pub fn insert_comment(
+        &mut self,
+        index: usize,
+        text: &str,
+        placement: CommentPlacement,
+    ) -> Result<(), Error> {
+        self.context
+            .mutate(|| self.editor.insert_comment(self.id, index, text, placement))
     }
 
     /// Replace the comment at `index`, keeping its placement.

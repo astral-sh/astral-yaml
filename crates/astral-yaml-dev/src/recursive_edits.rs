@@ -878,8 +878,7 @@ fn mapping_edit(
                     .chain(value.nodes())
                     .map(|node| node.id)
                     .collect();
-                (matches!(key.kind, Kind::Scalar(Scalar::Key(_))) && model.can_remove(&removed))
-                    .then_some(i)
+                model.can_remove(&removed).then_some(i)
             })
             .collect();
         if indices.is_empty() {
@@ -896,11 +895,8 @@ fn mapping_edit(
             return;
         }
         let index = indices[selector % indices.len()];
-        let Kind::Scalar(key) = &entries[index].0.kind else {
-            unreachable!()
-        };
         with_node(editor.reborrow(), path, |node| {
-            assert!(node.into_mapping().unwrap().remove(&key.value()).unwrap());
+            node.into_mapping().unwrap().remove_at(index).unwrap();
         });
         let Kind::Mapping(entries) = &mut model.at_mut(path).kind else {
             unreachable!()
