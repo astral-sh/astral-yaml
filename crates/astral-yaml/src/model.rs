@@ -122,7 +122,7 @@ pub struct Property<'source> {
 }
 
 /// A mapping entry. YAML keys can be collections.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Entry {
     /// The key node in the stream's arena.
     pub key: NodeId,
@@ -174,7 +174,7 @@ pub struct Node<'source> {
 }
 
 /// A comment's text and source range.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Comment<'source> {
     /// Includes `#` and excludes the line break.
     pub span: Span,
@@ -183,7 +183,7 @@ pub struct Comment<'source> {
 }
 
 /// A directive line, excluding its trailing comment and line break.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Directive<'source> {
     /// The directive's source range, starting at `%`.
     pub span: Span,
