@@ -422,6 +422,7 @@ enum CompoundState {
     Tag,
     TaggedValue,
     TaggedEnd,
+    Failed,
 }
 
 struct Compound<'ser> {
@@ -441,8 +442,17 @@ impl Compound<'_> {
         self.first = false;
     }
 
-    fn finish(self) -> Result<()> {
-        match self.state {
+    /// Leave the collection failed until the current field has been written in full.
+    fn take_state(&mut self) -> Result<CompoundState> {
+        match std::mem::replace(&mut self.state, CompoundState::Failed) {
+            CompoundState::Failed => Err(Error::new("collection serialization already failed")),
+            state => Ok(state),
+        }
+    }
+
+    fn finish(mut self) -> Result<()> {
+        let state = self.take_state()?;
+        match state {
             CompoundState::Tag | CompoundState::TaggedValue => {
                 return Err(Error::new("a tagged value requires a tag and payload"));
             }
@@ -453,11 +463,11 @@ impl Compound<'_> {
             _ => {}
         }
 
-        if self.state == CompoundState::MapValue {
+        if state == CompoundState::MapValue {
             return Err(Error::new("mapping key has no value"));
         }
 
-        if self.state == CompoundState::MapKey {
+        if state == CompoundState::MapKey {
             self.serializer
                 .keys
                 .finish(&self.serializer.output, self.key_scope)?;
@@ -465,7 +475,7 @@ impl Compound<'_> {
 
         self.serializer
             .output
-            .push(if self.state == CompoundState::Sequence {
+            .push(if state == CompoundState::Sequence {
                 ']'
             } else {
                 '}'
@@ -486,7 +496,8 @@ impl SerializeSeq for Compound<'_> {
     type Error = Error;
 
     fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
-        match self.state {
+        let state = self.take_state()?;
+        match state {
             CompoundState::Tag => {
                 let tag = value.serialize(tag::TagSerializer)?;
                 self.serializer.write_tag(tag);
@@ -506,7 +517,9 @@ impl SerializeSeq for Compound<'_> {
         }
 
         self.separator();
-        value.serialize(&mut *self.serializer)
+        value.serialize(&mut *self.serializer)?;
+        self.state = state;
+        Ok(())
     }
 
     fn end(self) -> Result<()> {
@@ -540,7 +553,7 @@ impl SerializeMap for Compound<'_> {
     type Error = Error;
 
     fn serialize_key<T: Serialize + ?Sized>(&mut self, key: &T) -> Result<()> {
-        if self.state == CompoundState::MapValue {
+        if self.take_state()? != CompoundState::MapKey {
             return Err(Error::new("mapping key has no value"));
         }
 
@@ -559,7 +572,7 @@ impl SerializeMap for Compound<'_> {
     }
 
     fn serialize_value<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
-        if self.state != CompoundState::MapValue {
+        if self.take_state()? != CompoundState::MapValue {
             return Err(Error::new("mapping value has no key"));
         }
 

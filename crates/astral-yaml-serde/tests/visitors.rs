@@ -5,7 +5,7 @@ mod support;
 use astral_yaml_dev::diagnostic_snapshot;
 use astral_yaml_serde::{Error, Tagged, from_str, to_string};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
-use serde::ser::{self, SerializeMap};
+use serde::ser::{self, SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -424,4 +424,50 @@ fn recursive_newtype_visitors_are_bounded() {
         from_str::<Recursive>("null").unwrap_err().message,
         "deserialization resource limit exceeded"
     );
+}
+
+enum FailedField {
+    Element,
+    Key,
+    Value,
+}
+
+impl Serialize for FailedField {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let invalid = [Tagged {
+            tag: "tag:yaml.org,2002:bool".into(),
+            value: 3,
+        }];
+        match self {
+            Self::Element => {
+                let mut seq = serializer.serialize_seq(None)?;
+                if seq.serialize_element(&invalid).is_err() {
+                    let _ = seq.serialize_element(&0);
+                }
+                seq.end()
+            }
+            Self::Key => {
+                let mut map = serializer.serialize_map(None)?;
+                if map.serialize_key(&invalid).is_err() {
+                    let _ = map.serialize_entry("fallback", &0);
+                }
+                map.end()
+            }
+            Self::Value => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_key("key")?;
+                if map.serialize_value(&invalid).is_err() {
+                    let _ = map.serialize_value(&0);
+                }
+                map.end()
+            }
+        }
+    }
+}
+
+#[test_case(&FailedField::Element; "sequence element")]
+#[test_case(&FailedField::Key; "mapping key")]
+#[test_case(&FailedField::Value; "mapping value")]
+fn handled_field_errors_cannot_publish_partial_yaml(field: &FailedField) {
+    assert!(to_string(field).is_err());
 }
