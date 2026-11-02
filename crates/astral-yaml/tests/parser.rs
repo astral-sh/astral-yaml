@@ -764,6 +764,19 @@ fn directive_parameters_and_comments_are_separate(
 }
 
 // https://yaml.org/spec/1.2.2/#68-directives
+#[test_case("%OLD")]
+#[test_case("%OLD\tfirst  second")]
+fn replacing_a_directive_preserves_its_comment(directive: &str) {
+    let mut source = format!("{directive} \t# keep\n--- value");
+    let stream = parse(&source).unwrap();
+    let span = stream.documents()[0].directives[0].span;
+    assert_eq!(stream.warnings().next().unwrap().span, span);
+
+    source.replace_range(span.start()..span.end(), "%NEW");
+    assert_eq!(source, "%NEW \t# keep\n--- value");
+}
+
+// https://yaml.org/spec/1.2.2/#68-directives
 #[test_case("APP", None)]
 #[test_case("YAML 1.2", Some("invalid YAML version directive"))]
 #[test_case("TAG !e! !prefix/", Some("invalid TAG directive"))]
