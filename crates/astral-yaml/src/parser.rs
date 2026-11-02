@@ -533,10 +533,8 @@ impl<'source> Parser<'source> {
                 self.pos += 1;
             }
 
-            let name = &self.source[name_start..self.pos];
-            self.spaces();
-
-            let argument_start = self.pos;
+            let name_end = self.pos;
+            let name = &self.source[name_start..name_end];
 
             while self.pos < end {
                 if self.byte() == Some(b'#')
@@ -548,10 +546,11 @@ impl<'source> Parser<'source> {
                 self.pos += self.rest().chars().next().map_or(0, char::len_utf8);
             }
 
-            let args = self.source[argument_start..self.pos].trim_end_matches([' ', '\t']);
+            let tail = self.source[name_end..self.pos].trim_end_matches([' ', '\t']);
+            let args = tail.trim_start_matches([' ', '\t']);
             let span = Span {
                 start,
-                end: argument_start + args.len(),
+                end: name_end + tail.len(),
             };
 
             match name {

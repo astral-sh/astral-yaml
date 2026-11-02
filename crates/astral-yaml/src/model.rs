@@ -199,7 +199,7 @@ pub struct Comment<'source> {
 /// A directive line, excluding its trailing comment and line break.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Directive<'source> {
-    /// The directive's source range, starting at `%`.
+    /// The source range from `%` through the name or last argument.
     pub span: Span,
     /// The directive name without its leading `%`.
     pub name: &'source str,
