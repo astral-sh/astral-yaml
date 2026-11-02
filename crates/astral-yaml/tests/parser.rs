@@ -1069,6 +1069,9 @@ fn collection_keys_allow_quotes_inside_plain_scalars() {
 #[test_case("foo:\n  a: 1\n\t b: 2\n")]
 #[test_case("foo:\n - a: 1\n  \tb: 2\n")]
 #[test_case("foo:\n  - a\n \t- b\n")]
+#[test_case(" ? key\n\t: value")]
+#[test_case("outer:\n  ? key\n \t: value")]
+#[test_case("outer:\n  ? key\n\t : value")]
 fn block_collections_reject_invalid_indentation_and_compact_values(source: &str) {
     assert!(parse(source).is_err(), "{source:?}");
 }
@@ -1078,6 +1081,7 @@ fn block_collections_reject_invalid_indentation_and_compact_values(source: &str)
 #[test_case("a: '?'")]
 #[test_case("a:\n  ?\n")]
 #[test_case("? a\n: ?\n")]
+#[test_case(" ?\tkey\n :\tvalue")]
 #[test_case("[\n\ta,\n\tb\n]")]
 #[test_case("foo:\n  a: 1\n\t\n  b: 2\n")]
 fn collection_indicators_and_blank_line_tabs_are_accepted(source: &str) {

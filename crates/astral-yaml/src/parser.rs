@@ -281,6 +281,13 @@ impl<'source> Parser<'source> {
             .count()
     }
 
+    fn check_block_indentation(&self) -> Result<()> {
+        if self.source[self.line_start..self.pos].contains('\t') {
+            return Err(self.error("tab in block indentation"));
+        }
+        Ok(())
+    }
+
     #[inline]
     fn document_boundary(&self) -> bool {
         match self.byte() {
@@ -751,9 +758,7 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-            if self.source[self.line_start..self.pos].contains('\t') {
-                return Err(self.error("tab in block indentation"));
-            }
+            self.check_block_indentation()?;
         }
 
         self.nodes[id.0].span.end = end;
@@ -973,6 +978,7 @@ impl<'source> Parser<'source> {
             let has_value = self.indicator(b':') && (!explicit || self.column() == indent);
             let value = if has_value {
                 let entry = if explicit {
+                    self.check_block_indentation()?;
                     BlockEntry::ExplicitMapping
                 } else {
                     BlockEntry::ImplicitMappingValue
@@ -999,9 +1005,7 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-            if self.source[self.line_start..self.pos].contains('\t') {
-                return Err(self.error("tab in block indentation"));
-            }
+            self.check_block_indentation()?;
         }
 
         self.nodes[id.0].span.end = end;
