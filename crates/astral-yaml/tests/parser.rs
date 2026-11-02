@@ -804,6 +804,49 @@ fn escape_repertoire_and_empty_pairs() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#75-flow-nodes
+#[test]
+fn a_verbatim_tag_can_end_an_empty_mapping_key() {
+    let source = concat!(
+        "!<urn:example:block>: value\n",
+        "mapping: {&a !<urn:example:flow>:, next: *a}\n",
+        "sequence: [!<urn:example:pair>: value]\n",
+        "!<urn:example:end>:",
+    );
+    insta::assert_snapshot!(astral_yaml_dev::events(&parse(source).unwrap()), @"
+    +STR
+    +DOC
+    +MAP
+    =VAL <urn:example:block> :
+    =VAL :value
+    =VAL :mapping
+    +MAP {}
+    =VAL &a <urn:example:flow> :
+    =VAL :
+    =VAL :next
+    =ALI *a
+    -MAP
+    =VAL :sequence
+    +SEQ []
+    +MAP {}
+    =VAL <urn:example:pair> :
+    =VAL :value
+    -MAP
+    -SEQ
+    =VAL <urn:example:end> :
+    =VAL :
+    -MAP
+    -DOC
+    -STR
+    ");
+}
+
+#[test_case("!<urn:example:key>:text")]
+#[test_case("{!<urn:example:key>:text}")]
+fn a_verbatim_tag_still_needs_separation_before_scalar_content(source: &str) {
+    assert!(parse(source).is_err());
+}
+
 // https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 // https://yaml.org/spec/1.2.2/#691-node-tags
 #[test_case("! value", "!")]

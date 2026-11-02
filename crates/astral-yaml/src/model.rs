@@ -111,6 +111,19 @@ pub struct Scalar<'source> {
     pub span: Span,
 }
 
+impl Scalar<'_> {
+    pub(crate) fn empty(offset: usize) -> Self {
+        Self {
+            value: Cow::Borrowed(""),
+            style: ScalarStyle::Plain,
+            span: Span {
+                start: offset,
+                end: offset,
+            },
+        }
+    }
+}
+
 /// An anchor name or expanded tag, with its source range.
 /// Percent escapes in tag URIs retain their original spelling.
 #[derive(Clone, Debug, PartialEq)]
