@@ -105,7 +105,7 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
 #[test]
 fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
-    let key = "\u{1}".repeat(103);
+    let key = "\u{1}".repeat(171);
     let document = edit::<serde_json::Value>("existing: 1\n", |root| {
         root.into_mapping()?.set(&key, true)?;
         Ok(())
@@ -113,7 +113,7 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
     assert_eq!(document.value()[&key], true);
     assert_eq!(document.value()["existing"], 1);
 
-    let escaped = r"\U00000001".repeat(103);
+    let escaped = r"\u0001".repeat(171);
     assert_eq!(
         document.source(),
         format!("existing: 1\n? \"{escaped}\"\n: true\n")
@@ -451,4 +451,66 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
        old
      # tail
     ");
+}
+
+// https://yaml.org/spec/1.2.2/#51-character-set
+#[test_case("'old'", '\u{7f}'; "DEL in a single-quoted edit")]
+#[test_case("'old'", '\u{80}'; "C1 control in a single-quoted edit")]
+#[test_case("\"old\"", '\u{fffe}'; "double-quoted noncharacter")]
+#[test_case("old", '\u{ffff}'; "plain fallback")]
+#[test_case("'old'", '\u{feff}'; "content byte order mark")]
+fn edited_scalars_escape_non_printable_characters(source: &str, character: char) {
+    let value = format!("a{character}b");
+    let mut document = Editable::<String>::parse(source).unwrap();
+    document.edit(|mut root| root.set(&value)).unwrap();
+    let yaml = document.into_yaml();
+    assert!(!yaml.contains(character));
+    assert_eq!(astral_yaml_serde::from_str::<String>(&yaml).unwrap(), value);
+}
+
+#[test]
+fn normalization_preserves_an_escaped_noncharacter() {
+    let document = Editable::<String>::parse(r#""a\uFFFFb""#).unwrap();
+    let yaml = document.syntax().normalized_yaml().unwrap();
+    assert!(!yaml.contains('\u{ffff}'));
+    assert_eq!(
+        astral_yaml_serde::from_str::<String>(&yaml).unwrap(),
+        "a\u{ffff}b"
+    );
+}
+
+#[test_case("'a\u{80}b'"; "single quoted")]
+#[test_case("\"a\u{80}b\""; "double quoted")]
+fn loading_reader_only_characters_preserves_unrelated_source(scalar: &str) {
+    let source = format!("keep : [x,   y]\nitem: &s {scalar} # data\ncopy: *s\n");
+    let document = astral_yaml_serde::EditableYaml::parse(&source).unwrap();
+    assert_eq!(
+        document.into_yaml(),
+        source.replace(scalar, r#""a\u0080b""#)
+    );
+}
+
+#[test]
+fn escaping_a_reader_only_character_can_require_an_explicit_key() {
+    let key = "\u{7f}".repeat(171);
+    let source = format!("'{key}': value\n");
+    let document = Editable::<std::collections::BTreeMap<String, String>>::parse(&source).unwrap();
+    assert_eq!(document.value()[&key], "value");
+    assert_eq!(
+        document.into_yaml(),
+        format!("? \"{}\"\n: value\n", r"\u007F".repeat(171))
+    );
+}
+
+#[test]
+fn an_explicit_single_quoted_style_cannot_publish_a_non_printable_character() {
+    let mut document = Editable::<String>::parse("'old'").unwrap();
+    let error = document
+        .edit(|mut root| {
+            root.set("a\u{80}b")?;
+            root.set_scalar_style(ScalarStyle::SingleQuoted)
+        })
+        .unwrap_err();
+    assert!(error.message.contains("requested style"));
+    assert_eq!(document.source(), "'old'");
 }

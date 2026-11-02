@@ -27,7 +27,7 @@ fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
 #[test_case("\u{feff}old\n\u{feff}# tail\n", "|-\n  x" => "\u{feff}|3-\n  x\n\u{feff}# tail\n"; "suffix after block scalar")]
 #[test_case("# first\n\u{feff}# second\n\u{feff}\u{feff}old\n\u{feff}# tail\n", "[x, y]" => "# first\n\u{feff}# second\n\u{feff}\u{feff}[x, y]\n\u{feff}# tail\n"; "marks between comments")]
 #[test_case("# first\n\u{feff}'x\u{feff}'", "new" => "# first\n\u{feff}new"; "removed quoted content")]
-#[test_case("# first\n\u{feff}old", "'y\u{feff}'" => "# first\n\u{feff}'y\u{feff}'"; "imported quoted content")]
+#[test_case("# first\n\u{feff}old", "'y\u{feff}'" => "# first\n\u{feff}\"y\\uFEFF\""; "imported quoted content")]
 fn replacing_a_root_keeps_its_stream_marks(source: &str, replacement: &str) -> String {
     let mut document = DocumentSyntax::parse(source).unwrap();
     document

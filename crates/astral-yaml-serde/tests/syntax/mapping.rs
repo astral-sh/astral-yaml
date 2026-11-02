@@ -3,7 +3,7 @@ use test_case::test_case;
 use super::support::{edit, edits};
 use crate::syntax::DocumentSyntax;
 use astral_yaml::{CollectionStyle, ParseOptions, ScalarStyle};
-use astral_yaml_dev::{edit_diff, indoc};
+use astral_yaml_dev::indoc;
 
 #[test_case("", "[]")]
 #[test_case("  ", r#"["new"]"#)]
@@ -690,19 +690,15 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
         key: value
     "};
     let mut document = DocumentSyntax::parse(source).unwrap();
-    let replacement = format!("\"{}\"", "\\u0001".repeat(103));
+    let replacement = format!("\"{}\"", "\\x01".repeat(171));
     document
         .edit_syntax(|editor| {
             let key = editor.mapping_entries(editor.root())?.remove(0).0;
             editor.replace(key, &replacement)
         })
         .unwrap();
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    @@ -1 +1,2 @@
-    -key: value
-    +? "\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001\U00000001"
-    +: value
-    "#);
+    let escaped = r"\u0001".repeat(171);
+    assert_eq!(document.source(), format!("? \"{escaped}\"\n: value\n"));
 }
 
 #[test]
