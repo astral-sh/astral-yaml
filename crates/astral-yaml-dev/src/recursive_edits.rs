@@ -284,6 +284,68 @@ impl Tree {
         }
     }
 
+    // Fuzzed key replacements and aliases can make two mapping keys equal.
+    fn has_duplicate_keys(&self) -> bool {
+        let nodes: HashMap<_, _> = self
+            .nodes()
+            .into_iter()
+            .map(|node| (node.id, node))
+            .collect();
+        nodes.values().any(|node| {
+            let Kind::Mapping(entries) = &node.kind else {
+                return false;
+            };
+            let mut keys = HashSet::new();
+            entries
+                .iter()
+                .any(|(key, _)| !keys.insert(key.key_identity(&nodes, &mut Vec::new())))
+        })
+    }
+
+    fn key_identity(&self, nodes: &HashMap<usize, &Self>, ancestors: &mut Vec<usize>) -> String {
+        let node = match self.kind {
+            Kind::Alias(target) => nodes[&target],
+            _ => self,
+        };
+        if ancestors.contains(&node.id) {
+            return format!("*{}", node.id);
+        }
+        ancestors.push(node.id);
+        let value = match &node.kind {
+            Kind::Alias(_) => unreachable!("aliases refer to anchored nodes"),
+            Kind::Scalar(scalar) if node.tag.is_some() => {
+                serde_json::to_string(&scalar.value()).unwrap()
+            }
+            Kind::Scalar(scalar) => scalar.yaml(),
+            Kind::Sequence(items) => {
+                let items: Vec<_> = items
+                    .iter()
+                    .map(|n| n.key_identity(nodes, ancestors))
+                    .collect();
+                format!("[{}]", items.join(","))
+            }
+            Kind::Mapping(entries) => {
+                let mut pairs: Vec<_> = entries
+                    .iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "{}:{}",
+                            key.key_identity(nodes, ancestors),
+                            value.key_identity(nodes, ancestors)
+                        )
+                    })
+                    .collect();
+                pairs.sort();
+                format!("{{{}}}", pairs.join(","))
+            }
+        };
+        ancestors.pop();
+        match &node.tag {
+            Some(tag) => format!("!<{tag}> {value}"),
+            None => value,
+        }
+    }
+
     fn can_remove(&self, removed: &HashSet<usize>) -> bool {
         self.nodes().into_iter().all(|node| match node.kind {
             Kind::Alias(target) => removed.contains(&node.id) || !removed.contains(&target),
@@ -951,7 +1013,15 @@ pub fn check_recursive_edits(data: &[u8]) {
         2 => format!("%YAML 1.2\n---\n{yaml}\n...\n"),
         _ => format!("\u{feff}---\n{yaml}\n"),
     };
-    let mut document = Editable::<Graph>::parse(&source).unwrap();
+    let parsed = Editable::<Graph>::parse(&source);
+    if model.has_duplicate_keys() {
+        assert_eq!(
+            parsed.err().expect("duplicate keys").message,
+            "duplicate mapping key"
+        );
+        return;
+    }
+    let mut document = parsed.unwrap_or_else(|e| panic!("{e} in {source} {data:?}"));
     check(&model, document.syntax().root(), |id| {
         document.syntax().node(id).unwrap()
     });
@@ -971,54 +1041,53 @@ pub fn check_recursive_edits(data: &[u8]) {
         })
     {
         let root = document.syntax().root();
-        let unchanged = operations
-            .iter()
-            .all(|op| {
-                matches!(
-                    Operation::from_byte(op[0]),
-                    Operation::CancelInsertion | Operation::CancelComment
-                )
-            })
-            .then(|| document.source().to_owned());
-        document
-            .edit(|mut cursor| {
-                let editor = &mut cursor;
-                for operation in operations {
-                    let selector = usize::from(operation[1]) * 256 + usize::from(operation[2]);
-                    match Operation::from_byte(operation[0]) {
-                        Operation::Replace => replace(&mut model, editor, &mut builder, selector),
-                        op @ (Operation::InsertItem
-                        | Operation::RemoveItem
-                        | Operation::CancelInsertion) => {
-                            sequence_edit(&mut model, editor, &mut builder, selector, op);
-                        }
-                        op @ (Operation::InsertEntry | Operation::RemoveEntry) => {
-                            mapping_edit(&mut model, editor, &mut builder, selector, op);
-                        }
-                        Operation::Flow => set_layout(&model, editor, CollectionStyle::Flow),
-                        Operation::Block => set_layout(&model, editor, CollectionStyle::Block),
-                        op @ (Operation::InsertComment
-                        | Operation::ReplaceComment
-                        | Operation::RemoveComment
-                        | Operation::CancelComment) => {
-                            comment_edit(&mut model, editor, selector, op);
-                        }
+        let before = document.source().to_owned();
+        let canceled = operations.iter().all(|op| {
+            matches!(
+                Operation::from_byte(op[0]),
+                Operation::CancelInsertion | Operation::CancelComment
+            )
+        });
+        let result = document.edit(|mut cursor| {
+            let editor = &mut cursor;
+            for operation in operations {
+                let selector = usize::from(operation[1]) * 256 + usize::from(operation[2]);
+                match Operation::from_byte(operation[0]) {
+                    Operation::Replace => replace(&mut model, editor, &mut builder, selector),
+                    op @ (Operation::InsertItem
+                    | Operation::RemoveItem
+                    | Operation::CancelInsertion) => {
+                        sequence_edit(&mut model, editor, &mut builder, selector, op);
                     }
-                    check_draft(&model, root, editor);
+                    op @ (Operation::InsertEntry | Operation::RemoveEntry) => {
+                        mapping_edit(&mut model, editor, &mut builder, selector, op);
+                    }
+                    Operation::Flow => set_layout(&model, editor, CollectionStyle::Flow),
+                    Operation::Block => set_layout(&model, editor, CollectionStyle::Block),
+                    op @ (Operation::InsertComment
+                    | Operation::ReplaceComment
+                    | Operation::RemoveComment
+                    | Operation::CancelComment) => {
+                        comment_edit(&mut model, editor, selector, op);
+                    }
                 }
-                Ok(())
-            })
-            .unwrap_or_else(|error| {
-                panic!(
-                    "{error}\ninput={data:?}\nsource={}\nmodel={model:?}",
-                    document.source()
-                )
-            });
+                check_draft(&model, root, editor);
+            }
+            Ok(())
+        });
+        if model.has_duplicate_keys() {
+            assert_eq!(result.unwrap_err().message, "duplicate mapping key");
+            assert_eq!(document.source(), before);
+            return;
+        }
+        result.unwrap_or_else(|error| {
+            panic!("{error}\ninput={data:?}\nsource={before}\nmodel={model:?}")
+        });
         check(&model, document.syntax().root(), |id| {
             document.syntax().node(id).unwrap()
         });
-        if let Some(source) = unchanged {
-            assert_eq!(document.source(), source, "canceled edits retain source");
+        if canceled {
+            assert_eq!(document.source(), before, "canceled edits retain source");
         }
     }
 }

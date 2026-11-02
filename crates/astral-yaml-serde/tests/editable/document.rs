@@ -37,6 +37,51 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
     assert_eq!(config.into_inner().timeout.value, 100);
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
+#[test]
+fn duplicate_keys_abort_edits_even_when_the_field_handles_the_error() {
+    use serde::Deserializer;
+    use std::collections::BTreeMap;
+
+    #[derive(Deserialize)]
+    struct Config {
+        options: Options,
+    }
+
+    struct Options(Option<BTreeMap<String, u32>>);
+
+    impl<'de> Deserialize<'de> for Options {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            Ok(Self(BTreeMap::deserialize(deserializer).ok()))
+        }
+    }
+
+    let source = "options: {a: 1, b: 2}\n";
+    let mut document = Editable::<Config>::parse(source).unwrap();
+    let error = document
+        .edit(|root| root.field("options")?.into_mapping()?.key_at(1)?.set("a"))
+        .unwrap_err();
+    assert_eq!(error.message, "duplicate mapping key");
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value().options.0.as_ref().unwrap()["b"], 2);
+}
+
+#[test_case("[&a [*a], { *a : 0, *a : 1 }]", false; "aliases of the same recursive key")]
+#[test_case("{ ? &a [*a] : 0, ? *a : 1 }", false; "an alias and its recursive key")]
+#[test_case("{ ? &a [*a] : 0, ? &b [*b] : 1 }", true; "distinct recursive keys")]
+#[test_case("{? {{x: 0, x: 1}: ok}: a, other: b}", false; "invalid key within a mapping key")]
+#[test_case("{? {ok: {x: 0, x: 1}}: a, other: b}", false; "invalid value within a mapping key")]
+#[test_case("outer: {1: a, 01: b}", false; "unvisited equivalent integer keys")]
+fn unvisited_mappings_compare_yaml_keys(source: &str, unique: bool) {
+    match Editable::<Unvisited>::parse(source) {
+        Ok(_) => assert!(unique),
+        Err(error) => {
+            assert!(!unique);
+            assert_eq!(error.message, "duplicate mapping key");
+        }
+    }
+}
+
 #[test_case(0; "integer overflow")]
 #[test_case(1; "duplicate field")]
 #[test_case(2; "missing field")]

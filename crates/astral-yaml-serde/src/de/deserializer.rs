@@ -72,14 +72,7 @@ pub(crate) fn from_edit_value<'de, T: Deserialize<'de>>(
 
 fn from_input<'de, T: Deserialize<'de>>(input: impl Input<'de>, id: NodeId) -> Result<T> {
     let context = Context::new(input);
-    T::deserialize(Deserializer {
-        context: &context,
-        id,
-        depth: 0,
-        tag_state: TagState::Unconsumed,
-        yaml_tag: false,
-    })
-    .map_err(|mut error| {
+    T::deserialize(context.deserializer(id)).map_err(|mut error| {
         if error.span.is_none() {
             error.span = context.input.node(id).ok().and_then(Node::span);
         }
@@ -102,6 +95,34 @@ impl<I> Context<I> {
             scalar_budget: Cell::new(64 * 1024 * 1024),
         }
     }
+
+    fn deserializer(&self, id: NodeId) -> Deserializer<&Self> {
+        Deserializer {
+            context: self,
+            id,
+            depth: 0,
+            tag_state: TagState::Unconsumed,
+            yaml_tag: false,
+        }
+    }
+}
+
+/// An application visitor can skip a mapping or recover from a duplicate-key error.
+/// Check each mapping in the editable document independently of that visitor.
+#[cfg(feature = "editable")]
+pub(crate) fn check_document_keys(stream: &Stream<'_>) -> Result<()> {
+    let context = Context::new(Parsed::new(stream, 0));
+    for (index, node) in stream.nodes().iter().enumerate() {
+        if let astral_yaml::NodeKind::Mapping { entries, .. } = &node.kind
+            && entries.len() > 1
+        {
+            context
+                .deserializer(NodeId::from_index(index))
+                .check_mapping_keys(entries, Some(node.span))
+                .map_err(|error| Error::at(error.message, error.span))?;
+        }
+    }
+    Ok(())
 }
 
 /// Canonical identity for a serialized mapping key. String identities use the
@@ -111,14 +132,7 @@ pub(crate) fn canonical_key(source: &str) -> Result<String> {
     // The serializer emits exactly one node for each key.
     let document = &stream.documents()[0];
     let context = Context::new(Parsed::new(&stream, 0));
-    let key = Deserializer {
-        context: &context,
-        id: document.root,
-        depth: 0,
-        tag_state: TagState::Unconsumed,
-        yaml_tag: false,
-    }
-    .key()?;
+    let key = context.deserializer(document.root).key(&mut Vec::new())?;
 
     let mut identity = String::new();
     key.write_identity(&mut identity);
@@ -532,7 +546,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         Ok(())
     }
 
-    fn key(self) -> Result<Key<'input>> {
+    fn key(self, ancestors: &mut Vec<NodeId>) -> Result<Key<'input>> {
         let node = self.raw_node()?;
 
         if let Some(tag) = node
@@ -548,7 +562,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
                     tag_state: TagState::ConsumedApplication,
                     ..self
                 }
-                .key()?
+                .key(ancestors)?
             };
 
             return Ok(Key::Tagged(tag, Box::new(value)));
@@ -585,19 +599,29 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             }
             NodeKind::Sequence { items, .. } => {
                 self.check_core_tag(node, YamlType::Sequence)?;
-                items
+                ancestors.push(self.id);
+                let key = items
                     .iter()
-                    .map(|&id| self.child(id).key())
+                    .map(|&id| self.child(id).key(ancestors))
                     .collect::<Result<Vec<_>>>()
-                    .map(Key::Sequence)
+                    .map(Key::Sequence);
+                ancestors.pop();
+                key
             }
             NodeKind::Mapping { entries, .. } => {
                 self.check_core_tag(node, YamlType::Mapping)?;
+                ancestors.push(self.id);
                 let mut pairs = entries
                     .iter()
                     .map(Entry::ids)
-                    .map(|(key, value)| Ok((self.child(key).key()?, self.child(value).key()?)))
+                    .map(|(key, value)| {
+                        Ok((
+                            self.child(key).key(ancestors)?,
+                            self.child(value).key(ancestors)?,
+                        ))
+                    })
                     .collect::<Result<Vec<_>>>()?;
+                ancestors.pop();
                 pairs.sort();
                 if pairs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
                     return Err(Error::at("duplicate mapping key", node.span()));
@@ -605,7 +629,15 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
 
                 Ok(Key::Mapping(pairs))
             }
-            NodeKind::Alias { target, .. } => self.child(target).key(),
+            NodeKind::Alias { target, .. } => {
+                // YAML leaves equality of recursive collections implementation-defined.
+                // Compare a back edge by the identity of the node it refers to.
+                if ancestors.contains(&target) {
+                    Ok(Key::Reference(target.index()))
+                } else {
+                    self.child(target).key(ancestors)
+                }
+            }
         }
     }
 
@@ -653,10 +685,11 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         let mut large_keys =
             (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));
 
+        let mut ancestors = Vec::new();
         for (index, (id, _)) in entries.iter().map(Entry::ids).enumerate() {
             let key = self
                 .child(id)
-                .key()
+                .key(&mut ancestors)
                 .map_err(|error| error.in_path(format_args!(".key_at({index})")))?;
             let unique = if let Some(keys) = &mut large_keys {
                 keys.insert(key)
@@ -743,6 +776,7 @@ enum Key<'input> {
     String(&'input str),
     Integer(bool, u128),
     Float(u64),
+    Reference(usize),
     Sequence(Vec<Self>),
     Mapping(Vec<(Self, Self)>),
     Tagged(&'input str, Box<Self>),
@@ -761,6 +795,7 @@ impl Key<'_> {
                     .expect("String write");
             }
             Self::Float(bits) => write!(output, "f{bits:x};").expect("String write"),
+            Self::Reference(id) => write!(output, "r{id};").expect("String write"),
             Self::Sequence(items) => {
                 output.push('[');
                 for item in items {
@@ -1391,6 +1426,18 @@ mod tests {
     use super::{Cell, Context, Deserializer, ScalarType, TagState, VariantValue};
     use serde::Deserialize;
     use serde::de::SeqAccess;
+
+    #[test]
+    fn recursive_key_identity_ignores_anchor_names_and_scalar_spelling() {
+        let source = "&a [null, true, false, 1, -2, 1.5, !tag {child: *a}]";
+        let equivalent = "&b [~, TRUE, FALSE, 01, -02, 1.50, !tag {'child': *b}]";
+        let identity = super::canonical_key(source).unwrap();
+        assert_eq!(identity, super::canonical_key(equivalent).unwrap());
+        assert_ne!(
+            identity,
+            super::canonical_key(&source.replace("*a", "'*a'")).unwrap()
+        );
+    }
 
     #[test]
     fn metadata_protocols_can_be_ignored() {
