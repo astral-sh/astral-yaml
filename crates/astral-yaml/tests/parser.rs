@@ -233,6 +233,39 @@ fn block_scalar_eof_and_indentation_follow_the_test_suite(style: &str) {
 }
 
 // https://yaml.org/spec/1.2.2/#911-document-prefix
+#[test]
+fn tabs_can_separate_a_completed_block_scalar_from_the_next_document() {
+    let source = "|2-\n x\n\t# between documents\n---\nk: >2+\n  y\n \t\r\n...\n";
+    let stream = parse(source).unwrap();
+    insta::assert_snapshot!(astral_yaml_dev::events(&stream), @r"
+    +STR
+    +DOC
+    =VAL |x
+    -DOC
+    +DOC ---
+    +MAP
+    =VAL :k
+    =VAL >y\n
+    -MAP
+    -DOC ...
+    -STR
+    ");
+    assert!(matches!(stream.comments(), [comment] if comment.text == " between documents"));
+}
+
+// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+#[test_case("\t# comment\nnext: y")]
+#[test_case("\t\nnext: y")]
+#[test_case("\t# comment\n  more")]
+#[test_case("\t--- y")]
+fn a_tab_outside_block_scalar_indentation_cannot_introduce_more_content(tail: &str) {
+    let source = format!("k: |2-\n  x\n{tail}");
+    let error = parse(&source).unwrap_err();
+    assert_eq!(error.message, "tab in block scalar indentation");
+    assert_eq!(error.span.slice(&source), Some("\t"));
+}
+
+// https://yaml.org/spec/1.2.2/#911-document-prefix
 #[test_case("|1-", "first\n", "first")]
 #[test_case(">", "", "")]
 fn a_root_block_scalar_stops_at_the_next_document_bom(header: &str, body: &str, expected: &str) {
@@ -270,6 +303,7 @@ fn stripping_a_long_run_of_blank_lines(header: &str) {
 // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
 #[test_case("|1\ntext\n", "text\n")]
 #[test_case("|2\n  foo\n", " foo\n")]
+#[test_case("|2-\n x\n\t", "x")]
 #[test_case("--- &root >2\n  foo\n", " foo\n")]
 fn explicit_root_block_indentation_starts_at_minus_one(source: &str, expected: &str) {
     let parsed = parse(source).unwrap();

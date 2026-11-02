@@ -1785,11 +1785,6 @@ impl<'source> Parser<'source> {
             if !empty {
                 let required = *indent.get_or_insert(spaces.max(minimum));
                 if spaces < required || self.document_boundary() {
-                    if self.byte() == Some(b'\t') {
-                        return Err(self.error("tab in block scalar indentation"));
-                    }
-
-                    self.pos = line_start;
                     break;
                 }
 
@@ -1808,8 +1803,16 @@ impl<'source> Parser<'source> {
             end = self.pos;
         }
 
-        let value = content.finish(chomp);
+        // An under-indented tab can begin stream separation after the document.
+        let tab_error =
+            (self.byte() == Some(b'\t')).then(|| self.error("tab in block scalar indentation"));
         self.block_space()?;
+        if let Some(error) = tab_error
+            && !self.document_boundary()
+        {
+            return Err(error);
+        }
+
         let style = if folded {
             ScalarStyle::Folded
         } else {
@@ -1817,7 +1820,7 @@ impl<'source> Parser<'source> {
         };
 
         Ok(NodeKind::Scalar(Scalar {
-            value: Cow::Owned(value),
+            value: Cow::Owned(content.finish(chomp)),
             style,
             span: Span { start, end },
         }))
