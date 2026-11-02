@@ -10,6 +10,14 @@ YAML 1.1 is unsupported. In particular, the plain scalars `yes`, `no`, `on`,
 `false` for booleans. The key `<<` is an ordinary string key, so it does not
 merge mappings.
 
+## Directives and warnings
+
+All documents use the YAML 1.2 grammar. Call `stream.warnings()` after parsing
+to locate unknown directives and declarations of a higher YAML 1.x minor
+version. In a document that declares YAML 1.1, the iterator also reports each
+literal U+0085, U+2028, or U+2029, which YAML 1.2 treats as content.
+[Directives](https://yaml.org/spec/1.2.2/#68-directives) and [line break characters](https://yaml.org/spec/1.2.2/#54-line-break-characters)
+
 ## Block scalars
 
 A block scalar can include a final newline even when the file has none.

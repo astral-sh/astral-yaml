@@ -9,6 +9,36 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum YamlVersion {
+    V1_0,
+    V1_1,
+    V1_2,
+    HigherMinor,
+}
+
+impl YamlVersion {
+    pub(crate) fn parse(arguments: &str) -> Option<Self> {
+        let mut words = arguments.split_ascii_whitespace();
+        let (major, minor) = words.next()?.split_once('.')?;
+        if words.next().is_some()
+            || major.trim_start_matches('0') != "1"
+            || minor.is_empty()
+            || !minor.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+
+        // Version components can have leading zeros and no upper bound.
+        Some(match minor.trim_start_matches('0') {
+            "" => Self::V1_0,
+            "1" => Self::V1_1,
+            "2" => Self::V1_2,
+            _ => Self::HigherMinor,
+        })
+    }
+}
+
 /// Limits on input size, syntax depth, and syntax elements.
 #[derive(Clone, Copy, Debug)]
 pub struct ParseOptions {
@@ -524,32 +554,20 @@ impl<'source> Parser<'source> {
                 end: argument_start + args.len(),
             };
 
-            let mut words = args.split_ascii_whitespace();
-
             match name {
                 "YAML" => {
                     if version {
                         return Err(self.error("duplicate YAML directive"));
                     }
 
-                    let valid = words
-                        .next()
-                        .and_then(|word| word.split_once('.'))
-                        .is_some_and(|(major, minor)| {
-                            major.trim_start_matches('0') == "1"
-                                && !minor.is_empty()
-                                && minor.bytes().all(|b| b.is_ascii_digit())
-                        })
-                        && words.next().is_none();
-                    if !valid {
+                    if YamlVersion::parse(args).is_none() {
                         return Err(self.error("invalid YAML version directive"));
                     }
 
-                    // New minor versions use the 1.2 grammar. 1.1 schema behavior is
-                    // not enabled.
                     version = true;
                 }
                 "TAG" => {
+                    let mut words = args.split_ascii_whitespace();
                     let (Some(handle), Some(prefix), None) =
                         (words.next(), words.next(), words.next())
                     else {
