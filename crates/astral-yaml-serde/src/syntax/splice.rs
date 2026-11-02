@@ -190,6 +190,14 @@ impl<'source> Boundary<'source> {
         let suffix = &self.source[span.end()..];
         let trimmed = suffix.trim_start_matches([' ', '\t']);
         let suffix_has_break = trimmed.starts_with('\n');
+        // A property-only node can end with an emitted separator. Reuse the
+        // original spacing when it lies outside the replacement.
+        if matches!(fragment.ending, Ending::Token)
+            && fragment.text.ends_with(' ')
+            && suffix.starts_with([' ', '\t'])
+        {
+            fragment.text.pop();
+        }
         if matches!(fragment.ending, Ending::Comment) && suffix_has_break {
             // Reuse the retained terminator, excluding spaces that would
             // otherwise become part of the emitted comment's text.

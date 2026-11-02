@@ -992,22 +992,47 @@ fn multiline_properties_preserve_anchor_identity(source: &str) {
 }
 
 // https://yaml.org/spec/1.2.2/#72-empty-nodes
-#[test]
-fn empty_scalar_span_follows_properties() {
-    let source = "- &a\n- x\n";
+// https://yaml.org/spec/1.2.2/#75-flow-nodes
+#[test_case("- &a\n- x\n", "&a", ""; "block sequence item")]
+#[test_case("!!str #keep", "!!str", ""; "tag at end of file")]
+#[test_case("? &a #keep\n: x\n", "&a", ""; "explicit block key")]
+#[test_case("[&a #keep\r\n, x]", "&a", ""; "flow sequence item")]
+#[test_case("{&a  : value}", "&a", ""; "flow mapping key")]
+#[test_case("{key: &a !!str  }", "&a !!str", ""; "flow mapping value")]
+#[test_case("!!str # first\n&a #keep\n", "!!str # first\n&a", ""; "properties on separate lines")]
+#[test_case("&a '' #keep\n", "&a ''", "''"; "quoted empty scalar")]
+#[test_case("&a #keep\n  text\n", "&a #keep\n  text", "text"; "content on a later line")]
+fn scalar_spans_after_properties(source: &str, node_text: &str, scalar_text: &str) {
     let stream = parse(source).unwrap();
     let node = stream
         .nodes()
         .iter()
-        .find(|node| node.anchor.is_some())
+        .find(|node| node.anchor.is_some() || node.tag.is_some())
         .unwrap();
     let NodeKind::Scalar(scalar) = &node.kind else {
         panic!("scalar")
     };
 
-    assert_eq!(scalar.span.start(), source.find('\n').unwrap());
-    assert!(scalar.span.is_empty());
-    assert_eq!(node.span.slice(source), Some("&a"));
+    assert_eq!(node.span.slice(source), Some(node_text));
+    assert_eq!(scalar.span.slice(source), Some(scalar_text));
+    assert_eq!(scalar.span.end(), node.span.end());
+}
+
+#[test]
+fn inserting_at_an_empty_scalar_span_preserves_its_trailing_comment() {
+    let mut source = String::from("&a #keep\n");
+    let stream = parse(&source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar");
+    };
+    source.insert_str(scalar.span.start(), " text");
+
+    assert_eq!(source, "&a text #keep\n");
+    let stream = parse(&source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected scalar");
+    };
+    assert_eq!(scalar.value, "text");
 }
 
 // https://yaml.org/spec/1.2.2/#61-indentation-spaces
