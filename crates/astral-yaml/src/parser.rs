@@ -1562,7 +1562,7 @@ impl<'source> Parser<'source> {
         breaks
     }
 
-    fn quoted_continuation(&self, parent: isize) -> Result<()> {
+    fn quoted_continuation(&self, parent: isize, quote: u8) -> Result<()> {
         // A BOM inside a quoted scalar is content, not a document boundary.
         if self.byte().is_none()
             || self.marker("---")
@@ -1570,6 +1570,10 @@ impl<'source> Parser<'source> {
             || signed(self.leading_spaces()) <= parent
         {
             return Err(self.error("invalid continuation of quoted scalar"));
+        }
+
+        if quote == b'"' && matches!(self.rest().as_bytes(), [b'\\', b'\r' | b'\n', ..]) {
+            return Err(self.error("expected content before another escaped line break"));
         }
 
         Ok(())
@@ -1625,7 +1629,7 @@ impl<'source> Parser<'source> {
                     self.pos += 1;
                     let breaks = self.scalar_breaks(parent);
                     if breaks > 0 {
-                        self.quoted_continuation(parent)?;
+                        self.quoted_continuation(parent, quote)?;
                         text.extend(std::iter::repeat_n('\n', breaks - 1));
                     } else {
                         text.push(self.escape()?);
@@ -1637,7 +1641,7 @@ impl<'source> Parser<'source> {
                     let text = output.get_or_insert_with(String::new);
                     text.push_str(self.source[segment..self.pos].trim_end_matches([' ', '\t']));
                     let breaks = self.scalar_breaks(parent);
-                    self.quoted_continuation(parent)?;
+                    self.quoted_continuation(parent, quote)?;
 
                     if breaks == 1 {
                         text.push(' ');
