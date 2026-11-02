@@ -55,7 +55,8 @@ For numeric keys, the YAML check compares integer magnitudes as `u128` and
 floats as `f64`, regardless of the destination key type. For scalar keys with
 application tags, it compares the tag and the decoded text. If your application
 treats other spellings as equal for a given tag, check for those collisions
-when constructing the map.
+when constructing the map. For a recursive collection key, a reference back
+to an enclosing collection compares by the identity of that collection.
 
 ## Numeric values
 

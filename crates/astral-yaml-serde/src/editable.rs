@@ -91,7 +91,9 @@ impl<T: DeserializeOwned> Editable<T> {
 
     fn deserialize_syntax(syntax: &DocumentSyntax) -> Result<T, Error> {
         let stream = astral_yaml::parse_with_options(syntax.source(), syntax.options())?;
-        crate::from_stream(&stream)
+        let value = crate::from_stream(&stream)?;
+        crate::de::check_document_keys(&stream)?;
+        Ok(value)
     }
 
     /// Edit the document starting at its root, and return the callback's result.
