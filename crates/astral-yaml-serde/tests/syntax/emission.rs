@@ -52,9 +52,8 @@ fn normalization_preserves_header_comments_before_leading_comments() {
     @@ -1,4 +1,4 @@
      key: # header
        # leading
-    -  | # scalar
+       | # scalar
     -    text
-    +  |2 # scalar
     +  text
 
     @@ -1,4 +1,4 @@
@@ -116,6 +115,20 @@ fn normalization_retains_multiline_scalar_styles() {
     ");
 }
 
+// Block indentation indicators: https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+#[test_case("|\n  hello\n"; "root literal")]
+#[test_case("message: >-\n  \n  first\n    second\n"; "leading empty line")]
+#[test_case("|-\n  \ttext\n"; "leading tab at the root")]
+#[test_case("message: >2-\n  \n  \tfirst\n    second\n"; "leading tab in a nested scalar")]
+#[test_case("- |\n  first\n   second\n"; "later content starts with a space")]
+#[test_case("|3\n  \n   hello\n"; "leading space after an empty line")]
+#[test_case("message: >2-\n   \n  next\n"; "space-only line before text")]
+#[test_case("|3-\n# tail\n"; "empty scalar before a comment")]
+#[test_case("|3+\n  \n# tail\n"; "only line breaks before a comment")]
+fn normalized_block_scalar_indicators(source: &str) {
+    assert_eq!(normalize(source), "");
+}
+
 #[test]
 fn normalized_block_scalars_use_their_parent_indentation() {
     let outputs = [
@@ -129,7 +142,7 @@ fn normalized_block_scalars_use_their_parent_indentation() {
 ",
         indoc! {r"
             outer:
-              inner: |-
+              inner: |1-
                 first
                 second
         "},
@@ -159,10 +172,12 @@ fn normalized_block_scalars_use_their_parent_indentation() {
 
     @@ -1,4 +1,4 @@
      outer:
-    -  inner: |-
+    -  inner: |1-
+    -    first
+    -    second
     +  inner: |2-
-         first
-         second
+    +     first
+    +     second
 
     @@ -1,3 +1,3 @@
      outer:
@@ -343,19 +358,17 @@ fn normalization_preserves_separate_header_comments() {
     insta::assert_snapshot!(outputs.join("\n"), @"
     @@ -1,3 +1,3 @@
      a: &a # anchor
-    -  | # header
+       | # header
     -    text
-    +  |2 # header
     +  text
 
     @@ -1,4 +1,4 @@
     -a: &a # anchor
     -  !!str # tag
-    -  | # header
-    -    text
     +a: !<tag:yaml.org,2002:str> # anchor
     +  &a # tag
-    +  |2 # header
+       | # header
+    -    text
     +  text
 
     @@ -1,4 +1,4 @@
@@ -579,7 +592,7 @@ fn normalization_consumes_interleaved_property_comments_in_order() {
     -  |
     -    value
     +    # leading
-    +    |2
+    +    |
     +  value
     ");
 }
@@ -628,7 +641,17 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
     ]
     .map(normalize);
     insta::assert_snapshot!(outputs.join("\n"), @"
+    @@ -1,3 +1,3 @@
+    -? |2-
+    +? |-
+       key
+     : value
 
+    @@ -1,3 +1,3 @@
+    -? >2-
+    +? >-
+       key
+     : value
 
     @@ -1,3 +1,4 @@
     -? - a
@@ -643,12 +666,26 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
     +  k: v
      : value
 
+    @@ -1,4 +1,4 @@
+     outer:
+    -  ? |2-
+    +  ? |-
+         key
+       : value
 
     @@ -1,3 +1,4 @@
     -? &key
     +?
     +  &key ⏎
        - a
+     : value
+
+    @@ -1,5 +1,5 @@
+     ? # header
+       # leading
+    -  |2-
+    +  |-
+       key
      : value
     ");
 }
@@ -713,19 +750,15 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
      ...
 
 
-    @@ -2,6 +2,6 @@
+    @@ -4,4 +4,4 @@
      ⏎
-     # detached
-     ⏎
-    -b: |+
-    +b: |2+
+     b: |+
        text
     -
     +  ⏎
 
     @@ -1,6 +1,6 @@
-    -a: |+
-    +a: |2+
+     a: |+
        text
     -
     +  ⏎
@@ -733,12 +766,9 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
      ⏎
      b: old
 
-    @@ -2,6 +2,6 @@
+    @@ -4,4 +4,4 @@
      ⏎
-     # detached
-     ⏎
-    -- |+
-    +- |2+
+     - |+
        text
     -
     +  ⏎

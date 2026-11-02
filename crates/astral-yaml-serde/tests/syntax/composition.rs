@@ -8,12 +8,12 @@ use test_case::test_case;
 
 #[test_case(
     "nested:\n  value: 'old'\n# model\n", &[]
-    => "nested:\n  value: |2+\n    new\n    \n# model\n";
+    => "nested:\n  value: |+\n    new\n    \n# model\n";
     "document root"
 )]
 #[test_case(
     "outer:\n  nested:\n    value: old\n  # model\nother: kept\n", &["outer"]
-    => "outer:\n  nested:\n    value: |2+\n      new\n      \n  # model\nother: kept\n";
+    => "outer:\n  nested:\n    value: |+\n      new\n      \n  # model\nother: kept\n";
     "nested mapping"
 )]
 fn reinserted_comments_keep_their_layout_during_descendant_edits(

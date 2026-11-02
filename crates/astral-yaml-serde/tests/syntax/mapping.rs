@@ -828,7 +828,8 @@ fn explicit_keys_accept_block_style_requests() {
     +  : updated
 
     @@ -1,3 +1,3 @@
-     ? |2-
+    -? |2-
+    +? |-
        key
     -: [value]
     +: updated

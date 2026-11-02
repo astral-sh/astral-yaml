@@ -24,7 +24,7 @@ fn inserting_a_document_marker_preserves_all_prefix_marks(prefix: &str) {
 #[test_case("---\n\u{feff}", "[a, b]" => "---\n[a, b]\n\u{feff}"; "empty document before a suffix mark")]
 #[test_case("---\n\u{feff}... # tail\n", "'new'" => "---\n'new'\n\u{feff}... # tail\n"; "empty document before a marked end marker")]
 #[test_case("# first\n\u{feff}old", "[x, y]" => "# first\n\u{feff}[x, y]"; "prefix on replaced line")]
-#[test_case("\u{feff}old\n\u{feff}# tail\n", "|-\n  x" => "\u{feff}|3-\n  x\n\u{feff}# tail\n"; "suffix after block scalar")]
+#[test_case("\u{feff}old\n\u{feff}# tail\n", "|-\n  x" => "\u{feff}|-\n  x\n\u{feff}# tail\n"; "suffix after block scalar")]
 #[test_case("# first\n\u{feff}# second\n\u{feff}\u{feff}old\n\u{feff}# tail\n", "[x, y]" => "# first\n\u{feff}# second\n\u{feff}\u{feff}[x, y]\n\u{feff}# tail\n"; "marks between comments")]
 #[test_case("# first\n\u{feff}'x\u{feff}'", "new" => "# first\n\u{feff}new"; "removed quoted content")]
 #[test_case("# first\n\u{feff}old", "'y\u{feff}'" => "# first\n\u{feff}\"y\\uFEFF\""; "imported quoted content")]
@@ -436,7 +436,7 @@ fn inserted_roots_are_separated_from_end_markers() {
 
     @@ -1,3 +1,5 @@
      ---
-    +|3
+    +|
     +  text
      ... # end
      # tail
@@ -544,8 +544,7 @@ fn detached_comment_gaps_survive_collection_mutations() {
      ⏎
      # detached
      ⏎
-    -b: |+
-    +b: |2+
+     b: |+
        text
     -
     +  ⏎
@@ -565,10 +564,9 @@ fn detached_comment_gaps_survive_collection_mutations() {
      ⏎
      # detached
      ⏎
-    -b: |+
+     b: |+
     -  text
     -
-    +b: |2+
     +  other
     +  ⏎
 
@@ -578,8 +576,7 @@ fn detached_comment_gaps_survive_collection_mutations() {
      ⏎
      # detached
      ⏎
-    -- |+
-    +- |2+
+     - |+
        text
     -
     +  ⏎
@@ -599,10 +596,9 @@ fn detached_comment_gaps_survive_collection_mutations() {
      ⏎
      # detached
      ⏎
-    -- |+
+     - |+
     -  text
     -
-    +- |2+
     +  other
     +  ⏎
     ");
@@ -674,8 +670,7 @@ fn removed_children_leave_their_comments_in_the_surviving_gap(
     false
     => with |diff| insta::assert_snapshot!(diff, @r"
         @@ -1,6 +1,6 @@
-        -a: |+
-        +a: |2+
+         a: |+
            text
         +  ⏎
         +...
@@ -698,8 +693,7 @@ fn removed_children_leave_their_comments_in_the_surviving_gap(
     true
     => with |diff| insta::assert_snapshot!(diff, @r"
         @@ -1,6 +1,6 @@
-        -- |+
-        +- |2+
+         - |+
            text
         +  ⏎
         +...
@@ -1064,26 +1058,26 @@ fn scalar_style_edits_keep_comments_outside_the_content() {
     }
     insta::assert_snapshot!(diffs.join("\n"), @"
     @@ -1,2 +1,3 @@
-    +  |3-
+    +  |-
        old
      # tail
 
     @@ -1,2 +1,3 @@
-    +  >3-
+    +  >-
        old
      # tail
 
     @@ -1,2 +1,3 @@
     -old
     -  # tail
-    +|3-
+    +|-
     +  old
     +# tail
 
     @@ -1,2 +1,3 @@
     -old
     -  # tail
-    +>3-
+    +>-
     +  old
     +# tail
     ");

@@ -1029,12 +1029,18 @@ fn block_scalar(
         1 if value.len() > trailing => "",
         _ => "+",
     };
-    // Content is indented two spaces. At the document root its parent is at -1.
-    let increment = if position == ScalarPosition::Document {
-        3
-    } else {
-        2
+
+    // Leading content spaces would be mistaken for indentation. With only
+    // empty lines, a following comment could be mistaken for content.
+    let content = value.trim_start_matches('\n').as_bytes();
+    let increment = match (position, content) {
+        // The document's parent is at -1, so two spaces require an indicator of three.
+        (ScalarPosition::Document, [] | [b' ', ..]) => "3",
+        // An explicit nested indicator also lets libyaml read a leading tab.
+        (ScalarPosition::Block, [] | [b' ' | b'\t', ..]) => "2",
+        _ => "",
     };
+
     let mut result = format!("{indicator}{increment}{chomp}\n");
     let mut previous_text = false;
     for line in value.split_terminator('\n') {

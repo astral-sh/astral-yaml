@@ -82,7 +82,7 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     @@ -1,4 +1,7 @@
      outer:
     -  key: old
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -93,7 +93,7 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
      outer:
     -  key: old
     -
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
      ...
@@ -121,7 +121,7 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
     @@ -1,5 +1,7 @@
      outer:
     -  key: old
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
        # trailing
@@ -166,7 +166,7 @@ fn explicit_block_style_requests_still_require_representable_separation() {
     @@ -1,4 +1,7 @@
      outer:
     -  key: "new\n\n"
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -177,7 +177,7 @@ fn explicit_block_style_requests_still_require_representable_separation() {
     @@ -1,4 +1,7 @@
      outer:
     -  key: "new\n\n"
-    +  key: >2+
+    +  key: >+
     +    new
     +    ⏎
     +...
@@ -717,7 +717,7 @@ fn replacing_a_tail_and_removing_its_boundary_share_the_final_layout() {
      outer:
     -  key: old
     -# trailing
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -856,7 +856,7 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     -{outer: {key: old}} # inline
     +--- # inline
     +outer:
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
      ...
@@ -868,7 +868,7 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     -# trailing
     +--- # inline
     +outer:
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -880,7 +880,7 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     -# trailing
     +--- # inline
     +outer:
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -890,7 +890,7 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     @@ -1,3 +1,5 @@
     -{outer: {key: old}}
     +outer:
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
      ... # inline
@@ -899,7 +899,7 @@ fn retained_end_markers_bound_removed_suffix_comments() {
     @@ -1,5 +1,7 @@
     -{outer: {key: old}}
     +outer:
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
      ...
@@ -954,7 +954,7 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     @@ -1,3 +1,5 @@
     -old
     -# remove
-    +|3+
+    +|+
     +  new
     +  ⏎
     +...
@@ -964,7 +964,7 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
      outer:
     -  key: old
     -# remove
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -974,7 +974,7 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     -- - old
     -# remove
     +-
-    +  - |2+
+    +  - |+
     +    new
     +    ⏎
     +...
@@ -984,7 +984,7 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
      outer:
     -  key: old
     -# remove
-    +  key: |2+
+    +  key: |+
     +    new
     +    ⏎
     +...
@@ -1071,7 +1071,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
     @@ -1,8 +1,9 @@
      outer:
     -  value: old
-    +  value: |2+
+    +  value: |+
     +    new
     +    ⏎
     +...
@@ -1085,7 +1085,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
     @@ -1,8 +1,9 @@
      -
     -  - old
-    +  - |2+
+    +  - |+
     +    new
     +    ⏎
     +...
@@ -1100,7 +1100,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
      outer:
        inner:
     -    value: old
-    +    value: |2+
+    +    value: |+
     +      new
     +      ⏎
     +...
@@ -1116,7 +1116,7 @@ fn generated_suffix_boundaries_follow_descendant_comment_regions() {
     -  value: old
     -
     -  # nested
-    +  value: |2+
+    +  value: |+
     +    new
     +    ⏎
      ...

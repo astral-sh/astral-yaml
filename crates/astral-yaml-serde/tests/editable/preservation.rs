@@ -94,9 +94,8 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     @@ -1,3 +1,4 @@
      text: &text # anchor
-    -  | # header
+       | # header
     -    content
-    +  |2 # header
     +  content
     +"enabled": true
     "#);
@@ -264,7 +263,7 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments(
     let mut document = Editable::<serde_json::Value>::parse(&source).unwrap();
     let mut expected = document.value().clone();
 
-    let block = format!("{prefix}|2{chomp}\n  text\n{trailing}");
+    let block = format!("{prefix}|{chomp}\n  text\n{trailing}");
     let yaml = if sequence {
         document
             .edit(|root| root.into_sequence()?.insert(0, "new").map(|_| ()))
@@ -447,7 +446,7 @@ fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
     let diff = edit_diff(source, document.source());
     insta::assert_snapshot!(diff, @"
     @@ -1,2 +1,3 @@
-    +  |3-
+    +  |-
        old
      # tail
     ");
