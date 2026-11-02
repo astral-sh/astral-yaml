@@ -32,7 +32,8 @@ pub type EditableYaml = Editable<serde::de::IgnoredAny>;
 /// `T` must implement [`DeserializeOwned`], but need not implement `Serialize`
 /// or `Clone`.
 ///
-/// Loading converts CR and CRLF line endings to LF. Spans refer to that source.
+/// Loading converts CR and CRLF line endings to LF and adds a UTF-8 byte order mark
+/// if the source starts with a non-ASCII character. Spans refer to that source.
 /// Unchanged regions keep their text, but rewritten regions may change whitespace.
 ///
 /// ```
@@ -65,8 +66,8 @@ impl<T: DeserializeOwned> FromStr for Editable<T> {
 impl<T: DeserializeOwned> Editable<T> {
     /// Parse `source` as a YAML document and deserialize its value as `T`.
     ///
-    /// CR and CRLF line endings are converted to LF. Spans and error locations refer
-    /// to this normalized source.
+    /// The source uses LF line endings and a byte order mark when required for UTF-8.
+    /// Spans and error locations refer to this normalized source.
     ///
     /// # Errors
     /// Returns an error if `source` is invalid YAML, does not contain exactly one

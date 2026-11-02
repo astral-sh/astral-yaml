@@ -55,7 +55,8 @@ fn key_edits_count_retained_padding(compact: bool, padding: usize) {
     } else {
         "éé: v".to_owned()
     };
-    assert_eq!(document.source(), expected);
+    let prefix = if compact { "" } else { "\u{feff}" };
+    assert_eq!(document.source(), format!("{prefix}{expected}"));
 }
 
 // https://yaml.org/spec/1.2.2/#742-flow-mappings

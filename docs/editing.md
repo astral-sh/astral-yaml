@@ -138,9 +138,10 @@ errors through and returns a successful result only after committing.
 
 ## Source preservation
 
-Parsing converts CR and CRLF line endings to LF. Edits preserve text outside
-the regions they rewrite. Within those regions, spacing and scalar spelling
-can change.
+Parsing converts CR and CRLF line endings to LF. If the first character is
+non-ASCII, the editor adds a UTF-8 byte order mark unless one is already present.
+Edits preserve text outside the regions they rewrite. Within those regions,
+spacing and scalar spelling can change.
 
 To add a leading comment to a node that already has an inline comment, use
 `node.insert_comment(0, " explanation", CommentPlacement::Leading)?`. The
