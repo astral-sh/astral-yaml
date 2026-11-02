@@ -28,6 +28,7 @@ mod model;
 mod parser;
 pub mod schema;
 mod source;
+mod warnings;
 
 pub use error::Error;
 pub use model::{
@@ -37,3 +38,4 @@ pub use model::{
 pub use parser::{ParseOptions, parse, parse_with_options};
 
 pub use source::{Encoding, Source};
+pub use warnings::{Warning, WarningKind};
