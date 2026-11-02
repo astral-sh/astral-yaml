@@ -629,6 +629,31 @@ fn block_scalar_ranges_exclude_following_node() {
     assert_eq!(scalar.span.slice(source), Some("|\n  text\n"));
 }
 
+// https://yaml.org/spec/1.2.2/#731-double-quoted-style
+#[test_case("\"a\n  \\\n  b\""; "after a folded break")]
+#[test_case("\"a\\\r\n  \\\r  b\""; "after an escaped break")]
+fn a_double_quoted_continuation_requires_content_before_an_escaped_break(source: &str) {
+    let error = parse(source).unwrap_err();
+    assert_eq!(
+        error.message,
+        "expected content before another escaped line break"
+    );
+    assert_eq!(error.span.slice(source), Some("\\"));
+}
+
+#[test_case("\"\\\n  b\"", "b")]
+#[test_case("\"a\n  x\\\n  b\"", "a xb")]
+#[test_case("\"a\n  \\ \\\n  b\"", "a  b")]
+#[test_case("\"a\\\n\n  b\"", "a\nb")]
+#[test_case("'a\n  \\\n  b'", "a \\ b")]
+fn quoted_breaks_can_follow_content_or_start_a_scalar(source: &str, expected: &str) {
+    let stream = parse(source).unwrap();
+    let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
+        panic!("expected a scalar")
+    };
+    assert_eq!(scalar.value, expected);
+}
+
 // https://yaml.org/spec/1.2.2/#51-character-set
 #[test]
 fn json_compatible_quoted_characters() {
