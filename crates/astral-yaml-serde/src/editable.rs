@@ -84,7 +84,7 @@ impl<T: DeserializeOwned> Editable<T> {
     /// does not contain exactly one document, cannot be deserialized as `T`, or
     /// exceeds a resource limit.
     pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Self, Error> {
-        let syntax = DocumentSyntax::parse_with_options(source, options)?;
+        let syntax = DocumentSyntax::parse_with_options(source, options)?.escape_non_printable()?;
         let value = Self::deserialize_syntax(&syntax)?;
         Ok(Self { value, syntax })
     }

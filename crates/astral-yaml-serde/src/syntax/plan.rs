@@ -31,7 +31,7 @@ pub(super) struct Rewrite<'source> {
 
 /// Changes between the original and final syntax, excluding canceled edits.
 pub(super) struct Changes {
-    roots: HashSet<NodeId>,
+    pub(super) roots: HashSet<NodeId>,
     root_comments: bool,
 }
 

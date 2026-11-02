@@ -376,7 +376,7 @@ fn normalization_preserves_separate_header_comments() {
     ");
 }
 
-#[test_case(&format!("\"{}\"", "\\u0001".repeat(103)))]
+#[test_case(&format!("\"{}\"", "\\x01".repeat(171)))]
 #[test_case(&format!("&{} short", "a".repeat(1024)))]
 #[test_case(&format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)))]
 #[test_case(&format!("\"{}\"", "a".repeat(1023)))]

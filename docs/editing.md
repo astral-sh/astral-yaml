@@ -146,6 +146,9 @@ To add a leading comment to a node that already has an inline comment, use
 `node.insert_comment(0, " explanation", CommentPlacement::Leading)?`. The
 existing inline comment stays on its line.
 
+If a quoted scalar contains a literal non-printable character, loading the
+document escapes it so the source can be emitted as YAML.
+
 The configuration example uses `update()` to increment a timeout, adds a
 comment, and switches a sequence to block style. Run it from the repository
 root. [Example source](../crates/astral-yaml-serde/examples/edit-config.rs)

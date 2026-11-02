@@ -79,6 +79,28 @@ impl DocumentSyntax {
         })
     }
 
+    /// JSON-compatible quoted input can contain characters that a YAML writer
+    /// must escape. Rewrite just those scalars before retaining the source.
+    pub(crate) fn escape_non_printable(self) -> Result<Self, Error> {
+        if !self.source.text.contains(crate::ser::non_printable) {
+            return Ok(self);
+        }
+
+        let scalars = self
+            .source
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| {
+                let span = self.source.contents[i];
+                (matches!(node.kind, super::NodeKind::Scalar { .. })
+                    && self.source.text[span.start()..span.end()]
+                        .contains(crate::ser::non_printable))
+                .then(|| NodeId::from_index(i))
+            });
+        super::Editor::new(&self).finish_rewriting(scalars)
+    }
+
     /// Return a copy of the YAML source.
     #[must_use]
     pub(crate) fn to_yaml(&self) -> String {

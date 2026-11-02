@@ -205,10 +205,18 @@ impl<'doc> Editor<'doc> {
     }
 
     pub(crate) fn finish(self) -> Result<DocumentSyntax, Error> {
+        self.finish_rewriting([])
+    }
+
+    pub(super) fn finish_rewriting(
+        self,
+        rewrites: impl IntoIterator<Item = NodeId>,
+    ) -> Result<DocumentSyntax, Error> {
         let mut candidate = self.draft.freeze()?;
         let syntax = Layout::new(&candidate);
         let original = &self.original.source;
-        let changes = Changes::between(original, &candidate, &syntax);
+        let mut changes = Changes::between(original, &candidate, &syntax);
+        changes.roots.extend(rewrites);
         if changes.is_empty() {
             return candidate.commit(&original.text);
         }

@@ -1,3 +1,13 @@
+/// Characters outside the YAML output character set (production 1).
+pub(crate) fn non_printable(c: char) -> bool {
+    (c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{85}'))
+        || matches!(c, '\u{fffe}' | '\u{ffff}')
+}
+
+pub(crate) fn requires_double_quotes(c: char) -> bool {
+    non_printable(c) || c == '\u{feff}'
+}
+
 #[inline]
 pub(crate) fn write_quoted(output: &mut String, value: &str) {
     if value.len() >= 64 {
@@ -131,12 +141,7 @@ fn write_escaped(output: &mut String, mut value: &str) {
             '\n' => output.push_str("\\n"),
             '\r' => output.push_str("\\r"),
             '\t' => output.push_str("\\t"),
-            c if c.is_control()
-                || matches!(
-                    c,
-                    '\u{85}' | '\u{2028}' | '\u{2029}' | '\u{feff}' | '\u{fffe}' | '\u{ffff}'
-                ) =>
-            {
+            c if requires_double_quotes(c) || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}') => {
                 // Writing to a String cannot fail.
                 write!(output, "\\u{:04X}", u32::from(c)).expect("String write");
             }

@@ -963,23 +963,8 @@ fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
 }
 
 pub(super) fn quoted(value: &str) -> String {
-    use std::fmt::Write;
-
-    let mut result = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '"' => result.push_str("\\\""),
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            c if c.is_control() || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}') => {
-                write!(result, "\\U{:08X}", u32::from(c)).expect("writing a String");
-            }
-            c => result.push(c),
-        }
-    }
-    result.push('"');
+    let mut result = String::new();
+    crate::ser::write_quoted(&mut result, value);
     result
 }
 
@@ -1084,7 +1069,7 @@ fn scalar(
         // application tags, even when the core schema resolves it as null.
         ScalarStyle::Plain if value.is_empty() => return Some(String::new()),
         ScalarStyle::Plain => flow_scalar(value, indent, limit)?,
-        ScalarStyle::SingleQuoted => {
+        ScalarStyle::SingleQuoted if !value.chars().any(crate::ser::requires_double_quotes) => {
             format!(
                 "'{}'",
                 flow_scalar(value, indent, limit)?.replace('\'', "''")
@@ -1095,7 +1080,10 @@ fn scalar(
         {
             block_scalar(value, style, position, indent, limit)?
         }
-        ScalarStyle::DoubleQuoted | ScalarStyle::Literal | ScalarStyle::Folded => {
+        ScalarStyle::SingleQuoted
+        | ScalarStyle::DoubleQuoted
+        | ScalarStyle::Literal
+        | ScalarStyle::Folded => {
             return Some(quoted(value));
         }
     };
