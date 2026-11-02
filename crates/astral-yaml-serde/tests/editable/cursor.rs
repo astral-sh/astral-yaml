@@ -93,7 +93,7 @@ fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
 
 #[test_case("'it''s': old", "it's"; "escaped quote")]
 #[test_case("'a.b/[0]': old", "a.b/[0]"; "path punctuation")]
-#[test_case("é: old", "é"; "unicode")]
+#[test_case("\u{feff}é: old", "é"; "unicode")]
 #[test_case("!!str true: old", "true"; "core string tag")]
 #[test_case("! true: old", "true"; "non specific tag")]
 #[test_case("{true: ignored, 'true': old}", "true"; "boolean spelling")]

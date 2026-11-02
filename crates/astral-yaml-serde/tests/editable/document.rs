@@ -310,3 +310,49 @@ fn explicit_limits_apply_to_initial_and_committed_typed_parsing() {
         .unwrap_err();
     assert!(error.message.contains("limit"));
 }
+
+// https://yaml.org/spec/1.2.2/#52-character-encodings
+#[test_case("old\n", false; "root scalar")]
+#[test_case("old: 1\n", true; "first mapping key")]
+fn edits_at_the_stream_start_produce_readable_utf8(source: &str, mapping: bool) {
+    let mut document = astral_yaml_serde::EditableYaml::parse(source).unwrap();
+    document
+        .edit(|mut root| {
+            if mapping {
+                root.into_mapping()?.key_at(0)?.set("éclair")
+            } else {
+                root.set("éclair")
+            }
+        })
+        .unwrap();
+
+    for yaml in [
+        document.to_yaml(),
+        document.syntax().normalized_yaml().unwrap(),
+    ] {
+        astral_yaml::Source::from_bytes(yaml.as_bytes()).unwrap();
+    }
+}
+
+#[test_case("é\r\n", "\u{feff}é\n"; "decoded text with CRLF")]
+#[test_case("\u{feff}é\n", "\u{feff}é\n"; "existing byte order mark")]
+#[test_case("---\né\n", "---\né\n"; "ASCII prefix")]
+fn editable_source_has_a_utf8_stream_prefix(source: &str, expected: &str) {
+    let document = Editable::<String>::parse(source).unwrap();
+    assert_eq!(document.into_yaml(), expected);
+}
+
+#[test]
+fn a_required_utf8_mark_counts_toward_the_edit_budget() {
+    let mut document = Editable::<String>::parse_with_options(
+        "old\n",
+        ParseOptions {
+            max_input_bytes: 5,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+    let error = document.edit(|mut root| root.set("é")).unwrap_err();
+    assert!(error.message.contains("limit"));
+    assert_eq!(document.source(), "old\n");
+}

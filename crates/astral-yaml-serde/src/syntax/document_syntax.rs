@@ -29,7 +29,7 @@ impl DocumentSyntax {
         let source = if source.len() > options.max_input_bytes {
             Cow::Borrowed(source)
         } else {
-            lf_source(source)
+            normalized_source(source)
         };
         let stream = astral_yaml::parse_with_options(&source, options)?;
         let document = super::single_document(&stream)?;
@@ -104,8 +104,10 @@ impl DocumentSyntax {
         let region = splice::region(self, self.source.root, OuterComments::Exclude);
         let rendered = splice::render(self, self.source.root, region)?;
         let output = splice::apply(&self.source, vec![(rendered.span, rendered.text)], region)?;
-        emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?;
-        Ok(output)
+        Ok(
+            emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?
+                .into_yaml(),
+        )
     }
 
     /// Return the YAML source, with LF line endings.
@@ -133,14 +135,25 @@ impl DocumentSyntax {
     }
 }
 
-/// Normalize physical line breaks without changing escaped scalar content.
-fn lf_source(source: &str) -> Cow<'_, str> {
-    let Some(first) = source.find('\r') else {
-        return Cow::Borrowed(source);
+/// Normalize physical line breaks and mark UTF-8 when its first character requires it.
+fn normalized_source(source: &str) -> Cow<'_, str> {
+    let prefix = if source.starts_with(|c: char| !c.is_ascii() && c != '\u{feff}') {
+        "\u{feff}"
+    } else {
+        ""
     };
-    let mut normalized = String::with_capacity(source.len());
-    normalized.push_str(&source[..first]);
-    for segment in source[first + 1..].split('\r') {
+    let mut segments = source.split('\r');
+    let first = segments
+        .next()
+        .expect("split always yields a first segment");
+    if prefix.is_empty() && first.len() == source.len() {
+        return Cow::Borrowed(source);
+    }
+
+    let mut normalized = String::with_capacity(source.len() + prefix.len());
+    normalized.push_str(prefix);
+    normalized.push_str(first);
+    for segment in segments {
         normalized.push('\n');
         normalized.push_str(segment.strip_prefix('\n').unwrap_or(segment));
     }
