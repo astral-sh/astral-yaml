@@ -1428,8 +1428,15 @@ mod tests {
     use serde::de::SeqAccess;
 
     #[test]
-    fn recursive_key_identity_refers_to_its_collection() {
-        assert_eq!(super::canonical_key("&a [*a]").unwrap(), "[r0;]");
+    fn recursive_key_identity_ignores_anchor_names_and_scalar_spelling() {
+        let source = "&a [null, true, false, 1, -2, 1.5, !tag {child: *a}]";
+        let equivalent = "&b [~, TRUE, FALSE, 01, -02, 1.50, !tag {'child': *b}]";
+        let identity = super::canonical_key(source).unwrap();
+        assert_eq!(identity, super::canonical_key(equivalent).unwrap());
+        assert_ne!(
+            identity,
+            super::canonical_key(&source.replace("*a", "'*a'")).unwrap()
+        );
     }
 
     #[test]

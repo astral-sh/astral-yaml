@@ -69,6 +69,8 @@ fn duplicate_keys_abort_edits_even_when_the_field_handles_the_error() {
 #[test_case("[&a [*a], { *a : 0, *a : 1 }]", false; "aliases of the same recursive key")]
 #[test_case("{ ? &a [*a] : 0, ? *a : 1 }", false; "an alias and its recursive key")]
 #[test_case("{ ? &a [*a] : 0, ? &b [*b] : 1 }", true; "distinct recursive keys")]
+#[test_case("{? {{x: 0, x: 1}: ok}: a, other: b}", false; "invalid key within a mapping key")]
+#[test_case("{? {ok: {x: 0, x: 1}}: a, other: b}", false; "invalid value within a mapping key")]
 #[test_case("outer: {1: a, 01: b}", false; "unvisited equivalent integer keys")]
 fn unvisited_mappings_compare_yaml_keys(source: &str, unique: bool) {
     match Editable::<Unvisited>::parse(source) {
