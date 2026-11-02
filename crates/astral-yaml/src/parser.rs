@@ -564,7 +564,7 @@ impl<'source> Parser<'source> {
                     }
 
                     let prefix = tag_uri(prefix).ok_or_else(|| self.error("invalid tag URI"))?;
-                    if prefix.starts_with([',', '[', ']']) {
+                    if !valid_tag(prefix, TagForm::Prefix) {
                         return Err(self.error("invalid global tag prefix"));
                     }
 
@@ -1073,7 +1073,7 @@ impl<'source> Parser<'source> {
         } else {
             Cow::Owned(format!("{prefix}{suffix}"))
         };
-        if !complete_tag(&expanded) {
+        if !valid_tag(&expanded, TagForm::Complete) {
             return Err(self.error("invalid expanded tag URI"));
         }
 
@@ -1132,7 +1132,7 @@ impl<'source> Parser<'source> {
                     let value = tag_uri(&self.source[uri_start..self.pos])
                         .ok_or_else(|| self.error("invalid tag URI"))?;
                     self.pos += 1;
-                    if !complete_tag(value) {
+                    if !valid_tag(value, TagForm::Complete) {
                         return Err(self.error("invalid verbatim tag URI"));
                     }
                     Cow::Borrowed(value)
@@ -1867,41 +1867,52 @@ fn tag_uri(s: &str) -> Option<&str> {
     Some(s)
 }
 
-fn complete_tag(s: &str) -> bool {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TagForm {
+    Prefix,
+    Complete,
+}
+
+fn valid_tag(s: &str, form: TagForm) -> bool {
     if let Some(local) = s.strip_prefix('!') {
-        return !local.is_empty();
+        return form == TagForm::Prefix || !local.is_empty();
     }
 
     let Some((scheme, rest)) = s.split_once(':') else {
-        return false;
+        return form == TagForm::Prefix && uri_scheme(s);
     };
-    if !scheme
-        .as_bytes()
-        .first()
-        .is_some_and(u8::is_ascii_alphabetic)
-        || !scheme
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
-    {
+    if !uri_scheme(scheme) {
         return false;
     }
+
+    let tail = if let Some(rest) = rest.strip_prefix("//") {
+        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let (authority, tail) = rest.split_at(end);
+        if !uri_authority(authority, form == TagForm::Prefix && tail.is_empty()) {
+            return false;
+        }
+        tail
+    } else {
+        rest
+    };
 
     // tag_uri has checked the character repertoire and percent escapes.
     // RFC 3986 §3 reserves literal brackets for hosts and permits one fragment.
-    let (hierarchy, suffix) = rest.split_at(rest.find(['?', '#']).unwrap_or(rest.len()));
-    if suffix.contains(['[', ']']) || suffix.split_once('#').is_some_and(|(_, f)| f.contains('#')) {
-        return false;
-    }
-    let Some(authority_path) = hierarchy.strip_prefix("//") else {
-        return !hierarchy.contains(['[', ']']);
-    };
-    let (authority, path) = authority_path
-        .split_once('/')
-        .unwrap_or((authority_path, ""));
-    !path.contains(['[', ']']) && uri_authority(authority)
+    !tail.contains(['[', ']']) && tail.split_once('#').is_none_or(|(_, f)| !f.contains('#'))
 }
 
-fn uri_authority(authority: &str) -> bool {
+fn uri_scheme(scheme: &str) -> bool {
+    let mut bytes = scheme.bytes();
+    bytes.next().is_some_and(|b| b.is_ascii_alphabetic())
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
+}
+
+fn uri_authority(authority: &str, open: bool) -> bool {
+    // Until the host is delimited, this entire prefix can still be userinfo.
+    if open && !authority.contains(['@', '[', ']']) {
+        return true;
+    }
+
     let (userinfo, host_port) = authority.split_once('@').unwrap_or(("", authority));
     if userinfo.contains(['[', ']']) || host_port.contains('@') {
         return false;
@@ -1909,9 +1920,9 @@ fn uri_authority(authority: &str) -> bool {
 
     let port = if let Some(literal) = host_port.strip_prefix('[') {
         let Some((address, rest)) = literal.split_once(']') else {
-            return false;
+            return open && ip_literal(literal, TagForm::Prefix);
         };
-        if !ip_literal(address) {
+        if !ip_literal(address, TagForm::Complete) {
             return false;
         }
         if rest.is_empty() {
@@ -1931,19 +1942,46 @@ fn uri_authority(authority: &str) -> bool {
     port.bytes().all(|b| b.is_ascii_digit())
 }
 
-fn ip_literal(address: &str) -> bool {
+fn ip_literal(address: &str, form: TagForm) -> bool {
     let Some(future) = address.strip_prefix(['v', 'V']) else {
-        return address.parse::<std::net::Ipv6Addr>().is_ok();
+        return address.parse::<std::net::Ipv6Addr>().is_ok()
+            || (form == TagForm::Prefix && ipv6_prefix(address));
     };
     // IPvFuture = "v" 1*HEXDIG "." 1*(unreserved / sub-delims / ":")
-    future.split_once('.').is_some_and(|(version, host)| {
-        !version.is_empty()
-            && version.bytes().all(|b| b.is_ascii_hexdigit())
-            && !host.is_empty()
-            && host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:".contains(&b))
-    })
+    let Some((version, host)) = future.split_once('.') else {
+        return form == TagForm::Prefix && future.bytes().all(|b| b.is_ascii_hexdigit());
+    };
+    !version.is_empty()
+        && version.bytes().all(|b| b.is_ascii_hexdigit())
+        && (form == TagForm::Prefix || !host.is_empty())
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:".contains(&b))
+}
+
+fn ipv6_prefix(address: &str) -> bool {
+    // Six hexadecimal groups followed by a dotted IPv4 address take at most 45 bytes.
+    if address.len() > 45 {
+        return false;
+    }
+
+    // Fill out the final IPv4 octets or the missing IPv6 groups, then let the
+    // standard parser check the resulting address.
+    let mut candidate = address.to_owned();
+    let dots = address.matches('.').count();
+    if dots > 0 {
+        if address.ends_with('.') {
+            candidate.push('0');
+        }
+        for _ in dots..3 {
+            candidate.push_str(".0");
+        }
+    } else if address.ends_with(':') {
+        candidate.push(if address.contains("::") { '0' } else { ':' });
+    } else {
+        candidate.push_str("::");
+    }
+    candidate.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
 fn signed(value: usize) -> isize {

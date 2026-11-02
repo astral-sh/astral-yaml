@@ -1134,7 +1134,19 @@ fn tag_handle_lookup_in_a_large_directive_list() {
 #[test_case(",tag:example")]
 #[test_case("[tag:example")]
 #[test_case("]tag:example")]
-fn tag_prefixes_reject_leading_flow_indicators(prefix: &str) {
+#[test_case("tag:example,[prefix]")]
+#[test_case("%74ag:example,")]
+#[test_case("https://example.org/#one#two")]
+#[test_case("relative/path")]
+#[test_case("https://user:pass/path")]
+#[test_case("https://user:pass?query")]
+#[test_case("x://user@host:bad")]
+#[test_case("x://[abcde")]
+#[test_case("x://[vZ")]
+#[test_case("x://[1:2:3:4:5:6:7:8:9")]
+#[test_case("x://[::ffff:192.999.")]
+#[test_case("x://[0000:0000:0000:0000:0000:0000:255.255.255.2550")]
+fn invalid_global_tag_prefixes_are_rejected_even_if_unused(prefix: &str) {
     let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
     assert_eq!(
         parse(&source).unwrap_err().message,
@@ -1144,11 +1156,34 @@ fn tag_prefixes_reject_leading_flow_indicators(prefix: &str) {
 
 #[test_case("!")]
 #[test_case("![]")]
-#[test_case("tag:example,[prefix]")]
-#[test_case("%74ag:example,")]
+#[test_case("tag:example,%5Bprefix%5D")]
+#[test_case("https://example.org/#one")]
 fn tag_prefixes_accept_local_and_global_forms(prefix: &str) {
     let source = format!("%TAG !e! {prefix}\n---\nvalue\n");
     parse(&source).unwrap();
+}
+
+#[test_case("x://[1:2:3:4:5:6:7:8]")]
+#[test_case("x://[::1:2]")]
+#[test_case("x://[::ffff:192.0.2.1]")]
+#[test_case("x://[Vff.name]")]
+fn a_tag_prefix_can_end_anywhere_in_an_ip_literal(uri: &str) {
+    for end in 1..=uri.len() {
+        let prefix = &uri[..end];
+        let source = format!("%TAG !e! {prefix}\n--- value");
+        parse(&source).unwrap_or_else(|error| panic!("{prefix}: {error}"));
+    }
+}
+
+#[test_case("htt", "ps://example.org/")]
+#[test_case("https://user:pa", "ss@example.org/")]
+fn shorthand_tags_can_complete_a_scheme_or_authority(prefix: &str, suffix: &str) {
+    let source = format!("%TAG !e! {prefix}\n--- !e!{suffix} value");
+    let stream = parse(&source).unwrap();
+    assert_eq!(
+        stream.nodes()[0].tag.as_ref().unwrap().value,
+        format!("{prefix}{suffix}")
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#911-document-prefix
