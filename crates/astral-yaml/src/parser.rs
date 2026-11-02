@@ -334,20 +334,13 @@ impl<'source> Parser<'source> {
     fn empty(&mut self, offset: usize) -> Result<NodeId> {
         self.reserve_element()?;
         let id = NodeId(self.nodes.len());
-        let span = Span {
-            start: offset,
-            end: offset,
-        };
+        let scalar = Scalar::empty(offset);
 
         self.nodes.push(Node {
-            span,
+            span: scalar.span,
             anchor: None,
             tag: None,
-            kind: NodeKind::Scalar(Scalar {
-                value: Cow::Borrowed(""),
-                style: ScalarStyle::Plain,
-                span,
-            }),
+            kind: NodeKind::Scalar(scalar),
         });
         Ok(id)
     }
@@ -658,17 +651,8 @@ impl<'source> Parser<'source> {
                 return self.block_into(parent, depth, sequence_indent, Some(id));
             }
 
-            let span = Span {
-                start: property_end,
-                end: property_end,
-            };
-
             self.nodes[id.0].span.end = property_end;
-            self.nodes[id.0].kind = NodeKind::Scalar(Scalar {
-                value: Cow::Borrowed(""),
-                style: ScalarStyle::Plain,
-                span,
-            });
+            self.nodes[id.0].kind = NodeKind::Scalar(Scalar::empty(property_end));
             return Ok(id);
         }
 
@@ -807,8 +791,12 @@ impl<'source> Parser<'source> {
 
         // Colons in property and alias names are not mapping separators.
         while bytes.get(i).is_some_and(|b| b"!&*".contains(b)) {
-            while bytes.get(i).is_some_and(|b| !is_space(*b)) {
-                i += 1;
+            if bytes[i..].starts_with(b"!<") {
+                i += memchr::memchr(b'>', &bytes[i..self.line_end()])? + 1;
+            } else {
+                while bytes.get(i).is_some_and(|b| !is_space(*b)) {
+                    i += 1;
+                }
             }
 
             while bytes.get(i).is_some_and(|b| matches!(b, b' ' | b'\t')) {
@@ -902,9 +890,10 @@ impl<'source> Parser<'source> {
                     }
                     b':' if level > 0
                         && (json_node
-                            || bytes
-                                .get(i + 1)
-                                .is_none_or(|b| is_space(*b) || b",]}".contains(b))) =>
+                            || is_node_separator(
+                                bytes.get(i + 1).copied(),
+                                CollectionStyle::Flow,
+                            )) =>
                     {
                         plain = false;
                         json_node = false;
@@ -1163,9 +1152,12 @@ impl<'source> Parser<'source> {
                 });
             }
 
-            if self.byte().is_some_and(|b| {
-                !(is_space(b) || context == CollectionStyle::Flow && b",]}".contains(&b))
-            }) {
+            // A property-only key may be followed immediately by its value indicator.
+            let separator = match self.byte() {
+                Some(b':') => self.next_byte(),
+                byte => byte,
+            };
+            if !is_node_separator(separator, context) {
                 return Err(self.error("node properties must be separated by whitespace"));
             }
 
@@ -1224,29 +1216,10 @@ impl<'source> Parser<'source> {
     ) -> Result<NodeKind<'source>> {
         match self.byte() {
             None | Some(b'\r' | b'\n' | b'#' | b',' | b']' | b'}') => {
-                Ok(NodeKind::Scalar(Scalar {
-                    value: Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    span: Span {
-                        start: self.pos,
-                        end: self.pos,
-                    },
-                }))
+                Ok(NodeKind::Scalar(Scalar::empty(self.pos)))
             }
-
-            Some(b':')
-                if self.next_byte().is_none_or(|b| {
-                    is_space(b) || (context == CollectionStyle::Flow && b",]}".contains(&b))
-                }) =>
-            {
-                Ok(NodeKind::Scalar(Scalar {
-                    value: Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    span: Span {
-                        start: self.pos,
-                        end: self.pos,
-                    },
-                }))
+            Some(b':') if is_node_separator(self.next_byte(), context) => {
+                Ok(NodeKind::Scalar(Scalar::empty(self.pos)))
             }
             Some(b'[') => self.flow_sequence(parent, depth),
             Some(b'{') => self.flow_mapping(parent, depth),
@@ -1285,11 +1258,7 @@ impl<'source> Parser<'source> {
                     ..
                 })
         );
-        if !json_key
-            && self
-                .byte()
-                .is_some_and(|b| !is_space(b) && !b",]}".contains(&b))
-        {
+        if !json_key && !is_node_separator(self.byte(), CollectionStyle::Flow) {
             return Err(self.error("a flow value after a YAML key must be separated by whitespace"));
         }
 
@@ -1857,6 +1826,12 @@ impl<'source> Parser<'source> {
 
 fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n')
+}
+
+fn is_node_separator(byte: Option<u8>, context: CollectionStyle) -> bool {
+    byte.is_none_or(|b| {
+        is_space(b) || (context == CollectionStyle::Flow && matches!(b, b',' | b']' | b'}'))
+    })
 }
 
 fn valid_handle(s: &str) -> bool {
