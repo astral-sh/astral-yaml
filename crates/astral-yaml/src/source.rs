@@ -39,6 +39,7 @@ impl<'input> TryFrom<&'input [u8]> for Source<'input> {
 
 impl<'bytes> Source<'bytes> {
     /// Decode UTF-8, UTF-16, or UTF-32 input, with or without a byte order mark.
+    /// Without a byte order mark, the first character must be ASCII.
     ///
     /// # Errors
     /// Returns an error if the input is malformed or exceeds the default size limit.
@@ -74,6 +75,10 @@ impl<'bytes> Source<'bytes> {
                         "invalid UTF-8",
                     )
                 })?;
+
+                if let Some(first) = text.chars().next() {
+                    check_initial_character(first, first.len_utf8())?;
+                }
 
                 return Ok(Self {
                     bytes,
@@ -122,6 +127,10 @@ impl<'bytes> Source<'bytes> {
                         .ok_or_else(|| error(start, offset, "invalid UTF-32 code point"))?
                 }
             };
+
+            if start == 0 {
+                check_initial_character(c, offset)?;
+            }
 
             if text.len() + c.len_utf8() > max_bytes {
                 return Err(error(start, offset, "decoded byte limit exceeded"));
@@ -182,6 +191,18 @@ impl<'bytes> Source<'bytes> {
             start,
             end: start + length(content),
         })
+    }
+}
+
+fn check_initial_character(first: char, end: usize) -> Result<(), Error> {
+    if first.is_ascii() || first == '\u{feff}' {
+        Ok(())
+    } else {
+        Err(error(
+            0,
+            end,
+            "non-ASCII stream start requires a byte order mark",
+        ))
     }
 }
 

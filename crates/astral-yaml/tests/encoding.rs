@@ -1,4 +1,4 @@
-use test_case::test_matrix;
+use test_case::{test_case, test_matrix};
 
 use astral_yaml::{Encoding, Source, Span};
 
@@ -21,10 +21,10 @@ fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
 // https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test_matrix(
     [Encoding::Utf8, Encoding::Utf16Be, Encoding::Utf16Le, Encoding::Utf32Be, Encoding::Utf32Le],
-    ["", "\u{feff}"]
+    [" ", "\u{feff}"]
 )]
-fn encodings_and_original_spans(encoding: Encoding, bom: &str) {
-    let text = format!("{bom}---\na: '🌍 é' # café\n");
+fn encodings_and_original_spans(encoding: Encoding, prefix: &str) {
+    let text = format!("{prefix}é: '🌍 é' # café\n");
     let bytes = encode(&text, encoding);
     let source: Source<'_> = bytes.as_slice().try_into().unwrap();
     assert_eq!(source.text(), text);
@@ -52,6 +52,25 @@ fn encodings_and_original_spans(encoding: Encoding, bom: &str) {
         source
             .original_span(Span::new(inside, inside).unwrap())
             .is_none()
+    );
+}
+
+// https://yaml.org/spec/1.2.2/#52-character-encodings
+#[test_case(Encoding::Utf8)]
+#[test_case(Encoding::Utf16Be)]
+#[test_case(Encoding::Utf16Le)]
+#[test_case(Encoding::Utf32Be)]
+#[test_case(Encoding::Utf32Le)]
+fn a_non_ascii_initial_character_needs_a_bom(encoding: Encoding) {
+    let bytes = encode("éx", encoding);
+    let error = Source::from_bytes(&bytes).unwrap_err();
+    assert_eq!(
+        error.span.slice_bytes(&bytes).unwrap(),
+        encode("é", encoding)
+    );
+    assert_eq!(
+        error.message,
+        "non-ASCII stream start requires a byte order mark"
     );
 }
 
