@@ -645,12 +645,11 @@ impl<'source> Parser<'source> {
             self.empty(start)?
         };
 
-        self.properties(id, CollectionStyle::Block, parent)?;
+        let property_end = self.properties(id, CollectionStyle::Block, parent)?;
         if self.byte() == Some(b'#') {
             self.comment()?;
         }
 
-        let property_end = self.pos;
         if self.newline() {
             self.block_space()?;
             if self.starts_nested_block(parent, sequence_indent) {
@@ -658,42 +657,18 @@ impl<'source> Parser<'source> {
                 return self.block_into(parent, depth, sequence_indent, Some(id));
             }
 
-            self.nodes[id.0].span.end = property_end;
-            self.nodes[id.0].kind = NodeKind::Scalar(Scalar::empty(property_end));
-            return Ok(id);
+            return self.finish_node(id, NodeKind::Scalar(Scalar::empty(property_end)));
         }
-
-        let content_start = self.pos;
-        let kind = match self.byte() {
-            Some(b'|' | b'>') => self.block_scalar(parent)?,
-            _ => self.inline_kind(CollectionStyle::Block, parent, depth)?,
-        };
-
-        if matches!(kind, NodeKind::Alias { .. })
-            && (self.nodes[id.0].anchor.is_some() || self.nodes[id.0].tag.is_some())
-        {
-            return Err(self.error("aliases cannot have node properties"));
-        }
-
-        let end = match &kind {
-            NodeKind::Scalar(scalar) => scalar.span.end,
-            _ => self.pos,
-        };
-
-        self.nodes[id.0].kind = kind;
-        self.nodes[id.0].span.end = end.max(content_start);
 
         // Block scalar scanning already stops at the next content line.
-        if !matches!(
-            &self.nodes[id.0].kind,
-            NodeKind::Scalar(Scalar {
-                style: ScalarStyle::Literal | ScalarStyle::Folded,
-                ..
-            })
-        ) {
-            self.finish_line()?;
+        if matches!(self.byte(), Some(b'|' | b'>')) {
+            let kind = self.block_scalar(parent)?;
+            return self.finish_node(id, kind);
         }
 
+        let kind = self.inline_kind(CollectionStyle::Block, parent, depth, property_end)?;
+        self.finish_node(id, kind)?;
+        self.finish_line()?;
         Ok(id)
     }
 
@@ -1080,7 +1055,9 @@ impl<'source> Parser<'source> {
         Ok(expanded)
     }
 
-    fn properties(&mut self, id: NodeId, context: CollectionStyle, parent: isize) -> Result<()> {
+    /// Returns the end of the last property, before trailing separation.
+    fn properties(&mut self, id: NodeId, context: CollectionStyle, parent: isize) -> Result<usize> {
+        let mut end = self.pos;
         while matches!(self.byte(), Some(b'&' | b'!')) {
             let start = self.pos;
             let anchor = self.byte() == Some(b'&');
@@ -1156,6 +1133,8 @@ impl<'source> Parser<'source> {
                 });
             }
 
+            end = self.pos;
+
             // A property-only key may be followed immediately by its value indicator.
             let separator = match self.byte() {
                 Some(b':') => self.next_byte(),
@@ -1172,7 +1151,7 @@ impl<'source> Parser<'source> {
             }
         }
 
-        Ok(())
+        Ok(end)
     }
 
     #[inline]
@@ -1184,7 +1163,7 @@ impl<'source> Parser<'source> {
         if !matches!(self.byte(), Some(b'!' | b'&' | b'[' | b'{')) {
             self.reserve_element()?;
             let start = self.pos;
-            let kind = self.inline_kind(context, parent, depth)?;
+            let kind = self.inline_kind(context, parent, depth, start)?;
             let id = NodeId(self.nodes.len());
             self.nodes.push(Node {
                 span: Span {
@@ -1199,16 +1178,22 @@ impl<'source> Parser<'source> {
         }
 
         let id = self.empty(self.pos)?;
-        self.properties(id, context, parent)?;
-        let kind = self.inline_kind(context, parent, depth)?;
-        if matches!(kind, NodeKind::Alias { .. })
-            && (self.nodes[id.0].tag.is_some() || self.nodes[id.0].anchor.is_some())
-        {
+        let property_end = self.properties(id, context, parent)?;
+        let kind = self.inline_kind(context, parent, depth, property_end)?;
+        self.finish_node(id, kind)
+    }
+
+    fn finish_node(&mut self, id: NodeId, kind: NodeKind<'source>) -> Result<NodeId> {
+        let node = &mut self.nodes[id.0];
+        if matches!(kind, NodeKind::Alias { .. }) && (node.tag.is_some() || node.anchor.is_some()) {
             return Err(self.error("aliases cannot have node properties"));
         }
 
-        self.nodes[id.0].kind = kind;
-        self.nodes[id.0].span.end = self.pos;
+        node.span.end = match &kind {
+            NodeKind::Scalar(scalar) => scalar.span.end,
+            _ => self.pos,
+        };
+        node.kind = kind;
         Ok(id)
     }
 
@@ -1217,13 +1202,14 @@ impl<'source> Parser<'source> {
         context: CollectionStyle,
         parent: isize,
         depth: usize,
+        empty_at: usize,
     ) -> Result<NodeKind<'source>> {
         match self.byte() {
             None | Some(b'\r' | b'\n' | b'#' | b',' | b']' | b'}') => {
-                Ok(NodeKind::Scalar(Scalar::empty(self.pos)))
+                Ok(NodeKind::Scalar(Scalar::empty(empty_at)))
             }
             Some(b':') if is_node_separator(self.next_byte(), context) => {
-                Ok(NodeKind::Scalar(Scalar::empty(self.pos)))
+                Ok(NodeKind::Scalar(Scalar::empty(empty_at)))
             }
             Some(b'[') => self.flow_sequence(parent, depth),
             Some(b'{') => self.flow_mapping(parent, depth),

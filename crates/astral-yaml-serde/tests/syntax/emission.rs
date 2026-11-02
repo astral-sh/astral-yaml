@@ -400,6 +400,13 @@ fn normalization_uses_explicit_keys_when_escaped_syntax_is_long(key: &str) {
     );
 }
 
+#[test_case("&a  "; "trailing spaces")]
+#[test_case("&a\t#keep\n"; "tab before a comment")]
+fn normalization_preserves_separation_after_a_property_only_scalar(source: &str) {
+    let document = DocumentSyntax::parse(source).unwrap();
+    assert_eq!(document.normalized_yaml().unwrap(), source);
+}
+
 #[test]
 fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
     for source in [

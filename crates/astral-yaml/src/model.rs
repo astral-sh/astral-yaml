@@ -108,6 +108,7 @@ pub struct Scalar<'source> {
     /// The presentation used to spell the value in the source.
     pub style: ScalarStyle,
     /// The scalar token, including its delimiters and excluding node properties.
+    /// Omitted content after an anchor or tag has a zero-width span at the end of the last property.
     pub span: Span,
 }
 
