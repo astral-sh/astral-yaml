@@ -165,9 +165,8 @@ fn replacement_keeps_compatible_styles_and_anchor_identity() {
     \ No newline at end of file
 
     @@ -1,2 +1,3 @@
-    -|-
+     |-
     -  old
-    +|3-
     +  new
     +  text
 

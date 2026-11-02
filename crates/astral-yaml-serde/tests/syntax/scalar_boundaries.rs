@@ -90,7 +90,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
     insta::assert_snapshot!(diffs.join("\n"), @"
     @@ -1 +1,6 @@
     -old
-    +|3+
+    +|+
     +  new
     +  ⏎
     +...
@@ -99,7 +99,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 
     @@ -1 +1,6 @@
     -old
-    +>3+
+    +>+
     +  new
     +  ⏎
     +...
@@ -108,7 +108,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 
     @@ -1 +1,5 @@
     -old
-    +|3
+    +|
     +  new
     +...
     +
@@ -116,7 +116,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 
     @@ -1 +1,5 @@
     -old
-    +|3-
+    +|-
     +  new
     +...
     +
@@ -124,7 +124,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 
     @@ -1 +1,6 @@
     -old
-    +- |2+
+    +- |+
     +  new
     +  ⏎
     +...
@@ -133,7 +133,7 @@ fn detached_suffixes_survive_root_block_scalar_replacement() {
 
     @@ -1 +1,6 @@
     -old
-    +key: |2+
+    +key: |+
     +  new
     +  ⏎
     +...
