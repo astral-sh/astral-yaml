@@ -99,6 +99,9 @@ fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
 #[test_case("{true: ignored, 'true': old}", "true"; "boolean spelling")]
 #[test_case("{1: ignored, '1': old}", "1"; "integer spelling")]
 #[test_case("{!!int '1': ignored, '1': old}", "1"; "explicit integer spelling")]
+#[test_case("{anchor: &a 'it''s', ? *a : old}", "it's"; "alias of quoted string")]
+#[test_case("{anchor: &a !!str true, ? *a : old}", "true"; "alias of tagged string")]
+#[test_case("{anchor: &a true, ? *a : ignored, 'true': old}", "true"; "alias of boolean")]
 #[test_case("{[complex, key]: ignored, name: old}", "name"; "complex sibling key")]
 fn fields_use_literal_decoded_string_keys(source: &str, name: &str) {
     let document = edit::<IgnoredAny>(source, |root| {
@@ -107,6 +110,78 @@ fn fields_use_literal_decoded_string_keys(source: &str, name: &str) {
         field.set("new")
     });
     assert_eq!(document.source(), source.replace("old", "new"));
+}
+
+// An alias refers to the anchored node, including when used as a key.
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
+#[test_case(|document| document.set_at(["map", "foo"], 5); "path")]
+#[test_case(|document| document.edit(|root| {
+    root.field("map")?.into_mapping()?.set("foo", 5)?;
+    Ok(())
+}); "mapping set")]
+fn updating_an_alias_key_preserves_its_spelling(
+    update: fn(&mut EditableYaml) -> Result<(), Error>,
+) {
+    let mut document = EditableYaml::parse("anchor: &a foo\nmap: {? *a : 2}\n").unwrap();
+    update(&mut document).unwrap();
+    assert_eq!(document.source(), "anchor: &a foo\nmap: {? *a : 5}\n");
+}
+
+#[test]
+fn named_removal_of_an_alias_key_keeps_its_target() {
+    let document = edit::<IgnoredAny>("anchor: &a foo\nmap: {? *a : 2, keep: 3}\n", |root| {
+        assert!(root.field("map")?.into_mapping()?.remove("foo")?);
+        Ok(())
+    });
+    insta::assert_snapshot!(document.source(), @"
+    anchor: &a foo
+    map: {keep: 3}
+    ");
+}
+
+#[test]
+fn alias_key_lookup_uses_the_current_draft_target() {
+    let source = "first: &a foo\nmap: {? *a : 2}\nsecond: &a other\n";
+    let document = edit::<IgnoredAny>(source, |mut root| {
+        root.reborrow().field("first")?.set("renamed")?;
+        let mut map = root.field("map")?.into_mapping()?;
+        assert!(map.get("foo")?.is_none());
+        assert!(map.get("other")?.is_none());
+        map.field("renamed")?.set(5)
+    });
+    insta::assert_snapshot!(document.source(), @"
+    first: &a renamed
+    map: {? *a : 5}
+    second: &a other
+    ");
+}
+
+#[test]
+fn named_edits_detect_ambiguity_after_an_alias_target_changes() {
+    let source = "anchor: &a foo\nmap: {? *a : 2, other: 3}\n";
+    let mut document = EditableYaml::parse(source).unwrap();
+    let error = document
+        .edit(|mut root| {
+            root.reborrow().field("anchor")?.set("other")?;
+            root.field("map")?.into_mapping()?.set("other", 5)?;
+            Ok(())
+        })
+        .unwrap_err();
+    insta::assert_snapshot!(error, @r#"$["map"]["other"]: ambiguous mapping key at bytes 0..40"#);
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn a_retired_alias_key_target_does_not_block_other_named_edits() {
+    let document = edit::<IgnoredAny>("anchor: &a foo\nmap: {? *a : 2, keep: 3}\n", |root| {
+        let mut root = root.into_mapping()?;
+        assert!(root.remove("anchor")?);
+        let mut map = root.field("map")?.into_mapping()?;
+        assert!(map.get("foo")?.is_none());
+        map.set("keep", 5)?;
+        map.remove_at(0)
+    });
+    insta::assert_snapshot!(document.source(), @"map: {keep: 5}");
 }
 
 #[test]
