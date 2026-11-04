@@ -343,7 +343,11 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
             .collect::<Vec<_>>(),
         [(
             document.source.root,
-            splice::region(&document, document.source.root, OuterComments::Include)
+            splice::region(
+                &document.source,
+                document.source.root,
+                OuterComments::Include
+            )
         )]
     );
 }
@@ -431,7 +435,11 @@ fn indented_root_suffixes_share_the_body_rewrite_context() {
             .collect::<Vec<_>>(),
         [(
             document.source.root,
-            splice::region(&document, document.source.root, OuterComments::Include)
+            splice::region(
+                &document.source,
+                document.source.root,
+                OuterComments::Include
+            )
         )]
     );
     editor.finish().unwrap();

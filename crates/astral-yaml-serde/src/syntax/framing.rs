@@ -293,7 +293,7 @@ impl RootComments {
     /// Remove blank lines between the root and its leading or trailing comments.
     /// Skip regions already covered by other patches.
     pub(super) fn finish_separation(&self, original: &Source, patches: &mut Vec<(Span, String)>) {
-        let root = original.nodes[original.root.index()].span;
+        let root = original.body_span(original.root);
         if let Some(start) = self.leading_start {
             Self::remove_blank_lines(original, start, root.start(), patches);
         }
@@ -689,7 +689,7 @@ impl RootLayout {
         candidate: Syntax<'_, Option<Span>>,
         syntax: &Layout,
     ) -> Self {
-        let root_start = original.nodes[original.root.index()].span.start();
+        let root_start = original.body_span(original.root).start();
         let start = original
             .start_marker
             .or(original.preceding_end_marker)

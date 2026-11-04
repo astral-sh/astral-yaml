@@ -92,6 +92,6 @@ fn snapshot() {
           "version" [plain @71:5..71:12]: "v1" [plain @71:14..71:16]
 
     document 7 (start: ---, end: implicit)
-    "" [plain @73:1..73:1]
+    "" [plain @72:4..72:4]
     "#);
 }

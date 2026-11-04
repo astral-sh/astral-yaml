@@ -36,7 +36,7 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         insta::assert_snapshot!(origins.join("\n\n"), @"
           |
         1 | existing: # keep
-          |           ^ original empty value
+          |          ^ original empty value
         2 | items: []
           |
 

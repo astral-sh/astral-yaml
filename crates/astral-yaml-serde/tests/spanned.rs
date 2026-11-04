@@ -230,7 +230,7 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
             Some(source.trim_start_matches("---\n"))
         );
         if value.span.is_empty() {
-            assert_eq!(value.span.start(), source.len());
+            assert_eq!(value.span.start(), "---".len());
         }
         snapshots.push(span_snapshot(source, [("None", value.span)]));
         assert!(from_str::<Option<Spanned<u8>>>(source).unwrap().is_none());
@@ -268,7 +268,7 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
     insta::assert_snapshot!(span_snapshot(source, [("empty: None", mapping["empty"].span)]), @"
       |
     1 | {empty: }
-      |         ^ empty: None
+      |        ^ empty: None
     ");
 }
 

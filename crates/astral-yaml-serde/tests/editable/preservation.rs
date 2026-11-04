@@ -226,6 +226,18 @@ fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Val
     assert_eq!(document.value(), value);
 }
 
+#[test]
+fn an_empty_document_keeps_its_header_comments_before_the_replacement() {
+    let mut document = Editable::<Option<String>>::parse("---\n# keep\n...").unwrap();
+    let syntax = document.syntax();
+    let root = syntax.node(syntax.root()).unwrap();
+    assert_eq!(root.span(), astral_yaml::Span::new(3, 3).unwrap());
+    assert_eq!(root.comments()[0].placement(), CommentPlacement::Leading);
+
+    document.set_at([] as [&str; 0], "new").unwrap();
+    assert_eq!(document.source(), "---\n# keep\nnew\n...");
+}
+
 #[test_case(&serde_json::json!("new"), "new"; "scalar")]
 #[test_case(&serde_json::json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
 #[test_case(&serde_json::json!({"a": "b"}), r#"{"a": "b"}"#; "mapping")]

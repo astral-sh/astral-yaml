@@ -80,6 +80,12 @@ impl<'source> CommentIndex<'source> {
             slots: Vec::with_capacity(16),
         };
         tree.push(stream, doc.root)?;
+        if tree.nodes[0].span.is_empty() {
+            // An empty document's header comments precede the place where its
+            // content would appear, even though the empty token follows `---`.
+            let at = skip_trivia(&stream.source()[..end], tree.nodes[0].span.end());
+            tree.nodes[0].span = Span { start: at, end: at };
+        }
 
         let mut marker_lines: Vec<_> = doc
             .directives
@@ -242,16 +248,31 @@ impl Tree<'_, '_> {
                 for (offset, entry) in entries.iter().enumerate() {
                     let key = self.push(stream, entry.key)?;
                     let value = self.push(stream, entry.value)?;
+                    let value_span = &mut self.nodes[value].span;
+                    if *style == CollectionStyle::Flow && value_span.is_empty() {
+                        // Comments before the comma or closing delimiter belong to
+                        // the omitted value. Use the delimiter to place them while
+                        // keeping the public scalar span immediately after its indicator.
+                        let at = skip_trivia(source, value_span.end());
+                        *value_span = Span { start: at, end: at };
+                    }
+                    let end = entry.span.end().max(value_span.end());
                     let separator = skip_trivia(self.source, self.nodes[key].span.end());
                     let colon =
                         (self.source.as_bytes().get(separator) == Some(&b':')).then_some(separator);
                     self.slots[slots.start + offset] = Slot {
                         start: entry.span.start(),
-                        end: entry.span.end(),
+                        end,
                         key: Some(key),
                         colon,
                         value,
                     };
+                }
+
+                // A compact mapping in a flow sequence has no closing brace of
+                // its own. Its last slot also bounds the mapping's comments.
+                if let Some(last) = self.slots[slots.clone()].last() {
+                    self.nodes[index].span.end = node.span.end().max(last.end);
                 }
 
                 Some(Collection {
