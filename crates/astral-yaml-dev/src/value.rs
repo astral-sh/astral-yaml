@@ -184,6 +184,8 @@ mod tests {
         }
     }
 
+    // Equal mappings have equal key/value pairs in any order. Sequence order and node tags matter.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     #[test]
     fn test_value_equality_ignores_mapping_order_but_preserves_types_and_entries() {
         for (left, right, equal) in [
