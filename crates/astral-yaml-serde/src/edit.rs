@@ -121,8 +121,9 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
 
     /// Select the value at string key `name`, or return `None` if it is absent.
     ///
-    /// Keys are compared after decoding. Numeric, boolean, and application-tagged
-    /// keys do not match their string spellings. Names are literal, not paths.
+    /// Keys are compared after decoding and resolving aliases. Numeric, boolean,
+    /// and application-tagged keys do not match their string spellings.
+    /// Names are literal, not paths.
     ///
     /// # Errors
     /// Returns an error if the node is not a mapping or more than one key matches.

@@ -107,7 +107,19 @@ impl<'doc> Editor<'doc> {
         self.draft.charge(entries.len())?;
         let mut found = None;
         for (index, &(key, value)) in entries.iter().enumerate() {
-            if string_key(self.draft.node(key)) == Some(name) {
+            let key = self.draft.node(key);
+            let key = if let NodeKind::Alias { target } = *key.kind() {
+                self.draft.charge(1)?;
+                // An alias may be removed after its target in the same transaction.
+                if !self.draft.contains(target) {
+                    continue;
+                }
+                self.draft.node(target)
+            } else {
+                key
+            };
+
+            if string_key_matches(key, name) {
                 if found.is_some() {
                     return Err(self.error("ambiguous mapping key"));
                 }
@@ -261,15 +273,17 @@ impl<'doc> Editor<'doc> {
     }
 }
 
-fn string_key<Location>(node: &Node<Location>) -> Option<&str> {
+fn string_key_matches<Location>(node: &Node<Location>, name: &str) -> bool {
     let NodeKind::Scalar { value, style } = node.kind() else {
-        return None;
+        return false;
     };
-    let kind = match node.tag() {
-        Some("!" | "tag:yaml.org,2002:str") => ScalarType::String,
-        Some(_) => return None,
-        None if *style == ScalarStyle::Plain => schema::classify(value),
-        None => ScalarType::String,
-    };
-    (kind == ScalarType::String).then_some(value)
+
+    match node.tag() {
+        Some("!" | "tag:yaml.org,2002:str") => value == name,
+        Some(_) => false,
+        None => {
+            value == name
+                && (*style != ScalarStyle::Plain || schema::classify(value) == ScalarType::String)
+        }
+    }
 }

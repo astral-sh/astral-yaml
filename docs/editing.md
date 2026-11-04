@@ -160,12 +160,16 @@ cargo run -p astral-yaml-serde --features editable --example edit-config
 
 ## Aliases and non-string keys
 
-Paths stop at aliases. Given `default_port: &port 80` and `port: *port`,
+A path stops when it selects an alias as a value.
+Given `default_port: &port 80` and `port: *port`,
 reading `port` returns `80`. Setting `port` to `443` replaces just the alias.
 To change the shared value, edit `default_port`. An edit fails if a surviving
 alias would lose its anchor or point to a different node. When deserialization
 fails at an alias, the error path identifies its use in the proposed document
 and the byte span can point to its target.
+
+Named mapping edits resolve alias keys that point to strings. Updating the value
+of such an entry preserves the alias key.
 
 If a mapping has non-string keys, use `key_at()` and `value_at()` to select
 its keys and values by index. Use `remove_at(index)` to delete the entry.

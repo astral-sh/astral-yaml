@@ -134,6 +134,23 @@ fn an_exhausted_work_budget_allows_an_empty_commit_but_not_a_rewrite() {
 }
 
 #[test]
+fn named_alias_key_lookup_charges_work_for_the_target() {
+    let options = ParseOptions {
+        max_nodes: 5,
+        ..ParseOptions::default()
+    };
+    let document =
+        DocumentSyntax::parse_with_options("{anchor: &a foo, ? *a : 2}", options).unwrap();
+    let editor = Editor::new(&document);
+    let root = editor.root();
+    editor.node(root).unwrap();
+    editor.node(root).unwrap();
+    // The remaining budget covers the mapping and both keys, but not the alias target.
+    let error = editor.string_field(root, "foo").unwrap_err();
+    assert_eq!(error.message, "editing resource limit exceeded");
+}
+
+#[test]
 fn inserting_outer_comments_obeys_the_output_limit() {
     let source = indoc! {r"
                 # old
