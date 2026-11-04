@@ -58,13 +58,9 @@ fn numeric_and_type_errors_are_located() {
       | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ $: float out of range
     ");
 
-    for source in [
-        "340282366920938463463374607431768211456",
-        "-170141183460469231731687303715884105729",
-    ] {
-        assert!(from_str::<de::IgnoredAny>(source).is_err());
-        assert!(from_str::<de::IgnoredAny>(&format!("{{{source}: null}}")).is_err());
-    }
+    let source = "{340282366920938463463374607431768211456: null}";
+    let error = from_str::<de::IgnoredAny>(source).unwrap_err();
+    assert_eq!(error.message, "integer key out of range");
 
     assert!(from_str::<Vec<u8>>("1").is_err());
     assert!(from_str::<BTreeMap<String, u8>>("1").is_err());
@@ -167,6 +163,23 @@ struct Known {
     known: u8,
 }
 
+// https://yaml.org/spec/1.2.2/#1031-tags
+#[test_case("340282366920938463463374607431768211456"; "unsigned integer")]
+#[test_case("-170141183460469231731687303715884105729"; "signed integer")]
+#[test_case("1e309"; "float")]
+#[test_case("!!int '0x100000000000000000000000000000000'"; "tagged radix integer")]
+#[test_case("[&n !!float '-1e309', *n]"; "alias to tagged float")]
+fn ignored_fields_accept_numbers_outside_native_ranges(extra: &str) {
+    let source = format!("known: 1\nextra: {extra}\n");
+    assert_eq!(from_str::<Known>(&source).unwrap(), Known { known: 1 });
+
+    #[cfg(feature = "editable")]
+    {
+        let document = astral_yaml_serde::EditableYaml::parse(&source).unwrap();
+        assert_eq!(document.source(), source);
+    }
+}
+
 #[test]
 fn ignored_fields_still_validate_their_values() {
     let value = from_str::<Known>("known: 1\nextra: [null, {a: true}]").unwrap();
@@ -175,6 +188,7 @@ fn ignored_fields_still_validate_their_values() {
     for source in [
         "known: 1\nextra: {a: 1, a: 2}",
         "known: 1\nextra: !!int invalid",
+        "known: 1\nextra: !!float 0xff",
         "known: 1\nextra: !!str []",
         "known: 1\nextra: &a [*a]",
     ] {
