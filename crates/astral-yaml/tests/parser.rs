@@ -1193,6 +1193,27 @@ fn tag_handle_lookup_in_a_large_directive_list() {
     );
 }
 
+// Anchors and tag handles are scoped to a single document.
+// https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
+// https://yaml.org/spec/1.2.2/#682-tag-directives
+#[test_case("*x", "unknown alias")]
+#[test_case("!x!value", "undefined tag handle")]
+fn document_boundaries_clear_sparse_tables(last: &str, expected: &str) {
+    use std::fmt::Write;
+
+    let mut source = String::new();
+    for i in 0..32 {
+        writeln!(source, "%TAG !t{i}! !example/").unwrap();
+    }
+    source.push_str("---\n");
+    for i in 0..32 {
+        writeln!(source, "- &a{i} value").unwrap();
+    }
+    writeln!(source, "...\n%TAG !x! !example/\n--- &x value\n--- {last}").unwrap();
+
+    assert_eq!(parse(&source).unwrap_err().message, expected);
+}
+
 // https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test_case(",tag:example")]
 #[test_case("[tag:example")]

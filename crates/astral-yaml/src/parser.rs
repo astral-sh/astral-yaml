@@ -433,8 +433,8 @@ impl<'source> Parser<'source> {
                 continue;
             }
 
-            self.anchors.clear();
-            self.tags.clear();
+            clear_document_table(&mut self.anchors);
+            clear_document_table(&mut self.tags);
 
             let start = self.pos;
             if !previous_ended && self.byte() == Some(b'%') {
@@ -1914,6 +1914,16 @@ fn is_space(b: u8) -> bool {
 impl CollectionStyle {
     fn is_node_separator(self, byte: Option<u8>) -> bool {
         byte.is_none_or(|b| is_space(b) || (self == Self::Flow && matches!(b, b',' | b']' | b'}')))
+    }
+}
+
+/// Reuse storage across similar-sized documents. Clearing a sparse table would
+/// repeatedly scan capacity retained from a much larger document.
+fn clear_document_table<K, V>(table: &mut HashMap<K, V>) {
+    if table.len() < table.capacity() / 4 {
+        *table = HashMap::new();
+    } else {
+        table.clear();
     }
 }
 
