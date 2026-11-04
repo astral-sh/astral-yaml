@@ -148,7 +148,7 @@ impl<O: Output> Serializer<O> {
     }
 
     fn number(&mut self, value: impl fmt::Display) -> Result<()> {
-        let start = self.output.as_str().len();
+        let start = self.output.as_ref().len();
         self.output.number(value)?;
         self.check_written_scalar_tag(start)
     }
@@ -175,7 +175,7 @@ impl<O: Output> Serializer<O> {
     #[inline]
     fn check_written_scalar_tag(&mut self, start: usize) -> Result<()> {
         if let Some(tag) = self.take_core_tag() {
-            Self::check_tagged_scalar(tag, &self.output.as_str()[start..])?;
+            Self::check_tagged_scalar(tag, &self.output.as_ref()[start..])?;
         }
 
         Ok(())
@@ -271,9 +271,9 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
 
     fn serialize_f32(self, value: f32) -> Result<()> {
         if value.is_finite() {
-            let start = self.output.as_str().len();
+            let start = self.output.as_ref().len();
             self.output.number(value)?;
-            if !self.output.as_str()[start..].contains(['.', 'e', 'E']) {
+            if !self.output.as_ref()[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0")?;
             }
 
@@ -284,7 +284,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
     }
 
     fn serialize_f64(self, value: f64) -> Result<()> {
-        let start = self.output.as_str().len();
+        let start = self.output.as_ref().len();
         if value.is_nan() {
             self.output.push_str(".nan")?;
         } else if value.is_infinite() {
@@ -296,7 +296,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
             self.output.push_str(value)?;
         } else {
             self.output.number(value)?;
-            if !self.output.as_str()[start..].contains(['.', 'e', 'E']) {
+            if !self.output.as_ref()[start..].contains(['.', 'e', 'E']) {
                 self.output.push_str(".0")?;
             }
         }
@@ -356,7 +356,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
         if std::mem::take(&mut self.yaml_tag) {
             // A node immediately after the explicit-key indicator will be followed
             // by a colon. Separate it from the bare tag.
-            let is_key = self.output.as_str().ends_with(EXPLICIT_KEY);
+            let is_key = self.output.as_ref().ends_with(EXPLICIT_KEY);
             self.enum_tag(variant)?;
             self.pending_tag = None;
             if is_key {
@@ -518,7 +518,7 @@ impl<O: Output> Compound<'_, O> {
         if state == CompoundState::MapKey {
             self.serializer
                 .keys
-                .finish(self.serializer.output.as_str(), self.key_scope)?;
+                .finish(self.serializer.output.as_ref(), self.key_scope)?;
         }
 
         let closing = if state == CompoundState::Sequence {
@@ -606,9 +606,9 @@ impl<O: Output> SerializeMap for Compound<'_, O> {
 
         self.separator()?;
         self.serializer.output.push_str(EXPLICIT_KEY)?;
-        let start = self.serializer.output.as_str().len();
+        let start = self.serializer.output.as_ref().len();
         key.serialize(&mut *self.serializer)?;
-        let output = self.serializer.output.as_str();
+        let output = self.serializer.output.as_ref();
         let signature = self.serializer.keys.insert(output, start..output.len())?;
         self.key_scope.insert(signature);
         self.serializer.output.push_str(": ")?;

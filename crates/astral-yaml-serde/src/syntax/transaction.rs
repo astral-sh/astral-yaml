@@ -117,9 +117,12 @@ impl<'doc> Editor<'doc> {
         Ok(found)
     }
 
-    pub(crate) fn serialize(&self, value: impl Serialize) -> Result<String, crate::Error> {
+    pub(crate) fn serialize(
+        &self,
+        value: &(impl Serialize + ?Sized),
+    ) -> Result<String, crate::Error> {
         let (remaining, span) = self.draft.byte_budget();
-        ser::to_string_with_limit(&value, remaining, span)
+        ser::to_string_with_limit(value, remaining, span)
     }
 
     pub(crate) fn append_string_entry<S: AsRef<str>>(
@@ -135,6 +138,15 @@ impl<'doc> Editor<'doc> {
         let (_, value) = self.insert_entry(id, *len, &key, yaml.as_ref())?;
         *len += 1;
         Ok(value)
+    }
+
+    pub(crate) fn replace_value(
+        &mut self,
+        id: NodeId,
+        value: &(impl Serialize + ?Sized),
+    ) -> Result<(), crate::Error> {
+        let yaml = self.serialize(value)?;
+        Ok(self.replace_preserving_style(id, &yaml)?)
     }
 
     #[cfg(test)]

@@ -182,7 +182,6 @@ impl<O: Output> ser::Serializer for TagSerializer<'_, O> {
 
 #[cfg(test)]
 mod tests {
-    use super::Output;
     use super::TagSerializer;
     use crate::Error;
     use serde::Serializer;
@@ -233,6 +232,6 @@ mod tests {
             .collect_str(&format_args!("!{}", "Tag"))
             .unwrap();
         tag.write(&mut output).unwrap();
-        assert_eq!(output.finish().unwrap(), "!Tag");
+        assert_eq!(output, "!Tag");
     }
 }

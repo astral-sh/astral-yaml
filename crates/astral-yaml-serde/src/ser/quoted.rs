@@ -12,29 +12,13 @@ pub(crate) fn requires_double_quotes(c: char) -> bool {
 
 #[inline]
 pub(crate) fn write_quoted(output: &mut String, value: &str) {
-    if value.len() >= 64 {
-        output.reserve(value.len() + 3);
-        output.push('"');
-        quoted_long(output, value).expect("String write");
-        output.push('"');
-        return;
-    }
-
-    let escaped = short_needs_escape(value);
-    if output.is_empty() {
+    if value.len() >= 64 || output.is_empty() {
         output.reserve(value.len() + 3);
     }
-
-    output.push('"');
-    if escaped {
-        write_escaped(output, value).expect("String write");
-    } else {
-        output.push_str(value);
-    }
-    output.push('"');
+    write_quoted_to(output, value).expect("String write");
 }
 
-#[cfg(feature = "editable")]
+#[inline]
 pub(super) fn write_quoted_to(output: &mut impl Write, value: &str) -> fmt::Result {
     output.write_char('"')?;
     if value.len() >= 64 {

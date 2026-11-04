@@ -234,9 +234,8 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
-        let yaml = self.context.mutate(|| self.editor.serialize(&value))?;
         self.context
-            .mutate(|| self.editor.replace_preserving_style(self.id, &yaml))
+            .mutate(|| self.editor.replace_value(self.id, &value))
     }
 
     /// Request a style for the selected scalar.
@@ -321,8 +320,7 @@ impl<'doc> MappingMut<'_, 'doc> {
         let mut context = self.context.child(format_args!("[{name:?}]"));
         let id = context.mutate(|| -> Result<_, Error> {
             if let Some((_, id)) = self.editor.string_field(self.id, name)? {
-                let yaml = self.editor.serialize(&value)?;
-                self.editor.replace_preserving_style(id, &yaml)?;
+                self.editor.replace_value(id, &value)?;
                 Ok(id)
             } else {
                 self.editor.append_string_entry(
