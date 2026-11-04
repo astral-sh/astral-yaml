@@ -223,7 +223,7 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
     ) -> Result<(), Error> {
         let value = self
             .context
-            .mutate(|| crate::de::from_edit_value(self.editor.value(self.id)))?;
+            .mutate(|| self.editor.value(self.id).deserialize())?;
         self.set(transform(value))
     }
 
@@ -547,7 +547,7 @@ impl<State> Cursor<'_, '_, State> {
     /// was removed, or a resource limit is exceeded.
     pub fn read<'de, T: Deserialize<'de>>(&'de self) -> Result<T, Error> {
         self.context
-            .with_path(crate::de::from_edit_value(self.editor.value(self.id)))
+            .with_path(self.editor.value(self.id).deserialize())
     }
 
     /// Return the selected node, including pending edits.
