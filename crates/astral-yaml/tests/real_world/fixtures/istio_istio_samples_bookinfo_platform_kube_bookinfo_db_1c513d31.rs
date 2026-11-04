@@ -60,6 +60,6 @@ fn snapshot() {
                 "emptyDir" [plain @62:9..62:17]: mapping [flow]
 
     document 3 (start: ---, end: implicit)
-    "" [plain @64:1..64:1]
+    "" [plain @63:4..63:4]
     "#);
 }

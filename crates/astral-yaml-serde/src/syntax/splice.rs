@@ -7,7 +7,7 @@ use super::emit::{self, Context, Ending, Fragment};
 use super::layout::Layout;
 use super::lines::Line;
 use super::source::Source;
-use super::view::{Emission, Syntax};
+use super::view::Emission;
 use super::{Comment, DocumentSyntax};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{Error, NodeId, Span};
@@ -24,18 +24,13 @@ pub(super) enum OuterComments {
 
 /// Return the source range covering `id` and its descendants' comments.
 /// `outer` controls whether the node's own comments extend this range.
-pub(super) fn region<'syntax>(
-    document: impl Into<Syntax<'syntax, Span>>,
-    id: NodeId,
-    outer: OuterComments,
-) -> Span {
-    let document = document.into();
-    let root = &document.nodes[id.index()];
-    let mut start = root.span.start();
-    let mut end = root.span.end();
+pub(super) fn region(source: &Source, id: NodeId, outer: OuterComments) -> Span {
+    let body = source.body_span(id);
+    let mut start = body.start();
+    let mut end = body.end();
     let mut pending = vec![id];
     while let Some(current) = pending.pop() {
-        let node = &document.nodes[current.index()];
+        let node = &source.nodes[current.index()];
         if current != id || outer == OuterComments::Include {
             for comment in &node.comments {
                 start = start.min(comment.span.start());
@@ -416,8 +411,8 @@ pub(super) fn apply(
     let root = &stream.nodes()[document.root.index()];
     let mut insertions = std::collections::BTreeMap::<usize, usize>::new();
     covered.sort_unstable_by_key(|mark| mark.start());
-    let split = covered
-        .partition_point(|mark| mark.start() < source.nodes[source.root.index()].span.start());
+    let split =
+        covered.partition_point(|mark| mark.start() < source.body_span(source.root).start());
     let (prefix, suffix) = covered.split_at(split);
 
     let mut lines = memchr::memchr_iter(b'\n', &output.as_bytes()[..document.span.start()]);

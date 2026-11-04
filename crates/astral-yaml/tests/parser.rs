@@ -1073,6 +1073,76 @@ fn inserting_at_an_empty_scalar_span_preserves_its_trailing_comment() {
     assert_eq!(scalar.value, "text");
 }
 
+// These empty nodes precede the trailing comment. Inserting at the reported
+// span adds content while preserving the comment.
+// https://yaml.org/spec/1.2.2/#72-empty-nodes
+// https://yaml.org/spec/1.2.2/#rule-l-explicit-document
+#[test_case("---", " #keep", " text"; "empty document at EOF")]
+#[test_case("---", " #keep\r\n...", " text"; "empty document before its end marker")]
+// Block values and sequence entries can omit content after their indicator.
+// https://yaml.org/spec/1.2.2/#rule-c-l-block-map-implicit-value
+// https://yaml.org/spec/1.2.2/#rule-s-l+block-indented
+#[test_case("k:", " #keep\n", " text"; "block mapping value")]
+#[test_case("-", " #keep\n", " text"; "block sequence item")]
+#[test_case("?", " #keep\n: v", " text"; "explicit block mapping key")]
+#[test_case("? k\n:", " #keep", " text"; "explicit block mapping value")]
+// A flow value may be empty after the colon. In a braced entry or an explicit
+// pair, the colon can also be omitted.
+// https://yaml.org/spec/1.2.2/#rule-c-ns-flow-map-separate-value
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-yaml-key-entry
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-explicit-entry
+#[test_case("{k:", " #keep\n}", " text"; "flow mapping value")]
+#[test_case("[k:", " #keep\n]", " text"; "compact flow mapping value")]
+#[test_case("{k", " #keep\n}", ": text"; "flow mapping without a colon")]
+#[test_case("[? k", " #keep\n]", ": text"; "explicit flow pair without a colon")]
+fn omitted_scalar_spans_precede_trailing_separation(before: &str, after: &str, insertion: &str) {
+    let mut source = format!("{before}{after}");
+    let stream = parse(&source).unwrap();
+    let span = stream
+        .nodes()
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Scalar(scalar) if scalar.value.is_empty() => Some(scalar.span),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(span, Span::new(before.len(), before.len()).unwrap());
+
+    source.insert_str(span.start(), insertion);
+    let stream = parse(&source).unwrap();
+    assert!(
+        stream.nodes().iter().any(|node| {
+            matches!(&node.kind, NodeKind::Scalar(scalar) if scalar.value == "text")
+        })
+    );
+    assert_eq!(stream.comments()[0].text, "keep");
+}
+
+// Both an explicit mapping entry and an explicit pair require separation after
+// the question mark, even when the key is empty.
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-entry
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-pair
+#[test_case("{? #key\n", ": v}"; "mapping with a value")]
+#[test_case("[? #key\n", ": v]"; "pair with a value")]
+#[test_case("{? #key\n", "}"; "empty mapping entry")]
+#[test_case("[? #key\n", "]"; "empty pair")]
+fn empty_explicit_flow_keys_follow_the_required_separation(before: &str, after: &str) {
+    let source = format!("{before}{after}");
+    let stream = parse(&source).unwrap();
+    let key = stream
+        .nodes()
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Mapping { entries, .. } => Some(entries[0].key),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        stream.node(key).unwrap().span,
+        Span::new(before.len(), before.len()).unwrap()
+    );
+}
+
 // https://yaml.org/spec/1.2.2/#61-indentation-spaces
 // https://yaml.org/spec/1.2.2/#63-line-prefixes
 // https://yaml.org/spec/1.2.2/#64-empty-lines
@@ -1314,6 +1384,36 @@ fn document_prefixes_do_not_create_nodes(source: &str, expected: &[&str]) {
             .map(|(at, _)| at)
             .collect::<Vec<_>>()
     );
+}
+
+// The comma ends the compact pair. The comment index uses that boundary to assign ownership.
+// https://yaml.org/spec/1.2.2/#rule-ns-s-flow-seq-entries
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-pair
+// https://yaml.org/spec/1.2.2/#3233-comments
+#[test]
+fn comments_on_a_compact_pair_stay_on_their_side_of_the_comma() {
+    use astral_yaml::comments::{CommentIndex, CommentPlacement};
+    use std::collections::BTreeMap;
+
+    let stream = parse("[key:\n # value\n, # pair\n next]").unwrap();
+    let root = stream.node(stream.documents()[0].root).unwrap();
+    let NodeKind::Sequence { items, .. } = &root.kind else {
+        panic!("expected sequence");
+    };
+    let pair = items[0];
+    let NodeKind::Mapping { entries, .. } = &stream.node(pair).unwrap().kind else {
+        panic!("expected pair");
+    };
+    let comments = CommentIndex::new(&stream, 0).unwrap();
+    let owners: BTreeMap<_, _> = comments
+        .direct()
+        .map(|(owner, comment)| (comment.comment.text, (owner, comment.placement)))
+        .collect();
+    assert_eq!(
+        owners[" value"],
+        (entries[0].value, CommentPlacement::Leading)
+    );
+    assert_eq!(owners[" pair"], (pair, CommentPlacement::Inline));
 }
 
 // https://yaml.org/spec/1.2.2/#92-streams

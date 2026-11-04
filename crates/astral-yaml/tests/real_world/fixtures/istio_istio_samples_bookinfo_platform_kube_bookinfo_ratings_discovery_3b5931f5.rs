@@ -19,6 +19,6 @@ fn snapshot() {
           "app" [plain @30:5..30:8]: "ratings" [plain @30:10..30:17]
 
     document 2 (start: ---, end: implicit)
-    "" [plain @32:1..32:1]
+    "" [plain @31:4..31:4]
     "#);
 }

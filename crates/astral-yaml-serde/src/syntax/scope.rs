@@ -81,14 +81,15 @@ impl<'plan> Scopes<'plan> {
         let mut pending = vec![(original.root, Role::Document, None, false)];
         while let Some((id, role, enclosing_key, flow)) = pending.pop() {
             let node = &original.nodes[id.index()];
+            let body = original.body_span(id);
             slots[id.index()] = Some(Slot {
                 role,
                 enclosing_key,
                 flow,
-                own_line: lines.at(node.span.start()).own_line(node.span.start()),
-                body: node.span,
+                own_line: lines.at(body.start()).own_line(body.start()),
+                body,
                 outer_comments: node.comments.iter().any(|comment| {
-                    comment.span.start() < node.span.start() || comment.span.end() > node.span.end()
+                    comment.span.start() < body.start() || comment.span.end() > body.end()
                 }),
             });
             order.push(id);

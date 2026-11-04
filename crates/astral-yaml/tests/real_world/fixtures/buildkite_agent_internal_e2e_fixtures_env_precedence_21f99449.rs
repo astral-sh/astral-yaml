@@ -6,7 +6,7 @@ fn snapshot() {
       "agents" [plain @1:1..1:7]: mapping [block]
         "queue" [plain @2:3..2:8]: mapping [flow]
           ? mapping [flow]
-            ".queue" [plain @2:13..2:19]: "" [plain @2:20..2:20]
+            ".queue" [plain @2:13..2:19]: "" [plain @2:19..2:19]
           : "" [plain @2:21..2:21]
       "env" [plain @3:1..3:4]: mapping [block]
         "GLOBAL_ENV" [plain @4:3..4:13]: "llamas" [plain @4:15..4:21]

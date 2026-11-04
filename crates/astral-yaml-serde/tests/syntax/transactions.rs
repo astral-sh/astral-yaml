@@ -10,6 +10,8 @@ use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, Error, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
+// In the original mapping, the value between the colon and the comment is an empty node.
+// https://yaml.org/spec/1.2.2/#rule-c-l-block-map-implicit-value
 #[test]
 fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
     // An omitted value has empty content at a position in the source.
@@ -40,7 +42,7 @@ fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
         insta::assert_snapshot!(origins.join("\n\n"), @"
           |
         1 | existing: # keep
-          |           ^ original empty value
+          |          ^ original empty value
         2 | items: []
           |
 

@@ -8,10 +8,25 @@ use astral_yaml::{NodeId, ParseOptions, Span};
 /// Return each node's content range, excluding tags, anchors, and intervening trivia.
 /// These ranges are separate because properties can start on a different line
 /// or at a different indentation.
-pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>]) -> Vec<Span> {
+pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: NodeId) -> Vec<Span> {
     nodes
         .iter()
-        .map(|node| {
+        .enumerate()
+        .map(|(index, node)| {
+            if node.span.is_empty() {
+                let start = node.span.start();
+                let next = astral_yaml::comments::skip_trivia(source, start);
+                // Keep separation after block indicators. At a flow delimiter
+                // or an empty document root, retain all preceding comment lines.
+                let at = if index == root.index()
+                    || matches!(source.as_bytes().get(next), Some(b',' | b']' | b'}'))
+                {
+                    next
+                } else {
+                    source.len() - source[start..].trim_start_matches([' ', '\t']).len()
+                };
+                return super::span(at, at);
+            }
             let properties_end = node
                 .anchor
                 .iter()
@@ -53,6 +68,17 @@ impl<'source> From<&'source Source> for Syntax<'source, Span> {
 }
 
 impl Source {
+    /// The range to rewrite, including any properties. An empty node can
+    /// have a layout insertion point separate from its lexical span.
+    pub(super) fn body_span(&self, id: NodeId) -> Span {
+        let span = self.nodes[id.index()].span;
+        if span.is_empty() {
+            self.contents[id.index()]
+        } else {
+            span
+        }
+    }
+
     pub(super) fn emission<'source, Location>(
         &'source self,
         syntax: Syntax<'source, Location>,

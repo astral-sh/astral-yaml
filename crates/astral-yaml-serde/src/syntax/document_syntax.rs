@@ -33,7 +33,7 @@ impl DocumentSyntax {
         };
         let stream = astral_yaml::parse_with_options(&source, options)?;
         let document = super::single_document(&stream)?;
-        let contents = source::contents(&source, stream.nodes());
+        let contents = source::contents(&source, stream.nodes(), document.root);
         let comments = CommentIndex::new(&stream, 0)?;
         let root = document.root;
         let start_marker = document.start_marker;
@@ -124,7 +124,7 @@ impl DocumentSyntax {
     /// Returns an error if rendering exceeds a resource limit or changes scalar
     /// content, alias targets, or comment ownership, placement, or order.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
-        let region = splice::region(self, self.source.root, OuterComments::Exclude);
+        let region = splice::region(&self.source, self.source.root, OuterComments::Exclude);
         let output = splice::normalize(self, region)?;
         Ok(
             emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?

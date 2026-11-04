@@ -478,8 +478,10 @@ impl<'source> Parser<'source> {
                 None
             };
 
-            let root = if self.boundary() {
-                self.empty(self.pos)?
+            let root = if let Some(marker) = start_marker
+                && self.boundary()
+            {
+                self.empty(marker.end)?
             } else {
                 self.block(-1, 0, SequenceIndent::Required)?
             };
@@ -771,9 +773,9 @@ impl<'source> Parser<'source> {
 
     fn block_entry(&mut self, indent: usize, depth: usize, entry: BlockEntry) -> Result<NodeId> {
         self.pos += 1;
+        let indicator_end = self.pos;
         self.spaces();
 
-        let at = self.pos;
         let sequence_indent = match entry {
             BlockEntry::SequenceItem => SequenceIndent::Required,
             BlockEntry::ExplicitMapping | BlockEntry::ImplicitMappingValue => {
@@ -789,7 +791,7 @@ impl<'source> Parser<'source> {
             self.block_space()?;
             if !self.starts_nested_block(signed(indent), sequence_indent) {
                 self.check_depth(depth)?;
-                return self.empty(at);
+                return self.empty(indicator_end);
             }
         } else if matches!(entry, BlockEntry::ImplicitMappingValue) {
             return self.implicit_mapping_value(indent, depth);
@@ -1351,17 +1353,18 @@ impl<'source> Parser<'source> {
     ) -> Result<Entry> {
         let value = if self.byte() == Some(b':') {
             self.flow_value_start(key)?;
+            let indicator_end = self.pos;
             self.flow_space(parent)?;
             if self
                 .byte()
                 .is_some_and(|byte| byte == b',' || byte == closing)
             {
-                self.empty(self.pos)?
+                self.empty(indicator_end)?
             } else {
                 self.inline(CollectionStyle::Flow, parent, depth)?
             }
         } else {
-            self.empty(self.pos)?
+            self.empty(self.nodes[key.0].span.end)?
         };
 
         Ok(Entry {

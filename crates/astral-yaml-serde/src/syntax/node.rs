@@ -120,7 +120,7 @@ impl CommentPosition {
     ) -> Self {
         let node = &nodes[owner.index()];
         let at = attached.comment.span.start();
-        if at < node.span.start() {
+        if at < node.span.start() || (node.span.is_empty() && at < content_start) {
             CommentPosition::Before
         } else if at < content_start {
             CommentPosition::Header

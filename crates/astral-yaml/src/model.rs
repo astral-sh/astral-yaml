@@ -108,7 +108,8 @@ pub struct Scalar<'source> {
     /// The presentation used to spell the value in the source.
     pub style: ScalarStyle,
     /// The scalar token, including its delimiters and excluding node properties.
-    /// Omitted content after an anchor or tag has a zero-width span at the end of the last property.
+    /// Omitted content has a zero-width span before its trailing separation and comments.
+    /// For example, in `key: # comment` the span is immediately after the colon.
     pub span: Span,
 }
 

@@ -49,6 +49,6 @@ fn snapshot() {
                     "containerPort" [plain @56:11..56:24]: "9080" [plain @56:26..56:30]
 
     document 3 (start: ---, end: implicit)
-    "" [plain @58:1..58:1]
+    "" [plain @57:4..57:4]
     "#);
 }

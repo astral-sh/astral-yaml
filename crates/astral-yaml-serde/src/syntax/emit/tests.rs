@@ -11,7 +11,7 @@ fn render_draft(original: &DocumentSyntax, draft: Draft) -> String {
     let candidate = draft.freeze().unwrap();
     let syntax = (&candidate).into();
     let source = &original.source;
-    let region = splice::region(original, source.root, OuterComments::Exclude);
+    let region = splice::region(source, source.root, OuterComments::Exclude);
     let rendered = splice::render(source.emission(syntax), source.root, region).unwrap();
     let output = format!(
         "{}{}{}",
@@ -358,7 +358,7 @@ fn rendering_obeys_work_and_output_budgets(
     document.source.options.max_input_bytes = bytes;
     let source = &document.source;
     let draft = Draft::from(&document).freeze().unwrap();
-    let region = splice::region(&document, source.root, OuterComments::Exclude);
+    let region = splice::region(source, source.root, OuterComments::Exclude);
     // Both committed syntax and drafts obey the same rendering limits.
     for result in [
         splice::render(&document, source.root, region),
@@ -915,7 +915,11 @@ fn detached_prefixes_are_emitted_before_content() {
         let document = DocumentSyntax::parse(source).unwrap();
         // Including outer comments exercises the same emitter path used by
         // imported fragments, which have no retained source prefix.
-        let span = splice::region(&document, document.source.root, OuterComments::Include);
+        let span = splice::region(
+            &document.source,
+            document.source.root,
+            OuterComments::Include,
+        );
         let rendered = splice::render(&document, document.source.root, span).unwrap();
         let parsed = DocumentSyntax::parse(&rendered.text).unwrap();
         let correspondence = correspondence(&document, &parsed).unwrap();
@@ -1135,7 +1139,11 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
             value: "old".to_owned(),
             style: ScalarStyle::Literal,
         };
-        let region = splice::region(&candidate, candidate.source.root, OuterComments::Include);
+        let region = splice::region(
+            &candidate.source,
+            candidate.source.root,
+            OuterComments::Include,
+        );
         let rendered = splice::render(&candidate, candidate.source.root, region).unwrap();
         let output = format!(
             "{}{}{}",
