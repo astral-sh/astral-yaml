@@ -13,6 +13,8 @@ use astral_yaml_dev::{edit_diff, indoc};
 fn patches_crossing_marks_need_a_document_boundary(
     replacement: &str,
 ) -> Result<String, &'static str> {
+    // A document prefix permits a byte order mark before the content.
+    // https://yaml.org/spec/1.2.2/#911-document-prefix
     let document =
         crate::syntax::DocumentSyntax::parse("# prefix\n\u{feff}old\n\u{feff}# suffix\n").unwrap();
     let source = &document.source;
@@ -162,6 +164,9 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
     "start and end markers"
 )]
 fn erased_root_boundaries_retain_shared_marker_lines(source: &str) -> String {
+    // Document markers delimit content and an explicit document may omit its root.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let start = source.find("old").unwrap();
     let body = Span::new(start, start + 3).unwrap();
     let boundary = Boundary::new(source, body, Line::at(source, body.start()), true, None);

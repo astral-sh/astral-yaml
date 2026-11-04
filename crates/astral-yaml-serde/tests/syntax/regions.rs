@@ -1,4 +1,7 @@
-//! Comments and separation: <https://yaml.org/spec/1.2.2/#66-comments>.
+//! The editor preserves comments and unchanged source outside each rewrite.
+//! For the grammar of comments around flow delimiters, see
+//! <https://yaml.org/spec/1.2.2/#67-separation-lines> and
+//! <https://yaml.org/spec/1.2.2/#74-flow-collection-styles>.
 
 use astral_yaml::NodeId;
 use test_case::test_case;

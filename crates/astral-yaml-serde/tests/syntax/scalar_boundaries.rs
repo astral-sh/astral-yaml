@@ -1,4 +1,6 @@
-//! Comment boundaries must not become block scalar content during an edit.
+//! Chomping determines which trailing line breaks belong to block scalar content.
+//! The first trailing comment must be less indented than that content.
+//! See <https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator>.
 
 use super::support::{edit, edits};
 use crate::syntax::DocumentSyntax;
@@ -6,8 +8,6 @@ use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
 use test_case::test_case;
 
-// The first trailing comment must be less indented than the scalar content:
-// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
 #[test_case("|\n   x\n  # after\n" => "|\n  x\n# after\n"; "root")]
 #[test_case("a: |\n   x\n  # after\n" => "a: |\n  x\n# after\n"; "mapping")]
 #[test_case("- >-\n   x\n  # after\n" => "- >-\n  x\n# after\n"; "sequence")]
@@ -64,8 +64,6 @@ fn relocated_inline_headers_keep_detached_suffix_separation() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn detached_suffixes_survive_root_block_scalar_replacement() {
-    // Blank lines before the dedented comment are subject to chomping:
-    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let mut diffs = Vec::new();
     for fragment in [
         indoc! {r"
@@ -246,6 +244,8 @@ fn removing_suffix_comments_does_not_extend_block_scalar_content() {
 
 #[test]
 fn trailing_comments_can_reclaim_blank_document_suffixes() {
+    // A document end marker can carry an inline comment.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
     let diffs = edits(
         [
             indoc! {r"
@@ -290,6 +290,9 @@ fn trailing_comments_can_reclaim_blank_document_suffixes() {
 
 #[test]
 fn omitted_roots_keep_suffix_comments_between_their_fixed_neighbors() {
+    // An explicit document may omit its root content. A stream permits repeated suffixes.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
+    // https://yaml.org/spec/1.2.2/#92-streams
     let source = indoc! {r"
         ---
         old

@@ -989,6 +989,7 @@ fn mapping_edit(
 
 /// Generate a recursive syntax graph, then compare each modeled operation and commit
 /// with independently updated child lists, scalar values and alias target IDs.
+/// Alias targets follow the [most recent preceding anchor](https://yaml.org/spec/1.2.2/#71-alias-nodes).
 ///
 /// # Panics
 /// Panics if a generated valid edit fails or differs from the model.

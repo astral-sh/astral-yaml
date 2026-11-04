@@ -113,6 +113,8 @@ fn wrappers_and_aliases_preserve_tag_checks(source: &str) {
         expected.clone().map(Some)
     );
 
+    // An alias denotes the original node, including its tag.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let alias = format!("[&value {source}, *value]");
     let result = from_str::<(IgnoredAny, &str)>(&alias);
     assert_eq!(result.is_ok(), expected.is_ok());
@@ -170,6 +172,7 @@ fn enum_names_and_field_names_preserve_tag_types(scalar: &str, accepted: bool) {
         accepted
     );
 
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let alias_key = format!("[&key {scalar}, {{*key : null}}]");
     assert_eq!(
         from_str::<(IgnoredAny, Choice)>(&alias_key).is_ok(),
@@ -179,6 +182,8 @@ fn enum_names_and_field_names_preserve_tag_types(scalar: &str, accepted: bool) {
 
 #[test]
 fn implicit_text_and_application_tags_remain_usable() {
+    // The explicit non-specific tag resolves a scalar as a string.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     for source in ["7", "'7'", "!!str 7", "! 7"] {
         assert_eq!(from_str::<char>(source).unwrap(), '7');
         assert_eq!(from_str::<&[u8]>(source).unwrap(), b"7");

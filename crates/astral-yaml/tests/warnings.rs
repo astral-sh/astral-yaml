@@ -2,6 +2,7 @@ use astral_yaml::{WarningKind, parse};
 use test_case::test_case;
 
 // https://yaml.org/spec/1.2.2/#68-directives
+// https://yaml.org/spec/1.2.2/#681-yaml-directives
 // https://yaml.org/spec/1.2.2/#54-line-break-characters
 #[test]
 fn warnings_follow_source_order_across_documents() {

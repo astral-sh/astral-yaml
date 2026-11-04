@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use support::YamlTag;
 
+// A YAML integer can exceed the range of the requested native type.
+// https://yaml.org/spec/1.2.2/#10213-integer
 #[test]
 fn every_integer_width_checks_its_boundaries() {
     macro_rules! check {
@@ -35,6 +37,8 @@ fn numeric_and_type_errors_are_located() {
     from_str::<()>("!!null null").unwrap();
     assert_eq!(from_str::<f64>("0o10").unwrap().to_bits(), 8.0f64.to_bits());
 
+    // The core schema recognizes hexadecimal integers and decimal floats.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let overflowing_integer = format!("0x{}", "f".repeat(257));
     let errors = ["text", "[]", "!!float 0xff", &overflowing_integer].map(|source| {
         let error = from_str::<f64>(source).unwrap_err();
@@ -163,7 +167,9 @@ struct Known {
     known: u8,
 }
 
-// https://yaml.org/spec/1.2.2/#1031-tags
+// The YAML numeric tags cover values outside the native destination ranges.
+// https://yaml.org/spec/1.2.2/#10213-integer
+// https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test_case("340282366920938463463374607431768211456"; "unsigned integer")]
 #[test_case("-170141183460469231731687303715884105729"; "signed integer")]
 #[test_case("1e309"; "float")]
@@ -185,6 +191,10 @@ fn ignored_fields_still_validate_their_values() {
     let value = from_str::<Known>("known: 1\nextra: [null, {a: true}]").unwrap();
     assert_eq!(value, Known { known: 1 });
 
+    // Mapping keys must be unique and explicit core tags must match their content.
+    // The cyclic sequence exercises the Serde traversal limit.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
+    // https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
     for source in [
         "known: 1\nextra: {a: 1, a: 2}",
         "known: 1\nextra: !!int invalid",
@@ -210,6 +220,7 @@ fn enum_payloads_and_aliases() {
         Variant::Unit
     );
     assert_eq!(from_str::<Variant>("! Unit").unwrap(), Variant::Unit);
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     assert_eq!(
         from_str::<Vec<YamlTag<Variant>>>("[&a !Unit, *a]").unwrap(),
         [YamlTag(Variant::Unit), YamlTag(Variant::Unit)]
@@ -305,6 +316,7 @@ impl<'de> Deserialize<'de> for ProtocolMap {
     ");
     "wrong type"
 )]
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test_case(
     "{a: 1, a: 2}"
     => with |result| insta::assert_snapshot!(Result::unwrap_err(result), @"

@@ -16,6 +16,8 @@ fn edit(
 
 #[test]
 fn string_key_updates_leave_application_tagged_entries_intact() {
+    // Two scalar keys with the same text can differ by tag.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     let mut diffs = Vec::new();
     // Exercise mixed key tags without imposing a Serde key type on the syntax.
     for source in [

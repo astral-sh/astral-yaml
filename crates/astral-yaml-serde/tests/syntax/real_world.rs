@@ -1,5 +1,6 @@
 //! Edits to the pinned corpus retain presentation outside the changed nodes.
-//! YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
+//! YAML distinguishes these presentation details from the serialization tree.
+//! See <https://yaml.org/spec/1.2.2/#323-presentation-stream>.
 
 use super::support::edit;
 use crate::syntax::{Editor, NodeKind};

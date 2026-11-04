@@ -79,6 +79,9 @@ fn null_and_empty_collections_can_replace_each_other(
     replacement: &str,
     expected: Option<&Shape>,
 ) {
+    // A null scalar is distinct from an empty sequence or mapping.
+    // https://yaml.org/spec/1.2.2/#10211-null
+    // https://yaml.org/spec/1.2.2/#3211-nodes
     let document = edit::<Option<Shape>>(&format!("{before} # nullable\n"), |mut root| {
         root.set(expected)
     });

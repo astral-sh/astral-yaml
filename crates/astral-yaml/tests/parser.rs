@@ -63,6 +63,7 @@ fn a_document_marker_cannot_supply_a_flow_node(source: &str) {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#rule-c-forbidden
 #[test_case("{a:\n ---\n}", "---")]
 #[test_case("{a:\n...suffix\n}", "...suffix")]
 fn flow_values_can_resemble_document_markers(source: &str, expected: &str) {
@@ -73,7 +74,8 @@ fn flow_values_can_resemble_document_markers(source: &str, expected: &str) {
     assert_eq!(value.value, expected);
 }
 
-// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+// https://yaml.org/spec/1.2.2/#rule-ns-plain-multi-line
+// https://yaml.org/spec/1.2.2/#54-line-break-characters
 #[test_case("\n")]
 #[test_case("\r")]
 #[test_case("\r\n")]
@@ -153,7 +155,9 @@ fn scalar_scans_preserve_content_and_spans_across_line_endings(newline: &str, pa
     }
 }
 
+// JSON can escape a supplementary character as a UTF-16 surrogate pair.
 // https://yaml.org/spec/1.2.2/#57-escaped-characters
+// https://datatracker.ietf.org/doc/html/rfc8259#section-7
 #[test_case(0x10000_u32)]
 #[test_case(0x1d11e_u32)]
 #[test_case(0x1f30d_u32)]
@@ -172,6 +176,7 @@ fn json_surrogate_pairs(value: u32) {
     assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test_case(r#""\uD800""#)]
 #[test_case(r#""\uD800"#)]
 #[test_case(r#""\uDC00""#)]
@@ -253,7 +258,8 @@ fn tabs_can_separate_a_completed_block_scalar_from_the_next_document() {
     assert!(matches!(stream.comments(), [comment] if comment.text == " between documents"));
 }
 
-// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+// https://yaml.org/spec/1.2.2/#61-indentation-spaces
+// https://yaml.org/spec/1.2.2/#rule-l-trail-comments
 #[test_case("\t# comment\nnext: y")]
 #[test_case("\t\nnext: y")]
 #[test_case("\t# comment\n  more")]
@@ -288,6 +294,7 @@ fn a_root_block_scalar_stops_at_the_next_document_bom(header: &str, body: &str, 
     );
 }
 
+// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
 #[test_case("|-")]
 #[test_case(">-")]
 fn stripping_a_long_run_of_blank_lines(header: &str) {
@@ -313,10 +320,10 @@ fn explicit_root_block_indentation_starts_at_minus_one(source: &str, expected: &
     assert_eq!(value.value, expected);
 }
 
+// https://yaml.org/spec/1.2.2/#example-block-indentation-indicator
 #[test_case("|\n  \ttext\n", "\ttext\n")]
 #[test_case(">\n  \t\n  text\n", "\t\ntext\n")]
 fn block_scalar_tabs_after_indentation_are_content(source: &str, expected: &str) {
-    // A tab after the detected spaces is content (YAML 1.2.2 example 8.2).
     let stream = parse(source).unwrap();
     let NodeKind::Scalar(scalar) = &stream.nodes()[0].kind else {
         panic!("expected scalar")
@@ -341,6 +348,8 @@ fn prefix_boms_and_multiple_restricted_quoted_characters() {
     assert_eq!(error.span.slice(source), Some("\u{80}"));
 }
 
+// https://yaml.org/spec/1.2.2/#66-comments
+// https://yaml.org/spec/1.2.2/#731-double-quoted-style
 #[test]
 fn spans_comments_and_locations() {
     let source = "# lead\r\nkey: &a \"v\\n\" # tail\r\ncopy: *a\n";
@@ -527,6 +536,7 @@ fn budgets_and_adversarial_nesting() {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#321-representation-graph
 // https://yaml.org/spec/1.2.2/#71-alias-nodes
 #[test]
 fn aliases_preserve_identity_and_cycles() {
@@ -599,6 +609,8 @@ fn implicit_key_limits_include_separation_before_the_colon(key: &str) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// https://yaml.org/spec/1.2.2/#822-block-mappings
 #[test_case("\n")]
 #[test_case("\r")]
 #[test_case("\r\n")]
@@ -641,6 +653,8 @@ fn a_double_quoted_continuation_requires_content_before_an_escaped_break(source:
     assert_eq!(error.span.slice(source), Some("\\"));
 }
 
+// https://yaml.org/spec/1.2.2/#rule-s-double-next-line
+// https://yaml.org/spec/1.2.2/#rule-s-single-next-line
 #[test_case("\"\\\n  b\"", "b")]
 #[test_case("\"a\n  x\\\n  b\"", "a xb")]
 #[test_case("\"a\n  \\ \\\n  b\"", "a  b")]
@@ -845,14 +859,17 @@ fn invalid_directives_properties_and_keys() {
         "%TAG !e! x\n--- !e! x",
         "!a\n!b x",
         "&a\n*a",
+        // https://yaml.org/spec/1.2.2/#742-flow-mappings
         "{",
         "{,}",
+        // https://yaml.org/spec/1.2.2/#731-double-quoted-style
         "\"\\",
         "\"\\q\"",
     ] {
         assert!(parse(source).is_err(), "accepted {source:?}");
     }
 
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
     assert!(parse(&format!("{}: x", "a".repeat(1025))).is_err());
 }
 
@@ -871,6 +888,9 @@ fn escape_repertoire_and_empty_pairs() {
         "\0\u{7}\u{8}\t\n\u{b}\u{c}\r\u{1b} \"/\\\u{85}\u{a0}\u{2028}\u{2029}Aλ🌍"
     );
 
+    // https://yaml.org/spec/1.2.2/#rule-ns-flow-pair
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
+    // https://yaml.org/spec/1.2.2/#731-double-quoted-style
     for source in ["[? a]", "[a: ]", "[? : ]", "?\n: a\n", "\"a\\\n\n  b\""] {
         assert!(parse(source).is_ok(), "{source:?}");
     }
@@ -913,6 +933,7 @@ fn a_verbatim_tag_can_end_an_empty_mapping_key() {
     ");
 }
 
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-yaml-node
 #[test_case("!<urn:example:key>:text")]
 #[test_case("{!<urn:example:key>:text}")]
 fn a_verbatim_tag_still_needs_separation_before_scalar_content(source: &str) {
@@ -941,6 +962,8 @@ fn tag_expansion_preserves_percent_escapes() {
     assert_eq!(tag.value, "tag:example:%FFsuffix");
 }
 
+// https://yaml.org/spec/1.2.2/#691-node-tags
+// https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test_case("!é x")]
 #[test_case("!<tag:a|b> x")]
 #[test_case("!<!> x")]
@@ -1031,6 +1054,8 @@ fn scalar_spans_after_properties(source: &str, node_text: &str, scalar_text: &st
     assert_eq!(scalar.span.end(), node.span.end());
 }
 
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-node
+// https://yaml.org/spec/1.2.2/#rule-s-l-comments
 #[test]
 fn inserting_at_an_empty_scalar_span_preserves_its_trailing_comment() {
     let mut source = String::from("&a #keep\n");
@@ -1061,6 +1086,7 @@ fn tab_indented_continuations_are_rejected(source: &str) {
     assert!(parse(source).is_err(), "{source:?}");
 }
 
+// https://yaml.org/spec/1.2.2/#rule-s-flow-line-prefix
 #[test_case("a: plain\n \tcontinued")]
 #[test_case("a: \"first\\\n \tsecond\"")]
 #[test_case("outer:\n  a: \"first\\\n   \t\n    second\"")]
@@ -1139,6 +1165,9 @@ fn block_collections_reject_invalid_indentation_and_compact_values(source: &str)
     assert!(parse(source).is_err(), "{source:?}");
 }
 
+// https://yaml.org/spec/1.2.2/#rule-ns-plain-first
+// https://yaml.org/spec/1.2.2/#64-empty-lines
+// https://yaml.org/spec/1.2.2/#822-block-mappings
 #[test_case("a: ?foo")]
 #[test_case("a: plain\n\t\nb: next")]
 #[test_case("a: '?'")]
@@ -1217,6 +1246,7 @@ fn invalid_global_tag_prefixes_are_rejected_even_if_unused(prefix: &str) {
     );
 }
 
+// https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test_case("!")]
 #[test_case("![]")]
 #[test_case("tag:example,%5Bprefix%5D")]
@@ -1226,6 +1256,8 @@ fn tag_prefixes_accept_local_and_global_forms(prefix: &str) {
     parse(&source).unwrap();
 }
 
+// https://yaml.org/spec/1.2.2/#6822-tag-prefixes
+// https://datatracker.ietf.org/doc/html/rfc3986#section-3.2.2
 #[test_case("x://[1:2:3:4:5:6:7:8]")]
 #[test_case("x://[::1:2]")]
 #[test_case("x://[::ffff:192.0.2.1]")]
@@ -1238,6 +1270,8 @@ fn a_tag_prefix_can_end_anywhere_in_an_ip_literal(uri: &str) {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#6822-tag-prefixes
+// https://yaml.org/spec/1.2.2/#691-node-tags
 #[test_case("htt", "ps://example.org/")]
 #[test_case("https://user:pa", "ss@example.org/")]
 fn shorthand_tags_can_complete_a_scheme_or_authority(prefix: &str, suffix: &str) {
@@ -1283,12 +1317,14 @@ fn document_prefixes_do_not_create_nodes(source: &str, expected: &[&str]) {
 }
 
 // https://yaml.org/spec/1.2.2/#92-streams
+// https://yaml.org/spec/1.2.2/#3233-comments
 #[test_case("\n"; "LF")]
 #[test_case("\r"; "CR")]
 #[test_case("\r\n"; "CRLF")]
 fn comment_ownership_retains_indentation_in_later_bare_documents(newline: &str) {
     use astral_yaml::comments::{CommentIndex, CommentPlacement};
 
+    // A document suffix can precede a bare document. CommentIndex assigns its comments to nodes.
     let source = [
         "first",
         "... # first end",
@@ -1397,6 +1433,9 @@ fn flow_values_require_separation_after_yaml_keys() {
     assert_eq!(scalars, [":foo", ""]);
 }
 
+// https://yaml.org/spec/1.2.2/#741-flow-sequences
+// https://yaml.org/spec/1.2.2/#733-plain-style
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn large_flow_collections_and_line_backtracking() {
     for item in ["0,", "\"\\n\","] {

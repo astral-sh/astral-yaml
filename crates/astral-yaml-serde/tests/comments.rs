@@ -1,5 +1,6 @@
-//! Comment syntax: <https://yaml.org/spec/1.2.2/#66-comments>.
-//! Ownership and aggregation are astral-yaml-serde API behavior.
+//! YAML comments are presentation details. This API records their placement and ownership.
+//! <https://yaml.org/spec/1.2.2/#3233-comments>
+//! <https://yaml.org/spec/1.2.2/#66-comments>
 
 use test_case::test_case;
 
@@ -366,6 +367,7 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
       |
     ");
 
+    // https://yaml.org/spec/1.2.2/#812-literal-style
     assert_eq!(value["value"].value, "# scalar content");
 
     let source = "&items # anchor\n- 1\n";
@@ -427,11 +429,14 @@ fn document_markers_and_gaps_stay_with_the_correct_root() {
 
     let value: Commented<'_, ()> = from_str("--- # empty\n").unwrap();
     assert_eq!(comments(&value), [(" empty", Inline)]);
+    // A stream may contain comments without a document.
+    // https://yaml.org/spec/1.2.2/#92-streams
     let stream = astral_yaml::parse("# only a comment\n").unwrap();
     assert_eq!(stream.documents(), []);
     assert_eq!(stream.comments()[0].text, " only a comment");
 }
 
+// https://yaml.org/spec/1.2.2/#52-character-encodings
 #[test_case("utf16")]
 #[test_case("utf32")]
 fn unicode_crlf_and_original_encoding_spans_are_preserved(encoding: &str) {
@@ -528,6 +533,8 @@ fn aggregation_does_not_expand_cyclic_aliases() {
         }
     }
 
+    // A sequence can contain itself.
+    // https://yaml.org/spec/1.2.2/#3211-nodes
     let source = "&self [*self # cycle\n]";
     let value: Commented<'_, Opaque> = from_str(source).unwrap();
     assert_eq!(comments(&value), [(" cycle", Inline)]);

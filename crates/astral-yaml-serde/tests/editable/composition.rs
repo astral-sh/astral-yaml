@@ -254,6 +254,8 @@ fn check_sequence<const N: usize>(source: &str, sequence: [Operation; N]) {
 }
 
 fn check_alias(document: &Editable<Value>) {
+    // An alias denotes another occurrence of the anchored node.
+    // https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
     let syntax = document.syntax();
     let NodeKind::Mapping { entries, .. } = syntax.node(syntax.root()).unwrap().kind() else {
         unreachable!()

@@ -1,3 +1,5 @@
+//! Sources and revisions for the snapshot inputs are recorded in `fixtures/real-world/manifest.json`.
+
 mod display;
 mod fixtures;
 
@@ -6,6 +8,8 @@ use std::fs;
 use astral_yaml_dev::fixtures::{manifest, root, with_line_breaks};
 use astral_yaml_dev::{diagnostic_snapshot, validate_spans};
 
+// Each alias resolves to the most recent preceding anchor with the same name.
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
 fn assert_alias_targets(stream: &astral_yaml::Stream<'_>) {
     for node in stream.nodes() {
         let astral_yaml::NodeKind::Alias { name, target } = &node.kind else {
@@ -40,6 +44,8 @@ fn check_fixture(name: &str) -> String {
     assert_alias_targets(&stream);
     let tree = display::tree(&stream);
 
+    // Scalar content normalizes LF, CRLF, and CR to line feeds.
+    // https://yaml.org/spec/1.2.2/#54-line-break-characters
     for line_break in ["\r\n", "\r"] {
         let converted = with_line_breaks(&source, line_break);
         let converted_stream = astral_yaml::parse(&converted).unwrap();
@@ -54,6 +60,10 @@ fn check_fixture(name: &str) -> String {
     tree
 }
 
+// The rejected fixtures exercise flow continuation indentation and document-scoped tag handles.
+// https://yaml.org/spec/1.2.2/#rule-s-flow-line-prefix
+// https://yaml.org/spec/1.2.2/#rule-s-l+flow-in-block
+// https://yaml.org/spec/1.2.2/#6821-tag-handles
 fn check_rejection(name: &str) -> String {
     let source = fs::read_to_string(root().join(format!("{name}.yaml"))).unwrap();
     let error = astral_yaml::parse(&source).unwrap_err();
@@ -83,6 +93,9 @@ fn every_fixture_has_an_inline_snapshot() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#733-plain-style
+// https://yaml.org/spec/1.2.2/#812-literal-style
+// https://yaml.org/spec/1.2.2/#66-comments
 #[test]
 fn workflow_scalars_retain_shell_syntax_and_yaml_styles() {
     use astral_yaml::{NodeKind, ScalarStyle};

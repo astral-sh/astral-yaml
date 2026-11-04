@@ -73,6 +73,8 @@ fn duplicate_keys_abort_edits_even_when_the_field_handles_the_error() {
 #[test_case("{? {ok: {x: 0, x: 1}}: a, other: b}", false; "invalid value within a mapping key")]
 #[test_case("outer: {1: a, 01: b}", false; "unvisited equivalent integer keys")]
 fn unvisited_mappings_compare_yaml_keys(source: &str, unique: bool) {
+    // Keys compare by tag and content. Equality of distinct cyclic nodes is implementation-defined.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     match Editable::<Unvisited>::parse(source) {
         Ok(_) => assert!(unique),
         Err(error) => {
@@ -112,6 +114,10 @@ fn type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
     assert_eq!(config.syntax().source(), source);
 }
 
+// A flow sequence needs a closing bracket. A two-document stream is valid YAML,
+// but Editable accepts a single document.
+// https://yaml.org/spec/1.2.2/#rule-c-flow-sequence
+// https://yaml.org/spec/1.2.2/#92-streams
 #[test_case("["; "invalid syntax")]
 #[test_case(
     indoc! {r"
@@ -128,6 +134,8 @@ fn typed_parse_rejects_invalid_documents(source: &str) {
 
 #[test]
 fn tags_and_nulls_use_the_existing_deserialization_policy() {
+    // The shorthand and verbatim spellings identify explicit node tags.
+    // https://yaml.org/spec/1.2.2/#691-node-tags
     let mut value = Editable::<Tagged<Option<u8>>>::parse("!!null null").unwrap();
     assert_eq!(value.value().value, None);
     let before = value.to_yaml();
@@ -191,6 +199,8 @@ fn typed_metadata_and_errors_use_the_lf_source() {
 
 #[test]
 fn typed_edits_preserve_carriage_returns_in_scalar_values() {
+    // Inside double quotes, escaped CR and LF are scalar content.
+    // https://yaml.org/spec/1.2.2/#57-escaped-characters
     let source = indoc! {r#"
         "before\r\nafter"
     "#};
@@ -383,6 +393,8 @@ fn edits_at_the_stream_start_produce_readable_utf8(source: &str, mapping: bool) 
 #[test_case("\u{feff}é\n", "\u{feff}é\n"; "existing byte order mark")]
 #[test_case("---\né\n", "---\né\n"; "ASCII prefix")]
 fn editable_source_has_a_utf8_stream_prefix(source: &str, expected: &str) {
+    // The byte order mark identifies UTF-8 when the stream starts with a non-ASCII character.
+    // https://yaml.org/spec/1.2.2/#52-character-encodings
     let document = Editable::<String>::parse(source).unwrap();
     assert_eq!(document.into_yaml(), expected);
 }

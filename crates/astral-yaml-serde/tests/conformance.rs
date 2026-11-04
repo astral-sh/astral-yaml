@@ -116,6 +116,7 @@ fn yaml_test_suite_values_round_trip() {
                 tagged.push(case.to_owned());
                 continue;
             }
+            // https://yaml.org/spec/1.2.2/#3213-node-comparison
             Err(error) if ["2JQS", "X38W"].contains(&case) => {
                 assert_eq!(error.message, "duplicate mapping key", "{}", path.display());
                 duplicate_keys.push(case.to_owned());

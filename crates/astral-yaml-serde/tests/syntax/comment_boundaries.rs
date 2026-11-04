@@ -1,3 +1,8 @@
+//! Comments on separation lines can appear between an entry indicator and its content.
+//! Flow delimiters offer additional positions for the editor to retain inline comments.
+//! See <https://yaml.org/spec/1.2.2/#67-separation-lines> and
+//! <https://yaml.org/spec/1.2.2/#74-flow-collection-styles>.
+
 use test_case::test_case;
 
 use super::support::edit;

@@ -1,3 +1,7 @@
+//! YAML treats comments as presentation details independent of individual nodes.
+//! These tests cover how the editor assigns such comments to a collection or child.
+//! See <https://yaml.org/spec/1.2.2/#3233-comments>.
+
 use crate::syntax::{DocumentSyntax, NodeKind};
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::indoc;

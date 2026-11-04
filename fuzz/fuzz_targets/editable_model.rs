@@ -282,6 +282,8 @@ fn check(document: &Editable<Config>, expected: &Config, comments: &Comments) {
         .map(|comment| (comment.text().to_owned(), comment.placement()))
         .collect();
     assert_eq!(actual, comments.nested);
+    // The alias must resolve to this anchored value after each edit.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let value = field("value");
     assert_eq!(syntax.node(value).unwrap().anchor(), Some("a"));
     assert!(

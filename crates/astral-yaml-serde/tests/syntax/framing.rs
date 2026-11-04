@@ -1,4 +1,7 @@
-//! Document framing, source separators, and comments between collection children.
+//! Document prefixes may contain byte order marks and comment lines. Document markers
+//! delimit the content and can carry their own inline comments.
+//! See <https://yaml.org/spec/1.2.2/#911-document-prefix> and
+//! <https://yaml.org/spec/1.2.2/#912-document-markers>.
 
 use test_case::test_case;
 
@@ -90,6 +93,8 @@ fn an_inserted_end_marker_shares_a_line_with_the_stream_mark() {
 
 #[test]
 fn a_marked_blank_line_can_be_removed_between_comment_headers() {
+    // A stream can contain repeated document suffixes with prefixes between them.
+    // https://yaml.org/spec/1.2.2/#92-streams
     use astral_yaml::comments::CommentPlacement;
 
     let source = "o\n... # first\n\u{feff}\n... # second\n";
@@ -383,7 +388,6 @@ fn suffix_boundaries_preserve_detached_comments() {
     "nested sequence"
 )]
 fn structural_edits_preserve_framing_and_outer_comments(source: &str) -> String {
-    // Document markers: https://yaml.org/spec/1.2.2/#922-document-markers
     edit(source, |editor| {
         let root = editor.root();
         editor.insert_entry(root, 0, "added", "new")?;
@@ -725,6 +729,7 @@ fn removed_children_leave_their_comments_in_the_surviving_gap(
 )]
 fn removing_the_last_gap_preserves_block_scalar_content(source: &str, sequence: bool) -> String {
     // A document boundary keeps detached suffix separation outside the scalar.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     edit(source, |editor| {
         let root = editor.root();
         if sequence {
@@ -897,6 +902,8 @@ fn root_leading_comments_use_the_start_marker_boundary(source: &str) -> String {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn root_omission_retains_comments_at_document_boundaries() {
+    // An explicit document can retain its marker and omit the root content.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -1055,6 +1062,8 @@ fn collection_comments_can_use_both_document_marker_headers(source: &str) -> Str
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn scalar_style_edits_keep_comments_outside_the_content() {
+    // The first comment after a block scalar must be less indented than its content.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"

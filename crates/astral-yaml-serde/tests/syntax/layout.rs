@@ -1,4 +1,7 @@
-//! Nested scalar termination and comment separation are layout dependencies.
+//! A block scalar's chomping mode determines which trailing breaks are part of its
+//! value. Its first trailing comment must be less indented than the scalar content.
+//! The editor chooses how to keep those comments attached across edits.
+//! See <https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator>.
 
 use test_case::test_case;
 
@@ -24,8 +27,6 @@ fn first_leaf(editor: &Editor<'_>) -> NodeId {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn descendant_edits_preserve_enclosing_comment_boundaries() {
-    // Blank separation belongs outside scalar content:
-    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let diffs = edits(
         [
             indoc! {r"
@@ -801,6 +802,8 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn retained_end_markers_bound_removed_suffix_comments() {
+    // A document suffix can carry a comment and be followed by further comment lines.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"

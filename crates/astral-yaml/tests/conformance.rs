@@ -26,6 +26,9 @@ fn corpus_paths() -> Vec<PathBuf> {
     inputs
 }
 
+// The upstream corpus supplies the expected events and rejections.
+// https://github.com/yaml/yaml-test-suite/tree/6ad3d2c62885d82fc349026c136ef560838fdf3d
+// https://yaml.org/spec/1.2.2/#rule-l-yaml-stream
 #[test]
 fn official_yaml_test_suite() {
     let mut valid = 0;
@@ -54,6 +57,8 @@ fn official_yaml_test_suite() {
     assert_eq!((valid, invalid), (308, 94));
 }
 
+// The plain-scalar regressions exercise colons and flow collection indicators.
+// https://yaml.org/spec/1.2.2/#733-plain-style
 #[test]
 fn fuzz_regressions() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/regressions");
@@ -97,6 +102,8 @@ fn every_corpus_prefix_has_valid_spans() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn events_preserve_escaped_controls_and_opaque_tag_bytes() {
     let stream = astral_yaml::parse("!<tag:example,%FF> \"\\0\\b\\t\\r\\n\\\\\"").unwrap();

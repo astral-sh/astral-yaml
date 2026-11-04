@@ -189,7 +189,8 @@ fn successive_root_comment_edits_keep_indices_and_attachments() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn block_roots_can_move_off_a_document_marker_line() {
-    // Document prefixes and markers: https://yaml.org/spec/1.2.2/#92-documents
+    // An explicit document can put its root on a line after the directives end marker.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -288,6 +289,8 @@ fn block_roots_can_move_off_a_document_marker_line() {
 
 #[test]
 fn root_comment_placement_respects_the_document_prefix() {
+    // A document with directives places the directives end marker before its content.
+    // https://yaml.org/spec/1.2.2/#915-directives-documents
     let source = indoc! {r"
         %YAML 1.2
         --- value
@@ -379,6 +382,9 @@ fn exact_scalar_style_requests_preserve_multiline_values(
     source: &str,
     style: ScalarStyle,
 ) -> String {
+    // Flow scalars use line folding. Block scalars use chomping for trailing line breaks.
+    // https://yaml.org/spec/1.2.2/#65-line-folding
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     edit(source, |editor| {
         editor.set_scalar_style(editor.root(), style)
     })
@@ -386,6 +392,8 @@ fn exact_scalar_style_requests_preserve_multiline_values(
 
 #[test]
 fn block_scalar_rewrites_own_their_trailing_line_breaks() {
+    // Chomping determines which trailing breaks belong to the scalar value.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let diffs = edits(
         [
             indoc! {r"
@@ -485,6 +493,8 @@ fn block_scalar_rewrites_own_their_trailing_line_breaks() {
     "folded"
 )]
 fn nested_block_scalar_boundaries_stop_before_following_syntax(style: ScalarStyle) -> String {
+    // The content indentation separates a block scalar from its following sibling.
+    // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
     let source = indoc! {r"
         outer:
           value: old # keep
@@ -582,6 +592,9 @@ fn comment_transactions_match_an_ordered_list_model() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn empty_roots_end_retained_header_comments_before_inserting_content() {
+    // An explicit document may have an empty root. Its marker line can end in a comment.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
+    // https://yaml.org/spec/1.2.2/#66-comments
     let mut diffs = Vec::new();
     for source in [
         "--- # marker",
@@ -726,6 +739,9 @@ fn empty_roots_end_retained_header_comments_before_inserting_content() {
     "leading anchor comment"
 )]
 fn edits_preserve_comments_between_headers_properties_and_content(source: &str) -> String {
+    // Comments may occupy the separation lines between properties and a block node.
+    // https://yaml.org/spec/1.2.2/#823-block-nodes
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
         .edit_syntax(|editor| {

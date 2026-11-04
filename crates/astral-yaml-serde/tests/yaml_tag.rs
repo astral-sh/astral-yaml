@@ -84,6 +84,7 @@ fn non_core_tags_require_opt_in_including_ignored_values_and_keys() {
     assert!(from_str::<Message>("!Text hello").is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#691-node-tags
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn core_tags_work_without_opt_in() {
@@ -392,6 +393,7 @@ fn adapter_scope_survives_transparent_wrappers_but_stops_at_children() {
 
     for source in ["!Inner {Text: hello}", "!Explicit !Text hello"] {
         // The second spelling puts two tags on the same node, which YAML forbids.
+        // https://yaml.org/spec/1.2.2/#69-node-properties
         assert_eq!(
             from_tag::<Outer>(source).is_ok(),
             source.starts_with("!Inner")
@@ -462,6 +464,8 @@ fn renamed_variants_validate_tag_names() {
 
     assert_eq!(from_tag::<Renamed>("!old-name").unwrap(), Renamed::Name);
     assert_eq!(to_string(&YamlTag(Renamed::Name)).unwrap(), "!some-name\n");
+    // The verbatim spelling preserves the comma in the tag name. A shorthand suffix excludes commas.
+    // https://yaml.org/spec/1.2.2/#691-node-tags
     assert_eq!(
         to_string(&YamlTag(Renamed::Punctuation)).unwrap(),
         "!<!a,b>\n"

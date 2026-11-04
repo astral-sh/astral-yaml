@@ -1467,6 +1467,10 @@ mod tests {
     use serde::Deserialize;
     use serde::de::SeqAccess;
 
+    // Anchor names are serialization details. YAML leaves equality of cyclic nodes
+    // to the implementation.
+    // https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     #[test]
     fn recursive_key_identity_ignores_anchor_names_and_scalar_spelling() {
         let source = "&a [null, true, false, 1, -2, 1.5, !tag {child: *a}]";
@@ -1793,6 +1797,8 @@ mod tests {
             yaml_tag: false,
         };
 
+        // The alias refers to the tagged scalar.
+        // https://yaml.org/spec/1.2.2/#71-alias-nodes
         assert_eq!(de.scalar(ScalarType::String).unwrap().0.value, "abc");
         assert_eq!(
             (de.context.budget.get(), de.context.scalar_budget.get()),

@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize, de};
 use std::collections::{BTreeMap, HashMap};
 use support::{YamlTag, from_tag};
 
+// Quoting and folding determine the decoded text. The wrapper also records the lexeme.
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+// https://yaml.org/spec/1.2.2/#81-block-scalar-styles
 #[test]
 fn scalars_retain_their_lexical_spans() {
     let mut snapshots = Vec::new();
@@ -82,6 +85,7 @@ fn scalars_retain_their_lexical_spans() {
 
 #[test]
 fn numeric_values_retain_their_lexical_spans() {
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let source = "0xff";
     let number: Spanned<u16> = from_str(source).unwrap();
     assert_eq!(*number, 255);
@@ -222,6 +226,8 @@ fn mapping_keys_and_sequence_elements_retain_their_spans() {
 #[test]
 fn options_and_nested_wrappers_keep_the_same_node_span() {
     let mut snapshots = Vec::new();
+    // The core schema resolves both null spellings and the empty plain scalar to null.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     for source in ["null", "~", "---\n"] {
         let value: Spanned<Option<u8>> = from_str(source).unwrap();
         assert!(value.is_none());
@@ -274,6 +280,8 @@ fn options_and_nested_wrappers_keep_the_same_node_span() {
 
 #[test]
 fn aliases_use_the_occurrence_span_and_children_use_definition_spans() {
+    // An alias denotes the anchored node.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "[&number 42, *number]";
     let values: Vec<Spanned<u8>> = from_str(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
@@ -466,6 +474,9 @@ fn wrapping_preserves_validation_and_located_errors() {
       |        ^^^ $["count"]: integer out of range
     "#);
 
+    // The duplicate key and mismatched tag violate YAML rules. The cycle hits a Serde limit.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
+    // https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
     let errors = ["{a: 1, a: 2}", "&a [*a]", "!!str []"].map(|source| {
         let error = from_str::<Spanned<de::IgnoredAny>>(source).unwrap_err();
         span_snapshot(source, [(error.message, error.span.unwrap())])

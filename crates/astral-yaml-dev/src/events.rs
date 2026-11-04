@@ -117,7 +117,8 @@ pub fn events(stream: &Stream<'_>) -> String {
 }
 
 // The suite's event convention decodes URI escapes (e.g. 6CK3). The parser's
-// public tag value preserves them as required by YAML 1.2.2 section 5.6.
+// public tag value preserves their spelling.
+// https://yaml.org/spec/1.2.2/#56-miscellaneous-characters
 fn event_tag(tag: &str) -> std::borrow::Cow<'_, str> {
     let mut bytes = tag.bytes();
     let mut decoded = Vec::new();

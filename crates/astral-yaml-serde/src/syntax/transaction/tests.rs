@@ -203,6 +203,8 @@ fn requested_style_comparison_checks_kind_and_collection_contents(
     right: &str,
     expected: bool,
 ) {
+    // Scalar and collection styles distinguish presentations of the same content.
+    // https://yaml.org/spec/1.2.2/#3231-node-styles
     let left = DocumentSyntax::parse(left).unwrap();
     let right = DocumentSyntax::parse(right).unwrap();
     assert_eq!(
@@ -310,6 +312,8 @@ fn collection_rewrites_include_their_comment_context() {
 
 #[test]
 fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
+    // Keep chomping makes trailing empty lines part of the scalar value.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let document = DocumentSyntax::parse(indoc! {r"
         outer:
           value: old
