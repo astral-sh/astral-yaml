@@ -284,6 +284,34 @@ fn adapter_roundtrips_every_variant_shape() {
     }
 }
 
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(transparent)]
+struct TaggedNest(#[serde(with = "yaml_tag")] Nest);
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+enum Nest {
+    End,
+    Tuple(u8, Box<TaggedNest>),
+}
+
+#[test_case(21; "reported depth")]
+#[test_case(31; "serializer depth limit")]
+fn nested_tagged_enums_roundtrip(levels: usize) {
+    let mut value = TaggedNest(Nest::End);
+    for _ in 0..levels {
+        value = TaggedNest(Nest::Tuple(0, Box::new(value)));
+    }
+
+    let yaml = to_string(&value).unwrap();
+    assert_eq!(from_str::<TaggedNest>(&yaml).unwrap(), value);
+}
+
+#[test]
+fn recursive_tagged_aliases_are_bounded() {
+    let error = from_str::<TaggedNest>("&cycle !Tuple [0, *cycle]").unwrap_err();
+    assert_eq!(error.message, "deserialization resource limit exceeded");
+}
+
 #[test]
 fn mixed_enums_buffer_tags_only_when_opted_in() {
     #[derive(Debug, PartialEq, Deserialize, Serialize)]

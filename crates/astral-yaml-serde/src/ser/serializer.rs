@@ -16,6 +16,9 @@ const EXPLICIT_KEY: &str = "? ";
 /// Strings are quoted to preserve their type. Unit enum variants use their name,
 /// and variants with data use a mapping with the variant name as its key.
 ///
+/// The default reader has separate limits on input bytes, syntax elements, and
+/// deserialization work. Large serialized documents can exceed those limits.
+///
 /// # Errors
 /// Propagates errors from `Serialize`. Also returns an error if a tag conflicts
 /// with its value, a mapping repeats a key, keys and values are not paired,
