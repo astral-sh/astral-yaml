@@ -74,8 +74,6 @@ See [fuzzing](fuzz/README.md) and [benchmarks](benchmarks/README.md) for details
 
 ## Releases
 
-For the first release, skip to step 3 if `main` already has the intended version.
-
 1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml)
    from `main` with the new Cargo version, omitting the `v` prefix.
 2. Review and merge the version-bump PR.
