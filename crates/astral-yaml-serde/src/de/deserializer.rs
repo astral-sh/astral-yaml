@@ -84,6 +84,7 @@ fn from_input<'de, T: Deserialize<'de>>(input: impl Input<'de>, id: NodeId) -> R
 struct Context<I> {
     input: I,
     budget: Cell<usize>,
+    // Shared by expanded scalar text, enum names, and tags used as mapping keys.
     scalar_budget: Cell<usize>,
 }
 
@@ -553,6 +554,16 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             .tag()
             .filter(|tag| self.tag_state != TagState::ConsumedApplication && !is_core_tag(tag))
         {
+            // Aliases can bring the same tag into many keys. Charge for each
+            // occurrence before hashing or comparing the tag text.
+            let remaining = self
+                .context
+                .scalar_budget
+                .get()
+                .checked_sub(tag.len())
+                .ok_or_else(|| Error::at("expanded key tag byte limit exceeded", node.span()))?;
+            self.context.scalar_budget.set(remaining);
+
             // Application tags define their own scalar types. Without an
             // application-specific canonical form, compare the scalar text.
             let value = if let NodeKind::Scalar(scalar) = node.kind() {
@@ -1437,6 +1448,44 @@ mod tests {
             identity,
             super::canonical_key(&source.replace("*a", "'*a'")).unwrap()
         );
+    }
+
+    #[test_case::test_case(18, true; "exact budget")]
+    #[test_case::test_case(16, false; "second alias exceeds budget")]
+    fn tagged_aliases_charge_the_key_byte_budget(bytes: usize, accepted: bool) {
+        let source = "[&a !shared x, {? [*a, 1]: null, ? [*a, 2]: null}]";
+        let stream = astral_yaml::parse(source).unwrap();
+        let (id, entries, span) = stream
+            .nodes()
+            .iter()
+            .enumerate()
+            .find_map(|(index, node)| match &node.kind {
+                astral_yaml::NodeKind::Mapping { entries, .. } => {
+                    Some((astral_yaml::NodeId::from_index(index), entries, node.span))
+                }
+                _ => None,
+            })
+            .unwrap();
+        let context = Context::new(super::Parsed::new(&stream, 0));
+        context.scalar_budget.set(bytes);
+
+        let result = context
+            .deserializer(id)
+            .check_mapping_keys(entries, Some(span));
+        if accepted {
+            result.unwrap();
+            assert_eq!(context.scalar_budget.get(), 0);
+        } else {
+            let error = result.unwrap_err();
+            let message = format!("{}: {}", error.path.unwrap(), error.message);
+            let diagnostic =
+                astral_yaml_dev::span_snapshot(source, [(message, error.span.unwrap())]);
+            insta::assert_snapshot!(diagnostic, @"
+              |
+            1 | [&a !shared x, {? [*a, 1]: null, ? [*a, 2]: null}]
+              |  ^^^^^^^^^^^^ $.key_at(1): expanded key tag byte limit exceeded
+            ");
+        }
     }
 
     #[test]
