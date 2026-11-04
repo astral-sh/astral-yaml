@@ -778,6 +778,72 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
 
         Ok(result)
     }
+
+    fn visit_number<V: Visitor<'de>>(
+        s: ScalarOf<'input, 'de, I>,
+        kind: ScalarType,
+        visitor: V,
+    ) -> Result<V::Value> {
+        if kind == ScalarType::Float {
+            return visitor.visit_f64(Self::float_value(s, kind)?);
+        }
+
+        let (value, radix, span) = Self::integer_value(s, kind)?;
+        if value.starts_with('-') {
+            let n = i128::from_str_radix(value, radix)
+                .map_err(|_| Error::at("integer out of range", span))?;
+            if let Ok(n) = i64::try_from(n) {
+                visitor.visit_i64(n)
+            } else {
+                visitor.visit_i128(n)
+            }
+        } else {
+            let n = u128::from_str_radix(value, radix)
+                .map_err(|_| Error::at("integer out of range", span))?;
+            if let Ok(n) = u64::try_from(n) {
+                visitor.visit_u64(n)
+            } else {
+                visitor.visit_u128(n)
+            }
+        }
+    }
+
+    fn visit_any<V: Visitor<'de>>(
+        self,
+        visitor: V,
+        visit_number: impl FnOnce(ScalarOf<'input, 'de, I>, ScalarType, V) -> Result<V::Value>,
+    ) -> Result<V::Value> {
+        let node = self.raw_node()?;
+
+        if let Some(variant) = self.enum_tag(node) {
+            return self.tagged_mapping(node, variant, visitor);
+        }
+
+        self.reject_tag(node)?;
+
+        match node.kind() {
+            NodeKind::Sequence { .. } => self.seq_node(node, visitor),
+            NodeKind::Mapping { .. } => self.map_node(node, visitor),
+            NodeKind::Scalar(_) => {
+                let (s, kind) = self.scalar_value(node)?;
+
+                match kind {
+                    ScalarType::Null => visitor.visit_unit(),
+                    ScalarType::Bool => {
+                        visitor.visit_bool(matches!(s.value(), "true" | "True" | "TRUE"))
+                    }
+                    ScalarType::String => Self::visit_text(s, visitor),
+                    ScalarType::Int | ScalarType::Float => visit_number(s, kind, visitor),
+                }
+            }
+            NodeKind::Alias { target, .. } => Self {
+                id: target,
+                depth: self.depth + 1,
+                ..self
+            }
+            .visit_any(visitor, visit_number),
+        }
+    }
 }
 
 #[derive(Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -855,56 +921,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let node = self.raw_node()?;
-
-        if let Some(variant) = self.enum_tag(node) {
-            return self.tagged_mapping(node, variant, visitor);
-        }
-
-        self.reject_tag(node)?;
-
-        match node.kind() {
-            NodeKind::Sequence { .. } => self.seq_node(node, visitor),
-            NodeKind::Mapping { .. } => self.map_node(node, visitor),
-            NodeKind::Scalar(_) => {
-                let (s, kind) = self.scalar_value(node)?;
-
-                match kind {
-                    ScalarType::Null => visitor.visit_unit(),
-                    ScalarType::Bool => {
-                        visitor.visit_bool(matches!(s.value(), "true" | "True" | "TRUE"))
-                    }
-                    ScalarType::String => Self::visit_text(s, visitor),
-                    ScalarType::Float => visitor.visit_f64(Self::float_value(s, kind)?),
-                    ScalarType::Int => {
-                        let (value, radix, span) = Self::integer_value(s, kind)?;
-                        if value.starts_with('-') {
-                            let n = i128::from_str_radix(value, radix)
-                                .map_err(|_| Error::at("integer out of range", span))?;
-                            if let Ok(n) = i64::try_from(n) {
-                                visitor.visit_i64(n)
-                            } else {
-                                visitor.visit_i128(n)
-                            }
-                        } else {
-                            let n = u128::from_str_radix(value, radix)
-                                .map_err(|_| Error::at("integer out of range", span))?;
-                            if let Ok(n) = u64::try_from(n) {
-                                visitor.visit_u64(n)
-                            } else {
-                                visitor.visit_u128(n)
-                            }
-                        }
-                    }
-                }
-            }
-            NodeKind::Alias { target, .. } => Self {
-                id: target,
-                depth: self.depth + 1,
-                ..self
-            }
-            .deserialize_any(visitor),
-        }
+        self.visit_any(visitor, Self::visit_number)
     }
 
     integer_methods! {
@@ -1138,7 +1155,15 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     }
 
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.deserialize_any(de::IgnoredAny)?;
+        self.visit_any(de::IgnoredAny, |s, kind, ignored| {
+            // Explicit float tags require a decimal spelling for integers.
+            if kind == ScalarType::Float && matches!(s.value().as_bytes(), [b'0', b'o' | b'x', ..])
+            {
+                return Err(Error::at("invalid float", s.span()));
+            }
+
+            Ok(ignored)
+        })?;
         visitor.visit_unit()
     }
 }

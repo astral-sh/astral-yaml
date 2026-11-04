@@ -649,6 +649,13 @@ impl<'de> Deserialize<'de> for Anything {
     }
 }
 
+#[test_case("340282366920938463463374607431768211456"; "unsigned overflow")]
+#[test_case("-170141183460469231731687303715884105729"; "signed overflow")]
+fn arbitrary_values_report_integer_overflow(source: &str) {
+    let error = from_str::<Anything>(source).unwrap_err();
+    assert_eq!(error.message, "integer out of range");
+}
+
 #[test]
 fn arbitrary_values_and_alias_limits() {
     from_str::<Anything>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
