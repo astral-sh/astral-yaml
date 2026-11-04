@@ -9,7 +9,14 @@ publish = false
 
 [features]
 editable = ["astral-yaml-serde/editable"]
-compare = ["dep:deser", "dep:deser-value", "dep:deser-yaml", "dep:serde-saphyr", "dep:yaml_serde"]
+compare = [
+    "dep:deser",
+    "dep:deser-value",
+    "dep:deser-yaml",
+    "dep:granit-parser",
+    "dep:serde-saphyr",
+    "dep:yaml_serde",
+]
 
 [dependencies]
 annotate-snippets.workspace = true
@@ -18,6 +25,7 @@ astral-yaml-serde.workspace = true
 deser = { workspace = true, optional = true }
 deser-value = { workspace = true, optional = true }
 deser-yaml = { workspace = true, optional = true }
+granit-parser = { workspace = true, optional = true }
 indoc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

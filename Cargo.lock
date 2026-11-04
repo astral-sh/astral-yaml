@@ -120,6 +120,7 @@ dependencies = [
  "deser",
  "deser-value",
  "deser-yaml",
+ "granit-parser",
  "indoc",
  "insta",
  "serde",

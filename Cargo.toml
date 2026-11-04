@@ -27,6 +27,7 @@ deser = { version = "=0.10.2", features = ["derive"] }
 deser-value = "=0.10.2"
 deser-yaml = "=0.10.2"
 divan = { package = "codspeed-divan-compat", version = "5.0.2" }
+granit-parser = "=2.1.0"
 indoc = "2.0.7"
 insta = "1.48.0"
 memchr = "2.8.3"
