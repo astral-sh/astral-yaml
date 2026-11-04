@@ -1,8 +1,27 @@
 //! Comment boundaries must not become block scalar content during an edit.
 
 use super::support::{edit, edits};
+use crate::syntax::DocumentSyntax;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml_dev::indoc;
+use test_case::test_case;
+
+// The first trailing comment must be less indented than the scalar content:
+// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+#[test_case("|\n   x\n  # after\n" => "|\n  x\n# after\n"; "root")]
+#[test_case("a: |\n   x\n  # after\n" => "a: |\n  x\n# after\n"; "mapping")]
+#[test_case("- >-\n   x\n  # after\n" => "- >-\n  x\n# after\n"; "sequence")]
+#[test_case("a:\n     b: |+\n        x\n\n    # first\n    # second\n" => "a:\n  b: |+\n    x\n    \n# first\n# second\n"; "nested keep")]
+#[test_case("a: |\n   x\n  # after\n... # end\n" => "a: |\n  x\n# after\n... # end\n"; "end marker")]
+#[test_case("|\n   x\n...\n  # after\n" => "|\n  x\n...\n  # after\n"; "comment after end marker")]
+#[test_case("|\n   x\n # after\n" => "|\n  x\n # after\n"; "safe indentation")]
+fn normalization_keeps_trailing_comments_outside_block_scalars(source: &str) -> String {
+    let document = DocumentSyntax::parse(source).unwrap();
+    let output = document.normalized_yaml().unwrap();
+    let reparsed = DocumentSyntax::parse(&output).unwrap();
+    assert_eq!(reparsed.normalized_yaml().unwrap(), output);
+    output
+}
 
 #[test]
 fn relocated_inline_headers_keep_detached_suffix_separation() {
