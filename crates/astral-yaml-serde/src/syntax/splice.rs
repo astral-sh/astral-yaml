@@ -42,7 +42,7 @@ pub(super) fn region<'syntax>(
                 end = end.max(comment.span.end());
             }
         }
-        emit::children(&node.kind, &mut pending);
+        node.kind.append_children_to(&mut pending);
     }
     Span::new(start, end).expect("ordered source ranges")
 }

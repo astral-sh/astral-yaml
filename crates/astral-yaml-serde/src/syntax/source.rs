@@ -1,8 +1,8 @@
 //! Track source ranges as document markers and line breaks are inserted.
 //! The original and edited syntax use the same offset mapping.
 
+use super::Node;
 use super::view::{Emission, Syntax};
-use super::{Node, draft};
 use astral_yaml::{NodeId, ParseOptions, Span};
 
 /// Return each node's content range, excluding tags, anchors, and intervening trivia.
@@ -207,7 +207,7 @@ impl<'source> Frame<'source> {
             .nodes
             .iter()
             .cloned()
-            .map(|node| draft::map_locations(node, |span| self.locations.span(span, false)))
+            .map(|node| node.map_locations(|span| self.locations.span(span, false)))
             .collect();
         let root = self.original.root;
         source_nodes[root.index()].span = self
@@ -219,9 +219,7 @@ impl<'source> Frame<'source> {
             .iter()
             .cloned()
             .map(|node| {
-                draft::map_locations(node, |span| {
-                    span.map(|span| self.locations.span(span, false))
-                })
+                node.map_locations(|span| span.map(|span| self.locations.span(span, false)))
             })
             .collect();
         nodes[syntax.root.index()].span = syntax.nodes[syntax.root.index()]

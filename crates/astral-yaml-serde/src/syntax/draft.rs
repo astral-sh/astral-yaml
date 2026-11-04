@@ -74,7 +74,7 @@ impl From<&DocumentSyntax> for Draft {
                 .nodes
                 .iter()
                 .cloned()
-                .map(|node| Slot::live(map_locations(node, Some), None))
+                .map(|node| Slot::live(node.map_locations(Some), None))
                 .collect(),
             root: document.root,
             options: document.options,
@@ -186,7 +186,7 @@ impl Draft {
 
     fn link_children(&mut self, id: NodeId) {
         let mut children = Vec::new();
-        emit::children(&self.node(id).kind, &mut children);
+        self.node(id).kind.append_children_to(&mut children);
         for child in children {
             self.membership_mut(child).parent = Some(id);
         }
@@ -209,10 +209,8 @@ impl Draft {
         let map = |id: NodeId| {
             NodeId::from_index(offset + id.index() - usize::from(id.index() > value_root.index()))
         };
-        let mut node = map_locations(Node::from_parsed(nodes.remove(value_root.index())), |_| {
-            None
-        });
-        remap(&mut node, map);
+        let mut node = Node::from_parsed(nodes.remove(value_root.index())).map_locations(|_| None);
+        node.kind.remap_children(map);
         if let Some((id, style)) = replacement {
             let slot = &mut self.slots[id.index()];
             let old = &mut slot.node;
@@ -228,8 +226,8 @@ impl Draft {
             self.slots.push(Slot::live(node, parent));
         }
         for node in nodes {
-            let mut node = map_locations(Node::from_parsed(node), |_| None);
-            remap(&mut node, map);
+            let mut node = Node::from_parsed(node).map_locations(|_| None);
+            node.kind.remap_children(map);
             self.slots.push(Slot::live(node, None));
         }
         self.link_children(root);
@@ -246,7 +244,7 @@ impl Draft {
         let mut removed = Vec::new();
         while let Some(id) = pending.pop() {
             self.charge(1)?;
-            emit::children(&self.node(id).kind, &mut pending);
+            self.node(id).kind.append_children_to(&mut pending);
             removed.push(id);
         }
         Ok(removed)
@@ -318,7 +316,9 @@ impl Draft {
         let following = items.get(index + 1).copied();
         let removed = self.removal([child])?;
         self.sequence_items_mut(id)?.remove(index);
-        retarget_comments(&mut self.slots[id.index()].node, child, following);
+        self.slots[id.index()]
+            .node
+            .retarget_child_comments(child, following);
         self.retire(removed);
         Ok(())
     }
@@ -356,7 +356,9 @@ impl Draft {
         let following = entries.get(index + 1).map(|&(key, _)| key);
         let removed = self.removal([key, value])?;
         self.mapping_entries_mut(id)?.remove(index);
-        retarget_comments(&mut self.slots[id.index()].node, key, following);
+        self.slots[id.index()]
+            .node
+            .retarget_child_comments(key, following);
         self.retire(removed);
         Ok(())
     }
@@ -601,34 +603,6 @@ fn preserve_style(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>
     }
 }
 
-fn remap(node: &mut Node<Option<Span>>, map: impl Fn(NodeId) -> NodeId) {
-    match &mut node.kind {
-        NodeKind::Sequence { items, .. } => {
-            for item in items {
-                *item = map(*item);
-            }
-        }
-        NodeKind::Mapping { entries, .. } => {
-            for (key, value) in entries {
-                *key = map(*key);
-                *value = map(*value);
-            }
-        }
-        NodeKind::Scalar { .. } | NodeKind::Alias { .. } => {}
-    }
-}
-
-/// Move `BeforeChild(removed)` comments to `following`, or to the collection's
-/// end if there is no following child.
-fn retarget_comments(node: &mut Node<Option<Span>>, removed: NodeId, following: Option<NodeId>) {
-    for comment in &mut node.comments {
-        if comment.position == CommentPosition::BeforeChild(removed) {
-            comment.position =
-                following.map_or(CommentPosition::After, CommentPosition::BeforeChild);
-        }
-    }
-}
-
 /// A gap comment precedes a sequence item or a mapping key.
 fn comment_boundaries(kind: &NodeKind) -> impl Iterator<Item = NodeId> {
     let (items, entries): (&[NodeId], &[(NodeId, NodeId)]) = match kind {
@@ -672,28 +646,5 @@ pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {
             entries.is_empty() || a == b
         }
         _ => false,
-    }
-}
-
-/// Map node and comment locations without changing the syntax or node IDs.
-pub(super) fn map_locations<Location, Target>(
-    node: Node<Location>,
-    map: impl Fn(Location) -> Target,
-) -> Node<Target> {
-    Node {
-        span: map(node.span),
-        kind: node.kind,
-        anchor: node.anchor,
-        tag: node.tag,
-        comments: node
-            .comments
-            .into_iter()
-            .map(|comment| Comment {
-                span: map(comment.span),
-                text: comment.text,
-                placement: comment.placement,
-                position: comment.position,
-            })
-            .collect(),
     }
 }

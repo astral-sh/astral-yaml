@@ -48,6 +48,39 @@ pub enum NodeKind {
     },
 }
 
+impl NodeKind {
+    /// Append structural child IDs in source order.
+    pub(super) fn append_children_to(&self, children: &mut Vec<NodeId>) {
+        match self {
+            Self::Sequence { items, .. } => children.extend(items),
+            Self::Mapping { entries, .. } => {
+                for &(key, value) in entries {
+                    children.extend([key, value]);
+                }
+            }
+            Self::Scalar { .. } | Self::Alias { .. } => {}
+        }
+    }
+
+    /// Relocate structural child IDs when inserting a serialized tree.
+    pub(super) fn remap_children(&mut self, map: impl Fn(NodeId) -> NodeId) {
+        match self {
+            Self::Sequence { items, .. } => {
+                for item in items {
+                    *item = map(*item);
+                }
+            }
+            Self::Mapping { entries, .. } => {
+                for (key, value) in entries {
+                    *key = map(*key);
+                    *value = map(*value);
+                }
+            }
+            Self::Scalar { .. } | Self::Alias { .. } => {}
+        }
+    }
+}
+
 /// A comment attached to a [`Node`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Comment<Location = Span> {
@@ -153,6 +186,36 @@ impl Node {
 }
 
 impl<Location> Node<Location> {
+    /// Map node and comment locations without changing the syntax or node IDs.
+    pub(super) fn map_locations<Target>(self, map: impl Fn(Location) -> Target) -> Node<Target> {
+        Node {
+            span: map(self.span),
+            kind: self.kind,
+            anchor: self.anchor,
+            tag: self.tag,
+            comments: self
+                .comments
+                .into_iter()
+                .map(|comment| Comment {
+                    span: map(comment.span),
+                    text: comment.text,
+                    placement: comment.placement,
+                    position: comment.position,
+                })
+                .collect(),
+        }
+    }
+
+    /// Move comments before a removed child to the following child or the collection's end.
+    pub(super) fn retarget_child_comments(&mut self, removed: NodeId, following: Option<NodeId>) {
+        for comment in &mut self.comments {
+            if comment.position == CommentPosition::BeforeChild(removed) {
+                comment.position =
+                    following.map_or(CommentPosition::After, CommentPosition::BeforeChild);
+            }
+        }
+    }
+
     /// Return the node's contents.
     #[must_use]
     pub fn kind(&self) -> &NodeKind {
