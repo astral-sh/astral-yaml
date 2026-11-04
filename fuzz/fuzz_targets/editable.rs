@@ -1,11 +1,23 @@
 #![no_main]
 
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml::{CollectionStyle, ScalarStyle};
+use astral_yaml::{CollectionStyle, ScalarStyle, Source};
 use astral_yaml_dev::Value;
 use astral_yaml_serde::edit::{Cursor, NodeKind};
 use astral_yaml_serde::{Editable, Error, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
+
+// YAML 1.2.2 §5.1, production [1]. The reader also accepts some characters
+// in quoted scalars that a writer must escape.
+fn yaml_printable(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | ' '..='~' | '\u{85}' | '\u{a0}'..='\u{fffd}' | '\u{10000}'..)
+}
+
+fn check_output(source: &str) {
+    assert!(!source.contains('\r'));
+    assert!(source.chars().all(yaml_printable));
+    Source::from_bytes(source.as_bytes()).unwrap();
+}
 
 fn edit_selected(cursor: Cursor<'_, '_>, selector: u8, depth: usize) -> Result<(), Error> {
     if depth < usize::from(selector >> 6) {
@@ -62,13 +74,29 @@ fuzz_target!(|data: &[u8]| {
     let Ok(mut document) = Editable::<Value>::parse(source) else {
         return;
     };
-    assert_eq!(
-        document.source(),
-        source.replace("\r\n", "\n").replace('\r', "\n")
-    );
-    let stream_marks = source
-        .contains('\u{feff}')
-        .then(|| astral_yaml::parse(source).unwrap().byte_order_marks().len());
+    let mut expected = source.replace("\r\n", "\n").replace('\r', "\n");
+    if expected.starts_with(|c: char| !c.is_ascii() && c != '\u{feff}') {
+        expected.insert(0, '\u{feff}');
+    }
+    check_output(document.source());
+    if expected.chars().all(yaml_printable) {
+        assert_eq!(document.source(), expected);
+    }
+    let stream_marks = expected.contains('\u{feff}').then(|| {
+        astral_yaml::parse(&expected)
+            .unwrap()
+            .byte_order_marks()
+            .len()
+    });
+    if let Some(count) = stream_marks {
+        assert_eq!(
+            astral_yaml::parse(document.source())
+                .unwrap()
+                .byte_order_marks()
+                .len(),
+            count
+        );
+    }
     let original: Value = from_str(source).unwrap();
     assert_eq!(to_string(document.value()), to_string(&original));
 
@@ -122,7 +150,7 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(to_string(document.value()), value_before);
         } else {
             let source = document.to_yaml();
-            assert!(!source.contains('\r'));
+            check_output(&source);
             if let Some(count) = stream_marks {
                 assert_eq!(
                     astral_yaml::parse(&source)
