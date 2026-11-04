@@ -1,10 +1,12 @@
 use super::draft::{Draft, ReplacementStyle};
 use super::layout::Layout;
 use super::plan::{Changes, Plan};
-use super::{DocumentSyntax, Node, NodeKind, emit};
+use super::{DocumentSyntax, Node, NodeKind};
+use crate::ser;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::schema::{self, ScalarType};
 use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle, Span};
+use serde::Serialize;
 
 #[cfg(test)]
 mod tests;
@@ -115,14 +117,22 @@ impl<'doc> Editor<'doc> {
         Ok(found)
     }
 
-    pub(crate) fn append_string_entry(
+    pub(crate) fn serialize(&self, value: impl Serialize) -> Result<String, crate::Error> {
+        let (remaining, span) = self.draft.byte_budget();
+        ser::to_string_with_limit(&value, remaining, span)
+    }
+
+    pub(crate) fn append_string_entry<S: AsRef<str>>(
         &mut self,
         id: NodeId,
         len: &mut usize,
         name: &str,
-        yaml: &str,
-    ) -> Result<NodeId, Error> {
-        let (_, value) = self.insert_entry(id, *len, &emit::quoted(name), yaml)?;
+        serialize: impl FnOnce(usize, Span) -> Result<S, crate::Error>,
+    ) -> Result<NodeId, crate::Error> {
+        let (remaining, span) = self.draft.byte_budget();
+        let key = ser::quote_with_limit(name, remaining, span)?;
+        let yaml = serialize(remaining - key.len(), span)?;
+        let (_, value) = self.insert_entry(id, *len, &key, yaml.as_ref())?;
         *len += 1;
         Ok(value)
     }

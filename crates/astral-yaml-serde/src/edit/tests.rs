@@ -4,6 +4,8 @@ use super::{Cursor, Error};
 use crate::syntax::DocumentSyntax;
 use astral_yaml::ParseOptions;
 use astral_yaml_dev::edit_diff;
+use serde::ser::{Serialize, SerializeSeq, Serializer};
+use std::cell::Cell;
 
 fn edit(
     document: &mut DocumentSyntax,
@@ -183,11 +185,11 @@ fn sequence_views_report_resource_errors_with_paths(required: bool) {
 #[test]
 fn serialization_failure_blocks_retries_and_rolls_back_prior_edits() {
     struct FallibleValue {
-        attempts: std::cell::Cell<usize>,
+        attempts: Cell<usize>,
     }
 
-    impl serde::Serialize for FallibleValue {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    impl Serialize for FallibleValue {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let attempt = self.attempts.get() + 1;
             self.attempts.set(attempt);
             if attempt == 2 {
@@ -201,7 +203,7 @@ fn serialization_failure_blocks_retries_and_rolls_back_prior_edits() {
     let source = "old\n";
     let mut document = crate::Editable::<String>::parse(source).unwrap();
     let value = FallibleValue {
-        attempts: std::cell::Cell::new(0),
+        attempts: Cell::new(0),
     };
     let error = document
         .edit(|mut root| {
@@ -216,4 +218,115 @@ fn serialization_failure_blocks_retries_and_rolls_back_prior_edits() {
     assert_eq!(error.to_string(), "$: serialization failed");
     assert_eq!(document.source(), source);
     assert_eq!(document.value(), "old");
+}
+
+struct Generated<'a>(&'a Cell<usize>);
+
+impl Serialize for Generated<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(None)?;
+        for _ in 0..100 {
+            self.0.set(self.0.get() + 1);
+            seq.serialize_element("value")?;
+        }
+        seq.end()
+    }
+}
+
+#[test]
+fn public_serialization_can_write_the_full_sequence() {
+    let visits = Cell::new(0);
+    let yaml = crate::to_string(&Generated(&visits)).unwrap();
+    assert_eq!(
+        crate::from_str::<Vec<String>>(&yaml).unwrap(),
+        ["value"; 100]
+    );
+    assert_eq!(visits.get(), 100);
+}
+
+#[derive(Clone, Copy)]
+enum Write {
+    Replace,
+    SetEntry,
+    InsertItem,
+    DefaultEntry,
+}
+
+#[test_case("null", Write::Replace, "$", 3; "root replacement")]
+#[test_case("{key: 0}", Write::SetEntry, "$[\"key\"]", 3; "mapping replacement")]
+#[test_case("{}", Write::SetEntry, "$[\"key\"]", 2; "new mapping entry")]
+#[test_case("[0]", Write::InsertItem, "$", 3; "new sequence item")]
+#[test_case("{}", Write::DefaultEntry, "$[\"key\"]", 2; "vacant entry default")]
+fn oversized_edit_stops_serializing_early(source: &str, write: Write, path: &str, count: usize) {
+    let options = ParseOptions {
+        max_input_bytes: 20,
+        ..ParseOptions::default()
+    };
+    let mut document = crate::EditableYaml::parse_with_options(source, options).unwrap();
+    let visits = Cell::new(0);
+    let error = document
+        .edit(|mut root| {
+            let value = Generated(&visits);
+            match write {
+                Write::Replace => root.set(value),
+                Write::SetEntry => root.into_mapping()?.set("key", value).map(drop),
+                Write::InsertItem => root.into_sequence()?.insert(0, value).map(drop),
+                Write::DefaultEntry => root
+                    .into_mapping()?
+                    .entry("key")?
+                    .or_insert(value)
+                    .map(drop),
+            }
+        })
+        .unwrap_err();
+    assert_eq!(error.path.as_deref(), Some(path));
+    assert_eq!(error.message, "inserted YAML exceeds input byte limit");
+    assert_eq!(error.span, astral_yaml::Span::new(0, source.len()));
+    assert_eq!(visits.get(), count);
+    assert_eq!(document.source(), source);
+}
+
+#[test_case(8, 0; "no bytes remain")]
+#[test_case(10, 1; "first item exceeds the remaining bytes")]
+fn replacements_share_the_budget_and_roll_back(limit: usize, count: usize) {
+    let source = "old\n";
+    let options = ParseOptions {
+        max_input_bytes: limit,
+        ..ParseOptions::default()
+    };
+    let mut document = crate::Editable::<String>::parse_with_options(source, options).unwrap();
+    let visits = Cell::new(0);
+    let error = document
+        .edit(|mut root| {
+            root.set("first")?;
+            let error = root.set(Generated(&visits)).unwrap_err();
+            assert_eq!(root.set("another").unwrap_err(), error);
+            assert_eq!(root.read::<String>()?, "first");
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "inserted YAML exceeds input byte limit");
+    assert_eq!(visits.get(), count);
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value(), "old");
+}
+
+#[test]
+fn escaped_new_key_uses_the_budget_before_the_value_is_serialized() {
+    let options = ParseOptions {
+        max_input_bytes: 10,
+        ..ParseOptions::default()
+    };
+    let mut document = crate::EditableYaml::parse_with_options("{}", options).unwrap();
+    let visits = Cell::new(0);
+    let error = document
+        .edit(|root| {
+            root.into_mapping()?
+                .set("\n\u{7}", Generated(&visits))
+                .map(drop)
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "inserted YAML exceeds input byte limit");
+    assert_eq!(visits.get(), 0);
+    assert_eq!(document.source(), "{}");
 }
