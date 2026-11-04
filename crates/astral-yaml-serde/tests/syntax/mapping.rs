@@ -8,6 +8,10 @@ use astral_yaml_dev::indoc;
 #[test_case("", "[]")]
 #[test_case("  ", r#"["new"]"#)]
 fn bom_preserves_indentless_sequence_columns(indent: &str, replacement: &str) {
+    // A BOM may precede the document. A sequence used as a block mapping value
+    // may align its dashes with the key.
+    // https://yaml.org/spec/1.2.2/#911-document-prefix
+    // https://yaml.org/spec/1.2.2/#823-block-nodes
     let source = format!("\u{feff}{indent}v:\n{indent}- old");
     let mut document = DocumentSyntax::parse(&source).unwrap();
     document
@@ -134,6 +138,8 @@ fn long_explicit_key_edits_preserve_surrounding_source(prefix: &str, suffix: &st
 
 #[test]
 fn flow_conversion_uses_content_indentation_after_properties() {
+    // The block collection productions distinguish property indentation from entry indentation.
+    // https://yaml.org/spec/1.2.2/#823-block-nodes
     let results = edits(
         [
             indoc! {r"
@@ -181,6 +187,8 @@ fn flow_conversion_uses_content_indentation_after_properties() {
 
 #[test]
 fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
+    // An explicit block key can itself be a block sequence or mapping.
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
     let results = edits(
         [
             indoc! {r"
@@ -219,6 +227,8 @@ fn edits_inside_complex_keys_share_the_enclosing_mapping_context() {
 
 #[test]
 fn fallback_quoted_keys_can_retain_adjacent_value_indicators() {
+    // A JSON-like key in a flow mapping allows the value immediately after the colon.
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
     let source = indoc! {r#"
         {"old":value, untouched:   [a,b]}
     "#};
@@ -265,7 +275,8 @@ fn omitted_keys_retain_entries_without_value_indicators() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn indentless_sequences_can_become_empty_or_flow_values() {
-    // Block sequences: https://yaml.org/spec/1.2.2/#821-block-sequences
+    // A sequence used as a block mapping value may align its dashes with the key.
+    // https://yaml.org/spec/1.2.2/#823-block-nodes
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -487,7 +498,8 @@ fn empty_key_insertions_do_not_copy_a_preceding_line_break(source: &str) -> Stri
     "recursive pair"
 )]
 fn nested_flow_pair_keys_expand_the_enclosing_rewrite(source: &str) -> String {
-    // Implicit flow pairs: https://yaml.org/spec/1.2.2/#741-flow-sequences
+    // A single-pair mapping in a flow sequence can omit its braces.
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
     edit(source, |editor| {
         let mut sequence = editor.root();
         if source.starts_with("outer:") {
@@ -507,7 +519,7 @@ fn nested_flow_pair_keys_expand_the_enclosing_rewrite(source: &str) -> String {
 #[test]
 fn mapping_scalar_replacement_adds_omitted_value_indicators() {
     // Empty values: https://yaml.org/spec/1.2.2/#742-flow-mappings
-    // Explicit entries: https://yaml.org/spec/1.2.2/#832-block-mappings
+    // Explicit entries: https://yaml.org/spec/1.2.2/#822-block-mappings
     let diffs = edits(
         [
             indoc! {r"
@@ -676,7 +688,9 @@ fn mapping_scalar_key_replacement_preserves_required_separation(
     source: &str,
     replacement: &str,
 ) -> String {
-    // JSON-like keys: https://yaml.org/spec/1.2.2/#742-flow-mappings
+    // A JSON-like flow key permits an adjacent value. A multiline block key requires `?`.
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
     edit(source, |editor| {
         let key = editor.mapping_entries(editor.root())?.remove(0).0;
         editor.replace(key, replacement)
@@ -685,7 +699,7 @@ fn mapping_scalar_key_replacement_preserves_required_separation(
 
 #[test]
 fn mapping_scalar_key_replacement_can_require_explicit_notation() {
-    // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
+    // Implicit keys: https://yaml.org/spec/1.2.2/#822-block-mappings
     let source = indoc! {r"
         key: value
     "};
@@ -703,6 +717,8 @@ fn mapping_scalar_key_replacement_can_require_explicit_notation() {
 
 #[test]
 fn mapping_scalar_key_style_changes_preserve_required_separation() {
+    // A plain flow key needs separation where a JSON-like quoted key allows an adjacent value.
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
     let source = indoc! {r#"
         outer: {"key":"value"}
         other : 'untouched'
@@ -723,6 +739,8 @@ fn mapping_scalar_key_style_changes_preserve_required_separation() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn explicit_keys_accept_block_style_requests() {
+    // An explicit block key may use a block scalar or collection.
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -838,6 +856,8 @@ fn explicit_keys_accept_block_style_requests() {
 
 #[test]
 fn implicit_block_keys_keep_their_own_scalar_context() {
+    // Flow collection indicators can occur inside a plain block key but must be quoted in flow.
+    // https://yaml.org/spec/1.2.2/#733-plain-style
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"
@@ -920,6 +940,9 @@ fn implicit_block_keys_keep_their_own_scalar_context() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "inline edit snapshots")]
 fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
+    // Line folding and continuation indentation depend on the scalar’s enclosing context.
+    // https://yaml.org/spec/1.2.2/#63-line-prefixes
+    // https://yaml.org/spec/1.2.2/#65-line-folding
     use crate::syntax::NodeKind;
 
     let mut diffs = Vec::new();

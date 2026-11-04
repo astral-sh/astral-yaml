@@ -94,6 +94,9 @@ fn inserted_nodes_can_be_edited_and_removed_before_commit() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn replacement_keeps_compatible_styles_and_anchor_identity() {
+    // Changing scalar style can change tag resolution. An alias must still name its target.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let mut diffs = Vec::new();
     for (source, replacement) in [
         ("old", "\"new\""),

@@ -20,6 +20,8 @@ fn reinserted_comments_keep_their_layout_during_descendant_edits(
     source: &str,
     scope: &[&str],
 ) -> String {
+    // Keep chomping includes the scalar’s trailing empty lines.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let mut document = DocumentSyntax::parse(source).unwrap();
     document
         .edit(|root| {

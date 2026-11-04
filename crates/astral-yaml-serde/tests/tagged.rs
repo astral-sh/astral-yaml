@@ -247,6 +247,7 @@ fn tagged_aliases_compare_expanded_tags_across_nodes() {
     assert_eq!(error.message, "duplicate mapping key");
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn serialization_compares_tagged_mapping_keys_by_yaml_identity() {
     #[derive(Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -294,6 +295,7 @@ fn serialization_compares_tagged_mapping_keys_by_yaml_identity() {
         );
     }
 
+    // https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
     let invalid_key = BTreeMap::from([(
         Tagged {
             tag: "tag:yaml.org,2002:int".into(),
@@ -350,6 +352,7 @@ fn spans_comments_and_aliases() {
     assert_eq!(inner.value.span, value.span);
     assert_eq!(inner.value.comments, value.comments);
 
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "[&text !Text hello, *text]";
     let values = from_str::<Vec<Spanned<Tagged<&str>>>>(source).unwrap();
     assert_eq!(values[0].value, values[1].value);
@@ -359,6 +362,7 @@ fn spans_comments_and_aliases() {
 // https://yaml.org/spec/1.2.2/#69-node-properties
 #[test]
 fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
+    // https://yaml.org/spec/1.2.2/#691-node-tags
     for tag in [
         "",
         "Text",
@@ -393,6 +397,8 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
     );
 }
 
+// The node kind and content must satisfy the explicitly supplied tag.
+// https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
 #[test_case("null", &["str", "null"][..])]
 #[test_case("true", &["str", "bool"])]
 #[test_case("42", &["str", "int", "float"])]
@@ -410,7 +416,6 @@ fn tag_serialization_rejects_invalid_tags_and_stacked_tags() {
 #[test_case("{}", &["map"])]
 #[test_case("{answer: 42}", &["map"])]
 fn serialization_checks_core_tag_content(source: &str, compatible: &[&str]) {
-    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let value = from_str::<Value>(source).unwrap();
     for tag in ["str", "null", "bool", "int", "float", "seq", "map"] {
         let tagged = Tagged {
@@ -427,6 +432,8 @@ fn serialization_checks_core_tag_content(source: &str, compatible: &[&str]) {
     }
 }
 
+// A tag is a property of the node on which it appears.
+// https://yaml.org/spec/1.2.2/#69-node-properties
 #[test]
 fn core_tags_do_not_affect_following_values() {
     #[derive(Debug, Deserialize, Serialize, PartialEq)]

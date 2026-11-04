@@ -38,6 +38,8 @@ impl Stream<'_> {
     /// Yields compatibility warnings in source order. Only documents that declare
     /// YAML 1.1 are scanned for non-ASCII line breaks.
     ///
+    /// The example reports an [unrecognized directive](https://yaml.org/spec/1.2.2/#68-directives).
+    ///
     /// ```
     /// use astral_yaml::WarningKind;
     ///

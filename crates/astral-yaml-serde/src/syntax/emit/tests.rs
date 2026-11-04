@@ -100,6 +100,9 @@ fn emitted_content_comparison_checks_shapes_values_and_alias_targets(
     right: &str,
     expected: bool,
 ) {
+    // The editor compares scalar text and type, and checks that aliases reach corresponding nodes.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let left = DocumentSyntax::parse(left).unwrap();
     let right = DocumentSyntax::parse(right).unwrap();
     assert_eq!(correspondence(&left, &right).is_some(), expected);
@@ -256,6 +259,9 @@ fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
 #[test_case(ScalarStyle::Plain)]
 #[test_case(ScalarStyle::SingleQuoted)]
 fn flow_scalars_quote_whitespace_that_cannot_be_folded(style: ScalarStyle) {
+    // Flow folding discards separation near a break. Double quotes can escape whitespace as data.
+    // https://yaml.org/spec/1.2.2/#65-line-folding
+    // https://yaml.org/spec/1.2.2/#57-escaped-characters
     for value in ["a \nb", "a\n b", "a\t\nb", "a\n\tb", "a\rb", "a\0b"] {
         let text = scalar(value, style, super::ScalarPosition::Block, 2);
         let parsed = astral_yaml::parse(&text).unwrap();
@@ -268,6 +274,10 @@ fn flow_scalars_quote_whitespace_that_cannot_be_folded(style: ScalarStyle) {
 #[test_case(ScalarStyle::Literal)]
 #[test_case(ScalarStyle::Folded)]
 fn block_scalars_preserve_indented_lines(style: ScalarStyle) {
+    // Spaces beyond the content indentation are scalar data. In folded style, breaks
+    // around more-indented lines are preserved.
+    // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+    // https://yaml.org/spec/1.2.2/#813-folded-style
     for value in [" a\nb", "a\n b\nc", "a\n\n b\n\nc", "a\n \nb", "\ta\nb"] {
         let text = scalar(value, style, super::ScalarPosition::Block, 2);
         let source = format!("  value: {text}");
@@ -380,6 +390,9 @@ fn rendering_obeys_work_and_output_budgets(
 #[test_case("first\r- second", false)]
 #[test_case("first\r---\rsecond", false)]
 fn plain_scalar_fallback_cannot_introduce_documents_or_collections(value: &str, flow: bool) {
+    // Document markers at the start of a line and flow delimiters can end a plain scalar.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
+    // https://yaml.org/spec/1.2.2/#733-plain-style
     let output = scalar(
         value,
         ScalarStyle::Plain,
@@ -398,6 +411,8 @@ fn plain_scalar_fallback_cannot_introduce_documents_or_collections(value: &str, 
 
 #[test]
 fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
+    // The emitted alias must name a preceding anchor.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "[&old value, *old]";
     let mut document = DocumentSyntax::parse(source).unwrap();
     let target = document
@@ -418,6 +433,8 @@ fn normalization_uses_the_target_anchor_and_rejects_an_unanchored_target() {
 
 #[test]
 fn normalization_rejects_an_alias_that_would_bind_to_a_different_definition() {
+    // A later definition of the same anchor name takes precedence for subsequent aliases.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let mut document = DocumentSyntax::parse("[&a 1, &a 2, *a]").unwrap();
     let first = astral_yaml::NodeId::from_index(
         document
@@ -491,6 +508,9 @@ fn normalization_ignores_comments_on_unreachable_nodes() {
 #[test]
 #[allow(clippy::too_many_lines, reason = "multiline YAML fixtures")]
 fn normalized_syntax_preserves_values_and_comments() {
+    // The same representation graph may have different presentations, including different node styles.
+    // The editor also retains the text of every comment.
+    // https://yaml.org/spec/1.2.2/#323-presentation-stream
     use astral_yaml_dev::Value;
     for source in [
         "42",
@@ -618,6 +638,8 @@ fn normalized_syntax_preserves_values_and_comments() {
 
 #[test]
 fn root_scalar_candidates_respect_document_position() {
+    // Marker spellings take on their document meaning at the start of a line.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
     let mut outputs = Vec::new();
     for source in [
         indoc! {r"
@@ -672,6 +694,8 @@ fn root_scalar_candidates_respect_document_position() {
 
 #[test]
 fn scalar_validation_distinguishes_implicit_keys_from_values() {
+    // Flow delimiters are forbidden in plain flow keys, while block keys can contain them.
+    // https://yaml.org/spec/1.2.2/#733-plain-style
     use super::ScalarPosition;
     let mut outputs = Vec::new();
     for position in [ScalarPosition::BlockKey, ScalarPosition::FlowKey] {
@@ -741,6 +765,9 @@ fn scalar_validation_distinguishes_implicit_keys_from_values() {
 
 #[test]
 fn removed_properties_leave_room_for_retained_header_comments() {
+    // Comments may separate properties from each other and from the node content.
+    // https://yaml.org/spec/1.2.2/#69-node-properties
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
     let source = indoc! {r"
         key: !!str # tag
           &a # anchor
@@ -857,6 +884,8 @@ fn detached_comments_preserve_their_structural_boundaries(
 
 #[test]
 fn detached_prefixes_are_emitted_before_content() {
+    // The document prefix may contain comment and empty lines.
+    // https://yaml.org/spec/1.2.2/#911-document-prefix
     let mut outputs = Vec::new();
     for source in [
         indoc! {r"
@@ -909,6 +938,8 @@ fn detached_prefixes_are_emitted_before_content() {
 
 #[test]
 fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
+    // A flow collection allows separation between the opening delimiter and its first entry.
+    // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
     let mut outputs = Vec::new();
     for source in [
         indoc! {r"
@@ -967,6 +998,8 @@ fn flow_opening_comments_do_not_depend_on_visible_closing_comments() {
 
 #[test]
 fn omitted_roots_own_their_erased_line() {
+    // An explicit document may contain just its marker and trailing comments.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let mut outputs = Vec::new();
     for source in [
         indoc! {r"
@@ -1043,6 +1076,8 @@ fn omitted_roots_own_their_erased_line() {
 
 #[test]
 fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
+    // A comment includes all characters after its indicator up to the break or end of input.
+    // https://yaml.org/spec/1.2.2/#66-comments
     let mut outputs = Vec::new();
     for source in [
         indoc! {"
@@ -1074,6 +1109,8 @@ fn emitted_comments_own_horizontal_whitespace_before_retained_breaks() {
 
 #[test]
 fn block_scalar_suffix_comments_use_the_parent_indentation() {
+    // The first trailing comment must be less indented than the block scalar content.
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let mut outputs = Vec::new();
     for source in [
         indoc! {r"
@@ -1123,6 +1160,8 @@ fn block_scalar_suffix_comments_use_the_parent_indentation() {
 
 #[test]
 fn omitted_roots_own_their_line_when_comments_are_emitted() {
+    // An explicit document can have empty content and comment lines after its marker.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let mut outputs = Vec::new();
     for source in ["---\nold\n...\n", "--- old\n...\n"] {
         let original = DocumentSyntax::parse(source).unwrap();

@@ -153,6 +153,8 @@ mod tests {
 
     #[test]
     fn test_values_preserve_scalar_and_collection_types() {
+        // Plain scalars resolve according to the core schema.
+        // https://yaml.org/spec/1.2.2/#1032-tag-resolution
         for (source, expected) in [
             ("null", Value::Null),
             ("true", Value::Bool(true)),
@@ -225,6 +227,8 @@ mod tests {
             assert_eq!(Value::Float(f64::from_bits(bits)), Value::Float(f64::NAN));
         }
 
+        // The core schema accepts this spelling for the floating-point NaN value.
+        // https://yaml.org/spec/1.2.2/#1032-tag-resolution
         for source in [
             ".nan",
             "[.nan]",

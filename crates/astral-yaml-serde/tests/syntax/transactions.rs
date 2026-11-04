@@ -1,4 +1,6 @@
-//! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
+//! These edits preserve presentation details outside the changed nodes.
+//! See <https://yaml.org/spec/1.2.2/#323-presentation-stream>.
+
 use astral_yaml::NodeId;
 use test_case::test_case;
 
@@ -10,6 +12,8 @@ use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
 #[test]
 fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
+    // An omitted value has empty content at a position in the source.
+    // https://yaml.org/spec/1.2.2/#72-empty-nodes
     let source = indoc! {"
         existing: # keep
         items: []
@@ -102,6 +106,8 @@ fn scalar_replacements_preserve_surrounding_source_and_refresh_spans() {
 
 #[test]
 fn structural_edits_preserve_comments_and_accept_complex_keys() {
+    // Any node, including a collection, can serve as a mapping key.
+    // https://yaml.org/spec/1.2.2/#3211-nodes
     let source = indoc! {r"
         # config
         a: 1 # remove
@@ -130,6 +136,9 @@ fn structural_edits_preserve_comments_and_accept_complex_keys() {
 
 #[test]
 fn style_changes_preserve_meaning_and_reject_impossible_requests() {
+    // Quoting can change an untagged scalar’s core type. A flow node permits only flow styles.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
+    // https://yaml.org/spec/1.2.2/#75-flow-nodes
     let source = indoc! {r"
         text: 'hello'
         items: [1, 2]
@@ -174,6 +183,8 @@ fn style_changes_preserve_meaning_and_reject_impossible_requests() {
 
 #[test]
 fn aliases_cannot_be_dangled_or_silently_rebound() {
+    // An alias resolves to the most recent preceding anchor of the same name.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     for (source, index) in [("[&a 1, *a]", 0), ("[&a 1, &a 2, *a]", 1)] {
         let mut document = DocumentSyntax::parse(source).unwrap();
         assert!(
@@ -199,6 +210,8 @@ fn aliases_cannot_be_dangled_or_silently_rebound() {
 
 #[test]
 fn comment_edits_keep_document_markers_and_source_outside_the_node() {
+    // The directives end marker separates directives from the root in a directives document.
+    // https://yaml.org/spec/1.2.2/#915-directives-documents
     let source = indoc! {r"
         %YAML 1.2 # version
         --- # marker
@@ -357,6 +370,9 @@ fn inserted_nodes_can_be_edited() {
 #[test_case(ScalarStyle::Literal, "|-\n  hello\n"; "literal")]
 #[test_case(ScalarStyle::Folded, ">-\n  hello\n"; "folded")]
 fn scalar_styles_can_be_changed(style: ScalarStyle, expected: &str) {
+    // YAML provides three flow scalar styles and two block scalar styles.
+    // https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+    // https://yaml.org/spec/1.2.2/#81-block-scalar-styles
     let document = edited("'hello'", |e| e.set_scalar_style(e.root(), style));
     assert_eq!(document.source(), expected);
 }
@@ -364,6 +380,9 @@ fn scalar_styles_can_be_changed(style: ScalarStyle, expected: &str) {
 #[test_case("[]")]
 #[test_case("{}")]
 fn empty_collections_remain_in_flow_style(source: &str) {
+    // Flow collections allow zero entries. Block collection productions require an entry.
+    // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
+    // https://yaml.org/spec/1.2.2/#82-block-collection-styles
     use astral_yaml::CollectionStyle;
 
     let document = edited(source, |e| {
@@ -374,6 +393,8 @@ fn empty_collections_remain_in_flow_style(source: &str) {
 
 #[test]
 fn scalar_style_changes_retain_header_comments() {
+    // A block scalar header can carry a single trailing comment.
+    // https://yaml.org/spec/1.2.2/#811-block-scalar-headers
     use astral_yaml::ScalarStyle;
 
     let source = indoc! {r"
@@ -647,6 +668,9 @@ fn repeated_navigation_is_bounded() {
     "flow mapping"
 )]
 fn replacing_implicit_nulls_adds_required_separation(source: &str) -> String {
+    // The indicators need separation when the editor fills in an omitted node.
+    // https://yaml.org/spec/1.2.2/#72-empty-nodes
+    // https://yaml.org/spec/1.2.2/#62-separation-spaces
     edit(source, |e| {
         let root = e.root();
         let target = match e.node(root)?.kind() {

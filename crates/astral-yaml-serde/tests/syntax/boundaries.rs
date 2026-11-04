@@ -1,4 +1,6 @@
-//! Root edits may require document boundaries to preserve comment ownership.
+//! The editor uses document markers to separate root content from comments.
+//! YAML defines where a marker and its trailing comment may appear in
+//! <https://yaml.org/spec/1.2.2/#912-document-markers>.
 
 use test_case::test_case;
 
@@ -337,6 +339,8 @@ fn root_inline_comments_can_use_additional_marker_lines() {
     "scalar anchor"
 )]
 fn nested_inline_comments_can_use_available_syntax_headers(source: &str) -> String {
+    // Comments may separate a property from its node or an opening delimiter from its entries.
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
     edit(source, |editor| {
         let value = editor.mapping_entries(editor.root())?.remove(0).1;
         editor.insert_comment(value, 1, " second", CommentPlacement::Inline)
@@ -406,6 +410,8 @@ fn detached_suffix_comments_follow_inserted_root_content() {
     "mapping"
 )]
 fn generated_start_markers_preserve_root_prefixes(source: &str) -> String {
+    // A document prefix may contain comment lines before the start marker.
+    // https://yaml.org/spec/1.2.2/#911-document-prefix
     edit(source, |editor| {
         let root = editor.root();
         let index = editor.node(root)?.comments().len();

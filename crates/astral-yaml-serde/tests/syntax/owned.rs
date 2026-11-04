@@ -1,4 +1,6 @@
-//! Owned syntax retains YAML presentation: <https://yaml.org/spec/1.2.2/#32-information-models>.
+//! The editor retains presentation details alongside the serialization tree.
+//! See <https://yaml.org/spec/1.2.2/#323-presentation-stream>.
+
 use crate::syntax::{DocumentSyntax, NodeKind};
 use astral_yaml::ParseOptions;
 use astral_yaml::comments::{CommentIndex, CommentPlacement};
@@ -6,6 +8,9 @@ use astral_yaml_dev::{indoc, span_snapshot};
 
 #[test]
 fn owned_document_retains_syntax_and_direct_comments() {
+    // A node can have a tag, an anchor, or both. An alias refers back to an anchored node.
+    // https://yaml.org/spec/1.2.2/#69-node-properties
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = indoc! {r"
         %YAML 1.2
         ---
@@ -98,6 +103,8 @@ fn alias_edges_distinguish_recursive_and_shadowed_definitions() {
 
 #[test]
 fn construction_rejects_invalid_documents_and_limits() {
+    // YAML streams permit zero or more documents. This editor requires exactly one.
+    // https://yaml.org/spec/1.2.2/#92-streams
     for source in [
         "[",
         "",
@@ -126,7 +133,8 @@ fn construction_rejects_invalid_documents_and_limits() {
 
 #[test]
 fn editable_sources_normalize_line_breaks_before_assigning_spans() {
-    // YAML line breaks normalize to LF: https://yaml.org/spec/1.2.2/#54-line-break-characters
+    // YAML normalizes physical breaks inside scalar content. The editor also stores LF source.
+    // https://yaml.org/spec/1.2.2/#54-line-break-characters
     let source = indoc! {r#"
         # before
         key: &a 'é' # inline

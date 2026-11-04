@@ -4,6 +4,8 @@ use serde_json::Value;
 
 #[test]
 fn updating_an_alias_reads_its_pending_target_and_replaces_only_the_alias() {
+    // Reading an alias resolves to the anchored node.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "retries: &default 3 # attempts\ncopy: *default\nother: 'keep'\n";
     let mut document = Editable::<Value>::parse(source).unwrap();
     document
@@ -98,6 +100,8 @@ fn reads_borrow_decoded_text_and_only_offer_spans_for_existing_syntax() {
 
 #[test]
 fn reads_report_a_dangling_alias_without_preventing_repair() {
+    // An alias needs a preceding anchor in the same document.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "default: &value {nested: old}\ncopy: *value\n";
     let mut document = Editable::<Value>::parse(source).unwrap();
     let error = document
@@ -122,6 +126,8 @@ fn reads_report_a_dangling_alias_without_preventing_repair() {
 
 #[test]
 fn reads_apply_tag_resolution() {
+    // The explicit local tag identifies the value for the application.
+    // https://yaml.org/spec/1.2.2/#691-node-tags
     let mut document = Editable::<Value>::parse("null").unwrap();
     document
         .edit(|mut root| {
@@ -139,7 +145,8 @@ fn reads_apply_tag_resolution() {
 
 #[test]
 fn reads_bound_alias_expansion_in_an_existing_document() {
-    // Load the graph without expanding the cycle until the cursor reads it.
+    // Load the cyclic representation graph before expanding it into a Rust value.
+    // https://yaml.org/spec/1.2.2/#321-representation-graph
     struct Graph;
     impl<'de> serde::Deserialize<'de> for Graph {
         fn deserialize<D: serde::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {

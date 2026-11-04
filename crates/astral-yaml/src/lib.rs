@@ -4,6 +4,9 @@
 //! owned values. Scalar resolution is separate from syntax parsing.
 //! Use `astral-yaml-serde` for source-preserving editing.
 //!
+//! The node span in this example includes the scalar's
+//! [tag property](https://yaml.org/spec/1.2.2/#691-node-tags).
+//!
 //! ```
 //! use astral_yaml::NodeKind;
 //!

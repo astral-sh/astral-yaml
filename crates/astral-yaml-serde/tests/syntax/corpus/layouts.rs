@@ -1,3 +1,8 @@
+//! Comments can separate node properties, collection entries, and document markers.
+//! These cases track the editor's attachment choices across those separation lines.
+//! See <https://yaml.org/spec/1.2.2/#67-separation-lines> and
+//! <https://yaml.org/spec/1.2.2/#69-node-properties>.
+
 use test_case::test_case;
 
 use super::{assert_projection, project};
@@ -245,6 +250,8 @@ fn bounded_comment_headers_preserve_equivalent_edits(kind: Kind) {
 
 #[test]
 fn a_nested_suffix_then_inline_comment_requires_a_closing_delimiter() {
+    // A flow collection has a closing token on which the editor can place an inline comment.
+    // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
     for slot in [Slot::Item, Slot::Value, Slot::Key] {
         for properties in ["", "&node\n", "!local\n", "!local &node\n"] {
             let body = format!(

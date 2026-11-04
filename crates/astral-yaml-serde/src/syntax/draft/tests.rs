@@ -89,6 +89,8 @@ fn composed_mutations_keep_one_owner_and_retire_style_requests() {
         .replace(leaf, "{nested: value}", ReplacementStyle::Preserve)
         .unwrap();
     assert_ownership(&draft);
+    // The alias still refers to the node bearing its anchor.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let alias = field(&mut draft, root, "copy");
     assert!(matches!(draft.node(alias).kind, NodeKind::Alias { target } if target == selected));
 

@@ -3,8 +3,10 @@ use test_case::test_case;
 use astral_yaml_serde::from_str;
 use serde_json::{Value, json};
 
-// A root block scalar has parent indentation -1. The nested presentations
-// use parent indentation 0 and indent their content by two spaces.
+// A root block scalar has parent indentation -1, so |3 at the document root
+// matches |2 under a top-level mapping key or sequence indicator.
+// https://yaml.org/spec/1.2.2/#913-bare-documents
+// https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
 fn document_scalar(scalar: &str) -> String {
     if scalar.starts_with("|2") || scalar.starts_with(">2") {
         scalar.replacen('2', "3", 1)
@@ -108,6 +110,7 @@ fn generated_block_scalars_agree_across_presentations() {
                                 if over_indented {
                                     // The indented # is content, so earlier empty lines
                                     // cannot be more indented (test-suite case S98Z).
+                                    // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
                                     for source in presentations(&scalar) {
                                         assert!(from_str::<Value>(&source).is_err(), "{source:?}");
                                     }
@@ -167,6 +170,7 @@ fn quoted_scalar_folding_and_escapes() {
     for (quote, fragments) in [('\'', single.as_slice()), ('"', double.as_slice())] {
         for &(first, first_value) in fragments {
             for &(second, second_value) in fragments {
+                // https://yaml.org/spec/1.2.2/#65-line-folding
                 for (separator, folded) in [
                     (" ", " "),
                     ("\n ", " "),

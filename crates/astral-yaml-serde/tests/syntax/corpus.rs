@@ -1,4 +1,6 @@
 //! Compare composed edits with the original corpus's ordered syntax and aliases.
+//! The serialization tree records alias occurrences and an order for mapping keys.
+//! See <https://yaml.org/spec/1.2.2/#322-serialization-tree>.
 
 mod layouts;
 

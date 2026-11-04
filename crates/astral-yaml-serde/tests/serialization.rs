@@ -35,6 +35,8 @@ fn every_unicode_scalar_survives_serialization() {
     assert_eq!(chunk, "");
 }
 
+// YAML leaves precision to the implementation. Both native widths preserve the
+// bits of non-NaN values, including the sign of zero.
 // https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test_case(0; "positive")]
 #[test_case(1 << 63; "negative")]

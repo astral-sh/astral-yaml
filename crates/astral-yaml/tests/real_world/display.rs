@@ -131,6 +131,9 @@ pub(super) fn tree(stream: &Stream<'_>) -> String {
     out
 }
 
+// The folded and literal values in this snapshot use strip and keep chomping.
+// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+// https://yaml.org/spec/1.2.2/#813-folded-style
 #[test]
 fn tree_preserves_presentation_and_decoded_lines() {
     let source = "%YAML 1.2\n---\nbase: &base !local {quoted: 'é', empty:}\nalias: *base\n? [a, b]\n: >-\n  folded\n  text\nscript: |+\n  echo \"hello\"\n\n...\n--- []\n";
@@ -157,6 +160,8 @@ fn tree_preserves_presentation_and_decoded_lines() {
     "#);
 }
 
+// Double-quoted escapes supply the line breaks rendered in the snapshot.
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
 #[test]
 fn tree_distinguishes_line_endings_and_empty_scalars() {
     let source = "[plain, '', \"\", \"line\\nend\", \"line\\n\", \"line\\n\\n\", \"\\t\\r\", ]";

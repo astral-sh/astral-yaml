@@ -71,6 +71,9 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
 
 #[test]
 fn structural_edits_preserve_separate_block_scalar_comments() {
+    // The comment after the anchor and the one on the scalar header both precede the content.
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
+    // https://yaml.org/spec/1.2.2/#811-block-scalar-headers
     #[derive(Deserialize)]
     struct Config {
         text: String,
@@ -103,7 +106,7 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
 
 #[test]
 fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
-    // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
+    // Implicit keys: https://yaml.org/spec/1.2.2/#822-block-mappings
     let key = "\u{1}".repeat(171);
     let document = edit::<serde_json::Value>("existing: 1\n", |root| {
         root.into_mapping()?.set(&key, true)?;
@@ -121,6 +124,8 @@ fn insertion_uses_explicit_syntax_for_long_escaped_keys() {
 
 #[test]
 fn typed_root_edits_preserve_document_framing_and_comment_order() {
+    // Start and end markers delimit the editable document.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
     let source = indoc! {r"
         --- [old]
         ...
@@ -169,6 +174,9 @@ fn value_setters_can_request_multiline_scalar_styles(
     style: ScalarStyle,
     expected: &str,
 ) {
+    // Plain and quoted styles fold line breaks. The block cases keep the trailing break.
+    // https://yaml.org/spec/1.2.2/#65-line-folding
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let document = edit::<String>("'old'\n\n", |mut root| {
         root.set(value)?;
         root.set_scalar_style(style)
@@ -196,6 +204,9 @@ fn typed_root_setters_distinguish_strings_from_document_markers(prefix: &str, va
 
 #[test]
 fn typed_setters_preserve_comments_interleaved_with_properties() {
+    // Separation lines can appear between node properties and content.
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
+    // https://yaml.org/spec/1.2.2/#69-node-properties
     let source = indoc! {r"
         key: # header
           &a # anchor
@@ -220,6 +231,9 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
 #[test_case(&serde_json::json!(["new"]), r#"["new"]"#; "sequence")]
 #[test_case(&serde_json::json!({"key": "new"}), r#"{"key": "new"}"#; "mapping")]
 fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value, yaml: &str) {
+    // The comment on the marker line ends before the new content begins.
+    // https://yaml.org/spec/1.2.2/#66-comments
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     let source = "--- # keep";
     let document = edit::<serde_json::Value>(source, |mut root| root.set(value));
     assert_eq!(document.source(), format!("{source}\n{yaml}"));
@@ -233,6 +247,9 @@ fn typed_setters_fill_empty_documents_without_consuming_markers(
     value: &serde_json::Value,
     yaml: &str,
 ) {
+    // An explicit document can be empty. The end marker is outside its content.
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
+    // https://yaml.org/spec/1.2.2/#912-document-markers
     let prefix = "# config\n%YAML 1.2\n---\n";
     let suffix = "... # end\n";
     let source = format!("{prefix}{suffix}");
@@ -287,6 +304,8 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments(
 #[test_case("&root", "&root"; "anchor")]
 #[test_case("!!seq", "!<tag:yaml.org,2002:seq>"; "tag")]
 fn typed_collection_edits_preserve_root_property_comments(property: &str, emitted: &str) {
+    // A tag or anchor can precede a collection on a separate line.
+    // https://yaml.org/spec/1.2.2/#69-node-properties
     let source = format!("{property} [old] # inline\n");
     let document = edit::<Vec<String>>(&source, |mut root| {
         root.set_collection_style(CollectionStyle::Block)?;
@@ -302,6 +321,9 @@ fn typed_collection_edits_preserve_root_property_comments(property: &str, emitte
 
 #[test]
 fn typed_insertions_keep_flow_delimiter_comments() {
+    // Flow collections allow separation lines around entries and delimiters.
+    // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
     let source = indoc! {r"
         [ # open
           old
@@ -383,6 +405,8 @@ fn typed_collection_edits_retain_outside_comments(source: &str) -> String {
 
 #[test]
 fn typed_collection_edits_use_document_comment_boundaries() {
+    // A document suffix may carry the closing comment.
+    // https://yaml.org/spec/1.2.2/#rule-l-document-suffix
     let source = indoc! {r"
         ---
         [ # open
@@ -414,6 +438,8 @@ fn typed_collection_edits_use_document_comment_boundaries() {
 
 #[test]
 fn setting_root_to_null_refreshes_the_value_and_preserves_comments() {
+    // The plain scalar `null` resolves to the core null tag.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let source = indoc! {r"
         ---
         # leading
@@ -435,6 +461,9 @@ fn setting_root_to_null_refreshes_the_value_and_preserves_comments() {
 
 #[test]
 fn typed_scalar_style_edits_keep_comments_out_of_the_value() {
+    // Indentation separates the trailing comment from the literal scalar.
+    // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let source = indoc! {r"
           old
         # tail
@@ -469,6 +498,9 @@ fn edited_scalars_escape_non_printable_characters(source: &str, character: char)
 
 #[test]
 fn normalization_preserves_an_escaped_noncharacter() {
+    // A hexadecimal escape can represent a character excluded from printable YAML.
+    // https://yaml.org/spec/1.2.2/#51-character-set
+    // https://yaml.org/spec/1.2.2/#57-escaped-characters
     let document = Editable::<String>::parse(r#""a\uFFFFb""#).unwrap();
     let yaml = document.syntax().normalized_yaml().unwrap();
     assert!(!yaml.contains('\u{ffff}'));
@@ -481,6 +513,8 @@ fn normalization_preserves_an_escaped_noncharacter() {
 #[test_case("'a\u{80}b'"; "single quoted")]
 #[test_case("\"a\u{80}b\""; "double quoted")]
 fn loading_reader_only_characters_preserves_unrelated_source(scalar: &str) {
+    // The JSON compatibility rule permits additional literal characters in quoted input.
+    // https://yaml.org/spec/1.2.2/#51-character-set
     let source = format!("keep : [x,   y]\nitem: &s {scalar} # data\ncopy: *s\n");
     let document = astral_yaml_serde::EditableYaml::parse(&source).unwrap();
     assert_eq!(
@@ -491,6 +525,8 @@ fn loading_reader_only_characters_preserves_unrelated_source(scalar: &str) {
 
 #[test]
 fn escaping_a_reader_only_character_can_require_an_explicit_key() {
+    // The implicit key limit counts characters in the YAML source, including escape sequences.
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
     let key = "\u{7f}".repeat(171);
     let source = format!("'{key}': value\n");
     let document = Editable::<std::collections::BTreeMap<String, String>>::parse(&source).unwrap();
@@ -503,6 +539,9 @@ fn escaping_a_reader_only_character_can_require_an_explicit_key() {
 
 #[test]
 fn an_explicit_single_quoted_style_cannot_publish_a_non_printable_character() {
+    // Backslash escapes for non-printable characters require double quotes.
+    // https://yaml.org/spec/1.2.2/#57-escaped-characters
+    // https://yaml.org/spec/1.2.2/#732-single-quoted-style
     let mut document = Editable::<String>::parse("'old'").unwrap();
     let error = document
         .edit(|mut root| {

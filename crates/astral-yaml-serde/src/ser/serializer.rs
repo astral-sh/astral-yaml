@@ -726,6 +726,7 @@ mod tests {
         assert_eq!(writes.get(), 2);
     }
 
+    // https://yaml.org/spec/1.2.2/#57-escaped-characters
     #[test]
     fn collected_text_uses_normal_escaping() {
         let value = Formatted("é\n");

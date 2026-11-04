@@ -1,3 +1,7 @@
+//! Comment lines outside scalar content may have their own indentation.
+//! The editor preserves which collection owns them across layout changes.
+//! See <https://yaml.org/spec/1.2.2/#66-comments>.
+
 use crate::syntax::DocumentSyntax;
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};
@@ -23,6 +27,8 @@ fn normalization_keeps_suffix_comments_on_the_root(source: &str) -> String {
 
 #[test]
 fn layout_changes_keep_comments_after_omitted_mapping_values() {
+    // An omitted value is an empty node even when comment lines follow the colon.
+    // https://yaml.org/spec/1.2.2/#72-empty-nodes
     let mut diffs = Vec::new();
     for source in [
         indoc! {r"

@@ -1,3 +1,6 @@
+//! A block collection can carry properties on lines before its entries.
+//! See <https://yaml.org/spec/1.2.2/#823-block-nodes>.
+
 use super::support::{edited, normalize};
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};

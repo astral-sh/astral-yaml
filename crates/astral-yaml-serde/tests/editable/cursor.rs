@@ -86,6 +86,8 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
 #[test_case(&json!(""), r#""""#; "empty string")]
 #[test_case(&json!("it's a\nnew line"), "it's a\n\n  new line"; "multiline string")]
 fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
+    // Quoting can preserve a string whose plain form would resolve to a different core tag.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let document = edit::<Value>("old\n", |mut root| root.set(value));
     assert_eq!(document.value(), value);
     assert_eq!(document.source(), format!("{yaml}\n"));
@@ -104,6 +106,9 @@ fn rust_values_never_interpret_strings_as_yaml(value: &Value, yaml: &str) {
 #[test_case("{anchor: &a true, ? *a : ignored, 'true': old}", "true"; "alias of boolean")]
 #[test_case("{[complex, key]: ignored, name: old}", "name"; "complex sibling key")]
 fn fields_use_literal_decoded_string_keys(source: &str, name: &str) {
+    // Key equality uses the resolved tag and content, including when an alias supplies the key.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let document = edit::<IgnoredAny>(source, |root| {
         let mut field = root.field(name)?;
         assert!(matches!(field.node()?.kind(), NodeKind::Scalar { value, .. } if value == "old"));
@@ -141,6 +146,8 @@ fn named_removal_of_an_alias_key_keeps_its_target() {
 
 #[test]
 fn alias_key_lookup_uses_the_current_draft_target() {
+    // A repeated anchor name binds an alias to the most recent preceding definition.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "first: &a foo\nmap: {? *a : 2}\nsecond: &a other\n";
     let document = edit::<IgnoredAny>(source, |mut root| {
         root.reborrow().field("first")?.set("renamed")?;
@@ -158,6 +165,8 @@ fn alias_key_lookup_uses_the_current_draft_target() {
 
 #[test]
 fn named_edits_detect_ambiguity_after_an_alias_target_changes() {
+    // An alias and a scalar that resolves to the same key collide in a mapping.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     let source = "anchor: &a foo\nmap: {? *a : 2, other: 3}\n";
     let mut document = EditableYaml::parse(source).unwrap();
     let error = document
@@ -363,6 +372,8 @@ fn navigation_errors_identify_the_selected_path(path: &[PathSegment<'_>]) -> Str
 fn ambiguous_string_keys_are_rejected_after_renaming_a_key(
     operation: fn(Cursor<'_, '_>) -> Result<(), Error>,
 ) {
+    // A mapping requires unique keys.
+    // https://yaml.org/spec/1.2.2/#3211-nodes
     let mut document = Editable::<Value>::parse("name: old").unwrap();
     let error = document
         .edit(|mut root| {
@@ -513,6 +524,8 @@ fn sequence_views_track_lengths_and_return_borrowed_children() {
 
 #[test]
 fn indexed_mapping_selection_supports_arbitrary_keys() {
+    // Mapping keys can be scalars, sequences, or mappings.
+    // https://yaml.org/spec/1.2.2/#10111-generic-mapping
     let source = "{[complex, key]: old, true: other}\n";
     let document = edit::<IgnoredAny>(source, |root| {
         let mut mapping = root.into_mapping()?;
@@ -533,6 +546,8 @@ fn indexed_mapping_selection_supports_arbitrary_keys() {
 
 #[test]
 fn removing_non_string_keys_by_index_preserves_other_entries() {
+    // The integer key and the quoted string key have different tags.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     let source = "1: old\n? [a, b]\n: complex\n'1': keep # existing\n";
     let document = edit::<IgnoredAny>(source, |root| {
         let mut mapping = root.into_mapping()?;
@@ -546,6 +561,8 @@ fn removing_non_string_keys_by_index_preserves_other_entries() {
 
 #[test]
 fn setting_a_value_preserves_its_anchor_style_and_comments() {
+    // The alias continues to refer to the anchored value after the edit.
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let source = "value: &old 'old' # keep\ncopy: *old\n";
     let document = edit::<Value>(source, |root| root.field("value")?.set("new"));
     insta::assert_snapshot!(edit_diff(source, document.source()), @r"
@@ -611,6 +628,9 @@ fn inserting_an_inline_comment_before_the_start_marker_comment_rolls_back(source
 
 #[test]
 fn inserting_an_inline_comment_between_prefix_comments_preserves_their_order() {
+    // A standalone document suffix can carry a comment before the next document.
+    // https://yaml.org/spec/1.2.2/#rule-l-document-suffix
+    // https://yaml.org/spec/1.2.2/#92-streams
     let source = "# prefix\n\n--- # start\na: b\n";
     let document = edit::<Value>(source, |mut root| {
         root.insert_comment(1, " inserted", CommentPlacement::Inline)

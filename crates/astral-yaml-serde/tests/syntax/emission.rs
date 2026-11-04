@@ -67,6 +67,9 @@ fn normalization_preserves_header_comments_before_leading_comments() {
 
 #[test]
 fn normalization_retains_multiline_scalar_styles() {
+    // Blank lines can encode line feeds in flow scalars. Keep chomping retains trailing breaks.
+    // https://yaml.org/spec/1.2.2/#65-line-folding
+    // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
     let outputs = [
         indoc! {r"
             a
@@ -131,6 +134,8 @@ fn normalized_block_scalar_indicators(source: &str) {
 
 #[test]
 fn normalized_block_scalars_use_their_parent_indentation() {
+    // The indentation indicator is relative to the indentation level of the block scalar.
+    // https://yaml.org/spec/1.2.2/#8111-block-indentation-indicator
     let outputs = [
         r"  |2-
   first
@@ -394,7 +399,7 @@ fn normalization_preserves_separate_header_comments() {
 #[test_case(&format!("!<tag:example.org,2026:{}> short", "a".repeat(1024)))]
 #[test_case(&format!("\"{}\"", "a".repeat(1023)))]
 fn normalization_uses_explicit_keys_when_escaped_syntax_is_long(key: &str) {
-    // Implicit keys: https://yaml.org/spec/1.2.2/#832-block-mappings
+    // Implicit keys: https://yaml.org/spec/1.2.2/#822-block-mappings
     let source = formatdoc! {r"
         ? {key}
         : value
@@ -416,12 +421,18 @@ fn normalization_uses_explicit_keys_when_escaped_syntax_is_long(key: &str) {
 #[test_case("&a  "; "trailing spaces")]
 #[test_case("&a\t#keep\n"; "tab before a comment")]
 fn normalization_preserves_separation_after_a_property_only_scalar(source: &str) {
+    // A node can have properties and empty content. An inline comment needs separation.
+    // https://yaml.org/spec/1.2.2/#72-empty-nodes
+    // https://yaml.org/spec/1.2.2/#66-comments
     let document = DocumentSyntax::parse(source).unwrap();
     assert_eq!(document.normalized_yaml().unwrap(), source);
 }
 
 #[test]
 fn normalization_preserves_empty_scalar_resolution_and_separates_markers() {
+    // Omitted content is an empty scalar. An explicit document may consist of its marker alone.
+    // https://yaml.org/spec/1.2.2/#72-empty-nodes
+    // https://yaml.org/spec/1.2.2/#914-explicit-documents
     for source in [
         "---",
         indoc! {r"
@@ -692,6 +703,9 @@ fn normalization_preserves_block_styles_in_explicit_keys() {
 
 #[test]
 fn normalization_preserves_framing_and_collection_comment_positions() {
+    // A marker line or a separation line can carry a comment. The editor preserves their order.
+    // https://yaml.org/spec/1.2.2/#912-document-markers
+    // https://yaml.org/spec/1.2.2/#67-separation-lines
     let outputs = [
         indoc! {r"
             # config
@@ -777,6 +791,8 @@ fn normalization_preserves_framing_and_collection_comment_positions() {
 
 #[test]
 fn normalization_preserves_explicit_scalar_types() {
+    // A shorthand tag and its expanded verbatim form identify the same tag.
+    // https://yaml.org/spec/1.2.2/#691-node-tags
     let outputs = [
         "!!str 42",
         "!!null null",

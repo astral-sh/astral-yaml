@@ -1,4 +1,6 @@
 //! Typed projections follow scalar style changes and comment relocation.
+//! The model checks that reading an alias reflects edits to its anchored value.
+//! <https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases>
 
 use test_case::test_case;
 

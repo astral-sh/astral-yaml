@@ -9,6 +9,7 @@ use libfuzzer_sys::fuzz_target;
 
 // YAML 1.2.2 §5.1, production [1]. The reader also accepts some characters
 // in quoted scalars that a writer must escape.
+// https://yaml.org/spec/1.2.2/#51-character-set
 fn yaml_printable(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r' | ' '..='~' | '\u{85}' | '\u{a0}'..='\u{fffd}' | '\u{10000}'..)
 }

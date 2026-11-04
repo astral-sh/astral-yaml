@@ -47,6 +47,8 @@ where
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
 }
 
+// The explicit cases use tag shorthands, a verbatim tag and the non-specific `!`.
+// https://yaml.org/spec/1.2.2/#691-node-tags
 #[test_case("42", "42")]
 #[test_case("true", "true")]
 #[test_case("1.5", "1.5")]
@@ -64,6 +66,7 @@ fn untagged_scalars_deserialize_as_text(source: &str, expected: &str) {
 #[test_case("[]")]
 #[test_case("{}")]
 #[test_case("!!int '42'")]
+// https://yaml.org/spec/1.2.2/#333-recognized-and-valid-tags
 #[test_case("!!int nope")]
 #[test_case("!!bool 2")]
 #[test_case("!!seq scalar")]
@@ -75,6 +78,7 @@ fn non_string_tags_reject_text_destinations(source: &str) {
 
 #[test]
 fn derived_types() {
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let source = "name: astral\nenabled: TRUE\ncount: 0xff\nrate: 1.5\nargs: [one, 'two', \"three\\nfour\"]\noptional: null\n";
     let config: Configuration<'_> = from_str(source).unwrap();
     assert_eq!(
@@ -205,12 +209,15 @@ fn core_resolution_and_numeric_limits() {
         assert_eq!(from_str::<f64>(&yaml).unwrap().to_bits(), value.to_bits());
     }
 
+    // The core schema resolves the plain key `<<` as a string.
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let source = "defaults: &defaults {answer: 42}\ncopy: {<<: *defaults}\n";
     let value = from_str::<serde_json::Value>(source).unwrap();
     assert_eq!(value["copy"], serde_json::json!({"<<": {"answer": 42}}));
 }
 
-// https://yaml.org/spec/1.2.2/#10213-integer
+// The core schema accepts a sign and leading zeroes on decimal integers.
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn unsigned_integers_accept_negative_zero() {
     macro_rules! check {
@@ -228,7 +235,8 @@ fn unsigned_integers_accept_negative_zero() {
     check!(u8, u16, u32, u64, u128);
 }
 
-// https://yaml.org/spec/1.2.2/#10213-integer
+// The core schema accepts hexadecimal and octal integer spellings.
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn wide_radix_integers_round_to_f64() {
     let two_to_128 = 2_f64.powi(128);
@@ -261,6 +269,7 @@ fn wide_radix_integers_round_to_f64() {
     assert!(from_str::<f32>(&format!("0x1{}", "0".repeat(32))).is_err());
 }
 
+// The supported range and precision depend on the native float type.
 // https://yaml.org/spec/1.2.2/#10214-floating-point
 #[test]
 fn finite_float_overflow_is_an_error() {
@@ -347,6 +356,8 @@ fn optional_tagged_enums() {
     assert!(from_str::<Option<Kind>>("!Unit value").is_err());
 }
 
+// https://yaml.org/spec/1.2.2/#57-escaped-characters
+// https://yaml.org/spec/1.2.2/#3211-nodes
 #[test]
 fn all_string_characters_and_complex_keys() {
     let mut text: String = (0..=255).filter_map(char::from_u32).collect();
@@ -360,6 +371,7 @@ fn all_string_characters_and_complex_keys() {
         (vec![], "second".to_owned()),
     ]));
 
+    // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let map: BTreeMap<String, Vec<String>> = from_str("a: &a [one, two]\nb: *a\n").unwrap();
     assert_eq!(map["a"], map["b"]);
 }
@@ -428,6 +440,7 @@ fn generated_nested_values_roundtrip() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#731-double-quoted-style
 #[test]
 fn punctuation_heavy_strings_roundtrip_as_keys_and_values() {
     use astral_yaml_dev::Value;
@@ -545,6 +558,7 @@ fn block_scalars_and_nulls_across_documents() {
         }
     }
 
+    // https://yaml.org/spec/1.2.2/#1032-tag-resolution
     let stream = astral_yaml::parse("--- null\n--- ''\n--- ~\n--- kept\n").unwrap();
     let documents: Vec<serde_json::Value> = (0..stream.documents().len())
         .map(|index| astral_yaml_serde::from_document(&stream, index).unwrap())
@@ -649,6 +663,8 @@ impl<'de> Deserialize<'de> for Anything {
     }
 }
 
+// A native integer type can have a smaller range than a YAML integer.
+// https://yaml.org/spec/1.2.2/#10213-integer
 #[test_case("340282366920938463463374607431768211456"; "unsigned overflow")]
 #[test_case("-170141183460469231731687303715884105729"; "signed overflow")]
 fn arbitrary_values_report_integer_overflow(source: &str) {
@@ -664,6 +680,8 @@ fn arbitrary_values_and_alias_limits() {
     assert!(from_str::<Anything>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Anything>("&a [*a]").is_err());
 
+    // A sequence or mapping may contain itself. This Serde reader bounds traversal.
+    // https://yaml.org/spec/1.2.2/#3211-nodes
     for source in ["&self [*self]", "&self {next: *self}"] {
         assert!(astral_yaml::parse(source).is_ok());
         assert!(from_str::<de::IgnoredAny>(source).is_err());

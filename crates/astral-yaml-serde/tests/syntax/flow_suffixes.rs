@@ -1,4 +1,6 @@
-//! Flow collection suffix comments belong before their closing delimiter.
+//! Flow collections enclose their entries and intervening separation lines in delimiters.
+//! These edits keep a trailing comment on its original side of the closing delimiter.
+//! See <https://yaml.org/spec/1.2.2/#74-flow-collection-styles>.
 
 use test_case::test_case;
 
@@ -8,6 +10,8 @@ use astral_yaml_dev::{formatdoc, indoc};
 
 #[test]
 fn omitted_final_values_keep_collection_suffix_comments() {
+    // A flow mapping entry permits an empty value before the next comma or closing brace.
+    // https://yaml.org/spec/1.2.2/#742-flow-mappings
     let diffs = [
         indoc! {r"
             outer: {empty:,
@@ -152,8 +156,6 @@ fn normalization_keeps_flow_suffixes_inside_their_owner() {
 #[test_case("[", "", "]")]
 #[test_case("{", "", "}")]
 fn flow_comment_layouts_normalize_idempotently(open: &str, body: &str, close: &str) {
-    // Delimiters enclose comments independently of block indentation:
-    // https://yaml.org/spec/1.2.2/#74-flow-collection-styles
     for prefix in [
         "",
         r" # open
