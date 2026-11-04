@@ -74,11 +74,7 @@ See [fuzzing](fuzz/README.md) and [benchmarks](benchmarks/README.md) for details
 
 ## Releases
 
-1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml)
-   from `main` with the new Cargo version, omitting the `v` prefix.
-2. Review and merge the version-bump PR.
-3. Run [Release](https://github.com/astral-sh/astral-yaml/actions/workflows/release.yml)
-   from `main` with that exact version.
-4. Approve the `release-gate` deployment. The workflow publishes `astral-yaml`
-   and `astral-yaml-serde` from the `release` environment, then tags the
-   published commit and creates the GitHub release.
+Use the same version (e.g. `0.2.0`) for both workflows on `main`.
+
+1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml) and merge its PR.
+2. Run [Release](https://github.com/astral-sh/astral-yaml/actions/workflows/release.yml) and approve `release-gate`.
