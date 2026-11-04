@@ -8,6 +8,8 @@ use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, Error, ParseOptions, ScalarStyle};
 use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
 
+// In the original mapping, the value between the colon and the comment is an empty node.
+// https://yaml.org/spec/1.2.2/#rule-c-l-block-map-implicit-value
 #[test]
 fn draft_locations_distinguish_original_empty_values_from_generated_syntax() {
     let source = indoc! {"

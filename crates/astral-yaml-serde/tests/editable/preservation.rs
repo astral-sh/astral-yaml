@@ -226,6 +226,9 @@ fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Val
     assert_eq!(document.value(), value);
 }
 
+// An explicit document can contain an empty node followed by comments. The
+// editor retains those comment lines when filling the document.
+// https://yaml.org/spec/1.2.2/#rule-l-explicit-document
 #[test]
 fn an_empty_document_keeps_its_header_comments_before_the_replacement() {
     let mut document = Editable::<Option<String>>::parse("---\n# keep\n...").unwrap();

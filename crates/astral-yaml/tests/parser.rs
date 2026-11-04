@@ -1048,15 +1048,24 @@ fn inserting_at_an_empty_scalar_span_preserves_its_trailing_comment() {
     assert_eq!(scalar.value, "text");
 }
 
-// https://yaml.org/spec/1.2.2/#914-explicit-documents
-// https://yaml.org/spec/1.2.2/#82-block-collection-styles
-// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// These empty nodes precede the trailing comment. Inserting at the reported
+// span adds content while preserving the comment.
+// https://yaml.org/spec/1.2.2/#72-empty-nodes
+// https://yaml.org/spec/1.2.2/#rule-l-explicit-document
 #[test_case("---", " #keep", " text"; "empty document at EOF")]
 #[test_case("---", " #keep\r\n...", " text"; "empty document before its end marker")]
+// Block values and sequence entries can omit content after their indicator.
+// https://yaml.org/spec/1.2.2/#rule-c-l-block-map-implicit-value
+// https://yaml.org/spec/1.2.2/#rule-s-l+block-indented
 #[test_case("k:", " #keep\n", " text"; "block mapping value")]
 #[test_case("-", " #keep\n", " text"; "block sequence item")]
 #[test_case("?", " #keep\n: v", " text"; "explicit block mapping key")]
 #[test_case("? k\n:", " #keep", " text"; "explicit block mapping value")]
+// A flow value may be empty after the colon. In a braced entry or an explicit
+// pair, the colon can also be omitted.
+// https://yaml.org/spec/1.2.2/#rule-c-ns-flow-map-separate-value
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-yaml-key-entry
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-explicit-entry
 #[test_case("{k:", " #keep\n}", " text"; "flow mapping value")]
 #[test_case("[k:", " #keep\n]", " text"; "compact flow mapping value")]
 #[test_case("{k", " #keep\n}", ": text"; "flow mapping without a colon")]
@@ -1084,7 +1093,10 @@ fn omitted_scalar_spans_precede_trailing_separation(before: &str, after: &str, i
     assert_eq!(stream.comments()[0].text, "keep");
 }
 
-// https://yaml.org/spec/1.2.2/#742-flow-mappings
+// Both an explicit mapping entry and an explicit pair require separation after
+// the question mark, even when the key is empty.
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-map-entry
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-pair
 #[test_case("{? #key\n", ": v}"; "mapping with a value")]
 #[test_case("[? #key\n", ": v]"; "pair with a value")]
 #[test_case("{? #key\n", "}"; "empty mapping entry")]
@@ -1340,7 +1352,10 @@ fn document_prefixes_do_not_create_nodes(source: &str, expected: &[&str]) {
     );
 }
 
-// https://yaml.org/spec/1.2.2/#741-flow-sequences
+// The comma ends the compact pair. The comment index uses that boundary to assign ownership.
+// https://yaml.org/spec/1.2.2/#rule-ns-s-flow-seq-entries
+// https://yaml.org/spec/1.2.2/#rule-ns-flow-pair
+// https://yaml.org/spec/1.2.2/#3233-comments
 #[test]
 fn comments_on_a_compact_pair_stay_on_their_side_of_the_comma() {
     use astral_yaml::comments::{CommentIndex, CommentPlacement};
