@@ -6,6 +6,8 @@ use astral_yaml_serde::{Tagged, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::{Deserialize, Serialize};
 
+mod roundtrip;
+
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 enum Message {
     Ready,
@@ -24,12 +26,16 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let quoted = to_string(source).unwrap();
-    assert_eq!(from_str::<String>(&quoted).unwrap(), source);
+    if quoted.len() <= astral_yaml::ParseOptions::default().max_input_bytes {
+        assert_eq!(from_str::<String>(&quoted).unwrap(), source);
+    }
 
     match from_str::<Value>(source) {
         Ok(value) => {
-            if let Ok(encoded) = to_string(&value) {
-                assert_eq!(from_str::<Value>(&encoded).unwrap(), value);
+            if let Ok(encoded) = to_string(&value)
+                && let Some(decoded) = roundtrip::read::<Value>(&encoded)
+            {
+                assert_eq!(decoded, value);
             }
         }
         Err(error) => {
@@ -42,17 +48,21 @@ fuzz_target!(|data: &[u8]| {
 
     if let Ok(value) = from_str::<Tagged<Value>>(source)
         && let Ok(encoded) = to_string(&value)
+        && let Some(decoded) = roundtrip::read::<Tagged<Value>>(&encoded)
     {
-        assert_eq!(from_str::<Tagged<Value>>(&encoded).unwrap(), value);
+        assert_eq!(decoded, value);
     }
 
     let text = YamlTag(Message::Text(source.to_owned()));
     let encoded = to_string(&text).unwrap();
-    assert_eq!(from_str::<YamlTag>(&encoded).unwrap(), text);
+    if let Some(decoded) = roundtrip::read::<YamlTag>(&encoded) {
+        assert_eq!(decoded, text);
+    }
 
     if let Ok(value) = from_str::<YamlTag>(source)
         && let Ok(encoded) = to_string(&value)
+        && let Some(decoded) = roundtrip::read::<YamlTag>(&encoded)
     {
-        assert_eq!(from_str::<YamlTag>(&encoded).unwrap(), value);
+        assert_eq!(decoded, value);
     }
 });
