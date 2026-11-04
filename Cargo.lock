@@ -413,9 +413,9 @@ dependencies = [
 
 [[package]]
 name = "deser"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43bfe67cf9a658adfb283ddfe1ca3ab882a5f9d2eb83294a926292cbde58cce5"
+checksum = "d76d6df21374422dad94c9ee880dcb7b7038fa853d8c98677cc6d17b01866945"
 dependencies = [
  "deser-core",
  "deser-derive",
@@ -423,9 +423,9 @@ dependencies = [
 
 [[package]]
 name = "deser-core"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "008b84ada3372d9c3ec224c4d415edc627bfc79d008798c66fb36ef062e610e4"
+checksum = "02f55809b557fd7b0edb219ea51b4368ed8bc03794d4850ffc20c7152139e7b0"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -436,9 +436,9 @@ dependencies = [
 
 [[package]]
 name = "deser-derive"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "066662685378048fc5f87e4b2ab83bd12ec278e5465607ff8050ab27440f2db3"
+checksum = "27b603a9e0a47996eb048e2e3a74cf505c283e94fa9f4bcb6efa9bc7824dd879"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -447,9 +447,9 @@ dependencies = [
 
 [[package]]
 name = "deser-value"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbfacb84c4f33b80f23f310625adfdd380097aebe404ead958476a52e95b7ee8"
+checksum = "8dce5a64c8cb0da3fcc7881bf0e0ef6b41d77c7f2d1588f6d31248716e41ef99"
 dependencies = [
  "deser-core",
  "indexmap",
@@ -457,9 +457,9 @@ dependencies = [
 
 [[package]]
 name = "deser-yaml"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20efcd913390e66c7758b1ca0c3768cdc253fc4a42be960031786af324dfaa97"
+checksum = "3abf9965927c95c5e6c6bf93f7b5f7efba39ea298d5acd150ec1fbcf898a7c2c"
 dependencies = [
  "deser-core",
  "itoa",
@@ -578,9 +578,9 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "granit-parser"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da55feca5d1625466bae068f9fd4b87892caeae70c3fe671ddb0f50d41aebf37"
+checksum = "05f05586d4d4df3d47123207826c40b252728b438a1a07bad3c01ee6bea401df"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -992,9 +992,9 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
+checksum = "3f4dc2714fc5632417a6e979602d7044bad8f2880c63fc7217087180acec31b6"
 dependencies = [
  "annotate-snippets",
  "base64",
