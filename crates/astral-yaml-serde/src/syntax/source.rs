@@ -36,6 +36,8 @@ pub(super) struct Source {
     pub(super) root: NodeId,
     pub(super) options: ParseOptions,
     pub(super) byte_order_marks: Vec<Span>,
+    /// The last standalone stream suffix before this document.
+    pub(super) preceding_end_marker: Option<Span>,
     pub(super) start_marker: Option<Span>,
     pub(super) end_marker: Option<Span>,
     pub(super) extra_end_markers: Vec<Span>,
@@ -250,6 +252,10 @@ impl<'source> Frame<'source> {
                 .iter()
                 .map(|&mark| self.locations.span(mark, false))
                 .collect(),
+            preceding_end_marker: self
+                .original
+                .preceding_end_marker
+                .map(|marker| self.locations.span(marker, false)),
             start_marker: self
                 .start
                 .map(|marker| self.locations.after(marker.span, marker.generation, false)),

@@ -37,14 +37,14 @@ impl DocumentSyntax {
         let comments = CommentIndex::new(&stream, 0)?;
         let root = document.root;
         let start_marker = document.start_marker;
-        let end_marker = document.end_marker;
         let byte_order_marks = stream.byte_order_marks().to_vec();
-        let extra_end_markers = stream
-            .document_end_markers()
-            .iter()
-            .copied()
-            .filter(|marker| end_marker.is_some_and(|first| marker.start() > first.start()))
-            .collect();
+        let ends = stream.document_end_markers();
+        let (before, after) =
+            ends.split_at(ends.partition_point(|marker| marker.end() <= document.span.start()));
+        let preceding_end_marker = before.last().copied();
+        let mut after = after.iter().copied();
+        let end_marker = after.next();
+        let extra_end_markers = after.collect();
         let mut nodes: Vec<_> = stream
             .into_nodes()
             .into_iter()
@@ -71,6 +71,7 @@ impl DocumentSyntax {
                 root,
                 options,
                 byte_order_marks,
+                preceding_end_marker,
                 start_marker,
                 end_marker,
                 extra_end_markers,
