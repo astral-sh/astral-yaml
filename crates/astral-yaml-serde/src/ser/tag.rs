@@ -1,6 +1,8 @@
+use super::output::Output;
 use crate::Error;
 use crate::schema::YamlType;
 use serde::{Serialize, ser};
+use std::fmt;
 
 pub(super) enum Constraint {
     Any,
@@ -13,7 +15,16 @@ pub(super) struct Tag {
 }
 
 impl Tag {
-    pub(super) fn parse(tag: &str) -> Result<Self, Error> {
+    pub(super) fn parse(tag: &str, output: &mut impl Output) -> Result<Self, Error> {
+        output.check(tag.len())?;
+        let compact = tag.strip_prefix('!').is_some_and(|name| {
+            name.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        });
+        if !compact {
+            output.check(tag.len().saturating_add(3))?;
+        }
+
         let spelling = if tag == "!" {
             tag.to_owned()
         } else {
@@ -32,14 +43,7 @@ impl Tag {
                 return Err(Error::new("invalid YAML tag"));
             }
 
-            if tag.strip_prefix('!').is_some_and(|name| {
-                name.bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-            }) {
-                tag.to_owned()
-            } else {
-                spelling
-            }
+            if compact { tag.to_owned() } else { spelling }
         };
 
         Ok(Self {
@@ -48,14 +52,14 @@ impl Tag {
         })
     }
 
-    pub(super) fn write(self, output: &mut String) -> Constraint {
-        output.push_str(&self.spelling);
-        self.constraint
+    pub(super) fn write(self, output: &mut impl Output) -> Result<Constraint, Error> {
+        output.push_str(&self.spelling)?;
+        Ok(self.constraint)
     }
 }
 
 /// Extracts a validated tag from the private Tagged tuple protocol.
-pub(super) struct TagSerializer;
+pub(super) struct TagSerializer<'a, O>(pub(super) &'a mut O);
 
 macro_rules! reject {
     ($($method:ident($($argument:ident: $ty:ty),*));* $(;)?) => {
@@ -67,7 +71,7 @@ macro_rules! reject {
     };
 }
 
-impl ser::Serializer for TagSerializer {
+impl<O: Output> ser::Serializer for TagSerializer<'_, O> {
     type Ok = Tag;
     type Error = Error;
     type SerializeSeq = ser::Impossible<Self::Ok, Error>;
@@ -79,7 +83,12 @@ impl ser::Serializer for TagSerializer {
     type SerializeStructVariant = ser::Impossible<Self::Ok, Error>;
 
     fn serialize_str(self, tag: &str) -> Result<Self::Ok, Error> {
-        Tag::parse(tag)
+        Tag::parse(tag, self.0)
+    }
+
+    fn collect_str<T: fmt::Display + ?Sized>(self, value: &T) -> Result<Self::Ok, Error> {
+        let tag = self.0.collect(value, 0)?;
+        self.serialize_str(&tag)
     }
 
     reject! {
@@ -183,35 +192,46 @@ mod tests {
 
     #[test]
     fn only_strings_can_supply_tag_names() {
-        rejects(TagSerializer.serialize_bool(true));
-        rejects(TagSerializer.serialize_i8(1));
-        rejects(TagSerializer.serialize_i16(1));
-        rejects(TagSerializer.serialize_i32(1));
-        rejects(TagSerializer.serialize_i64(1));
-        rejects(TagSerializer.serialize_i128(1));
-        rejects(TagSerializer.serialize_u8(1));
-        rejects(TagSerializer.serialize_u16(1));
-        rejects(TagSerializer.serialize_u32(1));
-        rejects(TagSerializer.serialize_u64(1));
-        rejects(TagSerializer.serialize_u128(1));
-        rejects(TagSerializer.serialize_f32(1.0));
-        rejects(TagSerializer.serialize_f64(1.0));
-        rejects(TagSerializer.serialize_char('!'));
-        rejects(TagSerializer.serialize_bytes(b"!Tag"));
-        rejects(TagSerializer.serialize_none());
-        rejects(TagSerializer.serialize_some("!Tag"));
-        rejects(TagSerializer.serialize_unit());
-        rejects(TagSerializer.serialize_unit_struct("Tag"));
-        rejects(TagSerializer.serialize_unit_variant("Enum", 0, "Tag"));
-        rejects(TagSerializer.serialize_newtype_struct("Tag", "!Tag"));
-        rejects(TagSerializer.serialize_newtype_variant("Enum", 0, "Tag", "!Tag"));
+        let mut output = String::new();
+        rejects(TagSerializer(&mut output).serialize_bool(true));
+        rejects(TagSerializer(&mut output).serialize_i8(1));
+        rejects(TagSerializer(&mut output).serialize_i16(1));
+        rejects(TagSerializer(&mut output).serialize_i32(1));
+        rejects(TagSerializer(&mut output).serialize_i64(1));
+        rejects(TagSerializer(&mut output).serialize_i128(1));
+        rejects(TagSerializer(&mut output).serialize_u8(1));
+        rejects(TagSerializer(&mut output).serialize_u16(1));
+        rejects(TagSerializer(&mut output).serialize_u32(1));
+        rejects(TagSerializer(&mut output).serialize_u64(1));
+        rejects(TagSerializer(&mut output).serialize_u128(1));
+        rejects(TagSerializer(&mut output).serialize_f32(1.0));
+        rejects(TagSerializer(&mut output).serialize_f64(1.0));
+        rejects(TagSerializer(&mut output).serialize_char('!'));
+        rejects(TagSerializer(&mut output).serialize_bytes(b"!Tag"));
+        rejects(TagSerializer(&mut output).serialize_none());
+        rejects(TagSerializer(&mut output).serialize_some("!Tag"));
+        rejects(TagSerializer(&mut output).serialize_unit());
+        rejects(TagSerializer(&mut output).serialize_unit_struct("Tag"));
+        rejects(TagSerializer(&mut output).serialize_unit_variant("Enum", 0, "Tag"));
+        rejects(TagSerializer(&mut output).serialize_newtype_struct("Tag", "!Tag"));
+        rejects(TagSerializer(&mut output).serialize_newtype_variant("Enum", 0, "Tag", "!Tag"));
 
-        rejects(TagSerializer.serialize_seq(Some(1)));
-        rejects(TagSerializer.serialize_tuple(1));
-        rejects(TagSerializer.serialize_tuple_struct("Tag", 1));
-        rejects(TagSerializer.serialize_tuple_variant("Enum", 0, "Tag", 1));
-        rejects(TagSerializer.serialize_map(Some(1)));
-        rejects(TagSerializer.serialize_struct("Tag", 1));
-        rejects(TagSerializer.serialize_struct_variant("Enum", 0, "Tag", 1));
+        rejects(TagSerializer(&mut output).serialize_seq(Some(1)));
+        rejects(TagSerializer(&mut output).serialize_tuple(1));
+        rejects(TagSerializer(&mut output).serialize_tuple_struct("Tag", 1));
+        rejects(TagSerializer(&mut output).serialize_tuple_variant("Enum", 0, "Tag", 1));
+        rejects(TagSerializer(&mut output).serialize_map(Some(1)));
+        rejects(TagSerializer(&mut output).serialize_struct("Tag", 1));
+        rejects(TagSerializer(&mut output).serialize_struct_variant("Enum", 0, "Tag", 1));
+    }
+
+    #[test]
+    fn tag_names_can_be_collected_from_display() {
+        let mut output = String::new();
+        let tag = TagSerializer(&mut output)
+            .collect_str(&format_args!("!{}", "Tag"))
+            .unwrap();
+        tag.write(&mut output).unwrap();
+        assert_eq!(output, "!Tag");
     }
 }

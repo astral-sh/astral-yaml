@@ -3,6 +3,7 @@
 
 use super::view::Syntax;
 use super::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit};
+use crate::ser::INSERTED_BYTE_LIMIT;
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 use std::cell::Cell;
@@ -44,7 +45,7 @@ pub(super) struct Draft {
     options: ParseOptions,
     diagnostic_span: Span,
     work: Cell<usize>,
-    introduced_bytes: usize,
+    remaining_bytes: usize,
 }
 
 /// The intended result of a transaction, used to check the rendered YAML.
@@ -79,7 +80,7 @@ impl From<&DocumentSyntax> for Draft {
             options: document.options,
             diagnostic_span: document.nodes[document.root.index()].span,
             work: Cell::new(document.options.max_nodes),
-            introduced_bytes: 0,
+            remaining_bytes: document.options.max_input_bytes,
         };
         for index in 0..draft.slots.len() {
             draft.link_children(NodeId::from_index(index));
@@ -139,12 +140,15 @@ impl Draft {
         super::charge_work(&self.work, amount, self.diagnostic_span)
     }
 
+    pub(super) fn byte_budget(&self) -> (usize, Span) {
+        (self.remaining_bytes, self.diagnostic_span)
+    }
+
     fn introduce(&mut self, bytes: usize) -> Result<(), Error> {
-        self.introduced_bytes = self
-            .introduced_bytes
-            .checked_add(bytes)
-            .filter(|&size| size <= self.options.max_input_bytes)
-            .ok_or_else(|| self.error("inserted YAML exceeds input byte limit"))?;
+        self.remaining_bytes = self
+            .remaining_bytes
+            .checked_sub(bytes)
+            .ok_or_else(|| self.error(INSERTED_BYTE_LIMIT))?;
         Ok(())
     }
 

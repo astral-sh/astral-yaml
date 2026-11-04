@@ -234,9 +234,8 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
-        let yaml = self.context.mutate(|| crate::to_string(&value))?;
         self.context
-            .mutate(|| self.editor.replace_preserving_style(self.id, &yaml))
+            .mutate(|| self.editor.replace_value(self.id, &value))
     }
 
     /// Request a style for the selected scalar.
@@ -320,14 +319,16 @@ impl<'doc> MappingMut<'_, 'doc> {
     pub fn set(&mut self, name: &str, value: impl Serialize) -> Result<Cursor<'_, 'doc>, Error> {
         let mut context = self.context.child(format_args!("[{name:?}]"));
         let id = context.mutate(|| -> Result<_, Error> {
-            let yaml = crate::to_string(&value)?;
             if let Some((_, id)) = self.editor.string_field(self.id, name)? {
-                self.editor.replace_preserving_style(id, &yaml)?;
+                self.editor.replace_value(id, &value)?;
                 Ok(id)
             } else {
-                Ok(self
-                    .editor
-                    .append_string_entry(self.id, &mut self.state.len, name, &yaml)?)
+                self.editor.append_string_entry(
+                    self.id,
+                    &mut self.state.len,
+                    name,
+                    |remaining, span| crate::ser::to_string_with_limit(&value, remaining, span),
+                )
             }
         })?;
         Ok(context.cursor(self.editor, id))
@@ -444,7 +445,7 @@ impl<'doc> SequenceMut<'_, 'doc> {
         value: impl Serialize,
     ) -> Result<Cursor<'_, 'doc>, Error> {
         let id = self.context.mutate(|| -> Result<_, Error> {
-            let yaml = crate::to_string(&value)?;
+            let yaml = self.editor.serialize(&value)?;
             Ok(self.editor.insert_item(self.id, index, &yaml)?)
         })?;
         self.state.len += 1;
@@ -495,22 +496,21 @@ impl<'edit, 'doc> Entry<'edit, 'doc> {
     /// # Errors
     /// Returns an error if serialization fails or an editing limit is exceeded.
     pub fn or_insert(self, value: impl Serialize) -> Result<Cursor<'edit, 'doc>, Error> {
-        self.or_insert_with(|| crate::to_string(&value))
+        self.or_insert_with(|remaining, span| {
+            crate::ser::to_string_with_limit(&value, remaining, span)
+        })
     }
 
     fn or_insert_with<S: AsRef<str>>(
         mut self,
-        default: impl FnOnce() -> Result<S, Error>,
+        default: impl FnOnce(usize, Span) -> Result<S, Error>,
     ) -> Result<Cursor<'edit, 'doc>, Error> {
         let id = self.context.mutate(|| -> Result<_, Error> {
             match self.state {
                 EntryState::Occupied(id) => Ok(id),
-                EntryState::Vacant { mapping, name, len } => {
-                    let yaml = default()?;
-                    Ok(self
-                        .editor
-                        .append_string_entry(mapping, len, &name, yaml.as_ref())?)
-                }
+                EntryState::Vacant { mapping, name, len } => self
+                    .editor
+                    .append_string_entry(mapping, len, &name, default),
             }
         })?;
         Ok(self.context.cursor(self.editor, id))
@@ -521,7 +521,7 @@ impl<'edit, 'doc> Entry<'edit, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a mapping or the edit exceeds a limit.
     pub fn or_mapping(self) -> Result<MappingMut<'edit, 'doc>, Error> {
-        self.or_insert_with(|| Ok("{}"))?.into_mapping()
+        self.or_insert_with(|_, _| Ok("{}"))?.into_mapping()
     }
 
     /// Edit the entry's sequence, inserting an empty sequence only if the entry is absent.
@@ -529,7 +529,7 @@ impl<'edit, 'doc> Entry<'edit, 'doc> {
     /// # Errors
     /// Returns an error if the existing value is not a sequence or the edit exceeds a limit.
     pub fn or_sequence(self) -> Result<SequenceMut<'edit, 'doc>, Error> {
-        self.or_insert_with(|| Ok("[]"))?.into_sequence()
+        self.or_insert_with(|_, _| Ok("[]"))?.into_sequence()
     }
 }
 

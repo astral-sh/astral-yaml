@@ -1,3 +1,5 @@
+use std::fmt::{self, Write};
+
 /// Characters outside the YAML output character set (production 1).
 pub(crate) fn non_printable(c: char) -> bool {
     (c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{85}'))
@@ -10,19 +12,32 @@ pub(crate) fn requires_double_quotes(c: char) -> bool {
 
 #[inline]
 pub(crate) fn write_quoted(output: &mut String, value: &str) {
-    if value.len() >= 64 {
+    if value.len() >= 64 || output.is_empty() {
         output.reserve(value.len() + 3);
-        output.push('"');
-        quoted_long(output, value);
-        output.push('"');
-        return;
     }
+    write_quoted_to(output, value).expect("String write");
+}
 
+#[inline]
+pub(super) fn write_quoted_to(output: &mut impl Write, value: &str) -> fmt::Result {
+    output.write_char('"')?;
+    if value.len() >= 64 {
+        quoted_long(output, value)?;
+    } else if short_needs_escape(value) {
+        write_escaped(output, value)?;
+    } else {
+        output.write_str(value)?;
+    }
+    output.write_char('"')
+}
+
+#[inline]
+fn short_needs_escape(value: &str) -> bool {
     // Check eight bytes at a time without alignment requirements. The last
     // word overlaps its predecessor when the length is not a multiple of eight.
     let bytes = value.as_bytes();
     #[allow(clippy::needless_bitwise_bool)]
-    let escaped = if let Some(last) = bytes.last_chunk::<8>() {
+    if let Some(last) = bytes.last_chunk::<8>() {
         let mut remaining = bytes;
         let mut escaped = false;
         while let Some((chunk, rest)) = remaining.split_first_chunk::<8>() {
@@ -41,21 +56,7 @@ pub(crate) fn write_quoted(output: &mut String, value: &str) {
         value.bytes().fold(false, |escaped, byte| {
             escaped | !(b' '..=b'~').contains(&byte) | (byte == b'"') | (byte == b'\\')
         })
-    };
-
-    if output.is_empty() {
-        output.reserve(value.len() + 3);
     }
-
-    output.push('"');
-
-    if escaped {
-        write_escaped(output, value);
-    } else {
-        output.push_str(value);
-    }
-
-    output.push('"');
 }
 
 #[inline]
@@ -80,7 +81,7 @@ fn word_needs_escape(word: u64) -> bool {
 }
 
 #[inline(never)]
-fn quoted_long(output: &mut String, value: &str) {
+fn quoted_long(output: &mut impl Write, value: &str) -> fmt::Result {
     // Quotes, backslashes, and line breaks use memchr below. Other controls
     // and non-ASCII text use the full escape scanner.
     #[allow(clippy::needless_bitwise_bool)]
@@ -89,27 +90,26 @@ fn quoted_long(output: &mut String, value: &str) {
     });
 
     if unusual {
-        write_escaped(output, value);
+        write_escaped(output, value)
     } else {
         let mut start = 0;
         for index in memchr::memchr3_iter(b'"', b'\\', b'\n', value.as_bytes()) {
-            output.push_str(&value[start..index]);
-            output.push_str(match value.as_bytes()[index] {
+            output.write_str(&value[start..index])?;
+            let escape = match value.as_bytes()[index] {
                 b'"' => "\\\"",
                 b'\\' => "\\\\",
                 _ => "\\n",
-            });
+            };
+            output.write_str(escape)?;
             start = index + 1;
         }
-        output.push_str(&value[start..]);
+        output.write_str(&value[start..])
     }
 }
 
 #[cold]
 #[inline(never)]
-fn write_escaped(output: &mut String, mut value: &str) {
-    use std::fmt::Write;
-
+fn write_escaped(output: &mut impl Write, mut value: &str) -> fmt::Result {
     const ESCAPE: [bool; 256] = {
         let mut escape = [false; 256];
         let mut byte = 0;
@@ -131,22 +131,22 @@ fn write_escaped(output: &mut String, mut value: &str) {
             .position(|byte| ESCAPE[usize::from(byte)])
             .unwrap_or(value.len());
         let (prefix, rest) = value.split_at(index);
-        output.push_str(prefix);
+        output.write_str(prefix)?;
 
         let mut chars = rest.chars();
-        let Some(c) = chars.next() else { break };
-        match c {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
+        let Some(c) = chars.next() else { return Ok(()) };
+        let escaped = match c {
+            '"' => output.write_str("\\\""),
+            '\\' => output.write_str("\\\\"),
+            '\n' => output.write_str("\\n"),
+            '\r' => output.write_str("\\r"),
+            '\t' => output.write_str("\\t"),
             c if requires_double_quotes(c) || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}') => {
-                // Writing to a String cannot fail.
-                write!(output, "\\u{:04X}", u32::from(c)).expect("String write");
+                write!(output, "\\u{:04X}", u32::from(c))
             }
-            c => output.push(c),
-        }
+            c => output.write_char(c),
+        };
+        escaped?;
         value = chars.as_str();
     }
 }
