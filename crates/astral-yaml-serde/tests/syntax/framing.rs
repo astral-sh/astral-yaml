@@ -7,7 +7,9 @@ use crate::syntax::DocumentSyntax;
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};
 
-// https://yaml.org/spec/1.2.2/#92-streams
+// A stream may start with repeated document suffixes. Each suffix can carry an inline comment.
+// https://yaml.org/spec/1.2.2/#rule-l-yaml-stream
+// https://yaml.org/spec/1.2.2/#rule-l-document-suffix
 #[test_case("|")]
 #[test_case(">")]
 fn a_stream_suffix_before_the_document_keeps_its_inline_comment(style: &str) {
@@ -30,6 +32,9 @@ fn a_stream_suffix_before_the_document_keeps_its_inline_comment(style: &str) {
     );
 }
 
+// A byte order mark can occur between the document and the following suffixes.
+// https://yaml.org/spec/1.2.2/#rule-l-yaml-stream
+// https://yaml.org/spec/1.2.2/#rule-l-document-suffix
 #[test]
 fn a_marked_stream_suffix_after_the_document_keeps_its_inline_comment() {
     let source = "|\n  old\n\u{feff}... # end\n... # extra\n";
