@@ -118,6 +118,7 @@ def seed_editable(root: Path, inputs: list[Path]) -> None:
     corpus.mkdir(parents=True, exist_ok=True)
     sources = [path.read_bytes() for path in inputs]
     sources.extend(example.encode("utf-8") for example in TYPED_EXAMPLES)
+    sources.extend(["é".encode(), b'"\x7f"'])
     operations = [
         bytes(depth + operation for operation in range(8))
         for depth in (0, 32, 64, 96, 128, 160, 192, 224)
