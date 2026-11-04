@@ -28,20 +28,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: false
+
       - name: Validate release metadata
+        run: uv run --locked scripts/release.py --validate -- "$VERSION"
         env:
           VERSION: ${{ inputs.version }}
-        shell: bash
-        run: |
-          cargo metadata --locked --format-version 1 --no-deps |
-            jq -e --arg version "$VERSION" 'all(.packages[]; .version == $version)' >/dev/null || {
-              echo "Requested version $VERSION must match every workspace package"
-              exit 1
-            }
-          if git show-ref --verify --quiet "refs/tags/v$VERSION"; then
-            echo "Tag v$VERSION already exists"
-            exit 1
-          fi
 
       - name: Verify release packages
         run: cargo publish --workspace --dry-run --locked

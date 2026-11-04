@@ -23,7 +23,8 @@ span refers to.
 ```sh
 uv run --only-dev --locked ruff format --check scripts
 uv run --only-dev --locked ruff check scripts
-uv run --only-dev --locked ty check --python .venv scripts
+uv sync --locked --script scripts/release.py
+uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check

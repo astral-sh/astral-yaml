@@ -29,16 +29,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install cargo-set-version
-        run: cargo install --locked --version 0.13.14 --bin cargo-set-version --debug cargo-edit
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: false
 
       - name: Bump workspace version and refresh lockfiles
+        run: uv run --locked scripts/release.py -- "$VERSION"
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          # Use only the build metadata in VERSION, including when it is empty.
-          cargo set-version --workspace --metadata '' -- "$VERSION"
-          cargo update --workspace --manifest-path fuzz/Cargo.toml
 
       - name: Create or update pull request
         uses: astral-sh/github-actions/create-release-pr@b18ab2e0c11d16711c1818c8774babfa0203b909 # 2026.10.08.0
