@@ -31,7 +31,7 @@ const EXPLICIT_KEY: &str = "? ";
 /// or a resource limit is exceeded.
 #[inline]
 pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
-    serialize_document(value, String::new())
+    Serializer::serialize_document(value, String::new())
 }
 
 #[cfg(feature = "editable")]
@@ -44,7 +44,7 @@ pub(crate) fn to_string_with_limit<T: Serialize + ?Sized>(
     let limit = limit
         .checked_sub(1)
         .ok_or_else(|| Error::at(INSERTED_BYTE_LIMIT, span))?;
-    serialize_document(value, LimitedOutput::new(limit, span))
+    Serializer::serialize_document(value, LimitedOutput::new(limit, span))
 }
 
 #[cfg(feature = "editable")]
@@ -52,22 +52,6 @@ pub(crate) fn quote_with_limit(value: &str, limit: usize, span: Span) -> Result<
     let mut output = LimitedOutput::new(limit, span);
     output.quote(value)?;
     output.finish()
-}
-
-#[inline]
-fn serialize_document<T: Serialize + ?Sized>(value: &T, output: impl Output) -> Result<String> {
-    let mut serializer = Serializer {
-        output,
-        depth: 0,
-        pending_tag: None,
-        yaml_tag: false,
-        keys: keys::Keys::default(),
-    };
-
-    value.serialize(&mut serializer)?;
-    let mut output = serializer.output.finish()?;
-    output.push('\n');
-    Ok(output)
 }
 
 struct Serializer<O> {
@@ -85,6 +69,22 @@ enum CollectionKind {
 }
 
 impl<O: Output> Serializer<O> {
+    #[inline]
+    fn serialize_document<T: Serialize + ?Sized>(value: &T, output: O) -> Result<String> {
+        let mut serializer = Self {
+            output,
+            depth: 0,
+            pending_tag: None,
+            yaml_tag: false,
+            keys: keys::Keys::default(),
+        };
+
+        value.serialize(&mut serializer)?;
+        let mut output = serializer.output.finish()?;
+        output.push('\n');
+        Ok(output)
+    }
+
     fn enter(&mut self) -> Result<()> {
         if self.depth >= MAX_DEPTH {
             return Err(Error::new("serialization nesting limit exceeded"));
