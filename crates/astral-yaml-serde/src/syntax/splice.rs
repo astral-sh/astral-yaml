@@ -247,6 +247,17 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
     let node = &syntax.nodes[id.index()];
     let line = Line::at(&source.text, region.start());
     let indent = line.indent(region.start());
+    let layout = Layout::new(syntax);
+    let region = if root && layout.tail(id).is_some() {
+        let parent = if matches!(node.kind, super::NodeKind::Scalar { .. }) {
+            0
+        } else {
+            indent
+        };
+        include_scalar_trailing_comments(&source.text, region, &node.comments, parent + 2)
+    } else {
+        region
+    };
     let boundary = Boundary::new(
         &source.text,
         region,
@@ -260,8 +271,41 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         &boundary,
         Context::block(indent, if root { 0 } else { indent }),
         &node.comments,
-        &Layout::new(syntax),
+        &layout,
     )
+}
+
+/// Include suffix comments that could become content or attach to a nested
+/// collection when a block scalar and its parent move to shallower indentation.
+fn include_scalar_trailing_comments<Location: Copy + Into<Option<Span>>>(
+    source: &str,
+    region: Span,
+    comments: &[Comment<Location>],
+    minimum_indent: usize,
+) -> Span {
+    let mut region_end = region.end();
+    let mut previous_end = region_end;
+    for comment in comments {
+        let Some(span) = comment
+            .span
+            .into()
+            .filter(|span| span.start() >= region.end())
+        else {
+            continue;
+        };
+        if comment.placement != CommentPlacement::Trailing
+            || !source
+                .get(previous_end..span.start())
+                .is_some_and(|gap| gap.bytes().all(|byte| byte.is_ascii_whitespace()))
+        {
+            break;
+        }
+        if indent(source, span.start()) >= minimum_indent {
+            region_end = span.end();
+        }
+        previous_end = span.end();
+    }
+    super::span(region.start(), region_end)
 }
 
 pub(super) fn render_with_comments<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
