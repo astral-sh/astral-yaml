@@ -237,7 +237,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         visitor.visit_enum(Enumeration {
             de: self,
             variant: tag,
-            value: VariantValue::Tagged(self.id),
+            value: VariantValue::Tagged,
         })
     }
 
@@ -253,7 +253,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             enumeration: Enumeration {
                 de: self,
                 variant,
-                value: VariantValue::Tagged(self.id),
+                value: VariantValue::Tagged,
             },
             state: TagMappingState::Key,
         };
@@ -1116,7 +1116,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
             return visitor.visit_enum(Enumeration {
                 de: self,
                 variant: tag,
-                value: VariantValue::Tagged(self.id),
+                value: VariantValue::Tagged,
             });
         }
 
@@ -1392,31 +1392,33 @@ struct Enumeration<'input, I> {
 enum VariantValue {
     Unit,
     Node(NodeId),
-    Tagged(NodeId),
+    Tagged,
 }
 
 impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
     fn payload(&self) -> Result<Deserializer<&'input Context<I>>> {
-        let (VariantValue::Node(id) | VariantValue::Tagged(id)) = self.value else {
-            return Err(Error::new("expected a variant payload"));
-        };
-
-        let node = self.de.node()?;
-        let core_tag = node.tag().is_some_and(is_core_tag);
-        let tag_state = if matches!(self.value, VariantValue::Tagged(_)) {
-            if core_tag {
-                TagState::ConsumedCore
-            } else {
-                TagState::ConsumedApplication
+        match self.value {
+            VariantValue::Unit => Err(Error::new("expected a variant payload")),
+            VariantValue::Node(id) => {
+                self.de.node()?;
+                Ok(self.de.child(id))
             }
-        } else {
-            TagState::Unconsumed
-        };
+            VariantValue::Tagged => {
+                let node = self.de.node()?;
+                let tag_state = if node.tag().is_some_and(is_core_tag) {
+                    TagState::ConsumedCore
+                } else {
+                    TagState::ConsumedApplication
+                };
 
-        Ok(Deserializer {
-            tag_state,
-            ..self.de.child(id)
-        })
+                // The tag and its payload belong to the same YAML node.
+                Ok(Deserializer {
+                    tag_state,
+                    yaml_tag: false,
+                    ..self.de
+                })
+            }
+        }
     }
 }
 
@@ -1436,7 +1438,7 @@ impl<'input, 'de: 'input, I: Input<'de>> VariantAccess<'de> for Enumeration<'inp
     fn unit_variant(self) -> Result<()> {
         match self.value {
             VariantValue::Unit => Ok(()),
-            VariantValue::Node(_) | VariantValue::Tagged(_) => <()>::deserialize(self.payload()?),
+            VariantValue::Node(_) | VariantValue::Tagged => <()>::deserialize(self.payload()?),
         }
     }
 
@@ -1574,7 +1576,7 @@ mod tests {
             let access = super::Enumeration {
                 de,
                 variant: "long-tag",
-                value: VariantValue::Tagged(de.id),
+                value: VariantValue::Tagged,
             };
 
             match access.variant_seed(PhantomData::<String>) {
