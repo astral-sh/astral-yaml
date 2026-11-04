@@ -97,7 +97,7 @@ pub fn parse(source: &str) -> Result<Stream<'_>> {
 pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<'_>> {
     options.check_input(source.len())?;
 
-    let stream = Parser {
+    Parser {
         source,
         pos: 0,
         options,
@@ -117,10 +117,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         line_end_cache: Cell::new(None),
         colon_cache: Cell::new(None),
     }
-    .stream()?;
-
-    validate_characters(&stream)?;
-    Ok(stream)
+    .stream()
 }
 
 struct Parser<'source> {
@@ -507,6 +504,8 @@ impl<'source> Parser<'source> {
             });
         }
 
+        self.validate_characters()?;
+
         Ok(Stream {
             source: self.source,
             nodes: self.nodes,
@@ -515,6 +514,78 @@ impl<'source> Parser<'source> {
             byte_order_marks: self.byte_order_marks,
             document_end_markers: self.document_end_markers,
         })
+    }
+
+    // JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.
+    fn validate_characters(&self) -> Result<()> {
+        // A full reduction lets the compiler vectorize this common ASCII check.
+        // Unicode and restricted bytes still receive the contextual checks below.
+        #[allow(clippy::needless_bitwise_bool)]
+        let ascii = self.source.bytes().fold(true, |valid, byte| {
+            valid
+                & ((b' '..=b'~').contains(&byte)
+                    | (byte == b'\t')
+                    | (byte == b'\r')
+                    | (byte == b'\n'))
+        });
+        if ascii {
+            return Ok(());
+        }
+
+        let mut restricted = self.source.char_indices().filter(|&(_, c)| {
+            c == '\u{feff}'
+                || !matches!(
+                    c,
+                    '\t' | '\r' | '\n' | '\u{20}'..='\u{7e}' | '\u{85}'
+                        | '\u{a0}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}'
+                        | '\u{10000}'..='\u{10ffff}'
+                )
+        });
+        let Some(first) = restricted.next() else {
+            return Ok(());
+        };
+
+        let mut allowed: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Scalar(s)
+                    if matches!(
+                        s.style,
+                        ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+                    ) =>
+                {
+                    Some(s.span)
+                }
+                _ => None,
+            })
+            .chain(self.byte_order_marks.iter().copied())
+            .collect();
+        allowed.sort_unstable_by_key(|span| span.start);
+
+        let mut index = 0;
+
+        for (offset, c) in std::iter::once(first).chain(restricted) {
+            while allowed.get(index).is_some_and(|span| span.end <= offset) {
+                index += 1;
+            }
+
+            if c < ' '
+                || !allowed
+                    .get(index)
+                    .is_some_and(|span| span.start <= offset && offset < span.end)
+            {
+                return Err(Error {
+                    span: Span {
+                        start: offset,
+                        end: offset + c.len_utf8(),
+                    },
+                    message: "character is not allowed in this context",
+                });
+            }
+        }
+
+        Ok(())
     }
 
     fn directives(&mut self) -> Result<Vec<Directive<'source>>> {
@@ -887,10 +958,8 @@ impl<'source> Parser<'source> {
                     }
                     b':' if level > 0
                         && (json_node
-                            || is_node_separator(
-                                bytes.get(i + 1).copied(),
-                                CollectionStyle::Flow,
-                            )) =>
+                            || CollectionStyle::Flow
+                                .is_node_separator(bytes.get(i + 1).copied())) =>
                     {
                         plain = false;
                         json_node = false;
@@ -1157,7 +1226,7 @@ impl<'source> Parser<'source> {
                 Some(b':') => self.next_byte(),
                 byte => byte,
             };
-            if !is_node_separator(separator, context) {
+            if !context.is_node_separator(separator) {
                 return Err(self.error("node properties must be separated by whitespace"));
             }
 
@@ -1225,7 +1294,7 @@ impl<'source> Parser<'source> {
             None | Some(b'\r' | b'\n' | b'#' | b',' | b']' | b'}') => {
                 Ok(NodeKind::Scalar(Scalar::empty(empty_at)))
             }
-            Some(b':') if is_node_separator(self.next_byte(), context) => {
+            Some(b':') if context.is_node_separator(self.next_byte()) => {
                 Ok(NodeKind::Scalar(Scalar::empty(empty_at)))
             }
             Some(b'[') => self.flow_sequence(parent, depth),
@@ -1265,7 +1334,7 @@ impl<'source> Parser<'source> {
                     ..
                 })
         );
-        if !json_key && !is_node_separator(self.byte(), CollectionStyle::Flow) {
+        if !json_key && !CollectionStyle::Flow.is_node_separator(self.byte()) {
             return Err(self.error("a flow value after a YAML key must be separated by whitespace"));
         }
 
@@ -1842,10 +1911,10 @@ fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n')
 }
 
-fn is_node_separator(byte: Option<u8>, context: CollectionStyle) -> bool {
-    byte.is_none_or(|b| {
-        is_space(b) || (context == CollectionStyle::Flow && matches!(b, b',' | b']' | b'}'))
-    })
+impl CollectionStyle {
+    fn is_node_separator(self, byte: Option<u8>) -> bool {
+        byte.is_none_or(|b| is_space(b) || (self == Self::Flow && matches!(b, b',' | b']' | b'}')))
+    }
 }
 
 fn valid_handle(s: &str) -> bool {
@@ -2037,73 +2106,4 @@ impl BlockScalarValue {
         }
         self.text
     }
-}
-
-// JSON-compatible quoted scalars admit non-C0 characters excluded elsewhere.
-fn validate_characters(stream: &Stream<'_>) -> Result<()> {
-    // A full reduction lets the compiler vectorize this common ASCII check.
-    // Unicode and restricted bytes still receive the contextual checks below.
-    #[allow(clippy::needless_bitwise_bool)]
-    let ascii = stream.source().bytes().fold(true, |valid, byte| {
-        valid
-            & ((b' '..=b'~').contains(&byte) | (byte == b'\t') | (byte == b'\r') | (byte == b'\n'))
-    });
-    if ascii {
-        return Ok(());
-    }
-
-    let mut restricted = stream.source().char_indices().filter(|&(_, c)| {
-        c == '\u{feff}'
-            || !matches!(
-                c,
-                '\t' | '\r' | '\n' | '\u{20}'..='\u{7e}' | '\u{85}'
-                    | '\u{a0}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}'
-                    | '\u{10000}'..='\u{10ffff}'
-            )
-    });
-    let Some(first) = restricted.next() else {
-        return Ok(());
-    };
-
-    let mut allowed: Vec<_> = stream
-        .nodes()
-        .iter()
-        .filter_map(|node| match &node.kind {
-            NodeKind::Scalar(s)
-                if matches!(
-                    s.style,
-                    ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
-                ) =>
-            {
-                Some(s.span)
-            }
-            _ => None,
-        })
-        .chain(stream.byte_order_marks().iter().copied())
-        .collect();
-    allowed.sort_unstable_by_key(|span| span.start);
-
-    let mut index = 0;
-
-    for (offset, c) in std::iter::once(first).chain(restricted) {
-        while allowed.get(index).is_some_and(|span| span.end <= offset) {
-            index += 1;
-        }
-
-        if c < ' '
-            || !allowed
-                .get(index)
-                .is_some_and(|span| span.start <= offset && offset < span.end)
-        {
-            return Err(Error {
-                span: Span {
-                    start: offset,
-                    end: offset + c.len_utf8(),
-                },
-                message: "character is not allowed in this context",
-            });
-        }
-    }
-
-    Ok(())
 }

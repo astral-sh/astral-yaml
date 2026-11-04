@@ -8,18 +8,6 @@ use std::borrow::Cow;
 #[cfg(test)]
 mod tests;
 
-pub(super) fn children(kind: &NodeKind, pending: &mut Vec<NodeId>) {
-    match kind {
-        NodeKind::Sequence { items, .. } => pending.extend(items),
-        NodeKind::Mapping { entries, .. } => {
-            for &(key, value) in entries {
-                pending.extend([key, value]);
-            }
-        }
-        NodeKind::Scalar { .. } | NodeKind::Alias { .. } => {}
-    }
-}
-
 /// Render `id` using the supplied placement.
 /// Source ranges are selected by the splice planner before this function runs.
 pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(

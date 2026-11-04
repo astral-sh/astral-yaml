@@ -30,11 +30,58 @@ struct Anchor {
     after: String,
 }
 
+impl Anchor {
+    fn before_marker(at: usize, placement: CommentPlacement) -> Self {
+        Self {
+            at,
+            before: if placement == CommentPlacement::Detached {
+                "\n".to_owned()
+            } else {
+                String::new()
+            },
+            after: "\n".to_owned(),
+        }
+    }
+}
+
 /// A retained comment with a known source span.
 #[derive(Clone, Copy)]
 struct LocatedComment<'comments> {
     comment: &'comments Comment<Option<Span>>,
     span: Span,
+}
+
+impl LocatedComment<'_> {
+    fn insertion_anchor(
+        &self,
+        original: &Source,
+        region: Span,
+        comment: &Comment<Option<Span>>,
+        before: bool,
+    ) -> Option<Anchor> {
+        if super::contains(region, self.span) {
+            return None;
+        }
+        let breaks = outer_comment_breaks(comment, self.comment, before)?;
+        let separator = format!(
+            "{}{}",
+            "\n".repeat(breaks),
+            " ".repeat(splice::indent(&original.text, self.span.start()))
+        );
+        Some(if before {
+            Anchor {
+                at: self.span.start(),
+                before: String::new(),
+                after: separator,
+            }
+        } else {
+            Anchor {
+                at: self.span.end(),
+                before: separator,
+                after: String::new(),
+            }
+        })
+    }
 }
 
 /// Insert document markers required by the edited root and adjust source spans.
@@ -160,17 +207,19 @@ impl RootComments {
                     && next.is_none_or(|next| anchor.at <= next.span.start())
             };
             let anchor = next
-                .and_then(|next| comment_anchor(original, region, comment, next, true))
+                .and_then(|next| next.insertion_anchor(original, region, comment, true))
                 .filter(ordered)
                 .or_else(|| {
                     previous_comment
                         .and_then(|previous| {
-                            comment_anchor(original, region, comment, previous, false)
+                            previous.insertion_anchor(original, region, comment, false)
                         })
                         .filter(ordered)
                 })
                 .or_else(|| {
-                    marker_anchor(original, layout, comment, index, region, next).filter(ordered)
+                    layout
+                        .marker_anchor(original, comment, index, region, next)
+                        .filter(ordered)
                 });
             let Some(mut anchor) = anchor else {
                 plan.rendered.push(comment.clone());
@@ -805,133 +854,104 @@ impl RootLayout {
         };
         fixed.then_some(span)
     }
-}
 
-pub(super) fn root_region(original: &Source, layout: &RootLayout, mut region: Span) -> Span {
-    for comment in &original.nodes[original.root.index()].comments {
-        if layout.fixed(comment).is_none() {
-            region = super::span(
-                region.start().min(comment.span.start()),
-                region.end().max(comment.span.end()),
-            );
-        }
-    }
-    if let Some(marker) = layout.suffix_boundary {
-        // Trailing comments require adjacency to the root even when the end
-        // marker hosts them. Omitted roots and block scalars also own these
-        // separators. Render the complete body to establish that boundary.
-        region = super::span(region.start(), region.end().max(marker.start()));
-    }
-    region
-}
-
-fn comment_anchor(
-    original: &Source,
-    region: Span,
-    comment: &Comment<Option<Span>>,
-    anchor: LocatedComment<'_>,
-    before: bool,
-) -> Option<Anchor> {
-    if super::contains(region, anchor.span) {
-        return None;
-    }
-    let breaks = outer_comment_breaks(comment, anchor.comment, before)?;
-    let separator = format!(
-        "{}{}",
-        "\n".repeat(breaks),
-        " ".repeat(splice::indent(&original.text, anchor.span.start()))
-    );
-    Some(if before {
-        Anchor {
-            at: anchor.span.start(),
-            before: String::new(),
-            after: separator,
-        }
-    } else {
-        Anchor {
-            at: anchor.span.end(),
-            before: separator,
-            after: String::new(),
-        }
-    })
-}
-
-fn marker_anchor(
-    original: &Source,
-    layout: &RootLayout,
-    comment: &Comment<Option<Span>>,
-    index: usize,
-    region: Span,
-    next: Option<LocatedComment<'_>>,
-) -> Option<Anchor> {
-    match (comment.placement, comment.position) {
-        (CommentPlacement::Leading, _)
-        | (CommentPlacement::Detached, CommentPosition::Before | CommentPosition::Header) => {
-            // Prefix comments share a boundary even when none retain source
-            // spans. Moving only the leading comments would reverse their order.
-            let marker = original.start_marker?;
-            let collection = matches!(
-                layout.kind,
-                RootKind::FlowCollection | RootKind::BlockCollection { .. }
-            );
-            let precedes_header = next.is_some_and(|next| next.span.end() <= region.start())
-                || layout.inline.start.is_some_and(|header| index < header);
-            if !collection
-                && !precedes_header
-                && line_end(&original.text, marker.end()) < region.start()
-            {
-                return None;
+    /// Include root comments and separators that must move with the body.
+    pub(super) fn rewrite_region(&self, original: &Source, mut region: Span) -> Span {
+        for comment in &original.nodes[original.root.index()].comments {
+            if self.fixed(comment).is_none() {
+                region = super::span(
+                    region.start().min(comment.span.start()),
+                    region.end().max(comment.span.end()),
+                );
             }
-            Some(Anchor {
-                at: marker.start(),
-                before: String::new(),
-                after: marker_separation(comment.placement),
-            })
         }
-        (CommentPlacement::Trailing, _) | (CommentPlacement::Detached, CommentPosition::After) => {
-            if let Some(next) = next.filter(|next| {
-                next.comment.placement == CommentPlacement::Inline
-                    && next.span.start() >= layout.body.end()
-            }) {
-                let at = original.text[..next.span.start()]
-                    .rfind('\n')
-                    .map_or(0, |index| index + 1);
-                return Some(before_marker(at, comment.placement));
-            }
-            let slot = layout.inline.end.partition_point(|&inline| inline <= index);
-            if let Some(slot) = layout.inline.slots.get(slot).filter(|slot| {
-                slot.marker().is_some_and(|marker| {
-                    next.is_none_or(|next| marker.start() <= next.span.start())
+        if let Some(marker) = self.suffix_boundary {
+            // Trailing comments require adjacency to the root even when the end
+            // marker hosts them. Omitted roots and block scalars also own these
+            // separators. Render the complete body to establish that boundary.
+            region = super::span(region.start(), region.end().max(marker.start()));
+        }
+        region
+    }
+
+    fn marker_anchor(
+        &self,
+        original: &Source,
+        comment: &Comment<Option<Span>>,
+        index: usize,
+        region: Span,
+        next: Option<LocatedComment<'_>>,
+    ) -> Option<Anchor> {
+        match (comment.placement, comment.position) {
+            (CommentPlacement::Leading, _)
+            | (CommentPlacement::Detached, CommentPosition::Before | CommentPosition::Header) => {
+                // Prefix comments share a boundary even when none retain source
+                // spans. Moving only the leading comments would reverse their order.
+                let marker = original.start_marker?;
+                let collection = matches!(
+                    self.kind,
+                    RootKind::FlowCollection | RootKind::BlockCollection { .. }
+                );
+                let precedes_header = next.is_some_and(|next| next.span.end() <= region.start())
+                    || self.inline.start.is_some_and(|header| index < header);
+                if !collection
+                    && !precedes_header
+                    && line_end(&original.text, marker.end()) < region.start()
+                {
+                    return None;
+                }
+                Some(Anchor {
+                    at: marker.start(),
+                    before: String::new(),
+                    after: marker_separation(comment.placement),
                 })
-            }) {
-                let marker = slot.marker()?;
-                return Some(before_marker(marker.start(), comment.placement));
             }
-            let marker = original
-                .end_marker
-                .iter()
-                .chain(&original.extra_end_markers)
-                .rfind(|marker| next.is_none_or(|next| marker.end() <= next.span.start()))?;
-            let at = line_end(&original.text, marker.end());
-            Some(Anchor {
-                at,
-                before: marker_separation(comment.placement),
-                after: String::new(),
-            })
-        }
-        _ => {
-            // Only inline comments have slots on document markers.
-            let marker = if layout.inline.start == Some(index) {
-                original.start_marker?
-            } else {
-                let slot = layout.inline.end.binary_search(&index).ok()?;
-                layout.inline.slots.get(slot)?.marker()?
-            };
-            Some(Anchor {
-                at: line_end(&original.text, marker.end()),
-                before: " ".to_owned(),
-                after: String::new(),
-            })
+            (CommentPlacement::Trailing, _)
+            | (CommentPlacement::Detached, CommentPosition::After) => {
+                if let Some(next) = next.filter(|next| {
+                    next.comment.placement == CommentPlacement::Inline
+                        && next.span.start() >= self.body.end()
+                }) {
+                    let at = original.text[..next.span.start()]
+                        .rfind('\n')
+                        .map_or(0, |index| index + 1);
+                    return Some(Anchor::before_marker(at, comment.placement));
+                }
+                let slot = self.inline.end.partition_point(|&inline| inline <= index);
+                if let Some(slot) = self.inline.slots.get(slot).filter(|slot| {
+                    slot.marker().is_some_and(|marker| {
+                        next.is_none_or(|next| marker.start() <= next.span.start())
+                    })
+                }) {
+                    let marker = slot.marker()?;
+                    return Some(Anchor::before_marker(marker.start(), comment.placement));
+                }
+                let marker = original
+                    .end_marker
+                    .iter()
+                    .chain(&original.extra_end_markers)
+                    .rfind(|marker| next.is_none_or(|next| marker.end() <= next.span.start()))?;
+                let at = line_end(&original.text, marker.end());
+                Some(Anchor {
+                    at,
+                    before: marker_separation(comment.placement),
+                    after: String::new(),
+                })
+            }
+            _ => {
+                // Only inline comments have slots on document markers.
+                let marker = if self.inline.start == Some(index) {
+                    original.start_marker?
+                } else {
+                    let slot = self.inline.end.binary_search(&index).ok()?;
+                    self.inline.slots.get(slot)?.marker()?
+                };
+                Some(Anchor {
+                    at: line_end(&original.text, marker.end()),
+                    before: " ".to_owned(),
+                    after: String::new(),
+                })
+            }
         }
     }
 }
@@ -941,18 +961,6 @@ fn marker_separation(placement: CommentPlacement) -> String {
         "\n\n".to_owned()
     } else {
         "\n".to_owned()
-    }
-}
-
-fn before_marker(at: usize, placement: CommentPlacement) -> Anchor {
-    Anchor {
-        at,
-        before: if placement == CommentPlacement::Detached {
-            "\n".to_owned()
-        } else {
-            String::new()
-        },
-        after: "\n".to_owned(),
     }
 }
 

@@ -1167,7 +1167,10 @@ fn full_line_suffixes_reserve_an_earlier_inline_header() {
             let original = DocumentSyntax::parse(source).unwrap();
             let mut candidate = Draft::from(&original);
             let mut children = Vec::new();
-            super::children(&candidate.node(candidate.root()).kind, &mut children);
+            candidate
+                .node(candidate.root())
+                .kind
+                .append_children_to(&mut children);
             let inner = children[1];
             candidate
                 .insert_comment(

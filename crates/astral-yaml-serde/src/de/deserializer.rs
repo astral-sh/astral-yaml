@@ -60,25 +60,14 @@ pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usiz
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
 
-    from_input(Parsed::new(stream, index), doc.root)
+    Context::new(Parsed::new(stream, index)).deserialize(doc.root)
 }
 
 #[cfg(feature = "editable")]
-pub(crate) fn from_edit_value<'de, T: Deserialize<'de>>(
-    value: crate::syntax::ValueRef<'de>,
-) -> Result<T> {
-    from_input(value, value.root())
-}
-
-fn from_input<'de, T: Deserialize<'de>>(input: impl Input<'de>, id: NodeId) -> Result<T> {
-    let context = Context::new(input);
-    T::deserialize(context.deserializer(id)).map_err(|mut error| {
-        if error.span.is_none() {
-            error.span = context.input.node(id).ok().and_then(Node::span);
-        }
-        error.path.get_or_insert_with(|| "$".to_owned());
-        error
-    })
+impl<'de> crate::syntax::ValueRef<'de> {
+    pub(crate) fn deserialize<T: Deserialize<'de>>(self) -> Result<T> {
+        Context::new(self).deserialize(self.root())
+    }
 }
 
 struct Context<I> {
@@ -95,6 +84,19 @@ impl<I> Context<I> {
             budget: Cell::new(1_000_000),
             scalar_budget: Cell::new(64 * 1024 * 1024),
         }
+    }
+
+    fn deserialize<'de, T: Deserialize<'de>>(&self, id: NodeId) -> Result<T>
+    where
+        I: Input<'de>,
+    {
+        T::deserialize(self.deserializer(id)).map_err(|mut error| {
+            if error.span.is_none() {
+                error.span = self.input.node(id).ok().and_then(Node::span);
+            }
+            error.path.get_or_insert_with(|| "$".to_owned());
+            error
+        })
     }
 
     fn deserializer(&self, id: NodeId) -> Deserializer<&Self> {
