@@ -237,6 +237,16 @@ fn tags_in_mapping_keys() {
     }
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
+#[test]
+fn tagged_aliases_compare_expanded_tags_across_nodes() {
+    let source = "%TAG !app! tag:example.org,2026:\n\
+        --- [&a !app!key x, &b !<tag:example.org,2026:key> x, {? [*a, 1]: a, ? [*b, 1]: b}]";
+    let error =
+        from_str::<(Tagged<String>, Tagged<String>, BTreeMap<String, String>)>(source).unwrap_err();
+    assert_eq!(error.message, "duplicate mapping key");
+}
+
 #[test]
 fn serialization_compares_tagged_mapping_keys_by_yaml_identity() {
     #[derive(Eq, Ord, PartialEq, PartialOrd, Serialize)]
