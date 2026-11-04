@@ -1193,9 +1193,11 @@ fn tag_handle_lookup_in_a_large_directive_list() {
     );
 }
 
-// Anchors and tag handles are scoped to a single document.
-// https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
-// https://yaml.org/spec/1.2.2/#682-tag-directives
+// Each document starts a new scope. An alias needs a preceding anchor in that
+// document, and a named tag handle needs a directive there.
+// https://yaml.org/spec/1.2.2/#91-documents
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
+// https://yaml.org/spec/1.2.2/#6821-tag-handles
 #[test_case("*x", "unknown alias")]
 #[test_case("!x!value", "undefined tag handle")]
 fn document_boundaries_clear_sparse_tables(last: &str, expected: &str) {
