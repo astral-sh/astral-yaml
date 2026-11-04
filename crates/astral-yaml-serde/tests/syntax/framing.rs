@@ -7,6 +7,41 @@ use crate::syntax::DocumentSyntax;
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};
 
+// https://yaml.org/spec/1.2.2/#92-streams
+#[test_case("|")]
+#[test_case(">")]
+fn a_stream_suffix_before_the_document_keeps_its_inline_comment(style: &str) {
+    use crate::Editable;
+    use astral_yaml::comments::CommentPlacement;
+
+    let prefix = "... # first\n... # second\n";
+    let source = format!("{prefix}{style}\n  old\n");
+    let mut document = Editable::<String>::parse(&source).unwrap();
+    let root: [&str; 0] = [];
+    document.set_at(root, "new").unwrap();
+    assert_eq!(document.source(), format!("{prefix}{style}-\n  new\n"));
+
+    document
+        .edit(|mut root| root.append_comment(" after", CommentPlacement::Detached))
+        .unwrap();
+    assert_eq!(
+        document.source(),
+        format!("{prefix}{style}-\n  new\n...\n\n# after\n")
+    );
+}
+
+#[test]
+fn a_marked_stream_suffix_after_the_document_keeps_its_inline_comment() {
+    let source = "|\n  old\n\u{feff}... # end\n... # extra\n";
+    let mut document = crate::Editable::<String>::parse(source).unwrap();
+    let root: [&str; 0] = [];
+    document.set_at(root, "new").unwrap();
+    assert_eq!(
+        document.source(),
+        "|-\n  new\n\u{feff}... # end\n... # extra\n"
+    );
+}
+
 // https://yaml.org/spec/1.2.2/#911-document-prefix
 #[test_case("\u{feff}")]
 #[test_case("\n\u{feff}")]

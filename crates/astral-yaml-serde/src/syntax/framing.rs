@@ -690,9 +690,12 @@ impl RootLayout {
         syntax: &Layout,
     ) -> Self {
         let root_start = original.nodes[original.root.index()].span.start();
-        let start = original.start_marker.map_or(0, |marker| {
-            line_end(&original.text, marker.end()).min(root_start)
-        });
+        let start = original
+            .start_marker
+            .or(original.preceding_end_marker)
+            .map_or(0, |marker| {
+                line_end(&original.text, marker.end()).min(root_start)
+            });
         let end = original.end_marker.map_or(original.text.len(), Span::start);
         // Framing can insert `...` before `---` to host an inline comment.
         // In that case the interval between the markers contains no body comments.
