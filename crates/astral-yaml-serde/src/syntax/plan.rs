@@ -139,7 +139,7 @@ impl Plan<'_> {
                 }
             }
         }
-        super::framing::root_region(self.original, layout, region)
+        layout.rewrite_region(self.original, region)
     }
 
     pub(super) fn rewrite_regions(
