@@ -84,6 +84,9 @@ def seed_parsers(root: Path, inputs: list[Path]) -> None:
         for corpus in corpora:
             write_seed(corpus, data)
 
+    for path in (root / "fixtures/regressions/serde").glob("*.yaml"):
+        write_seed(root / "fuzz/corpus/serde", path.read_bytes())
+
     print(f"Seeded {len(inputs)} inputs in each of {len(corpora)} corpora")
 
 

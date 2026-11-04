@@ -35,6 +35,10 @@ The fuzz crate enables `editable` on `astral-yaml-serde` and the shared developm
 - `decode` checks UTF-8 and both byte orders of UTF-16 and UTF-32, including
   spans in the original bytes.
 - `serde` checks string and arbitrary-value round trips and error ranges.
+  In this target and `typed`, expanding aliases or writing numbers in decimal
+  can produce a document that exceeds the default reader's size or work limits.
+  The round-trip checks compare every successful read and accept those limit
+  errors only on output larger than the standard fuzz input size.
 - `editable` checks value edits and style changes on arbitrary YAML, including
   LF normalization and rollback. Its first eight bytes select edits and paths.
   Bit 5 selects between nested paths and operations starting at the root. The rest is YAML.

@@ -1,12 +1,14 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use astral_yaml_serde::{Commented, Spanned, from_str, from_stream, to_string};
+use astral_yaml_serde::{Commented, Spanned, from_stream, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+
+mod roundtrip;
 
 #[derive(Deserialize, Serialize)]
 struct Newtype(u64);
@@ -110,8 +112,9 @@ macro_rules! check {
                     ));
                 }
 
-                if let Ok(encoded) = to_string(&value) {
-                    let decoded: Spanned<Commented<'_, $ty>> = from_str(&encoded).unwrap();
+                if let Ok(encoded) = to_string(&value)
+                    && let Some(decoded) = roundtrip::read::<Spanned<Commented<'_, $ty>>>(&encoded)
+                {
                     assert!(decoded.comments.is_empty());
 
                     // Compare serialized forms: NaN is unequal to itself, and
