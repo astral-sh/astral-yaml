@@ -53,6 +53,25 @@ fn normalization_keeps_the_mark_before_a_collection() {
     );
 }
 
+#[test_case(" # c\na: b\n" => " # c\n\n{}\n"; "adjacent")]
+#[test_case(" # c\n\na: b\n" => " # c\n\n{}\n"; "already separated")]
+#[test_case(" # first\n # last\na: b\n" => " # first\n # last\n\n{}\n"; "multiple comments")]
+#[test_case("---\n # c\na: b\n" => "---\n # c\n\n{}\n"; "explicit document")]
+fn removing_the_last_entry_keeps_detached_prefix_comments(source: &str) -> String {
+    let mut document = DocumentSyntax::parse(source).unwrap();
+    document
+        .edit(|root| root.into_mapping()?.remove("a"))
+        .unwrap();
+    document.into_yaml()
+}
+
+#[test_case("{a: b}" => " # c\n\n{a: b}\n"; "flow mapping")]
+#[test_case("new" => " # c\n\nnew\n"; "scalar")]
+fn replacing_a_block_mapping_keeps_detached_prefix_comments(replacement: &str) -> String {
+    let source = " # c\na: b\n";
+    edited(source, |editor| editor.replace(editor.root(), replacement)).into_yaml()
+}
+
 #[test]
 fn an_inserted_end_marker_shares_a_line_with_the_stream_mark() {
     use astral_yaml::comments::CommentPlacement;

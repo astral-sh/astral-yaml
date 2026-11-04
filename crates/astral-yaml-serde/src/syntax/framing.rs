@@ -215,6 +215,7 @@ impl RootComments {
             patches.push((super::span(anchor.at, anchor.at), text));
         }
         plan.changed_comments(original, Some(region));
+        plan.retain_prefix_separation(original, layout, region);
         if let Some(marker) = layout.suffix_boundary {
             plan.retain_suffix_separation(original, marker);
         }
@@ -271,6 +272,27 @@ impl RootComments {
                 patches.push((super::span(at, next), String::new()));
             }
             at = next;
+        }
+    }
+
+    /// A retained prefix can be detached by indentation above a block collection.
+    /// Give it a blank line when the new root uses a token or flow delimiter.
+    fn retain_prefix_separation(&mut self, original: &Source, layout: &RootLayout, region: Span) {
+        if !matches!(layout.kind, RootKind::Token | RootKind::FlowCollection) {
+            return;
+        }
+        let last = self.rendered.iter().rev().find_map(|comment| {
+            comment.span.filter(|span| {
+                comment.placement == CommentPlacement::Detached
+                    && comment.position == CommentPosition::Before
+                    && span.end() <= region.start()
+            })
+        });
+        if let Some(span) = last
+            && !blank_between(&original.text, span.end(), region.start())
+        {
+            let at = span.end();
+            self.patches.push((super::span(at, at), "\n".to_owned()));
         }
     }
 
