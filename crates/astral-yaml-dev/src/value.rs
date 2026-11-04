@@ -44,8 +44,10 @@ impl PartialEq for Value {
 
                 let mut remaining: Vec<_> = right.iter().collect();
 
-                for entry in left {
-                    let Some(index) = remaining.iter().position(|candidate| *candidate == entry)
+                // The serializer preserves entry order. Searching from the end
+                // lets swap_remove pop each matching entry on a round trip.
+                for entry in left.iter().rev() {
+                    let Some(index) = remaining.iter().rposition(|candidate| *candidate == entry)
                     else {
                         return false;
                     };
