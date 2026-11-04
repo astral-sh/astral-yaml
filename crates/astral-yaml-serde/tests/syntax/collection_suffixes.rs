@@ -1,6 +1,25 @@
 use crate::syntax::DocumentSyntax;
 use astral_yaml::CollectionStyle;
 use astral_yaml_dev::{edit_diff, indoc};
+use test_case::test_case;
+
+#[test_case("a:\n    b: x\n  # root\n" => "a:\n  b: x\n# root\n"; "mapping")]
+#[test_case("-\n    - x\n  # root\n" => "-\n  - x\n# root\n"; "sequence")]
+#[test_case("-   a: x\n  # root\n" => "-\n  a: x\n# root\n"; "compact mapping")]
+#[test_case("a:\n    b: x\n  # first\n # safe\n\n  # detached\n" => "a:\n  b: x\n# first\n # safe\n\n# detached\n"; "mixed suffixes")]
+#[test_case("a:\n    b: x\nz: [q]\n   # root\n" => "a:\n  b: x\nz: [q]\n   # root\n"; "final flow collection")]
+#[test_case("a:\n    b: x\nz: q\n   # root\n" => "a:\n  b: x\nz: q\n   # root\n"; "final scalar")]
+#[test_case("a:\n    b: x\n  # root\n... # end\n    # framed\n" => "a:\n  b: x\n# root\n... # end\n    # framed\n"; "end marker")]
+#[test_case("a:\n    b: |\n       x\n    # inner\n  # root\n" => "a:\n  b: |\n    x\n  # inner\n# root\n"; "nested scalar with comment")]
+#[test_case("&root\na:\n  # before\n    b: x\n  # root\n" => "&root \na:\n  # before\n    b: x\n  # root\n"; "leading comment keeps child deeper")]
+#[test_case("  a:\n      b: x\n    # root\n" => "  a:\n    b: x\n  # root\n"; "indented root")]
+fn normalization_keeps_suffix_comments_on_the_root(source: &str) -> String {
+    let document = DocumentSyntax::parse(source).unwrap();
+    let output = document.normalized_yaml().unwrap();
+    let reparsed = DocumentSyntax::parse(&output).unwrap();
+    assert_eq!(reparsed.normalized_yaml().unwrap(), output);
+    output
+}
 
 #[test]
 fn layout_changes_keep_comments_after_omitted_mapping_values() {

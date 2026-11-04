@@ -95,6 +95,7 @@ fn lexical_endings_stay_inside_the_reserved_boundary() {
                 Fragment {
                     text: text.to_owned(),
                     ending,
+                    last_block_child_indent: None,
                 },
                 1024,
             )
@@ -169,6 +170,7 @@ fn erased_root_boundaries_retain_shared_marker_lines(source: &str) -> String {
             Fragment {
                 text: String::new(),
                 ending: Ending::Token,
+                last_block_child_indent: None,
             },
             1024,
         )
@@ -194,6 +196,7 @@ fn completing_a_boundary_checks_new_separation_against_the_limit() {
         Fragment {
             text: "new".to_owned(),
             ending: Ending::Token,
+            last_block_child_indent: None,
         },
         3,
     );

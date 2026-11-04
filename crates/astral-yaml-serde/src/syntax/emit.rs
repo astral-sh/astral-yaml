@@ -40,6 +40,7 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         output: String::new(),
         work: options.max_nodes,
         ending: EmitterEnding::Token,
+        last_block_child_indent: None,
     };
     match placement.before {
         super::splice::Separator::None => {}
@@ -52,6 +53,7 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
     }
     Ok(Fragment {
         text: emitter.output,
+        last_block_child_indent: emitter.last_block_child_indent,
         ending: match emitter.ending {
             EmitterEnding::Token => Ending::Token,
             EmitterEnding::Comment { .. } => Ending::Comment,
@@ -70,6 +72,8 @@ pub(super) enum Ending {
 pub(super) struct Fragment {
     pub(super) text: String,
     pub(super) ending: Ending,
+    /// Indentation of the last value or item if it opens a block collection.
+    pub(super) last_block_child_indent: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -291,6 +295,7 @@ struct Emitter<'syntax, 'layout, Location> {
     output: String,
     work: usize,
     ending: EmitterEnding,
+    last_block_child_indent: Option<usize>,
 }
 
 impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location> {
@@ -865,6 +870,9 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
             self.before(&mut comments, value_indent)?;
             value_indent += 2;
             self.line(value_indent)?;
+        }
+        if depth == 1 {
+            self.last_block_child_indent = block.then_some(value_indent);
         }
         let context = Context::value(value_indent, flow, indent);
         self.node_with_comments(id, context, suffix, depth, comments)
