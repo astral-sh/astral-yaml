@@ -84,6 +84,9 @@ def seed_parsers(root: Path, inputs: list[Path]) -> None:
         for corpus in corpora:
             write_seed(corpus, data)
 
+    # The float fixture repeats an anchored node through aliases. Serializing the
+    # resulting Rust value writes each occurrence into the output.
+    # https://yaml.org/spec/1.2.2/#3222-anchors-and-aliases
     for path in (root / "fixtures/regressions/serde").glob("*.yaml"):
         write_seed(root / "fuzz/corpus/serde", path.read_bytes())
 
