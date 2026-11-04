@@ -3,12 +3,12 @@
 //! Reserve each region before rendering so its whitespace cannot overlap another
 //! replacement. [`PatchSet`] checks ranges and output size before assembling the result.
 
-use super::Comment;
 use super::emit::{self, Context, Ending, Fragment};
 use super::layout::Layout;
 use super::lines::Line;
 use super::source::Source;
 use super::view::{Emission, Syntax};
+use super::{Comment, DocumentSyntax};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{Error, NodeId, Span};
 use std::borrow::Cow;
@@ -225,6 +225,7 @@ impl<'source> Boundary<'source> {
         Ok(Replacement {
             span,
             text: fragment.text,
+            last_block_child_indent: fragment.last_block_child_indent,
         })
     }
 }
@@ -234,6 +235,35 @@ impl<'source> Boundary<'source> {
 pub(super) struct Replacement {
     pub(super) text: String,
     pub(super) span: Span,
+    last_block_child_indent: Option<usize>,
+}
+
+/// Normalize the root while keeping its retained suffix comments outside the final child.
+pub(super) fn normalize(document: &DocumentSyntax, region: Span) -> Result<String, Error> {
+    let source = &document.source;
+    let rendered = render(document, source.root, region)?;
+    let mut patches = vec![(rendered.span, rendered.text)];
+    if let Some(child_indent) = rendered.last_block_child_indent {
+        let root_indent = indent(&source.text, region.start());
+        let end = source.end_marker.map_or(source.text.len(), Span::start);
+        let suffix = rendered.span.end()..end;
+        for comment in &source.nodes[source.root.index()].comments {
+            let at = comment.span.start();
+            if !matches!(
+                comment.placement,
+                CommentPlacement::Trailing | CommentPlacement::Detached
+            ) || !suffix.contains(&at)
+            {
+                continue;
+            }
+            let column = Line::at(&source.text, at).column(at);
+            if column >= child_indent {
+                let start = at - (column - root_indent);
+                patches.push((super::span(start, at), String::new()));
+            }
+        }
+    }
+    apply(source, patches, region)
 }
 
 pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(

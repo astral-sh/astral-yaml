@@ -115,17 +115,16 @@ impl DocumentSyntax {
 
     /// Render the document with normalized whitespace, without modifying it.
     ///
-    /// Comments and compatible styles are preserved. Source outside the root node's
-    /// rewrite region is copied unchanged. Byte order marks within the region
-    /// stay on prefix or suffix lines outside the document content.
+    /// Comments and compatible styles are preserved. Root comments can be
+    /// reindented to keep them attached to the same node. Byte order marks within
+    /// the rewrite region stay on prefix or suffix lines outside the document content.
     ///
     /// # Errors
     /// Returns an error if rendering exceeds a resource limit or changes scalar
     /// content, alias targets, or comment ownership, placement, or order.
     pub fn normalized_yaml(&self) -> Result<String, Error> {
         let region = splice::region(self, self.source.root, OuterComments::Exclude);
-        let rendered = splice::render(self, self.source.root, region)?;
-        let output = splice::apply(&self.source, vec![(rendered.span, rendered.text)], region)?;
+        let output = splice::normalize(self, region)?;
         Ok(
             emit::parse_rendered(self.into(), &output, self.source.options, region, &[])?
                 .into_yaml(),
