@@ -16,6 +16,26 @@ pub enum Encoding {
     Utf32Le,
 }
 
+impl Encoding {
+    fn detect(bytes: &[u8]) -> Self {
+        match bytes {
+            [0, 0, 0xfe, 0xff, ..] | [0, 0, 0, _, ..] => Self::Utf32Be,
+            [0xff, 0xfe, 0, 0, ..] | [_, 0, 0, 0, ..] => Self::Utf32Le,
+            [0xfe, 0xff, ..] | [0, _, ..] => Self::Utf16Be,
+            [0xff, 0xfe, ..] | [_, 0, ..] => Self::Utf16Le,
+            _ => Self::Utf8,
+        }
+    }
+
+    fn encoded_len(self, text: &str) -> usize {
+        match self {
+            Self::Utf8 => text.len(),
+            Self::Utf16Be | Self::Utf16Le => text.encode_utf16().count() * 2,
+            Self::Utf32Be | Self::Utf32Le => text.chars().count() * 4,
+        }
+    }
+}
+
 /// YAML input decoded to UTF-8.
 ///
 /// UTF-8 input is borrowed. UTF-16 and UTF-32 input is decoded into an owned
@@ -63,7 +83,7 @@ impl<'bytes> Source<'bytes> {
             return Err(error(0, 0, "input byte limit exceeded"));
         }
 
-        let encoding = detect(bytes);
+        let encoding = Encoding::detect(bytes);
         let unit = match encoding {
             Encoding::Utf16Be | Encoding::Utf16Le => CodeUnit::Utf16,
             Encoding::Utf32Be | Encoding::Utf32Le => CodeUnit::Utf32,
@@ -180,16 +200,11 @@ impl<'bytes> Source<'bytes> {
     pub fn original_span(&self, span: Span) -> Option<Span> {
         let before = self.text.get(..span.start)?;
         let content = self.text.get(span.start..span.end)?;
-        let length = |s: &str| match self.encoding {
-            Encoding::Utf8 => s.len(),
-            Encoding::Utf16Be | Encoding::Utf16Le => s.encode_utf16().count() * 2,
-            Encoding::Utf32Be | Encoding::Utf32Le => s.chars().count() * 4,
-        };
 
-        let start = length(before);
+        let start = self.encoding.encoded_len(before);
         Some(Span {
             start,
-            end: start + length(content),
+            end: start + self.encoding.encoded_len(content),
         })
     }
 }
@@ -223,15 +238,5 @@ fn error(start: usize, end: usize, message: &'static str) -> Error {
     Error {
         span: Span { start, end },
         message,
-    }
-}
-
-fn detect(bytes: &[u8]) -> Encoding {
-    match bytes {
-        [0, 0, 0xfe, 0xff, ..] | [0, 0, 0, _, ..] => Encoding::Utf32Be,
-        [0xff, 0xfe, 0, 0, ..] | [_, 0, 0, 0, ..] => Encoding::Utf32Le,
-        [0xfe, 0xff, ..] | [0, _, ..] => Encoding::Utf16Be,
-        [0xff, 0xfe, ..] | [_, 0, ..] => Encoding::Utf16Le,
-        _ => Encoding::Utf8,
     }
 }
