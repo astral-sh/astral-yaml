@@ -57,7 +57,9 @@ fn saphyr_options() -> serde_saphyr::Options {
 }
 
 fn main() {
-    for &(_, source) in FIXTURES {
+    for &(name, source) in FIXTURES {
+        parse::check_counts(name, source);
+
         let values = benchmarks::astral(source);
         assert_eq!(values, yaml_serde_documents(source));
         assert_eq!(
@@ -86,6 +88,97 @@ fn main() {
     );
 
     divan::main();
+}
+
+mod parse {
+    use std::fmt;
+
+    use astral_yaml_dev::benchmarks::fixture;
+    use divan::{Bencher, black_box};
+    use granit_parser::{Event, Parser};
+
+    #[derive(Debug, Default, Eq, PartialEq)]
+    struct Counts {
+        documents: usize,
+        nodes: usize,
+        comments: usize,
+    }
+
+    pub(super) fn check_counts(name: &str, source: &str) {
+        assert_eq!(astral_counts(source), granit_counts(source), "{name}");
+    }
+
+    fn astral_counts(source: &str) -> Counts {
+        let stream = astral_yaml::parse(source).unwrap();
+
+        Counts {
+            documents: stream.documents().len(),
+            nodes: stream.nodes().len(),
+            comments: stream.comments().len(),
+        }
+    }
+
+    fn granit_counts(source: &str) -> Counts {
+        let options = granit_parser::options! { strict_indentation: true, emit_comments: true };
+        let mut counts = Counts::default();
+
+        for result in Parser::new_from_str_with_options(source, options) {
+            let (event, _) = result.unwrap();
+            match event {
+                Event::DocumentStart(..) => counts.documents += 1,
+                Event::Comment(..) => counts.comments += 1,
+                _ if event.is_node() => counts.nodes += 1,
+                _ => {}
+            }
+        }
+
+        counts
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Implementation {
+        Astral,
+        Granit,
+    }
+
+    impl fmt::Display for Implementation {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(match self {
+                Self::Astral => "astral-yaml",
+                Self::Granit => "granit-parser",
+            })
+        }
+    }
+
+    const IMPLEMENTATIONS: &[Implementation] = &[Implementation::Astral, Implementation::Granit];
+
+    fn run(bencher: Bencher, name: &str, implementation: Implementation) {
+        let source = fixture(name);
+
+        match implementation {
+            Implementation::Astral => bencher.bench_local(|| {
+                black_box(astral_counts(black_box(source)));
+            }),
+            Implementation::Granit => bencher.bench_local(|| {
+                black_box(granit_counts(black_box(source)));
+            }),
+        }
+    }
+
+    #[divan::bench(name = "uv-ci", args = IMPLEMENTATIONS)]
+    fn uv_ci(bencher: Bencher, implementation: Implementation) {
+        run(bencher, "uv-ci", implementation);
+    }
+
+    #[divan::bench(name = "kubernetes-guestbook", args = IMPLEMENTATIONS)]
+    fn kubernetes_guestbook(bencher: Bencher, implementation: Implementation) {
+        run(bencher, "kubernetes-guestbook", implementation);
+    }
+
+    #[divan::bench(name = "openapi-petstore", args = IMPLEMENTATIONS)]
+    fn openapi_petstore(bencher: Bencher, implementation: Implementation) {
+        run(bencher, "openapi-petstore", implementation);
+    }
 }
 
 mod deserialize {
