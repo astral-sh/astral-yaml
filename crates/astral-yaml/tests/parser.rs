@@ -1292,6 +1292,29 @@ fn tag_handle_lookup_in_a_large_directive_list() {
     );
 }
 
+// Each document starts a new scope. An alias needs a preceding anchor in that
+// document, and a named tag handle needs a directive there.
+// https://yaml.org/spec/1.2.2/#91-documents
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
+// https://yaml.org/spec/1.2.2/#6821-tag-handles
+#[test_case("*x", "unknown alias")]
+#[test_case("!x!value", "undefined tag handle")]
+fn document_boundaries_clear_sparse_tables(last: &str, expected: &str) {
+    use std::fmt::Write;
+
+    let mut source = String::new();
+    for i in 0..32 {
+        writeln!(source, "%TAG !t{i}! !example/").unwrap();
+    }
+    source.push_str("---\n");
+    for i in 0..32 {
+        writeln!(source, "- &a{i} value").unwrap();
+    }
+    writeln!(source, "...\n%TAG !x! !example/\n--- &x value\n--- {last}").unwrap();
+
+    assert_eq!(parse(&source).unwrap_err().message, expected);
+}
+
 // https://yaml.org/spec/1.2.2/#6822-tag-prefixes
 #[test_case(",tag:example")]
 #[test_case("[tag:example")]

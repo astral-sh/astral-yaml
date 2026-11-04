@@ -49,6 +49,21 @@ mod astral {
         });
     }
 
+    #[divan::bench(args = [16_384, 65_536])]
+    fn parse_documents_after_many_anchors(bencher: Bencher, count: usize) {
+        use std::fmt::Write;
+
+        let mut source = String::new();
+        for index in 0..count {
+            writeln!(source, "- &a{index} x").unwrap();
+        }
+        source.push_str(&"--- &x x\n".repeat(count));
+
+        bencher.bench_local(|| {
+            black_box(astral_yaml::parse(black_box(&source)).unwrap());
+        });
+    }
+
     #[divan::bench(args = FIXTURES.iter().map(|&(name, _)| name))]
     fn deserialize(bencher: Bencher, name: &str) {
         let source = fixture(name);
