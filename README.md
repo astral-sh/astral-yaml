@@ -4,7 +4,7 @@ A fast, safe Rust YAML 1.2 parser.
 
 > [!WARNING]
 > This README is human-edited, but all code changes, PR summaries, and additional
-> documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
+> documentation were authored entirely by [Codex](https://openai.com/codex/).
 > Use at your own risk.
 
 Core parts:
