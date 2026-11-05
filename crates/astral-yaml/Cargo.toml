@@ -1,6 +1,7 @@
 [package]
 name = "astral-yaml"
 description = "A YAML 1.2 parser with source spans and comments"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
