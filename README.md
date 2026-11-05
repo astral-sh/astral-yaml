@@ -106,3 +106,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and checks.
 
 See [benchmarks](benchmarks/README.md) for workloads, comparison settings, and
 commands. Pull requests include CodSpeed performance reports.
+
+<div align="center">
+  <a target="_blank" href="https://astral.sh" style="background:none">
+    <img src="https://raw.githubusercontent.com/astral-sh/uv/main/assets/svg/Astral.svg" alt="Made by Astral">
+  </a>
+</div>
