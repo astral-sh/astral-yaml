@@ -101,7 +101,7 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "astral-yaml"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "astral-yaml-dev",
  "insta",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "astral-yaml-dev"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "annotate-snippets",
  "astral-yaml",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "astral-yaml-serde"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "astral-yaml",
  "astral-yaml-dev",
@@ -1328,7 +1328,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "clap",
  "serde",

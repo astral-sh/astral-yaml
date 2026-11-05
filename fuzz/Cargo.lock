@@ -27,14 +27,14 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "astral-yaml"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "astral-yaml-dev"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "annotate-snippets",
  "astral-yaml",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "astral-yaml-serde"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "astral-yaml",
  "memchr",
