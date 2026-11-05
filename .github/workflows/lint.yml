@@ -43,4 +43,6 @@ jobs:
         run: uv run --only-dev --locked ruff check scripts
 
       - name: Check Python types
-        run: uv run --only-dev --locked ty check --python .venv scripts
+        run: |
+          uv sync --locked --script scripts/release.py
+          uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts

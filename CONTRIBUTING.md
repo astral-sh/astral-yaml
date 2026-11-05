@@ -23,7 +23,8 @@ span refers to.
 ```sh
 uv run --only-dev --locked ruff format --check scripts
 uv run --only-dev --locked ruff check scripts
-uv run --only-dev --locked ty check --python .venv scripts
+uv sync --locked --script scripts/release.py
+uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check
@@ -70,3 +71,10 @@ cargo bench -p astral-yaml-dev --bench yaml --locked
 are passed to cargo-fuzz instead.
 
 See [fuzzing](fuzz/README.md) and [benchmarks](benchmarks/README.md) for details.
+
+## Releases
+
+Use the same version (e.g. `0.2.0`) for both workflows on `main`.
+
+1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml) and merge its PR.
+2. Run [Release](https://github.com/astral-sh/astral-yaml/actions/workflows/release.yml) and approve `release-gate`.
