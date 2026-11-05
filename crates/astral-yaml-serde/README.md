@@ -40,3 +40,9 @@ With the `editable` feature enabled, `Editable<T>` provides a high-level
 editing API. See the [editing guide] for more information.
 
 [editing guide]: https://github.com/astral-sh/astral-yaml/blob/main/docs/editing.md
+
+<div align="center">
+  <a target="_blank" href="https://astral.sh" style="background:none">
+    <img src="https://raw.githubusercontent.com/astral-sh/uv/main/assets/svg/Astral.svg" alt="Made by Astral">
+  </a>
+</div>
