@@ -10,7 +10,6 @@ mod de;
 #[cfg(feature = "editable")]
 mod editable;
 mod error;
-mod schema;
 mod ser;
 mod spanned;
 #[cfg(feature = "editable")]

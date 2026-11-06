@@ -1,5 +1,8 @@
 /target/
 /.venv/
+/dist/
+/.coverage
+__pycache__/
 /fuzz/target/
 /fuzz/artifacts/
 /fuzz/coverage/

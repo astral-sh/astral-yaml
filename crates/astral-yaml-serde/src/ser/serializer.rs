@@ -1,8 +1,8 @@
 use super::output::Output;
 use super::{keys, tag};
-use crate::schema::YamlType;
 use crate::with::yaml_tag;
 use crate::{Error, tagged};
+use astral_yaml::schema::CoreType;
 use serde::Serialize;
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use std::fmt;
@@ -124,7 +124,7 @@ impl<O: Output> Serializer<O> {
     }
 
     #[cold]
-    fn enter_compound(&mut self, kind: CollectionKind, tag: Option<YamlType>) -> Result<()> {
+    fn enter_compound(&mut self, kind: CollectionKind, tag: Option<CoreType>) -> Result<()> {
         Self::check_collection_tag(tag, kind)?;
         self.enter()
     }
@@ -155,7 +155,7 @@ impl<O: Output> Serializer<O> {
 
     /// Consume the current node's tag state and return any core type constraint.
     #[inline]
-    fn take_core_tag(&mut self) -> Option<YamlType> {
+    fn take_core_tag(&mut self) -> Option<CoreType> {
         self.yaml_tag = false;
         match self.pending_tag.take() {
             Some(tag::Constraint::Core(kind)) => Some(kind),
@@ -182,7 +182,7 @@ impl<O: Output> Serializer<O> {
     }
 
     #[cold]
-    fn check_tagged_scalar(tag: YamlType, value: &str) -> Result<()> {
+    fn check_tagged_scalar(tag: CoreType, value: &str) -> Result<()> {
         if !tag.matches_scalar(value) {
             return Err(Error::new("serialized value does not match its YAML tag"));
         }
@@ -190,11 +190,11 @@ impl<O: Output> Serializer<O> {
         Ok(())
     }
 
-    fn check_collection_tag(tag: Option<YamlType>, kind: CollectionKind) -> Result<()> {
+    fn check_collection_tag(tag: Option<CoreType>, kind: CollectionKind) -> Result<()> {
         if let Some(tag) = tag {
             let actual = match kind {
-                CollectionKind::Sequence => YamlType::Sequence,
-                CollectionKind::Mapping => YamlType::Mapping,
+                CollectionKind::Sequence => CoreType::Sequence,
+                CollectionKind::Mapping => CoreType::Mapping,
             };
             if tag != actual {
                 return Err(Error::new("serialized value does not match its YAML tag"));

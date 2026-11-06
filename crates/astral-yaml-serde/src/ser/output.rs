@@ -1,4 +1,3 @@
-use super::quoted;
 use crate::Error;
 use std::fmt::{self, Write};
 
@@ -54,7 +53,7 @@ impl Output for String {
 
     #[inline]
     fn quote(&mut self, value: &str) -> Result<(), Error> {
-        quoted::write_quoted(self, value);
+        super::write_quoted(self, value);
         Ok(())
     }
 
@@ -130,7 +129,7 @@ impl Output for LimitedOutput {
 
     fn quote(&mut self, value: &str) -> Result<(), Error> {
         self.check(value.len().saturating_add(2))?;
-        let result = quoted::write_quoted_to(self, value);
+        let result = astral_yaml::emit::write_quoted(self, value);
         self.write_result(result)
     }
 

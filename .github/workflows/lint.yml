@@ -37,12 +37,13 @@ jobs:
           cargo clippy --manifest-path fuzz/Cargo.toml --all-targets --locked -- -D warnings
 
       - name: Check Python formatting
-        run: uv run --only-dev --locked ruff format --check scripts
+        run: uv run --only-dev --locked ruff format --check scripts astral_yaml.pyi crates/astral-yaml-python/tests
 
       - name: Lint Python
-        run: uv run --only-dev --locked ruff check scripts
+        run: uv run --only-dev --locked ruff check scripts astral_yaml.pyi crates/astral-yaml-python/tests
 
       - name: Check Python types
         run: |
           uv sync --locked --script scripts/release.py
           uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts
+          uv run --only-dev --locked ty check --python-version 3.11 astral_yaml.pyi crates/astral-yaml-python/tests
