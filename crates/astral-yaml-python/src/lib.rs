@@ -57,17 +57,20 @@ mod tests {
     }
 
     #[test]
-    fn empty_file_round_trip() -> PyResult<()> {
+    #[ignore = "cargo xtask cov runs the public API tests with pytest installed"]
+    fn python_api() -> PyResult<()> {
         Python::initialize();
         Python::attach(|py| {
             let module = pyo3::wrap_pymodule!(bindings)(py);
-            let file = py.import("io")?.call_method0("StringIO")?;
-            let value = module.call_method1(py, "load", (&file,))?;
-            module.call_method1(py, "dump", (value, &file))?;
-            assert_eq!(
-                file.call_method0("getvalue")?.extract::<String>()?,
-                "null\n"
-            );
+            py.import("sys")?
+                .getattr("modules")?
+                .set_item("astral_yaml", module)?;
+
+            let tests = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
+            let result = py
+                .import("pytest")?
+                .call_method1("main", (["-q", tests],))?;
+            assert_eq!(result.extract::<i32>()?, 0, "pytest failed");
             Ok(())
         })
     }

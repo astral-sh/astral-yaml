@@ -56,7 +56,9 @@ cargo xtask cov
 ## Coverage
 
 We require 100% line and function coverage for `astral-yaml`,
-`astral-yaml-serde`, and `astral-yaml-python`.
+`astral-yaml-serde`, and `astral-yaml-python`. The coverage run includes the
+Rust tests and the pytest suite against the same instrumented binding. Tests
+of the public Python API contribute to the Rust coverage report.
 
 Use `cargo xtask cov --html` to generate a report at
 `target/coverage/html/index.html`.

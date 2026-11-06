@@ -135,7 +135,6 @@ name = "astral-yaml-python"
 version = "0.0.3"
 dependencies = [
  "astral-yaml",
- "insta",
  "pyo3",
  "test-case",
 ]

@@ -38,10 +38,35 @@ jobs:
       - name: Enforce coverage
         run: cargo xtask cov
 
-      - name: Build and test the Python distribution
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.15"]
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Build the Python distribution
+        run: uv build
+
+      - name: Test the installed wheel
         run: |
-          uv build
-          for version in 3.11 3.15; do
-            uv run --isolated --locked --only-group test --python "$version" --with dist/*.whl \
-              sh -ec 'python -m coverage run -m pytest && python -m coverage report'
-          done
+          uv run --isolated --locked --only-group test --with dist/*.whl \
+            sh -ec 'python -m coverage run -m pytest && python -m coverage report'
