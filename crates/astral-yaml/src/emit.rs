@@ -1,25 +1,35 @@
+//! Write YAML 1.2 scalar text.
+
 use std::fmt::{self, Write};
 
-/// Characters outside the YAML output character set (production 1).
-pub(crate) fn non_printable(c: char) -> bool {
+/// Whether a character is outside the [YAML printable character set].
+///
+/// [YAML printable character set]: https://yaml.org/spec/1.2.2/#51-character-set
+#[must_use]
+pub fn non_printable(c: char) -> bool {
     (c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{85}'))
         || matches!(c, '\u{fffe}' | '\u{ffff}')
 }
 
-pub(crate) fn requires_double_quotes(c: char) -> bool {
+/// Whether the emitter requires a double-quoted scalar for a non-printable
+/// character or a byte-order mark.
+#[must_use]
+pub fn requires_double_quotes(c: char) -> bool {
     non_printable(c) || c == '\u{feff}'
 }
 
+/// Write a double-quoted scalar, escaping characters that cannot appear literally.
+///
+/// ```
+/// let mut output = String::new();
+/// astral_yaml::emit::write_quoted(&mut output, "a\nb").unwrap();
+/// assert_eq!(output, r#""a\nb""#);
+/// ```
+///
+/// # Errors
+/// Returns the underlying writer's error if it fails.
 #[inline]
-pub(crate) fn write_quoted(output: &mut String, value: &str) {
-    if value.len() >= 64 || output.is_empty() {
-        output.reserve(value.len() + 3);
-    }
-    write_quoted_to(output, value).expect("String write");
-}
-
-#[inline]
-pub(super) fn write_quoted_to(output: &mut impl Write, value: &str) -> fmt::Result {
+pub fn write_quoted(output: &mut impl Write, value: &str) -> fmt::Result {
     output.write_char('"')?;
     if value.len() >= 64 {
         quoted_long(output, value)?;

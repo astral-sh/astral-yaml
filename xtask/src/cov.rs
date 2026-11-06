@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const PACKAGES: [&str; 2] = ["astral-yaml", "astral-yaml-serde"];
+const PACKAGES: [&str; 3] = ["astral-yaml", "astral-yaml-serde", "astral-yaml-python"];
 
 #[derive(Deserialize)]
 struct Metadata {

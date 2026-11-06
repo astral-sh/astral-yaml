@@ -15,6 +15,48 @@ pub enum ScalarType {
     String,
 }
 
+/// A node type defined by the YAML 1.2 core schema.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreType {
+    /// A scalar with a core-schema type.
+    Scalar(ScalarType),
+    /// An ordered sequence of nodes.
+    Sequence,
+    /// A mapping of keys to values.
+    Mapping,
+}
+
+impl CoreType {
+    /// Returns whether the decoded scalar text can be presented with this explicit tag.
+    #[must_use]
+    pub fn matches_scalar(self, value: &str) -> bool {
+        match self {
+            Self::Scalar(ScalarType::String) => true,
+            Self::Scalar(ScalarType::Float) => {
+                matches!(classify(value), ScalarType::Float | ScalarType::Int)
+                    && !(value.starts_with("0x") || value.starts_with("0o"))
+            }
+            Self::Scalar(kind) => classify(value) == kind,
+            Self::Sequence | Self::Mapping => false,
+        }
+    }
+
+    /// Looks up an expanded core tag, such as `tag:yaml.org,2002:str`.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "tag:yaml.org,2002:str" => Some(Self::Scalar(ScalarType::String)),
+            "tag:yaml.org,2002:null" => Some(Self::Scalar(ScalarType::Null)),
+            "tag:yaml.org,2002:bool" => Some(Self::Scalar(ScalarType::Bool)),
+            "tag:yaml.org,2002:int" => Some(Self::Scalar(ScalarType::Int)),
+            "tag:yaml.org,2002:float" => Some(Self::Scalar(ScalarType::Float)),
+            "tag:yaml.org,2002:seq" => Some(Self::Sequence),
+            "tag:yaml.org,2002:map" => Some(Self::Mapping),
+            _ => None,
+        }
+    }
+}
+
 /// Classifies a plain, untagged scalar without imposing machine numeric limits.
 #[must_use]
 #[inline]

@@ -1,12 +1,12 @@
 use super::output::Output;
 use crate::Error;
-use crate::schema::YamlType;
+use astral_yaml::schema::CoreType;
 use serde::{Serialize, ser};
 use std::fmt;
 
 pub(super) enum Constraint {
     Any,
-    Core(YamlType),
+    Core(CoreType),
 }
 
 pub(super) struct Tag {
@@ -48,7 +48,7 @@ impl Tag {
 
         Ok(Self {
             spelling,
-            constraint: YamlType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
+            constraint: CoreType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
         })
     }
 

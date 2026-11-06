@@ -1,0 +1,22 @@
+[package]
+name = "astral-yaml-python"
+description = "Python bindings for astral-yaml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+astral-yaml.workspace = true
+pyo3.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+test-case.workspace = true
+
+[lints]
+workspace = true
