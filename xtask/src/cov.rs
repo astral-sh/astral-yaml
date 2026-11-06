@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const PACKAGES: [&str; 2] = ["astral-yaml", "astral-yaml-serde"];
+const PACKAGES: [&str; 3] = ["astral-yaml", "astral-yaml-serde", "astral-yaml-python"];
 
 #[derive(Deserialize)]
 struct Metadata {
@@ -210,6 +210,22 @@ fn toolchain(root: &Path) -> Result<Toolchain> {
     })
 }
 
+fn python_test_environment(root: &Path, directory: &Path) -> Result<(PathBuf, PathBuf)> {
+    let mut uv = Command::new("uv");
+    uv.current_dir(root)
+        .env("UV_PROJECT_ENVIRONMENT", directory.join("venv"))
+        .args(["run", "--locked", "--only-group", "test"]);
+    if let Some(python) = env::var_os("PYO3_PYTHON") {
+        uv.arg("--python").arg(python);
+    }
+    let paths = output(uv.args([
+        "python",
+        "-c",
+        "import json, sys, sysconfig; print(json.dumps([sys.executable, sysconfig.get_path('purelib')]))",
+    ]))?;
+    Ok(serde_json::from_str(&paths)?)
+}
+
 pub(crate) fn run(html: bool) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -241,9 +257,11 @@ pub(crate) fn run(html: bool) -> Result<()> {
         return Err("no YAML sources found for coverage".into());
     }
 
+    let (interpreter, site_packages) = python_test_environment(&root, &directory)?;
+
     // Build separately so test stdout cannot be mistaken for Cargo JSON messages.
     // The explicit host target keeps build scripts and proc macros uninstrumented.
-    let test_command = || {
+    let test_command = |packages: &[&str]| {
         let mut tests = Command::new(&cargo);
         tests
             .current_dir(&root)
@@ -253,18 +271,27 @@ pub(crate) fn run(html: bool) -> Result<()> {
             .arg(directory.join("build"))
             .env("CARGO_ENCODED_RUSTFLAGS", coverage_flags())
             .env("LLVM_PROFILE_FILE", profiles.join("%m-%p.profraw"))
+            .env("PYO3_PYTHON", &interpreter)
             .env("CARGO_INCREMENTAL", "0");
 
-        for package in PACKAGES {
+        for &package in packages {
             tests.args(["--package", package]);
         }
 
         tests
     };
-    let messages =
-        output(test_command().args(["--no-run", "--message-format=json-render-diagnostics"]))?;
+    let messages = output(
+        test_command(&PACKAGES).args(["--no-run", "--message-format=json-render-diagnostics"]),
+    )?;
     let executables = artifacts(&messages, &members)?;
-    execute(&mut test_command())?;
+    execute(&mut test_command(&PACKAGES))?;
+
+    // Run pytest inside the same instrumented binding as its Rust unit tests.
+    execute(
+        test_command(&["astral-yaml-python"])
+            .env("PYTHONPATH", site_packages)
+            .args(["tests::python_api", "--", "--ignored", "--exact"]),
+    )?;
 
     let profile = directory.join("coverage.profdata");
     let mut merge = Command::new(toolchain.profdata);

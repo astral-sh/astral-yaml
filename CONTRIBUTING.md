@@ -2,6 +2,21 @@
 
 Development requires `rustup` and `uv`. Run commands from the repository root.
 
+## Python bindings
+
+Use uv to build and test the [Python package](crates/astral-yaml-python/README.md).
+The package supports CPython 3.11 and newer. The development tools use Python
+3.14 or newer.
+
+```sh
+uv sync --locked --python 3.14
+uv run --locked pytest
+uv build
+```
+
+To select a Python interpreter for Rust tests that embed Python, set
+`PYO3_PYTHON` to the path reported by `uv python find 3.14`.
+
 ## Rust style
 
 Use stable `rustfmt` and the workspace Clippy lints. For API and implementation
@@ -21,10 +36,11 @@ span refers to.
 ## Checks
 
 ```sh
-uv run --only-dev --locked ruff format --check scripts
-uv run --only-dev --locked ruff check scripts
+uv run --only-dev --locked ruff format --check scripts astral_yaml.pyi crates/astral-yaml-python/tests
+uv run --only-dev --locked ruff check scripts astral_yaml.pyi crates/astral-yaml-python/tests
 uv sync --locked --script scripts/release.py
 uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts
+uv run --only-dev --locked ty check --python-version 3.11 astral_yaml.pyi crates/astral-yaml-python/tests
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check
@@ -39,11 +55,18 @@ cargo xtask cov
 
 ## Coverage
 
-We require 100% line and function coverage for `astral-yaml` and
-`astral-yaml-serde`.
+We require 100% line and function coverage for `astral-yaml`,
+`astral-yaml-serde`, and `astral-yaml-python`. The coverage run includes the
+Rust tests and the pytest suite against the same instrumented binding. Tests
+of the public Python API contribute to the Rust coverage report.
 
 Use `cargo xtask cov --html` to generate a report at
 `target/coverage/html/index.html`.
+
+For Python coverage, run `uv run --locked coverage run -m pytest` followed by
+`uv run --locked coverage report`. This measures the Python code shipped in
+the package, currently the initializer that re-exports the native functions.
+`cargo xtask cov` measures the Rust implementation of those functions.
 
 ## Conformance and snapshots
 
