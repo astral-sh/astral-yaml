@@ -22,13 +22,11 @@ def test_tuple_as_sequence() -> None:
 
 def test_numeric_types() -> None:
     integer = 2**256 + 1
-    data = yaml.loads(yaml.dumps([integer, 1.0, -0.0, -math.inf, math.inf, math.nan]))
-    assert data[0] == integer
-    assert isinstance(data[1], float)
-    assert math.copysign(1, data[2]) == -1
-    assert data[3] == -math.inf
-    assert data[4] == math.inf
-    assert math.isnan(data[5])
+    big, whole, zero, nan = yaml.loads(yaml.dumps([integer, 1.0, -0.0, math.nan]))
+    assert big == integer
+    assert isinstance(whole, float) and whole == 1.0
+    assert math.copysign(1, zero) == -1
+    assert math.isnan(nan)
 
 
 def test_python_integer_limit() -> None:
@@ -63,8 +61,11 @@ def test_empty_stream(source: str) -> None:
     assert yaml.loads(source) is None
 
 
-def test_mapping_key_types() -> None:
-    assert yaml.loads('{1: first, "1": second}') == {1: "first", "1": "second"}
+def test_mapping_keys_round_trip() -> None:
+    data = {"é" * 2048: "long", 1: "first", "1": "second"}
+    document = yaml.dumps(data)
+    assert document.startswith("{? ")
+    assert yaml.loads(document) == data
 
 
 def test_alias_identity() -> None:

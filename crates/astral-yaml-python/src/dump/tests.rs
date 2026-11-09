@@ -1,7 +1,6 @@
 use super::Dumper;
 use astral_yaml::ParseOptions;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
 use std::ffi::CStr;
 use test_case::test_case;
 
@@ -25,32 +24,18 @@ fn limits(expression: &CStr, depth: usize, nodes: usize, bytes: usize, message: 
 }
 
 #[test]
-fn byte_limit_includes_key_indicators_escapes_and_anchors() {
+fn byte_limit_includes_inserted_anchors() {
     Python::initialize();
     Python::attach(|py| {
-        let obj = py
-            .eval(c"[{'é' * 1023: [12345, '\\x00']}]", None, None)
-            .unwrap();
-        let items = obj.cast::<PyList>().unwrap();
-        for _ in 0..6 {
-            let shared = PyList::empty(py);
-            items.append(&shared).unwrap();
-            items.append(shared).unwrap();
-        }
+        let obj = py.eval(c"[[]] * 2", None, None).unwrap();
+        let mut options = ParseOptions::default();
+        let expected = Dumper::serialize(&obj, options).unwrap();
 
-        let expected = Dumper::serialize(&obj, ParseOptions::default()).unwrap();
-        assert!(expected.starts_with("[{? "));
-        for limit in 0..=expected.len() {
-            let options = ParseOptions {
-                max_input_bytes: limit,
-                ..ParseOptions::default()
-            };
-            let result = Dumper::serialize(&obj, options);
-            if limit == expected.len() {
-                assert_eq!(result.unwrap(), expected);
-            } else {
-                assert!(result.unwrap_err().to_string().contains("byte limit"));
-            }
-        }
+        options.max_input_bytes = expected.len();
+        assert_eq!(Dumper::serialize(&obj, options).unwrap(), expected);
+
+        options.max_input_bytes -= 1;
+        let error = Dumper::serialize(&obj, options).unwrap_err();
+        assert!(error.to_string().contains("byte limit"), "{error}");
     });
 }

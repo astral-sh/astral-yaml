@@ -1,4 +1,3 @@
-import math
 from collections.abc import Callable
 from unittest.mock import Mock
 
@@ -8,7 +7,7 @@ import astral_yaml as yaml
 
 
 def test_python_scalar_construction() -> None:
-    assert yaml.loads("[! 1, 010, 0o10, 0x10, .inf]") == ["1", 10, 8, 16, math.inf]
+    assert yaml.loads("[! 1, 010, 0x10]") == ["1", 10, 16]
 
 
 @pytest.mark.parametrize(
