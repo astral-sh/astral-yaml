@@ -34,6 +34,9 @@ Run the Python benchmarks locally with a release build of the extension:
 uv run --locked --python 3.14 --no-editable pytest benchmarks --codspeed
 ```
 
+For local comparisons, read the per-call medians in nanoseconds from
+`benchmarks[].stats.median_ns` in `.codspeed/results_*.json`.
+
 Each public API is measured on a small configuration, the uv CI workflow, and
 the Airflow Compose file, which uses anchors and aliases. `loads` reads text and
 `load` reads a fresh binary stream. The dump benchmarks start from Python
