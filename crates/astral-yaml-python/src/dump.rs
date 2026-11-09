@@ -104,7 +104,7 @@ impl<'py> Dumper<'py> {
         if let Some(list) = as_builtin::<PyList>(value) {
             self.sequence(value, list.iter(), depth)
         } else if let Some(tuple) = as_builtin::<PyTuple>(value) {
-            self.sequence(value, tuple.iter(), depth)
+            self.sequence(value, tuple.iter_borrowed(), depth)
         } else if let Some(dict) = as_builtin::<PyDict>(value) {
             self.mapping(dict, depth)
         } else {
@@ -180,7 +180,7 @@ impl<'py> Dumper<'py> {
     fn sequence(
         &mut self,
         value: &Bound<'py, PyAny>,
-        items: impl Iterator<Item = Bound<'py, PyAny>>,
+        items: impl Iterator<Item = impl AsRef<Py<PyAny>>>,
         depth: usize,
     ) -> PyResult<()> {
         if self.alias(value)? {
@@ -191,7 +191,7 @@ impl<'py> Dumper<'py> {
         let mut first = true;
         for item in items {
             self.output.separator(&mut first)?;
-            self.node(&item, depth + 1)?;
+            self.node(item.as_ref().bind(value.py()), depth + 1)?;
         }
         self.output.push_str("]")
     }
