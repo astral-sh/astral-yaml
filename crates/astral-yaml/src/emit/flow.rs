@@ -1,14 +1,5 @@
 use std::fmt::{self, Write};
 
-/// A YAML flow collection.
-#[derive(Clone, Copy, Debug)]
-pub enum Collection {
-    /// A sequence enclosed in square brackets.
-    Sequence,
-    /// A mapping enclosed in braces.
-    Mapping,
-}
-
 /// Writes flow-style YAML into a [`String`] or a byte-limited [`LimitedWriter`].
 ///
 /// The caller traverses the value, choosing which scalars and collections to emit.
@@ -16,14 +7,14 @@ pub enum Collection {
 /// YAML exceeds the byte budget.
 ///
 /// ```
-/// use astral_yaml::emit::{Collection, FlowWrite, LimitedWriter};
+/// use astral_yaml::emit::{FlowWrite, LimitedWriter};
 ///
 /// let mut yaml = LimitedWriter::new(32, || "document too large");
-/// yaml.open(Collection::Mapping)?;
+/// yaml.push_str("{")?;
 /// yaml.quote("name")?;
-/// yaml.end_key()?;
+/// yaml.push_str(": ")?;
 /// yaml.quote("Ada")?;
-/// yaml.close(Collection::Mapping)?;
+/// yaml.push_str("}")?;
 /// assert_eq!(yaml.finish()?, r#"{"name": "Ada"}"#);
 /// # Ok::<(), &'static str>(())
 /// ```
@@ -107,18 +98,6 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
     where
         E: From<fmt::Error>;
 
-    /// Start a flow sequence or mapping.
-    ///
-    /// # Errors
-    /// Returns an error if the delimiter exceeds the budget.
-    #[inline]
-    fn open(&mut self, kind: Collection) -> Result<(), E> {
-        self.push_str(match kind {
-            Collection::Sequence => "[",
-            Collection::Mapping => "{",
-        })
-    }
-
     /// Write a comma before each entry after the first in a flow collection.
     ///
     /// # Errors
@@ -129,15 +108,6 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
             self.push_str(", ")?;
         }
         Ok(())
-    }
-
-    /// Separate a mapping key from its value.
-    ///
-    /// # Errors
-    /// Returns an error if the separator exceeds the budget.
-    #[inline]
-    fn end_key(&mut self) -> Result<(), E> {
-        self.push_str(": ")
     }
 
     /// Finish a single-line key, inserting `? ` if the encoded key exceeds
@@ -156,19 +126,7 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
         if key.len() > 1024 && key.chars().count() > 1024 {
             self.insert_explicit_key(start)?;
         }
-        self.end_key()
-    }
-
-    /// Close a flow sequence or mapping.
-    ///
-    /// # Errors
-    /// Returns an error if the delimiter exceeds the budget.
-    #[inline]
-    fn close(&mut self, kind: Collection) -> Result<(), E> {
-        self.push_str(match kind {
-            Collection::Sequence => "]",
-            Collection::Mapping => "}",
-        })
+        self.push_str(": ")
     }
 }
 

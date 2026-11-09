@@ -7,7 +7,7 @@ use crate::{Error, tagged};
 use astral_yaml::Span;
 #[cfg(feature = "editable")]
 use astral_yaml::emit::LimitedWriter;
-use astral_yaml::emit::{Collection, FlowWrite, non_finite_float};
+use astral_yaml::emit::{FlowWrite, non_finite_float};
 use astral_yaml::schema::CoreType;
 use serde::Serialize;
 use serde::ser::{self, SerializeMap, SerializeSeq};
@@ -62,6 +62,12 @@ struct Serializer<O> {
     keys: keys::Keys,
 }
 
+#[derive(Clone, Copy)]
+enum Collection {
+    Sequence,
+    Mapping,
+}
+
 impl<O: FlowWrite<Error>> Serializer<O> {
     #[inline]
     fn serialize_document<T: Serialize + ?Sized>(value: &T, output: O) -> Result<String> {
@@ -102,11 +108,11 @@ impl<O: FlowWrite<Error>> Serializer<O> {
             self.depth += 1;
         }
 
-        self.output.open(kind)?;
-        let state = match kind {
-            Collection::Sequence => CompoundState::Sequence,
-            Collection::Mapping => CompoundState::MapKey,
+        let (opening, state) = match kind {
+            Collection::Sequence => ("[", CompoundState::Sequence),
+            Collection::Mapping => ("{", CompoundState::MapKey),
         };
+        self.output.push_str(opening)?;
         let key_scope = self.keys.scope();
         Ok(Compound {
             serializer: self,
@@ -132,7 +138,7 @@ impl<O: FlowWrite<Error>> Serializer<O> {
 
         self.enter()?;
         Self::check_collection_tag(self.take_core_tag(), Collection::Mapping)?;
-        self.output.open(Collection::Mapping)?;
+        self.output.push_str("{")?;
         let start = self.output.as_ref().len();
         self.output.quote(name)?;
         self.output.finish_implicit_key(start)?;
@@ -498,16 +504,16 @@ impl<O: FlowWrite<Error>> Compound<'_, O> {
                 .finish(self.serializer.output.as_ref(), self.key_scope)?;
         }
 
-        let collection = if state == CompoundState::Sequence {
-            Collection::Sequence
+        let closing = if state == CompoundState::Sequence {
+            "]"
         } else {
-            Collection::Mapping
+            "}"
         };
-        self.serializer.output.close(collection)?;
+        self.serializer.output.push_str(closing)?;
         self.serializer.depth -= 1;
 
         if self.variant {
-            self.serializer.output.close(Collection::Mapping)?;
+            self.serializer.output.push_str("}")?;
             self.serializer.depth -= 1;
         }
 
@@ -588,7 +594,7 @@ impl<O: FlowWrite<Error>> SerializeMap for Compound<'_, O> {
         let output = self.serializer.output.as_ref();
         let signature = self.serializer.keys.insert(output, start..output.len())?;
         self.key_scope.insert(signature);
-        self.serializer.output.end_key()?;
+        self.serializer.output.push_str(": ")?;
         self.state = CompoundState::MapValue;
         Ok(())
     }

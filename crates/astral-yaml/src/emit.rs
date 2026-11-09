@@ -2,7 +2,7 @@
 
 mod flow;
 
-pub use flow::{Collection, FlowWrite, LimitedWriter};
+pub use flow::{FlowWrite, LimitedWriter};
 
 use std::fmt::{self, Write};
 

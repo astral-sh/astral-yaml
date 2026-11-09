@@ -34,7 +34,7 @@ impl CoreType {
             Self::Scalar(ScalarType::String) => true,
             Self::Scalar(ScalarType::Float) => {
                 matches!(classify(value), ScalarType::Float | ScalarType::Int)
-                    && !(value.starts_with("0x") || value.starts_with("0o"))
+                    && radix_digits(value).is_none()
             }
             Self::Scalar(kind) => classify(value) == kind,
             Self::Sequence | Self::Mapping => false,
@@ -79,8 +79,29 @@ pub fn classify(value: &str) -> ScalarType {
     }
 }
 
+/// Split the digits and base of an integer with a YAML radix prefix.
+#[must_use]
+pub fn radix_digits(value: &str) -> Option<(&str, u32)> {
+    if let Some(digits) = value.strip_prefix("0x") {
+        Some((digits, 16))
+    } else {
+        value.strip_prefix("0o").map(|digits| (digits, 8))
+    }
+}
+
+/// Resolve the core schema's non-finite floating-point spellings.
+#[must_use]
+pub fn special_float(value: &str) -> Option<f64> {
+    match value {
+        ".nan" | ".NaN" | ".NAN" => Some(f64::NAN),
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => Some(f64::INFINITY),
+        "-.inf" | "-.Inf" | "-.INF" => Some(f64::NEG_INFINITY),
+        _ => None,
+    }
+}
+
 fn classify_number(value: &str) -> ScalarType {
-    if matches!(value, ".nan" | ".NaN" | ".NAN") {
+    if special_float(value).is_some() {
         return ScalarType::Float;
     }
 
@@ -92,14 +113,7 @@ fn classify_number(value: &str) -> ScalarType {
         return ScalarType::String;
     }
 
-    if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
-        return ScalarType::Float;
-    }
-
-    if digits(unsigned, 10)
-        || value.strip_prefix("0o").is_some_and(|s| digits(s, 8))
-        || value.strip_prefix("0x").is_some_and(|s| digits(s, 16))
-    {
+    if digits(unsigned, 10) || radix_digits(value).is_some_and(|(s, radix)| digits(s, radix)) {
         return ScalarType::Int;
     }
 

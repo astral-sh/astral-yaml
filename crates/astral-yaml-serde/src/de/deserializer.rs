@@ -409,13 +409,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         }
 
         let value = s.value();
-        let (value, radix) = if let Some(s) = value.strip_prefix("0x") {
-            (s, 16)
-        } else if let Some(s) = value.strip_prefix("0o") {
-            (s, 8)
-        } else {
-            (value, 10)
-        };
+        let (value, radix) = schema::radix_digits(value).unwrap_or((value, 10));
 
         Ok((value, radix, s.span()))
     }
@@ -426,15 +420,15 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     }
 
     fn radix_integer_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
-        if kind != ScalarType::Int || !(s.value().starts_with("0x") || s.value().starts_with("0o"))
-        {
+        if kind != ScalarType::Int {
             return Ok(None);
         }
-
-        let (value, radix, span) = Self::integer_value(s, kind)?;
+        let Some((value, radix)) = schema::radix_digits(s.value()) else {
+            return Ok(None);
+        };
         u128::from_str_radix(value, radix)
             .map(Some)
-            .map_err(|_| Error::at("integer out of range", span))
+            .map_err(|_| Error::at("integer out of range", s.span()))
     }
 
     fn wide_radix_float(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
@@ -496,17 +490,8 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             return Err(Error::at("expected a number", s.span()));
         }
 
-        let unsigned = s.value().trim_start_matches(['+', '-']);
-        if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
-            return Ok(if s.value().starts_with('-') {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            });
-        }
-
-        if matches!(unsigned, ".nan" | ".NaN" | ".NAN") {
-            return Ok(f64::NAN);
+        if let Some(value) = schema::special_float(s.value()) {
+            return Ok(value);
         }
 
         match Self::radix_integer_value(s, kind) {
