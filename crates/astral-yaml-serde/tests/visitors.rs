@@ -495,5 +495,8 @@ impl Serialize for FailedField {
 #[test_case(&FailedField::Key; "mapping key")]
 #[test_case(&FailedField::Value; "mapping value")]
 fn handled_field_errors_cannot_publish_partial_yaml(field: &FailedField) {
-    assert!(to_string(field).is_err());
+    assert_eq!(
+        to_string(field).unwrap_err().message,
+        "collection serialization already failed"
+    );
 }

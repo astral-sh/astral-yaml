@@ -457,13 +457,16 @@ enum CompoundState {
 }
 
 impl CompoundState {
-    fn check_end(self) -> Result<()> {
+    fn closing_delimiter(self) -> Result<Option<&'static str>> {
         match self {
+            Self::Sequence => Ok(Some("]")),
+            Self::MapKey => Ok(Some("}")),
+            Self::TaggedEnd => Ok(None),
+            Self::MapValue => Err(Error::new("mapping key has no value")),
             Self::Tag | Self::TaggedValue => {
                 Err(Error::new("a tagged value requires a tag and payload"))
             }
-            Self::MapValue => Err(Error::new("mapping key has no value")),
-            _ => Ok(()),
+            Self::Failed => Err(Error::new("collection serialization already failed")),
         }
     }
 }
@@ -490,26 +493,16 @@ impl<O: FlowWrite<Error>> Compound<'_, O> {
         }
     }
 
-    fn finish(mut self) -> Result<()> {
-        let state = self.take_state()?;
-        state.check_end()?;
-        if state == CompoundState::TaggedEnd {
-            self.serializer.depth -= 1;
-            return Ok(());
-        }
-
-        if state == CompoundState::MapKey {
+    fn finish(self) -> Result<()> {
+        if self.state == CompoundState::MapKey {
             self.serializer
                 .keys
                 .finish(self.serializer.output.as_ref(), self.key_scope)?;
         }
 
-        let closing = if state == CompoundState::Sequence {
-            "]"
-        } else {
-            "}"
-        };
-        self.serializer.output.push_str(closing)?;
+        if let Some(closing) = self.state.closing_delimiter()? {
+            self.serializer.output.push_str(closing)?;
+        }
         self.serializer.depth -= 1;
 
         if self.variant {
