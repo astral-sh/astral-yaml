@@ -58,9 +58,8 @@ target extension:
 
 ```sh
 rustup component add llvm-tools-preview
-MATURIN_PGO=1 UV_NO_DEFAULT_GROUPS=true uv build --wheel
+MATURIN_PGO=1 uv build --wheel
 ```
 
-Maturin builds an instrumented extension, runs the four APIs on a separate
-training corpus, then builds the optimized wheel. The benchmark fixtures are
-reserved for measuring the result.
+Maturin builds an instrumented extension, runs the Python API tests to collect a
+profile, then uses it to build the optimized wheel.

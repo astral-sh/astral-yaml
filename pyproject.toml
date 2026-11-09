@@ -22,7 +22,6 @@ dev = [
     "ruff>=0.16.9",
     "ty>=0.0.84",
 ]
-pgo = []
 test = [
     "coverage>=7.17.0",
     "pytest>=9.2.0",
@@ -40,16 +39,9 @@ testpaths = ["crates/astral-yaml-python/tests"]
 [tool.maturin]
 manifest-path = "crates/astral-yaml-python/Cargo.toml"
 module-name = "astral_yaml"
-pgo-command = "python benchmarks/train_python.py"
-pgo-dependency-group = "pgo"
-include = [
-    { path = "astral_yaml.pyi", format = "sdist" },
-    { path = "benchmarks/train_python.py", format = "sdist" },
-    { path = "fixtures/real-world/openapi-petstore.yaml", format = "sdist" },
-    { path = "fixtures/real-world/LICENSE-openapi", format = "sdist" },
-    { path = "fixtures/real-world/ruff-ci.yaml", format = "sdist" },
-    { path = "fixtures/real-world/LICENSE-ruff", format = "sdist" },
-]
+pgo-command = "python -m pytest"
+pgo-dependency-group = "test"
+include = [{ path = "astral_yaml.pyi", format = "sdist" }]
 
 [tool.ruff.per-file-target-version]
 "scripts/**" = "py314"
@@ -81,9 +73,7 @@ cache-keys = [
     { file = "pyproject.toml" },
     { file = "astral_yaml.pyi" },
     { env = "MATURIN_PGO" },
-    { file = "benchmarks/train_python.py" },
-    { file = "fixtures/real-world/openapi-petstore.yaml" },
-    { file = "fixtures/real-world/ruff-ci.yaml" },
+    { file = "crates/astral-yaml-python/tests/**/*.py" },
     { file = "Cargo.toml" },
     { file = "Cargo.lock" },
     { file = "crates/astral-yaml/Cargo.toml" },
