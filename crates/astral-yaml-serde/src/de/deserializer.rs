@@ -1,8 +1,7 @@
 use super::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarOf};
-use crate::schema::YamlType;
 use crate::with::yaml_tag;
 use crate::{AttachedComment, CommentPlacement, Error, commented, spanned, tagged};
-use astral_yaml::schema::{self, ScalarType};
+use astral_yaml::schema::{self, CoreType, ScalarType};
 use astral_yaml::{NodeId, ScalarStyle, Span, Stream};
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
@@ -14,7 +13,7 @@ use std::collections::HashSet;
 type Result<T> = std::result::Result<T, Error>;
 
 fn is_core_tag(tag: &str) -> bool {
-    tag == "!" || YamlType::from_tag(tag).is_some()
+    tag == "!" || CoreType::from_tag(tag).is_some()
 }
 
 /// Deserialize `source` as a YAML 1.2 document using the core schema.
@@ -310,7 +309,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
 
         self.reject_tag(node)?;
         let value = self.scalar_value(node)?;
-        self.check_core_tag(node, YamlType::Scalar(expected))?;
+        self.check_core_tag(node, CoreType::Scalar(expected))?;
 
         Ok(value)
     }
@@ -363,8 +362,8 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
 
         let kind = match tag {
             Some("!") => ScalarType::String,
-            Some(tag) => match YamlType::from_tag(tag) {
-                Some(YamlType::Scalar(kind)) => kind,
+            Some(tag) => match CoreType::from_tag(tag) {
+                Some(CoreType::Scalar(kind)) => kind,
                 _ => return Err(Error::at("unsupported scalar tag", node.span())),
             },
             None if s.style() == ScalarStyle::Plain => schema::classify(s.value()),
@@ -410,13 +409,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         }
 
         let value = s.value();
-        let (value, radix) = if let Some(s) = value.strip_prefix("0x") {
-            (s, 16)
-        } else if let Some(s) = value.strip_prefix("0o") {
-            (s, 8)
-        } else {
-            (value, 10)
-        };
+        let (value, radix) = schema::radix_digits(value).unwrap_or((value, 10));
 
         Ok((value, radix, s.span()))
     }
@@ -427,15 +420,15 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     }
 
     fn radix_integer_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
-        if kind != ScalarType::Int || !(s.value().starts_with("0x") || s.value().starts_with("0o"))
-        {
+        if kind != ScalarType::Int {
             return Ok(None);
         }
-
-        let (value, radix, span) = Self::integer_value(s, kind)?;
+        let Some((value, radix)) = schema::radix_digits(s.value()) else {
+            return Ok(None);
+        };
         u128::from_str_radix(value, radix)
             .map(Some)
-            .map_err(|_| Error::at("integer out of range", span))
+            .map_err(|_| Error::at("integer out of range", s.span()))
     }
 
     fn wide_radix_float(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
@@ -497,17 +490,8 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             return Err(Error::at("expected a number", s.span()));
         }
 
-        let unsigned = s.value().trim_start_matches(['+', '-']);
-        if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
-            return Ok(if s.value().starts_with('-') {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            });
-        }
-
-        if matches!(unsigned, ".nan" | ".NaN" | ".NAN") {
-            return Ok(f64::NAN);
+        if let Some(value) = schema::special_float(s.value()) {
+            return Ok(value);
         }
 
         match Self::radix_integer_value(s, kind) {
@@ -531,22 +515,23 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         Ok(value)
     }
 
-    fn check_core_tag(self, node: I::Node<'input>, expected: YamlType) -> Result<()> {
+    fn check_core_tag(self, node: I::Node<'input>, expected: CoreType) -> Result<()> {
         if self.tag_state == TagState::ConsumedApplication {
             return Ok(());
         }
 
         // Non-specific `!` follows the node's shape (and forces scalar text).
         // Application tags are checked separately by reject_tag.
-        if node
-            .tag()
-            .and_then(YamlType::from_tag)
-            .is_some_and(|declared| !expected.accepts(declared))
-        {
-            return Err(Error::at("tag does not match requested type", node.span()));
-        }
+        let Some(declared) = node.tag().and_then(CoreType::from_tag) else {
+            return Ok(());
+        };
 
-        Ok(())
+        // Floating-point destinations also accept YAML integers.
+        match (expected, declared) {
+            (CoreType::Scalar(ScalarType::Float), CoreType::Scalar(ScalarType::Int)) => Ok(()),
+            _ if expected == declared => Ok(()),
+            _ => Err(Error::at("tag does not match requested type", node.span())),
+        }
     }
 
     fn key(self, ancestors: &mut Vec<NodeId>) -> Result<Key<'input>> {
@@ -611,7 +596,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
                 })
             }
             NodeKind::Sequence { items, .. } => {
-                self.check_core_tag(node, YamlType::Sequence)?;
+                self.check_core_tag(node, CoreType::Sequence)?;
                 ancestors.push(self.id);
                 let key = items
                     .iter()
@@ -622,7 +607,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
                 key
             }
             NodeKind::Mapping { entries, .. } => {
-                self.check_core_tag(node, YamlType::Mapping)?;
+                self.check_core_tag(node, CoreType::Mapping)?;
                 ancestors.push(self.id);
                 let mut pairs = entries
                     .iter()
@@ -732,7 +717,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             return Err(Error::at("expected a mapping", node.span()));
         };
 
-        self.check_core_tag(node, YamlType::Mapping)?;
+        self.check_core_tag(node, CoreType::Mapping)?;
 
         self.check_mapping_keys(entries, node.span())?;
 
@@ -763,7 +748,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             return Err(Error::at("expected a sequence", node.span()));
         };
 
-        self.check_core_tag(node, YamlType::Sequence)?;
+        self.check_core_tag(node, CoreType::Sequence)?;
 
         let mut access = Sequence {
             de: self,
@@ -1134,7 +1119,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
                 })
             }
             NodeKind::Mapping { entries, .. } if entries.len() == 1 => {
-                self.check_core_tag(node, YamlType::Mapping)?;
+                self.check_core_tag(node, CoreType::Mapping)?;
                 let (key, value) = entries[0].ids();
                 let (key, _) = self.child(key).scalar(ScalarType::String)?;
                 visitor

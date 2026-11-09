@@ -47,6 +47,12 @@ impl Error {
     }
 }
 
+impl From<fmt::Error> for Error {
+    fn from(_: fmt::Error) -> Self {
+        Self::new("display formatting failed")
+    }
+}
+
 impl From<astral_yaml::Error> for Error {
     fn from(error: astral_yaml::Error) -> Self {
         Self::at(error.message, error.span)

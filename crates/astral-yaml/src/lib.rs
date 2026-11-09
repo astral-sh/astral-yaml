@@ -26,6 +26,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
 pub mod comments;
+pub mod emit;
 mod error;
 mod model;
 mod parser;

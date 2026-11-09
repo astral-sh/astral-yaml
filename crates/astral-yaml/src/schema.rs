@@ -15,6 +15,48 @@ pub enum ScalarType {
     String,
 }
 
+/// A node type defined by the YAML 1.2 core schema.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreType {
+    /// A scalar with a core-schema type.
+    Scalar(ScalarType),
+    /// An ordered sequence of nodes.
+    Sequence,
+    /// A mapping of keys to values.
+    Mapping,
+}
+
+impl CoreType {
+    /// Returns whether the decoded scalar text can be presented with this explicit tag.
+    #[must_use]
+    pub fn matches_scalar(self, value: &str) -> bool {
+        match self {
+            Self::Scalar(ScalarType::String) => true,
+            Self::Scalar(ScalarType::Float) => {
+                matches!(classify(value), ScalarType::Float | ScalarType::Int)
+                    && radix_digits(value).is_none()
+            }
+            Self::Scalar(kind) => classify(value) == kind,
+            Self::Sequence | Self::Mapping => false,
+        }
+    }
+
+    /// Looks up an expanded core tag, such as `tag:yaml.org,2002:str`.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "tag:yaml.org,2002:str" => Some(Self::Scalar(ScalarType::String)),
+            "tag:yaml.org,2002:null" => Some(Self::Scalar(ScalarType::Null)),
+            "tag:yaml.org,2002:bool" => Some(Self::Scalar(ScalarType::Bool)),
+            "tag:yaml.org,2002:int" => Some(Self::Scalar(ScalarType::Int)),
+            "tag:yaml.org,2002:float" => Some(Self::Scalar(ScalarType::Float)),
+            "tag:yaml.org,2002:seq" => Some(Self::Sequence),
+            "tag:yaml.org,2002:map" => Some(Self::Mapping),
+            _ => None,
+        }
+    }
+}
+
 /// Classifies a plain, untagged scalar without imposing machine numeric limits.
 #[must_use]
 #[inline]
@@ -37,8 +79,29 @@ pub fn classify(value: &str) -> ScalarType {
     }
 }
 
+/// Split the digits and base of an integer with a YAML radix prefix.
+#[must_use]
+pub fn radix_digits(value: &str) -> Option<(&str, u32)> {
+    if let Some(digits) = value.strip_prefix("0x") {
+        Some((digits, 16))
+    } else {
+        value.strip_prefix("0o").map(|digits| (digits, 8))
+    }
+}
+
+/// Resolve the core schema's non-finite floating-point spellings.
+#[must_use]
+pub fn special_float(value: &str) -> Option<f64> {
+    match value {
+        ".nan" | ".NaN" | ".NAN" => Some(f64::NAN),
+        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => Some(f64::INFINITY),
+        "-.inf" | "-.Inf" | "-.INF" => Some(f64::NEG_INFINITY),
+        _ => None,
+    }
+}
+
 fn classify_number(value: &str) -> ScalarType {
-    if matches!(value, ".nan" | ".NaN" | ".NAN") {
+    if special_float(value).is_some() {
         return ScalarType::Float;
     }
 
@@ -50,14 +113,7 @@ fn classify_number(value: &str) -> ScalarType {
         return ScalarType::String;
     }
 
-    if matches!(unsigned, ".inf" | ".Inf" | ".INF") {
-        return ScalarType::Float;
-    }
-
-    if digits(unsigned, 10)
-        || value.strip_prefix("0o").is_some_and(|s| digits(s, 8))
-        || value.strip_prefix("0x").is_some_and(|s| digits(s, 16))
-    {
+    if digits(unsigned, 10) || radix_digits(value).is_some_and(|(s, radix)| digits(s, radix)) {
         return ScalarType::Int;
     }
 

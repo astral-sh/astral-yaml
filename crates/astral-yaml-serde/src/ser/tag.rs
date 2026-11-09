@@ -1,12 +1,12 @@
-use super::output::Output;
 use crate::Error;
-use crate::schema::YamlType;
+use astral_yaml::emit::FlowWrite;
+use astral_yaml::schema::CoreType;
 use serde::{Serialize, ser};
 use std::fmt;
 
 pub(super) enum Constraint {
     Any,
-    Core(YamlType),
+    Core(CoreType),
 }
 
 pub(super) struct Tag {
@@ -15,7 +15,7 @@ pub(super) struct Tag {
 }
 
 impl Tag {
-    pub(super) fn parse(tag: &str, output: &mut impl Output) -> Result<Self, Error> {
+    pub(super) fn parse(tag: &str, output: &mut impl FlowWrite<Error>) -> Result<Self, Error> {
         output.check(tag.len())?;
         let compact = tag.strip_prefix('!').is_some_and(|name| {
             name.bytes()
@@ -48,11 +48,11 @@ impl Tag {
 
         Ok(Self {
             spelling,
-            constraint: YamlType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
+            constraint: CoreType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
         })
     }
 
-    pub(super) fn write(self, output: &mut impl Output) -> Result<Constraint, Error> {
+    pub(super) fn write(self, output: &mut impl FlowWrite<Error>) -> Result<Constraint, Error> {
         output.push_str(&self.spelling)?;
         Ok(self.constraint)
     }
@@ -71,7 +71,7 @@ macro_rules! reject {
     };
 }
 
-impl<O: Output> ser::Serializer for TagSerializer<'_, O> {
+impl<O: FlowWrite<Error>> ser::Serializer for TagSerializer<'_, O> {
     type Ok = Tag;
     type Error = Error;
     type SerializeSeq = ser::Impossible<Self::Ok, Error>;

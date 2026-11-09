@@ -1,16 +1,17 @@
-use super::output::Output;
+#[cfg(feature = "editable")]
+use super::INSERTED_BYTE_LIMIT;
 use super::{keys, tag};
-use crate::schema::YamlType;
 use crate::with::yaml_tag;
 use crate::{Error, tagged};
+#[cfg(feature = "editable")]
+use astral_yaml::Span;
+#[cfg(feature = "editable")]
+use astral_yaml::emit::LimitedWriter;
+use astral_yaml::emit::{FlowWrite, non_finite_float};
+use astral_yaml::schema::CoreType;
 use serde::Serialize;
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use std::fmt;
-
-#[cfg(feature = "editable")]
-use super::output::{INSERTED_BYTE_LIMIT, LimitedOutput};
-#[cfg(feature = "editable")]
-use astral_yaml::Span;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -40,16 +41,15 @@ pub(crate) fn to_string_with_limit<T: Serialize + ?Sized>(
     limit: usize,
     span: Span,
 ) -> Result<String> {
+    let on_limit = || Error::at(INSERTED_BYTE_LIMIT, span);
     // The fragment includes the newline after the serialized value.
-    let limit = limit
-        .checked_sub(1)
-        .ok_or_else(|| Error::at(INSERTED_BYTE_LIMIT, span))?;
-    Serializer::serialize_document(value, LimitedOutput::new(limit, span))
+    let limit = limit.checked_sub(1).ok_or_else(on_limit)?;
+    Serializer::serialize_document(value, LimitedWriter::new(limit, on_limit))
 }
 
 #[cfg(feature = "editable")]
 pub(crate) fn quote_with_limit(value: &str, limit: usize, span: Span) -> Result<String> {
-    let mut output = LimitedOutput::new(limit, span);
+    let mut output = LimitedWriter::new(limit, || Error::at(INSERTED_BYTE_LIMIT, span));
     output.quote(value)?;
     output.finish()
 }
@@ -63,12 +63,12 @@ struct Serializer<O> {
 }
 
 #[derive(Clone, Copy)]
-enum CollectionKind {
+enum Collection {
     Sequence,
     Mapping,
 }
 
-impl<O: Output> Serializer<O> {
+impl<O: FlowWrite<Error>> Serializer<O> {
     #[inline]
     fn serialize_document<T: Serialize + ?Sized>(value: &T, output: O) -> Result<String> {
         let mut serializer = Self {
@@ -99,7 +99,7 @@ impl<O: Output> Serializer<O> {
     }
 
     #[inline]
-    fn compound(&mut self, kind: CollectionKind) -> Result<Compound<'_, O>> {
+    fn compound(&mut self, kind: Collection) -> Result<Compound<'_, O>> {
         // Nested collections without a core tag only need a depth increment.
         let tag = self.take_core_tag();
         if self.depth == 0 || self.depth >= MAX_DEPTH || tag.is_some() {
@@ -109,10 +109,10 @@ impl<O: Output> Serializer<O> {
         }
 
         let (opening, state) = match kind {
-            CollectionKind::Sequence => ('[', CompoundState::Sequence),
-            CollectionKind::Mapping => ('{', CompoundState::MapKey),
+            Collection::Sequence => ("[", CompoundState::Sequence),
+            Collection::Mapping => ("{", CompoundState::MapKey),
         };
-        self.output.push(opening)?;
+        self.output.push_str(opening)?;
         let key_scope = self.keys.scope();
         Ok(Compound {
             serializer: self,
@@ -124,23 +124,24 @@ impl<O: Output> Serializer<O> {
     }
 
     #[cold]
-    fn enter_compound(&mut self, kind: CollectionKind, tag: Option<YamlType>) -> Result<()> {
+    fn enter_compound(&mut self, kind: Collection, tag: Option<CoreType>) -> Result<()> {
         Self::check_collection_tag(tag, kind)?;
         self.enter()
     }
 
-    fn variant(&mut self, name: &str, kind: CollectionKind) -> Result<Compound<'_, O>> {
+    fn variant(&mut self, name: &str, kind: Collection) -> Result<Compound<'_, O>> {
         if std::mem::take(&mut self.yaml_tag) {
             self.enum_tag(name)?;
-            self.output.push(' ')?;
+            self.output.push_str(" ")?;
             return self.compound(kind);
         }
 
         self.enter()?;
-        Self::check_collection_tag(self.take_core_tag(), CollectionKind::Mapping)?;
-        self.output.push('{')?;
+        Self::check_collection_tag(self.take_core_tag(), Collection::Mapping)?;
+        self.output.push_str("{")?;
+        let start = self.output.as_ref().len();
         self.output.quote(name)?;
-        self.output.push_str(": ")?;
+        self.output.finish_implicit_key(start)?;
 
         let mut compound = self.compound(kind)?;
         compound.variant = true;
@@ -149,13 +150,27 @@ impl<O: Output> Serializer<O> {
 
     fn number(&mut self, value: impl fmt::Display) -> Result<()> {
         let start = self.output.as_ref().len();
-        self.output.number(value)?;
+        self.output.display(value)?;
+        self.check_written_scalar_tag(start)
+    }
+
+    fn float(&mut self, value: impl fmt::Display + Into<f64> + Copy) -> Result<()> {
+        let start = self.output.as_ref().len();
+        if let Some(spelling) = non_finite_float(value.into()) {
+            self.output.push_str(spelling)?;
+        } else {
+            self.output.display(value)?;
+            if !self.output.as_ref()[start..].contains(['.', 'e', 'E']) {
+                self.output.push_str(".0")?;
+            }
+        }
+
         self.check_written_scalar_tag(start)
     }
 
     /// Consume the current node's tag state and return any core type constraint.
     #[inline]
-    fn take_core_tag(&mut self) -> Option<YamlType> {
+    fn take_core_tag(&mut self) -> Option<CoreType> {
         self.yaml_tag = false;
         match self.pending_tag.take() {
             Some(tag::Constraint::Core(kind)) => Some(kind),
@@ -182,7 +197,7 @@ impl<O: Output> Serializer<O> {
     }
 
     #[cold]
-    fn check_tagged_scalar(tag: YamlType, value: &str) -> Result<()> {
+    fn check_tagged_scalar(tag: CoreType, value: &str) -> Result<()> {
         if !tag.matches_scalar(value) {
             return Err(Error::new("serialized value does not match its YAML tag"));
         }
@@ -190,11 +205,11 @@ impl<O: Output> Serializer<O> {
         Ok(())
     }
 
-    fn check_collection_tag(tag: Option<YamlType>, kind: CollectionKind) -> Result<()> {
+    fn check_collection_tag(tag: Option<CoreType>, kind: Collection) -> Result<()> {
         if let Some(tag) = tag {
             let actual = match kind {
-                CollectionKind::Sequence => YamlType::Sequence,
-                CollectionKind::Mapping => YamlType::Mapping,
+                Collection::Sequence => CoreType::Sequence,
+                Collection::Mapping => CoreType::Mapping,
             };
             if tag != actual {
                 return Err(Error::new("serialized value does not match its YAML tag"));
@@ -239,7 +254,7 @@ macro_rules! integer {
     };
 }
 
-impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
+impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
     type Ok = ();
     type Error = Error;
     type SerializeSeq = Compound<'ser, O>;
@@ -270,38 +285,11 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
     }
 
     fn serialize_f32(self, value: f32) -> Result<()> {
-        if value.is_finite() {
-            let start = self.output.as_ref().len();
-            self.output.number(value)?;
-            if !self.output.as_ref()[start..].contains(['.', 'e', 'E']) {
-                self.output.push_str(".0")?;
-            }
-
-            self.check_written_scalar_tag(start)
-        } else {
-            self.serialize_f64(f64::from(value))
-        }
+        self.float(value)
     }
 
     fn serialize_f64(self, value: f64) -> Result<()> {
-        let start = self.output.as_ref().len();
-        if value.is_nan() {
-            self.output.push_str(".nan")?;
-        } else if value.is_infinite() {
-            let value = if value.is_sign_negative() {
-                "-.inf"
-            } else {
-                ".inf"
-            };
-            self.output.push_str(value)?;
-        } else {
-            self.output.number(value)?;
-            if !self.output.as_ref()[start..].contains(['.', 'e', 'E']) {
-                self.output.push_str(".0")?;
-            }
-        }
-
-        self.check_written_scalar_tag(start)
+        self.float(value)
     }
 
     fn serialize_char(self, value: char) -> Result<()> {
@@ -322,7 +310,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
     }
 
     fn serialize_bytes(self, value: &[u8]) -> Result<()> {
-        let mut seq = self.compound(CollectionKind::Sequence)?;
+        let mut seq = self.compound(Collection::Sequence)?;
 
         for byte in value {
             seq.separator()?;
@@ -360,7 +348,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
             self.enum_tag(variant)?;
             self.pending_tag = None;
             if is_key {
-                self.output.push(' ')?;
+                self.output.push_str(" ")?;
             }
             return Ok(());
         }
@@ -389,21 +377,21 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
     ) -> Result<()> {
         if std::mem::take(&mut self.yaml_tag) {
             self.enum_tag(variant)?;
-            self.output.push(' ')?;
+            self.output.push_str(" ")?;
             return self.serialize_some(value);
         }
 
-        let mut map = self.compound(CollectionKind::Mapping)?;
+        let mut map = self.compound(Collection::Mapping)?;
         map.serialize_entry(variant, value)?;
         SerializeMap::end(map)
     }
 
     fn serialize_seq(self, _: Option<usize>) -> Result<Compound<'ser, O>> {
-        self.compound(CollectionKind::Sequence)
+        self.compound(Collection::Sequence)
     }
 
     fn serialize_tuple(self, _: usize) -> Result<Compound<'ser, O>> {
-        self.compound(CollectionKind::Sequence)
+        self.compound(Collection::Sequence)
     }
 
     fn serialize_tuple_struct(self, name: &'static str, len: usize) -> Result<Compound<'ser, O>> {
@@ -425,7 +413,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
             });
         }
 
-        self.compound(CollectionKind::Sequence)
+        self.compound(Collection::Sequence)
     }
 
     fn serialize_tuple_variant(
@@ -435,15 +423,15 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
         variant: &'static str,
         _: usize,
     ) -> Result<Compound<'ser, O>> {
-        self.variant(variant, CollectionKind::Sequence)
+        self.variant(variant, Collection::Sequence)
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Compound<'ser, O>> {
-        self.compound(CollectionKind::Mapping)
+        self.compound(Collection::Mapping)
     }
 
     fn serialize_struct(self, _: &'static str, _: usize) -> Result<Compound<'ser, O>> {
-        self.compound(CollectionKind::Mapping)
+        self.compound(Collection::Mapping)
     }
 
     fn serialize_struct_variant(
@@ -453,7 +441,7 @@ impl<'ser, O: Output> ser::Serializer for &'ser mut Serializer<O> {
         variant: &'static str,
         _: usize,
     ) -> Result<Compound<'ser, O>> {
-        self.variant(variant, CollectionKind::Mapping)
+        self.variant(variant, Collection::Mapping)
     }
 }
 
@@ -488,15 +476,10 @@ struct Compound<'ser, O> {
     variant: bool,
 }
 
-impl<O: Output> Compound<'_, O> {
+impl<O: FlowWrite<Error>> Compound<'_, O> {
     #[inline]
     fn separator(&mut self) -> Result<()> {
-        if !self.first {
-            self.serializer.output.push_str(", ")?;
-        }
-
-        self.first = false;
-        Ok(())
+        self.serializer.output.separator(&mut self.first)
     }
 
     /// Leave the collection failed until the current field has been written in full.
@@ -522,15 +505,15 @@ impl<O: Output> Compound<'_, O> {
         }
 
         let closing = if state == CompoundState::Sequence {
-            ']'
+            "]"
         } else {
-            '}'
+            "}"
         };
-        self.serializer.output.push(closing)?;
+        self.serializer.output.push_str(closing)?;
         self.serializer.depth -= 1;
 
         if self.variant {
-            self.serializer.output.push('}')?;
+            self.serializer.output.push_str("}")?;
             self.serializer.depth -= 1;
         }
 
@@ -538,7 +521,7 @@ impl<O: Output> Compound<'_, O> {
     }
 }
 
-impl<O: Output> SerializeSeq for Compound<'_, O> {
+impl<O: FlowWrite<Error>> SerializeSeq for Compound<'_, O> {
     type Ok = ();
     type Error = Error;
 
@@ -548,7 +531,7 @@ impl<O: Output> SerializeSeq for Compound<'_, O> {
             CompoundState::Tag => {
                 let tag = value.serialize(tag::TagSerializer(&mut self.serializer.output))?;
                 self.serializer.write_tag(tag)?;
-                self.serializer.output.push(' ')?;
+                self.serializer.output.push_str(" ")?;
                 self.state = CompoundState::TaggedValue;
                 return Ok(());
             }
@@ -576,7 +559,7 @@ impl<O: Output> SerializeSeq for Compound<'_, O> {
 
 macro_rules! sequence {
     ($trait:ident, $method:ident) => {
-        impl<O: Output> ser::$trait for Compound<'_, O> {
+        impl<O: FlowWrite<Error>> ser::$trait for Compound<'_, O> {
             type Ok = ();
             type Error = Error;
 
@@ -595,7 +578,7 @@ sequence!(SerializeTuple, serialize_element);
 sequence!(SerializeTupleStruct, serialize_field);
 sequence!(SerializeTupleVariant, serialize_field);
 
-impl<O: Output> SerializeMap for Compound<'_, O> {
+impl<O: FlowWrite<Error>> SerializeMap for Compound<'_, O> {
     type Ok = ();
     type Error = Error;
 
@@ -633,7 +616,7 @@ impl<O: Output> SerializeMap for Compound<'_, O> {
 
 macro_rules! structure {
     ($trait:ident) => {
-        impl<O: Output> ser::$trait for Compound<'_, O> {
+        impl<O: FlowWrite<Error>> ser::$trait for Compound<'_, O> {
             type Ok = ();
             type Error = Error;
 
@@ -657,7 +640,7 @@ structure!(SerializeStructVariant);
 
 #[cfg(all(test, feature = "editable"))]
 mod tests {
-    use super::{INSERTED_BYTE_LIMIT, Span, to_string, to_string_with_limit};
+    use super::{INSERTED_BYTE_LIMIT, Span, quote_with_limit, to_string, to_string_with_limit};
     use crate::Tagged;
     use serde::{Serialize, Serializer};
     use std::cell::Cell;
@@ -681,6 +664,13 @@ mod tests {
         );
         let error = to_string_with_limit(value, expected.len() - 1, span).unwrap_err();
         assert_eq!(error.message, INSERTED_BYTE_LIMIT);
+    }
+
+    #[test]
+    fn over_budget_escaped_key_reports_the_edit_span() {
+        let span = Span::new(4, 8).unwrap();
+        let error = quote_with_limit("\n", 3, span).unwrap_err();
+        assert_eq!(error, crate::Error::at(INSERTED_BYTE_LIMIT, span));
     }
 
     struct Formatted<T>(T);
@@ -752,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn collected_text_can_fail_before_reaching_the_budget() {
+    fn display_errors_propagate_with_and_without_a_limit() {
         struct Broken;
 
         impl fmt::Display for Broken {
@@ -762,7 +752,9 @@ mod tests {
         }
 
         let span = Span::new(0, 0).unwrap();
-        let error = to_string_with_limit(&Formatted(Broken), 10, span).unwrap_err();
+        let error = to_string(&Formatted(Broken)).unwrap_err();
         assert_eq!(error.message, "display formatting failed");
+        let limited = to_string_with_limit(&Formatted(Broken), 10, span).unwrap_err();
+        assert_eq!(limited, error);
     }
 }
