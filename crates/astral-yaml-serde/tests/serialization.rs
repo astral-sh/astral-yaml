@@ -95,3 +95,30 @@ fn complex_and_long_keys_roundtrip() {
     roundtrip(&[i128::MIN, i128::MAX, 0]);
     roundtrip(&[u128::MIN, u128::MAX]);
 }
+
+// https://yaml.org/spec/1.2.2/#flow-mapping-implicit-keys
+#[test]
+fn long_tuple_variant_names_use_explicit_keys() {
+    use serde::ser::SerializeTupleVariant;
+
+    // The two quotes make this key one character longer than the implicit key limit.
+    fn variant_name() -> &'static str {
+        str::from_utf8(&[b'x'; 1023]).unwrap()
+    }
+
+    struct Pair(u8, u8);
+
+    impl Serialize for Pair {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut tuple = serializer.serialize_tuple_variant("Value", 0, variant_name(), 2)?;
+            tuple.serialize_field(&self.0)?;
+            tuple.serialize_field(&self.1)?;
+            tuple.end()
+        }
+    }
+
+    let yaml = to_string(&Pair(1, 2)).unwrap();
+    assert!(yaml.starts_with("{? "));
+    let decoded: BTreeMap<&str, (u8, u8)> = from_str(&yaml).unwrap();
+    assert_eq!(decoded, BTreeMap::from([(variant_name(), (1, 2))]));
+}
