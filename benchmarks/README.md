@@ -25,3 +25,16 @@ The deserialization groups measure construction of values and typed structs sepa
 Pull requests receive CodSpeed reports. Add the `benchmarks:compare` label to
 include comparisons with other implementations. Local `cargo bench` timings
 measure elapsed time and are not directly comparable to CodSpeed's simulation.
+
+## Python bindings
+
+Run the Python benchmarks locally with a release build of the extension:
+
+```sh
+uv run --locked --python 3.14 --no-editable pytest benchmarks --codspeed
+```
+
+Each public API is measured on a small configuration, the uv CI workflow, and
+the Airflow Compose file, which uses anchors and aliases. `loads` reads text and
+`load` reads a fresh binary stream. The dump benchmarks start from Python
+objects constructed before timing. `dump` writes to a fresh text stream.

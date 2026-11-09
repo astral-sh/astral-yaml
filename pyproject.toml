@@ -17,6 +17,7 @@ dev = [
     { include-group = "test" },
     "astral-dev-toolchain-cargo-codspeed>=5.0.1",
     "astral-dev-toolchain-cargo-fuzz>=0.13.2",
+    "pytest-codspeed>=5.0.4",
     "ruff>=0.16.9",
     "ty>=0.0.84",
 ]
