@@ -45,13 +45,13 @@ struct Coverage {
     totals: Totals,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct Totals {
     lines: Count,
     functions: Count,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct Count {
     count: u64,
     covered: u64,
@@ -143,16 +143,8 @@ fn artifacts(messages: &str, members: &BTreeSet<String>) -> Result<BTreeSet<Path
     Ok(executables)
 }
 
-fn enforce_thresholds(json: &str) -> Result<()> {
-    let report: Report = serde_json::from_str(json)?;
-    let [coverage] = report.data.as_slice() else {
-        return Err("expected one LLVM coverage summary".into());
-    };
-
-    for (name, total) in [
-        ("line", &coverage.totals.lines),
-        ("function", &coverage.totals.functions),
-    ] {
+fn enforce_thresholds(totals: &Totals) -> Result<()> {
+    for (name, total) in [("line", &totals.lines), ("function", &totals.functions)] {
         // Compare counts, since displayed percentages can round up to 100%.
         if total.count == 0 || total.covered != total.count {
             return Err(format!(
@@ -164,6 +156,25 @@ fn enforce_thresholds(json: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn binding_totals(lcov: &str) -> Result<Totals> {
+    // Rust unit tests and the extension contain separate copies of the binding.
+    // LLVM's LCOV line records combine their hits. Its per-function line totals
+    // use only the most-covered copy of each function.
+    let mut totals = Totals::default();
+    for record in lcov.lines() {
+        if let Some(line) = record.strip_prefix("DA:") {
+            let (_, hits) = line.split_once(',').ok_or("invalid LCOV line record")?;
+            totals.lines.count += 1;
+            totals.lines.covered += u64::from(hits.parse::<u64>()? > 0);
+        } else if let Some(count) = record.strip_prefix("FNF:") {
+            totals.functions.count += count.parse::<u64>()?;
+        } else if let Some(count) = record.strip_prefix("FNH:") {
+            totals.functions.covered += count.parse::<u64>()?;
+        }
+    }
+    Ok(totals)
 }
 
 struct Toolchain {
@@ -210,20 +221,37 @@ fn toolchain(root: &Path) -> Result<Toolchain> {
     })
 }
 
-fn python_test_environment(root: &Path, directory: &Path) -> Result<(PathBuf, PathBuf)> {
+fn python_coverage(root: &Path, directory: &Path, profile: &Path) -> Result<(PathBuf, PathBuf)> {
     let mut uv = Command::new("uv");
     uv.current_dir(root)
         .env("UV_PROJECT_ENVIRONMENT", directory.join("venv"))
-        .args(["run", "--locked", "--only-group", "test"]);
+        .env("CARGO_TARGET_DIR", directory.join("build"))
+        .env("LLVM_PROFILE_FILE", profile)
+        .args(["run", "--locked", "--no-dev", "--group", "test"])
+        .args([
+            "--config-settings-package",
+            "astral-yaml:maturin.build-args=--profile dev --locked -- -Cinstrument-coverage",
+        ]);
     if let Some(python) = env::var_os("PYO3_PYTHON") {
         uv.arg("--python").arg(python);
     }
     let paths = output(uv.args([
         "python",
         "-c",
-        "import json, sys, sysconfig; print(json.dumps([sys.executable, sysconfig.get_path('purelib')]))",
+        "import json, sys; from astral_yaml import astral_yaml; print(json.dumps([sys.executable, astral_yaml.__file__]))",
     ]))?;
-    Ok(serde_json::from_str(&paths)?)
+    let (python, extension): (PathBuf, PathBuf) = serde_json::from_str(&paths)?;
+    for args in [&["run", "-m", "pytest"][..], &["report"]] {
+        execute(
+            Command::new(&python)
+                .current_dir(root)
+                .env("LLVM_PROFILE_FILE", profile)
+                .env("COVERAGE_FILE", directory.join(".coverage"))
+                .args(["-m", "coverage"])
+                .args(args),
+        )?;
+    }
+    Ok((python, extension))
 }
 
 pub(crate) fn run(html: bool) -> Result<()> {
@@ -242,26 +270,34 @@ pub(crate) fn run(html: bool) -> Result<()> {
     reset_directory(&profiles)?;
 
     let mut sources = Vec::new();
+    let mut binding_sources = Vec::new();
     let mut members = BTreeSet::new();
 
     for package in &metadata.packages {
         if PACKAGES.contains(&package.name.as_str()) {
-            collect_sources(&package.manifest_path.with_file_name("src"), &mut sources)?;
+            let files = if package.name == "astral-yaml-python" {
+                &mut binding_sources
+            } else {
+                &mut sources
+            };
+            collect_sources(&package.manifest_path.with_file_name("src"), files)?;
             members.insert(package.id.clone());
         }
     }
 
     sources.sort();
+    binding_sources.sort();
 
-    if sources.is_empty() {
+    if sources.is_empty() || binding_sources.is_empty() {
         return Err("no YAML sources found for coverage".into());
     }
 
-    let (interpreter, site_packages) = python_test_environment(&root, &directory)?;
+    let profile_pattern = profiles.join("%m-%p.profraw");
+    let (interpreter, extension) = python_coverage(&root, &directory, &profile_pattern)?;
 
     // Build separately so test stdout cannot be mistaken for Cargo JSON messages.
     // The explicit host target keeps build scripts and proc macros uninstrumented.
-    let test_command = |packages: &[&str]| {
+    let test_command = || {
         let mut tests = Command::new(&cargo);
         tests
             .current_dir(&root)
@@ -270,28 +306,21 @@ pub(crate) fn run(html: bool) -> Result<()> {
             .arg("--target-dir")
             .arg(directory.join("build"))
             .env("CARGO_ENCODED_RUSTFLAGS", coverage_flags())
-            .env("LLVM_PROFILE_FILE", profiles.join("%m-%p.profraw"))
+            .env("LLVM_PROFILE_FILE", &profile_pattern)
             .env("PYO3_PYTHON", &interpreter)
             .env("CARGO_INCREMENTAL", "0");
 
-        for &package in packages {
+        for package in PACKAGES {
             tests.args(["--package", package]);
         }
 
         tests
     };
-    let messages = output(
-        test_command(&PACKAGES).args(["--no-run", "--message-format=json-render-diagnostics"]),
-    )?;
-    let executables = artifacts(&messages, &members)?;
-    execute(&mut test_command(&PACKAGES))?;
-
-    // Run pytest inside the same instrumented binding as its Rust unit tests.
-    execute(
-        test_command(&["astral-yaml-python"])
-            .env("PYTHONPATH", site_packages)
-            .args(["tests::python_api", "--", "--ignored", "--exact"]),
-    )?;
+    let messages =
+        output(test_command().args(["--no-run", "--message-format=json-render-diagnostics"]))?;
+    let mut executables = artifacts(&messages, &members)?;
+    executables.insert(extension);
+    execute(&mut test_command())?;
 
     let profile = directory.join("coverage.profdata");
     let mut merge = Command::new(toolchain.profdata);
@@ -318,7 +347,8 @@ pub(crate) fn run(html: bool) -> Result<()> {
         &directory,
         profile,
         executables,
-        sources,
+        &sources,
+        &binding_sources,
         html,
     )
 }
@@ -328,7 +358,8 @@ fn report(
     directory: &Path,
     profile: PathBuf,
     executables: BTreeSet<PathBuf>,
-    sources: Vec<PathBuf>,
+    sources: &[PathBuf],
+    binding_sources: &[PathBuf],
     html: bool,
 ) -> Result<()> {
     let mut report_args = vec![OsString::from("-instr-profile"), profile.into_os_string()];
@@ -339,8 +370,32 @@ fn report(
     }
 
     report_args.push("-sources".into());
-    report_args.extend(sources.into_iter().map(PathBuf::into_os_string));
-    execute(Command::new(llvm_cov).arg("report").args(&report_args))?;
+    execute(
+        Command::new(llvm_cov)
+            .arg("report")
+            .args(&report_args)
+            .args(sources),
+    )?;
+
+    let binding_lcov = output(
+        Command::new(llvm_cov)
+            .args([
+                "export",
+                "-format=lcov",
+                "-skip-functions",
+                "-skip-branches",
+            ])
+            .args(&report_args)
+            .args(binding_sources),
+    )?;
+    let binding = binding_totals(&binding_lcov)?;
+    println!(
+        "Python binding: {}/{} lines and {}/{} functions covered",
+        binding.lines.covered,
+        binding.lines.count,
+        binding.functions.covered,
+        binding.functions.count
+    );
 
     if html {
         let html_directory = directory.join("html");
@@ -350,19 +405,40 @@ fn report(
                 .args(["show", "-format=html", "-show-line-counts-or-regions"])
                 .arg("-output-dir")
                 .arg(&html_directory)
-                .args(&report_args),
+                .args(&report_args)
+                .args(sources),
+        )?;
+        let binding_html = html_directory.join("python.html");
+        execute(
+            Command::new(llvm_cov)
+                .args([
+                    "show",
+                    "-format=html",
+                    "-show-instantiations=false",
+                    "-show-line-counts",
+                ])
+                .args(&report_args)
+                .args(binding_sources)
+                .stdout(fs::File::create(&binding_html)?),
         )?;
         println!(
             "HTML report: {}",
             html_directory.join("index.html").display()
         );
+        println!("Python binding HTML report: {}", binding_html.display());
     }
 
     let summary = output(
         Command::new(llvm_cov)
             .args(["export", "-summary-only"])
-            .args(&report_args),
+            .args(&report_args)
+            .args(sources),
     )?;
     fs::write(directory.join("summary.json"), &summary)?;
-    enforce_thresholds(&summary)
+    let report: Report = serde_json::from_str(&summary)?;
+    let [coverage] = report.data.as_slice() else {
+        return Err("expected one LLVM coverage summary".into());
+    };
+    enforce_thresholds(&coverage.totals)?;
+    enforce_thresholds(&binding)
 }
