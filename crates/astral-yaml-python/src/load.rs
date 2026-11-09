@@ -1,7 +1,7 @@
 //! Construct Python values directly from the parser's node arena.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use astral_yaml::schema::{self, CoreType, ScalarType};
@@ -207,7 +207,7 @@ impl<'py> Loader<'py, '_> {
         let dict = PyDict::new(self.py);
         self.remember(id, dict.as_any());
         let mut seen_nan = false;
-        let mut hashes = None;
+        let mut hashes = BTreeMap::new();
 
         for entry in entries {
             let key_node = &self.stream.nodes()[entry.key.index()];
@@ -225,12 +225,7 @@ impl<'py> Loader<'py, '_> {
             let duplicate_nan = if key.is_exact_instance_of::<PyString>() || key.is_none() {
                 false
             } else {
-                self.charge_numeric_key(
-                    &key,
-                    scalar.value.len(),
-                    span,
-                    hashes.get_or_insert_with(HashMap::new),
-                )?;
+                self.charge_numeric_key(&key, scalar.value.len(), span, &mut hashes)?;
                 // Python considers distinct NaN objects unequal. YAML has one NaN key.
                 key.cast::<PyFloat>().is_ok_and(|n| n.value().is_nan())
                     && std::mem::replace(&mut seen_nan, true)
@@ -251,7 +246,7 @@ impl<'py> Loader<'py, '_> {
         key: &Bound<'py, PyAny>,
         digits: usize,
         span: Span,
-        hashes: &mut HashMap<isize, usize>,
+        hashes: &mut BTreeMap<isize, usize>,
     ) -> PyResult<()> {
         let count = hashes.entry(key.hash()?).or_default();
         *count += 1;

@@ -101,9 +101,14 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         source,
         pos: 0,
         options,
-        // Reserve for short mapping keys and values, while bounding unused
-        // capacity for inputs dominated by a few large scalars.
-        nodes: Vec::with_capacity((source.len() / 8).min(1024).min(options.max_nodes)),
+        // Leave room for a few short keys and collection nodes, which can occupy
+        // only a handful of input bytes. Cap unused space on large scalars.
+        nodes: Vec::with_capacity(
+            (source.len() / 8 + 4)
+                .min(source.len())
+                .min(1024)
+                .min(options.max_nodes),
+        ),
         documents: Vec::new(),
         comments: Vec::new(),
         anchors: HashMap::new(),

@@ -115,26 +115,28 @@ impl<'py> Dumper<'py> {
         }
     }
 
+    #[inline]
     fn scalar(&mut self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-        if value.is_none() {
-            self.output.push_str("null")?;
-        } else if let Some(text) = as_builtin::<PyString>(value) {
+        if let Some(text) = as_builtin::<PyString>(value) {
             // CPython may allocate a UTF-8 copy on the first conversion.
             self.output
                 .check(text.code_point_len()?.saturating_add(2))?;
             let text = crate::unicode_text(text)?;
             self.output.quote(text)?;
+        } else if value.is_none() {
+            self.output.push_str("null")?;
         } else if let Some(boolean) = as_builtin::<PyBool>(value) {
             self.output
                 .push_str(if boolean.is_true() { "true" } else { "false" })?;
         } else if let Some(integer) = as_builtin::<PyInt>(value) {
             self.integer(integer)?;
         } else if let Some(float) = as_builtin::<PyFloat>(value) {
-            if let Some(spelling) = non_finite_float(float.value()) {
+            let number = float.value();
+            if let Some(spelling) = non_finite_float(number) {
                 self.output.push_str(spelling)?;
             } else {
-                // Python's float repr preserves the type and round-trips through f64.
-                self.output.push_str(float.repr()?.to_str()?)?;
+                // Debug formatting retains the fractional part of integral floats.
+                self.output.display(format_args!("{number:?}"))?;
             }
         } else {
             return Ok(false);
@@ -207,8 +209,9 @@ impl<'py> Dumper<'py> {
             }
             Ok(dict.iter().collect::<Vec<_>>())
         })?;
-        // Each entry emits its key, value, and spacing, even for single-digit numbers.
-        self.output.reserve(entries.len().saturating_mul(6));
+        // Allow for a short scalar key and value, their quotes, and the separators.
+        self.output
+            .reserve(entries.len().saturating_mul(16).min(4096));
         self.output.push_str("{")?;
         let mut first = true;
         let mut has_nan = false;

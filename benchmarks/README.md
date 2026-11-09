@@ -52,3 +52,15 @@ astral-yaml reads both as strings under the YAML 1.2 core schema. All dumpers
 receive the same astral-yaml-loaded values, including shared objects. PyYAML
 uses flow style, preserves insertion order, and allows Unicode. The emitters
 choose different quoting and line wrapping.
+
+For a profile-guided wheel, run the following on a host that can load the
+target extension:
+
+```sh
+rustup component add llvm-tools-preview
+MATURIN_PGO=1 UV_NO_DEFAULT_GROUPS=true uv build --wheel
+```
+
+Maturin builds an instrumented extension, runs the four APIs on a separate
+training corpus, then builds the optimized wheel. The benchmark fixtures are
+reserved for measuring the result.
