@@ -32,7 +32,9 @@ fn conversion_error(py: Python<'_>, err: PyErr) -> PyErr {
 
 /// Read and write YAML 1.2 documents using Python values.
 #[pymodule(name = "astral_yaml")]
-mod bindings {
+// Only the extension library exports the CPython module initializer.
+#[cfg_attr(test, pyo3(submodule))]
+pub mod bindings {
     #[pymodule_export]
     use super::YAMLError;
     #[pymodule_export]

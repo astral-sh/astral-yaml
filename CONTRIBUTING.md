@@ -60,9 +60,11 @@ We require 100% line and function coverage for `astral-yaml`,
 instrumented Python extension and runs pytest under coverage.py. It combines
 the native coverage from that run with coverage from the Rust tests.
 
-Use `cargo xtask cov --html` to generate the core and Serde report at
-`target/coverage/html/index.html` and the binding report at
-`target/coverage/html/python.html`.
+The gate counts each executable source line once across both runs using
+`target/coverage/coverage.info`. LLVM's `summary.json` also includes statistics
+for compiled copies of functions.
+Use `cargo xtask cov --html` to see annotated source for all three crates in
+`target/coverage/html/index.html`.
 
 For Python coverage, run `uv run --locked coverage run -m pytest` followed by
 `uv run --locked coverage report`. This measures the Python code shipped in

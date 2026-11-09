@@ -35,23 +35,13 @@ enum Message {
     Other,
 }
 
-#[derive(Deserialize)]
-struct Report {
-    data: Vec<Coverage>,
-}
-
-#[derive(Deserialize)]
-struct Coverage {
-    totals: Totals,
-}
-
-#[derive(Default, Deserialize)]
+#[derive(Default)]
 struct Totals {
     lines: Count,
     functions: Count,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default)]
 struct Count {
     count: u64,
     covered: u64,
@@ -158,16 +148,21 @@ fn enforce_thresholds(totals: &Totals) -> Result<()> {
     Ok(())
 }
 
-fn binding_totals(lcov: &str) -> Result<Totals> {
-    // Rust unit tests and the extension contain separate copies of the binding.
-    // LLVM's LCOV line records combine their hits. Its per-function line totals
-    // use only the most-covered copy of each function.
+fn coverage_totals(lcov: &str) -> Result<Totals> {
+    // DA records count hits at a source line across all compiled copies.
     let mut totals = Totals::default();
+    let mut source = "";
     for record in lcov.lines() {
-        if let Some(line) = record.strip_prefix("DA:") {
-            let (_, hits) = line.split_once(',').ok_or("invalid LCOV line record")?;
+        if let Some(path) = record.strip_prefix("SF:") {
+            source = path;
+        } else if let Some(line) = record.strip_prefix("DA:") {
+            let (number, hits) = line.split_once(',').ok_or("invalid LCOV line record")?;
             totals.lines.count += 1;
-            totals.lines.covered += u64::from(hits.parse::<u64>()? > 0);
+            if hits.parse::<u64>()? == 0 {
+                eprintln!("Uncovered line at {source}:{number}");
+            } else {
+                totals.lines.covered += 1;
+            }
         } else if let Some(count) = record.strip_prefix("FNF:") {
             totals.functions.count += count.parse::<u64>()?;
         } else if let Some(count) = record.strip_prefix("FNH:") {
@@ -270,25 +265,18 @@ pub(crate) fn run(html: bool) -> Result<()> {
     reset_directory(&profiles)?;
 
     let mut sources = Vec::new();
-    let mut binding_sources = Vec::new();
     let mut members = BTreeSet::new();
 
     for package in &metadata.packages {
         if PACKAGES.contains(&package.name.as_str()) {
-            let files = if package.name == "astral-yaml-python" {
-                &mut binding_sources
-            } else {
-                &mut sources
-            };
-            collect_sources(&package.manifest_path.with_file_name("src"), files)?;
+            collect_sources(&package.manifest_path.with_file_name("src"), &mut sources)?;
             members.insert(package.id.clone());
         }
     }
 
     sources.sort();
-    binding_sources.sort();
 
-    if sources.is_empty() || binding_sources.is_empty() {
+    if sources.is_empty() {
         return Err("no YAML sources found for coverage".into());
     }
 
@@ -323,32 +311,19 @@ pub(crate) fn run(html: bool) -> Result<()> {
     execute(&mut test_command())?;
 
     let profile = directory.join("coverage.profdata");
-    let mut merge = Command::new(toolchain.profdata);
-    merge.args(["merge", "-sparse", "-o"]).arg(&profile);
-    let mut raw_profiles = Vec::new();
-
-    for entry in fs::read_dir(&profiles)? {
-        let path = entry?.path();
-
-        if path.extension().is_some_and(|ext| ext == "profraw") {
-            raw_profiles.push(path);
-        }
-    }
-
-    if raw_profiles.is_empty() {
-        return Err("tests did not produce any coverage profiles".into());
-    }
-
-    raw_profiles.sort();
-    execute(merge.args(raw_profiles))?;
+    execute(
+        Command::new(toolchain.profdata)
+            .args(["merge", "-sparse", "-o"])
+            .arg(&profile)
+            .arg(profiles),
+    )?;
 
     report(
         &toolchain.cov,
         &directory,
         profile,
         executables,
-        &sources,
-        &binding_sources,
+        sources,
         html,
     )
 }
@@ -358,8 +333,7 @@ fn report(
     directory: &Path,
     profile: PathBuf,
     executables: BTreeSet<PathBuf>,
-    sources: &[PathBuf],
-    binding_sources: &[PathBuf],
+    sources: Vec<PathBuf>,
     html: bool,
 ) -> Result<()> {
     let mut report_args = vec![OsString::from("-instr-profile"), profile.into_os_string()];
@@ -370,45 +344,30 @@ fn report(
     }
 
     report_args.push("-sources".into());
-    execute(
-        Command::new(llvm_cov)
-            .arg("report")
-            .args(&report_args)
-            .args(sources),
-    )?;
+    report_args.extend(sources.into_iter().map(PathBuf::into_os_string));
 
-    let binding_lcov = output(
+    let lcov = output(
         Command::new(llvm_cov)
-            .args([
-                "export",
-                "-format=lcov",
-                "-skip-functions",
-                "-skip-branches",
-            ])
-            .args(&report_args)
-            .args(binding_sources),
+            .args(["export", "-format=lcov", "-skip-branches"])
+            .args(&report_args),
     )?;
-    let binding = binding_totals(&binding_lcov)?;
+    let totals = coverage_totals(&lcov)?;
+    fs::write(directory.join("coverage.info"), lcov)?;
+    let summary = output(
+        Command::new(llvm_cov)
+            .args(["export", "-summary-only"])
+            .args(&report_args),
+    )?;
+    fs::write(directory.join("summary.json"), summary)?;
     println!(
-        "Python binding: {}/{} lines and {}/{} functions covered",
-        binding.lines.covered,
-        binding.lines.count,
-        binding.functions.covered,
-        binding.functions.count
+        "Workspace coverage: {}/{} lines and {}/{} functions",
+        totals.lines.covered, totals.lines.count, totals.functions.covered, totals.functions.count
     );
 
     if html {
         let html_directory = directory.join("html");
         reset_directory(&html_directory)?;
-        execute(
-            Command::new(llvm_cov)
-                .args(["show", "-format=html", "-show-line-counts-or-regions"])
-                .arg("-output-dir")
-                .arg(&html_directory)
-                .args(&report_args)
-                .args(sources),
-        )?;
-        let binding_html = html_directory.join("python.html");
+        let index = html_directory.join("index.html");
         execute(
             Command::new(llvm_cov)
                 .args([
@@ -418,27 +377,10 @@ fn report(
                     "-show-line-counts",
                 ])
                 .args(&report_args)
-                .args(binding_sources)
-                .stdout(fs::File::create(&binding_html)?),
+                .stdout(fs::File::create(&index)?),
         )?;
-        println!(
-            "HTML report: {}",
-            html_directory.join("index.html").display()
-        );
-        println!("Python binding HTML report: {}", binding_html.display());
+        println!("HTML report: {}", index.display());
     }
 
-    let summary = output(
-        Command::new(llvm_cov)
-            .args(["export", "-summary-only"])
-            .args(&report_args)
-            .args(sources),
-    )?;
-    fs::write(directory.join("summary.json"), &summary)?;
-    let report: Report = serde_json::from_str(&summary)?;
-    let [coverage] = report.data.as_slice() else {
-        return Err("expected one LLVM coverage summary".into());
-    };
-    enforce_thresholds(&coverage.totals)?;
-    enforce_thresholds(&binding)
+    enforce_thresholds(&totals)
 }
