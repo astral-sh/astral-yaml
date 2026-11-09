@@ -1557,7 +1557,7 @@ impl<'source> Parser<'source> {
 
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
-                        || signed(self.leading_spaces()) <= parent
+                        || signed(self.column()) <= parent
                         || (self.byte() == Some(b':') && is_separator(self.next_byte()))
                         || self.byte().is_some_and(is_flow_indicator)
                     {
@@ -1629,10 +1629,12 @@ impl<'source> Parser<'source> {
             while self.byte() == Some(b' ') {
                 self.pos += 1;
             }
-            if self.byte() == Some(b'\t') && signed(self.column()) <= parent {
-                break;
+            if self.byte() == Some(b'\t') {
+                if signed(self.column()) <= parent {
+                    break;
+                }
+                self.spaces();
             }
-            self.spaces();
         }
         breaks
     }
@@ -1642,7 +1644,7 @@ impl<'source> Parser<'source> {
         if self.byte().is_none()
             || self.marker("---")
             || self.marker("...")
-            || signed(self.leading_spaces()) <= parent
+            || signed(self.column()) <= parent
         {
             return Err(self.error("invalid continuation of quoted scalar"));
         }
