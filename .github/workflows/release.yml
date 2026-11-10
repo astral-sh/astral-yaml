@@ -100,13 +100,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish wheels and source distribution
-        shell: bash
-        run: |
-          shopt -s nullglob
-          wheels=(dist/*.whl)
-          sdists=(dist/*.tar.gz)
-          [[ ${#wheels[@]} == 6 && ${#sdists[@]} == 1 ]]
-          uv publish --trusted-publishing always "${wheels[@]}" "${sdists[@]}"
+        run: uv publish --trusted-publishing always
 
   publish-github:
     name: Create GitHub release
