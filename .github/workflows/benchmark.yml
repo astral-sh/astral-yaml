@@ -14,6 +14,11 @@ on:
 
 permissions: {}
 
+env:
+  COMPARE_IMPLEMENTATIONS: >-
+    ${{ (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmarks:compare')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.compare) }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,9 +33,6 @@ jobs:
       id-token: write # Authenticate uploads to CodSpeed with OIDC.
     env:
       RUSTUP_TOOLCHAIN: stable
-      COMPARE_IMPLEMENTATIONS: >-
-        ${{ (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmarks:compare')) ||
-            (github.event_name == 'workflow_dispatch' && inputs.compare) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,7 +81,7 @@ jobs:
           enable-cache: false
 
       - name: Build the Python extension
-        run: uv sync --locked --python 3.14 --no-editable
+        run: uv sync --locked --python 3.14 --no-editable ${{ env.COMPARE_IMPLEMENTATIONS == 'true' && '--group=compare' || '' }}
 
       - name: Run Python benchmarks
         uses: CodSpeedHQ/action@61efe07e57e55bedeab750c434504de272a56e8c # v5.6.1

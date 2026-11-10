@@ -13,6 +13,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
+compare = ["pyyaml>=6.0.3"]
 dev = [
     { include-group = "test" },
     "astral-dev-toolchain-cargo-codspeed>=5.0.1",
