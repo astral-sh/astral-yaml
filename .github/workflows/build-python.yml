@@ -43,23 +43,13 @@ jobs:
         run: uv build --sdist
 
       - name: Build PGO wheel
-        shell: bash
+        run: uv build --wheel -C "maturin.build-args=--locked --compatibility pypi"
         env:
           MATURIN_PGO: "1"
           UV_LOCKED: "1"
           UV_NO_DEFAULT_GROUPS: "true"
           # MSVC's linker corrupts PGO profiles on Windows ARM64 (rust-lang/rust#156675).
           CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: rust-lld
-        run: |
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            docker run --rm --label "astral-yaml-wheel=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RUNNER_ARCH" \
-              -v "$PWD:/io" -w /io -v "$(rustc --print sysroot):/opt/rust:ro" \
-              -e MATURIN_PGO -e UV_LOCKED -e UV_NO_DEFAULT_GROUPS -e UV_PYTHON=/opt/python/cp313-cp313/bin/python \
-              "quay.io/pypa/manylinux2014_$(uname -m)" timeout 20m bash -ec \
-              'PATH=/opt/rust/bin:$PATH uv build --wheel -C "maturin.build-args=--locked --compatibility manylinux_2_17"'
-          else
-            uv build --wheel -C "maturin.build-args=--locked --compatibility pypi"
-          fi
 
       - name: Test the release wheel
         shell: bash
