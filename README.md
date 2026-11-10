@@ -11,6 +11,7 @@ Core parts:
 
 - `astral-yaml`: parsing, syntax, source spans, and comments.
 - `astral-yaml-serde`: serialization and deserialization.
+- `astral-yaml-python`: Python bindings.
 
 The parser targets [YAML 1.2.2](https://yaml.org/spec/1.2.2/).
 
@@ -28,6 +29,9 @@ The primary interfaces are:
 - `astral-yaml-serde` provides a high-level serde-compatible serialization
   and deserialization interface. The serializer uses flow style and quoted
   strings.
+
+- [`astral-yaml-python`](crates/astral-yaml-python/README.md) provides the
+  `astral_yaml` module for reading and writing YAML with Python's built-in types.
 
 See each crate's documentation for more information on usage.
 
