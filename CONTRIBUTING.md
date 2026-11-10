@@ -104,3 +104,4 @@ Use the same version (e.g. `0.2.0`) for both workflows on `main`.
 
 1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml) and merge its PR.
 2. Run [Release](https://github.com/astral-sh/astral-yaml/actions/workflows/release.yml) and approve `release-gate`.
+
