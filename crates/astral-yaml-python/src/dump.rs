@@ -1,7 +1,7 @@
 //! Serialize Python built-ins to a YAML document.
 
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 use astral_yaml::ParseOptions;
 use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
@@ -21,7 +21,7 @@ pub(super) fn dumps(obj: &Bound<'_, PyAny>) -> PyResult<String> {
 #[pyfunction]
 pub(super) fn dump(obj: &Bound<'_, PyAny>, fp: &Bound<'_, PyAny>) -> PyResult<()> {
     let write = fp
-        .getattr_opt("write")?
+        .getattr_opt(pyo3::intern!(fp.py(), "write"))?
         .ok_or_else(|| PyTypeError::new_err("expected a text stream with a write method"))?;
     let text = PyString::new(obj.py(), &dumps(obj)?);
     let written = write.call1((&text,))?;
@@ -35,6 +35,17 @@ pub(super) fn dump(obj: &Bound<'_, PyAny>, fp: &Bound<'_, PyAny>) -> PyResult<()
     Ok(())
 }
 
+// Avoid building a PyO3 cast error while trying the other builtin types.
+fn as_builtin<'a, 'py, T: pyo3::PyTypeInfo>(
+    value: &'a Bound<'py, PyAny>,
+) -> Option<&'a Bound<'py, T>> {
+    if value.is_exact_instance_of::<T>() {
+        value.cast_exact().ok()
+    } else {
+        None
+    }
+}
+
 fn output_limit() -> PyErr {
     YAMLError::new_err("serialized YAML exceeds the output byte limit")
 }
@@ -44,7 +55,7 @@ struct Dumper<'py> {
     remaining_nodes: usize,
     max_depth: usize,
     // Hold a reference to every visited container so its identity stays valid.
-    seen: HashMap<usize, (Bound<'py, PyAny>, usize)>,
+    seen: BTreeMap<usize, (Bound<'py, PyAny>, usize)>,
     // First occurrences need an anchor only when we encounter an alias later.
     // Source order lets us insert all anchors with one linear copy.
     anchors: BTreeMap<usize, usize>,
@@ -56,7 +67,7 @@ impl<'py> Dumper<'py> {
             output: LimitedWriter::new(options.max_input_bytes, output_limit),
             remaining_nodes: options.max_nodes,
             max_depth: options.max_depth,
-            seen: HashMap::new(),
+            seen: BTreeMap::new(),
             anchors: BTreeMap::new(),
         };
         dumper.node(value, 1)?;
@@ -90,11 +101,11 @@ impl<'py> Dumper<'py> {
             return Ok(());
         }
 
-        if let Ok(list) = value.cast_exact::<PyList>() {
+        if let Some(list) = as_builtin::<PyList>(value) {
             self.sequence(value, list.iter(), depth)
-        } else if let Ok(tuple) = value.cast_exact::<PyTuple>() {
-            self.sequence(value, tuple.iter(), depth)
-        } else if let Ok(dict) = value.cast_exact::<PyDict>() {
+        } else if let Some(tuple) = as_builtin::<PyTuple>(value) {
+            self.sequence(value, tuple.iter_borrowed(), depth)
+        } else if let Some(dict) = as_builtin::<PyDict>(value) {
             self.mapping(dict, depth)
         } else {
             Err(PyTypeError::new_err(format!(
@@ -104,26 +115,28 @@ impl<'py> Dumper<'py> {
         }
     }
 
+    #[inline]
     fn scalar(&mut self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
-        if value.is_none() {
-            self.output.push_str("null")?;
-        } else if let Ok(text) = value.cast_exact::<PyString>() {
+        if let Some(text) = as_builtin::<PyString>(value) {
             // CPython may allocate a UTF-8 copy on the first conversion.
             self.output
                 .check(text.code_point_len()?.saturating_add(2))?;
             let text = crate::unicode_text(text)?;
             self.output.quote(text)?;
-        } else if let Ok(boolean) = value.cast_exact::<PyBool>() {
+        } else if value.is_none() {
+            self.output.push_str("null")?;
+        } else if let Some(boolean) = as_builtin::<PyBool>(value) {
             self.output
                 .push_str(if boolean.is_true() { "true" } else { "false" })?;
-        } else if let Ok(integer) = value.cast_exact::<PyInt>() {
+        } else if let Some(integer) = as_builtin::<PyInt>(value) {
             self.integer(integer)?;
-        } else if let Ok(float) = value.cast_exact::<PyFloat>() {
-            if let Some(spelling) = non_finite_float(float.value()) {
+        } else if let Some(float) = as_builtin::<PyFloat>(value) {
+            let number = float.value();
+            if let Some(spelling) = non_finite_float(number) {
                 self.output.push_str(spelling)?;
             } else {
-                // Python's float repr preserves the type and round-trips through f64.
-                self.output.push_str(float.repr()?.to_str()?)?;
+                // Debug formatting retains the fractional part of integral floats.
+                self.output.display(format_args!("{number:?}"))?;
             }
         } else {
             return Ok(false);
@@ -167,7 +180,7 @@ impl<'py> Dumper<'py> {
     fn sequence(
         &mut self,
         value: &Bound<'py, PyAny>,
-        items: impl Iterator<Item = Bound<'py, PyAny>>,
+        items: impl Iterator<Item = impl AsRef<Py<PyAny>>>,
         depth: usize,
     ) -> PyResult<()> {
         if self.alias(value)? {
@@ -178,7 +191,7 @@ impl<'py> Dumper<'py> {
         let mut first = true;
         for item in items {
             self.output.separator(&mut first)?;
-            self.node(&item, depth + 1)?;
+            self.node(item.as_ref().bind(value.py()), depth + 1)?;
         }
         self.output.push_str("]")
     }
@@ -188,15 +201,21 @@ impl<'py> Dumper<'py> {
             return Ok(());
         }
 
-        if dict.len() > self.remaining_nodes / 2 {
-            return Err(node_limit());
-        }
+        // Take strong references under the dictionary lock before recursing.
+        // Serializing a child can run Python finalizers that mutate the original dictionary.
+        let entries = pyo3::sync::critical_section::with_critical_section(dict, || {
+            if dict.len() > self.remaining_nodes / 2 {
+                return Err(node_limit());
+            }
+            Ok(dict.iter().collect::<Vec<_>>())
+        })?;
+        // Allow for a short scalar key and value, their quotes, and the separators.
+        self.output
+            .reserve(entries.len().saturating_mul(16).min(4096));
         self.output.push_str("{")?;
         let mut first = true;
         let mut has_nan = false;
-        // Snapshot the entries before recursing. Python can run finalizers during
-        // allocations, and PyO3's dictionary iterator panics if its keys change.
-        for (key, value) in dict.copy()?.iter() {
+        for (key, value) in entries {
             self.output.separator(&mut first)?;
             self.enter(depth + 1)?;
             let start = self.output.as_ref().len();
@@ -205,9 +224,7 @@ impl<'py> Dumper<'py> {
                     "mapping keys must be built-in strings, numbers, booleans, or None",
                 ));
             }
-            if key
-                .cast_exact::<PyFloat>()
-                .is_ok_and(|n| n.value().is_nan())
+            if as_builtin::<PyFloat>(&key).is_some_and(|n| n.value().is_nan())
                 && std::mem::replace(&mut has_nan, true)
             {
                 return Err(YAMLError::new_err("duplicate mapping key .nan"));

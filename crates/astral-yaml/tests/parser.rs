@@ -113,7 +113,8 @@ fn line_tracking_survives_scalar_lookahead(newline: &str) {
 
 // https://yaml.org/spec/1.2.2/#54-line-break-characters
 // https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
-#[test_matrix(["\n", "\r", "\r\n"], [0, 15, 31, 64])]
+// With the "key: " prefix, 4090 padding bytes place é across a 4 KiB boundary.
+#[test_matrix(["\n", "\r", "\r\n"], [0, 15, 31, 64, 4090])]
 fn scalar_scans_preserve_content_and_spans_across_line_endings(newline: &str, padding: usize) {
     let prefix = format!("{}é", "a".repeat(padding));
 

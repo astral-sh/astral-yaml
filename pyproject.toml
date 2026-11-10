@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.9.4,<2"]
+requires = ["maturin>=1.16,<2"]
 build-backend = "maturin"
 
 [project]
@@ -39,6 +39,8 @@ testpaths = ["crates/astral-yaml-python/tests"]
 [tool.maturin]
 manifest-path = "crates/astral-yaml-python/Cargo.toml"
 module-name = "astral_yaml"
+pgo-command = "python -m pytest"
+pgo-dependency-group = "test"
 include = [{ path = "astral_yaml.pyi", format = "sdist" }]
 
 [tool.ruff.per-file-target-version]
@@ -70,6 +72,8 @@ build-constraint-dependencies = [
 cache-keys = [
     { file = "pyproject.toml" },
     { file = "astral_yaml.pyi" },
+    { env = "MATURIN_PGO" },
+    { file = "crates/astral-yaml-python/tests/**/*.py" },
     { file = "Cargo.toml" },
     { file = "Cargo.lock" },
     { file = "crates/astral-yaml/Cargo.toml" },

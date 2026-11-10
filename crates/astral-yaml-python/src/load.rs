@@ -1,7 +1,7 @@
 //! Construct Python values directly from the parser's node arena.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use astral_yaml::schema::{self, CoreType, ScalarType};
@@ -73,9 +73,11 @@ fn check_size(size: usize, limit: usize) -> PyResult<()> {
 }
 
 fn read_document<'py>(fp: &Bound<'py, PyAny>, limit: usize) -> PyResult<Bound<'py, PyAny>> {
-    let read = fp.getattr_opt("read")?.ok_or_else(|| {
-        PyTypeError::new_err("expected a text or binary file with a read() method")
-    })?;
+    let read = fp
+        .getattr_opt(pyo3::intern!(fp.py(), "read"))?
+        .ok_or_else(|| {
+            PyTypeError::new_err("expected a text or binary file with a read() method")
+        })?;
     let mut buffer = Vec::new();
     let mut text = None;
 
@@ -205,7 +207,7 @@ impl<'py> Loader<'py, '_> {
         let dict = PyDict::new(self.py);
         self.remember(id, dict.as_any());
         let mut seen_nan = false;
-        let mut hashes = HashMap::new();
+        let mut hashes = BTreeMap::new();
 
         for entry in entries {
             let key_node = &self.stream.nodes()[entry.key.index()];
@@ -219,14 +221,15 @@ impl<'py> Loader<'py, '_> {
             };
 
             let key = self.value(entry.key)?;
-            if key.is_instance_of::<PyInt>() || key.is_instance_of::<PyFloat>() {
+            // Scalar keys other than strings and None are numbers (including bool).
+            let duplicate_nan = if key.is_exact_instance_of::<PyString>() || key.is_none() {
+                false
+            } else {
                 self.charge_numeric_key(&key, scalar.value.len(), span, &mut hashes)?;
-            }
-
-            // Python considers distinct NaN objects unequal. YAML's core
-            // schema has a single NaN value for comparing mapping keys.
-            let duplicate_nan = key.cast::<PyFloat>().is_ok_and(|n| n.value().is_nan())
-                && std::mem::replace(&mut seen_nan, true);
+                // Python considers distinct NaN objects unequal. YAML has one NaN key.
+                key.cast::<PyFloat>().is_ok_and(|n| n.value().is_nan())
+                    && std::mem::replace(&mut seen_nan, true)
+            };
             if duplicate_nan || dict.contains(&key)? {
                 return Err(self.error("duplicate mapping key", span));
             }
@@ -243,7 +246,7 @@ impl<'py> Loader<'py, '_> {
         key: &Bound<'py, PyAny>,
         digits: usize,
         span: Span,
-        hashes: &mut HashMap<isize, usize>,
+        hashes: &mut BTreeMap<isize, usize>,
     ) -> PyResult<()> {
         let count = hashes.entry(key.hash()?).or_default();
         *count += 1;
@@ -272,6 +275,13 @@ impl<'py> Loader<'py, '_> {
             ScalarType::Int => {
                 // Base zero would reject YAML decimal integers with leading zeros.
                 let (digits, base) = schema::radix_digits(text).unwrap_or((text, 10));
+                // Short integers can be converted without constructing a Python string.
+                // Longer decimals go through int() to preserve Python's digit limit.
+                if digits.len() <= 19
+                    && let Ok(value) = i64::from_str_radix(digits, base)
+                {
+                    return Ok(value.into_pyobject(self.py)?.into_any());
+                }
                 self.py
                     .get_type::<PyInt>()
                     .call1((digits, base))

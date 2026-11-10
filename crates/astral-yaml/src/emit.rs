@@ -139,43 +139,59 @@ fn quoted_long(output: &mut impl Write, value: &str) -> fmt::Result {
 #[cold]
 #[inline(never)]
 fn write_escaped(output: &mut impl Write, mut value: &str) -> fmt::Result {
+    const fn possible_escape(byte: usize) -> bool {
+        (byte < 0x20) | matches!(byte, 0x22 | 0x5c | 0x7f | 0xc2 | 0xe2 | 0xef)
+    }
     const ESCAPE: [bool; 256] = {
         let mut escape = [false; 256];
         let mut byte = 0;
 
         while byte < escape.len() {
-            escape[byte] = byte < 0x20 || matches!(byte, 0x22 | 0x5c | 0x7f | 0xc2 | 0xe2 | 0xef);
+            escape[byte] = possible_escape(byte);
             byte += 1;
         }
 
         escape
     };
 
-    // Copy runs of text until a possible escape. The non-ASCII characters escaped
-    // below start with C2, E2, or EF. Stopping at those leading bytes or at ASCII
-    // preserves UTF-8 character boundaries.
-    loop {
-        let index = value
+    // These possible escapes are ASCII bytes and selected UTF-8 leading bytes,
+    // so every candidate index is a character boundary.
+    if value.len() >= 64
+        && !value
             .bytes()
-            .position(|byte| ESCAPE[usize::from(byte)])
-            .unwrap_or(value.len());
-        let (prefix, rest) = value.split_at(index);
-        output.write_str(prefix)?;
-
-        let mut chars = rest.chars();
-        let Some(c) = chars.next() else { return Ok(()) };
-        let escaped = match c {
-            '"' => output.write_str("\\\""),
-            '\\' => output.write_str("\\\\"),
-            '\n' => output.write_str("\\n"),
-            '\r' => output.write_str("\\r"),
-            '\t' => output.write_str("\\t"),
-            c if requires_double_quotes(c) || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}') => {
-                write!(output, "\\u{:04X}", u32::from(c))
-            }
-            c => output.write_char(c),
-        };
-        escaped?;
-        value = chars.as_str();
+            .fold(false, |any, byte| any | possible_escape(usize::from(byte)))
+    {
+        return output.write_str(value);
     }
+    // Keep printable Unicode characters in the same uninterrupted run.
+    let mut plain = value;
+    let mut hex = *b"\\u0000";
+    while let Some(index) = value.bytes().position(|byte| ESCAPE[usize::from(byte)]) {
+        let rest = &value[index..];
+        let mut chars = rest.chars();
+        let c = chars.next().expect("matched a candidate byte");
+        value = chars.as_str();
+        let escape = match c {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            '\n' => "\\n",
+            '\r' => "\\r",
+            '\t' => "\\t",
+            c if requires_double_quotes(c) || matches!(c, '\u{85}' | '\u{2028}' | '\u{2029}') => {
+                // Every code point escaped here fits in a four-digit YAML escape.
+                for (digit, shift) in hex[2..].iter_mut().zip([12, 8, 4, 0]) {
+                    *digit = b"0123456789ABCDEF"[(c as usize >> shift) & 0xf];
+                }
+                std::str::from_utf8(&hex).expect("ASCII hex digits")
+            }
+            _ => continue,
+        };
+        let prefix_len = plain.len() - rest.len();
+        if prefix_len != 0 {
+            output.write_str(&plain[..prefix_len])?;
+        }
+        output.write_str(escape)?;
+        plain = value;
+    }
+    output.write_str(plain)
 }

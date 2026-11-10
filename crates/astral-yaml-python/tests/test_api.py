@@ -29,13 +29,19 @@ def test_numeric_types() -> None:
     assert math.isnan(nan)
 
 
+@pytest.mark.parametrize("value", [5e-324, 1e20, sys.float_info.max])
+def test_exponential_float_round_trip(value: float) -> None:
+    restored = yaml.loads(yaml.dumps(value))
+    assert isinstance(restored, float) and restored == value
+
+
 def test_python_integer_limit() -> None:
     limit = sys.int_info.str_digits_check_threshold
     previous = sys.get_int_max_str_digits()
     try:
         sys.set_int_max_str_digits(limit)
         with pytest.raises(yaml.YAMLError, match="limit"):
-            yaml.loads("1" * (limit + 1))
+            yaml.loads("0" * limit + "1")
         with pytest.raises(yaml.YAMLError, match="limit"):
             yaml.dumps(10**limit)
     finally:

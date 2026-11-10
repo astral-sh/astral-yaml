@@ -101,9 +101,14 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         source,
         pos: 0,
         options,
-        // Reserve for short mapping keys and values, while bounding unused
-        // capacity for inputs dominated by a few large scalars.
-        nodes: Vec::with_capacity((source.len() / 8).min(1024).min(options.max_nodes)),
+        // Leave room for a few short keys and collection nodes, which can occupy
+        // only a handful of input bytes. Cap unused space on large scalars.
+        nodes: Vec::with_capacity(
+            (source.len() / 8 + 4)
+                .min(source.len())
+                .min(1024)
+                .min(options.max_nodes),
+        ),
         documents: Vec::new(),
         comments: Vec::new(),
         anchors: HashMap::new(),
@@ -114,6 +119,7 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         elements: 0,
         deepest_node: 0,
         line_start: 0,
+        lf_window: Cell::new(Span::default()),
         line_end_cache: Cell::new(None),
         colon_cache: Cell::new(None),
     }
@@ -135,6 +141,7 @@ struct Parser<'source> {
     elements: usize,
     deepest_node: usize,
     line_start: usize,
+    lf_window: Cell<Span>,
     line_end_cache: Cell<Option<Span>>,
     colon_cache: Cell<Option<KeyLookahead>>,
 }
@@ -855,6 +862,33 @@ impl<'source> Parser<'source> {
         lookahead.colon
     }
 
+    // Find the next colon, comment indicator or line break. Cache a bounded
+    // carriage-return-free range so LF input needs one delimiter search.
+    fn plain_key_delimiter(&self, mut start: usize) -> usize {
+        const WINDOW_BYTES: usize = 4096;
+
+        let bytes = self.source.as_bytes();
+        loop {
+            let mut window = self.lf_window.get();
+            if start < window.start || start >= window.end {
+                let remaining = &bytes[start..];
+                let part = &remaining[..remaining.len().min(WINDOW_BYTES)];
+                window = Span {
+                    start,
+                    end: start + memchr::memchr(b'\r', part).unwrap_or(part.len()),
+                };
+                self.lf_window.set(window);
+            }
+            if let Some(at) = memchr::memchr3(b':', b'#', b'\n', &bytes[start..window.end]) {
+                return start + at;
+            }
+            start = window.end;
+            if start == bytes.len() || bytes[start] == b'\r' {
+                return start;
+            }
+        }
+    }
+
     fn find_simple_colon(&self, lookahead: &mut KeyLookahead) -> Option<usize> {
         let bytes = self.source.as_bytes();
         let mut i = self.pos;
@@ -877,13 +911,10 @@ impl<'source> Parser<'source> {
         let plain = bytes.get(i).is_some_and(|b| !b"[{'\"".contains(b));
         if plain {
             let content_start = i;
-            let line_end = self.line_end();
-
             // Plain keys cannot open quoted or flow syntax. Skip their content
             // in runs, checking only separators and comments on this line.
             loop {
-                let remaining = &bytes[i..line_end];
-                i += memchr::memchr2(b':', b'#', remaining).unwrap_or(remaining.len());
+                i = self.plain_key_delimiter(i);
 
                 let colon = match bytes.get(i) {
                     None | Some(b'\r' | b'\n') => None,
@@ -1557,7 +1588,7 @@ impl<'source> Parser<'source> {
 
                     if self.document_boundary()
                         || self.byte() == Some(b'#')
-                        || signed(self.leading_spaces()) <= parent
+                        || signed(self.column()) <= parent
                         || (self.byte() == Some(b':') && is_separator(self.next_byte()))
                         || self.byte().is_some_and(is_flow_indicator)
                     {
@@ -1629,10 +1660,12 @@ impl<'source> Parser<'source> {
             while self.byte() == Some(b' ') {
                 self.pos += 1;
             }
-            if self.byte() == Some(b'\t') && signed(self.column()) <= parent {
-                break;
+            if self.byte() == Some(b'\t') {
+                if signed(self.column()) <= parent {
+                    break;
+                }
+                self.spaces();
             }
-            self.spaces();
         }
         breaks
     }
@@ -1642,7 +1675,7 @@ impl<'source> Parser<'source> {
         if self.byte().is_none()
             || self.marker("---")
             || self.marker("...")
-            || signed(self.leading_spaces()) <= parent
+            || signed(self.column()) <= parent
         {
             return Err(self.error("invalid continuation of quoted scalar"));
         }
