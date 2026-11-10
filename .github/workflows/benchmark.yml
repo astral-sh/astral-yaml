@@ -81,7 +81,9 @@ jobs:
           enable-cache: false
 
       - name: Build the Python extension
-        run: uv sync --locked --python 3.14 --no-editable ${{ env.COMPARE_IMPLEMENTATIONS == 'true' && '--group=compare' || '' }}
+        env:
+          BENCHMARK_GROUP: ${{ env.COMPARE_IMPLEMENTATIONS == 'true' && 'compare' || 'dev' }}
+        run: uv sync --locked --python 3.14 --no-editable --group "$BENCHMARK_GROUP"
 
       - name: Run Python benchmarks
         uses: CodSpeedHQ/action@61efe07e57e55bedeab750c434504de272a56e8c # v5.6.1
