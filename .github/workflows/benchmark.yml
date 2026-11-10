@@ -14,6 +14,11 @@ on:
 
 permissions: {}
 
+env:
+  COMPARE_IMPLEMENTATIONS: >-
+    ${{ (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmarks:compare')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.compare) }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -28,9 +33,6 @@ jobs:
       id-token: write # Authenticate uploads to CodSpeed with OIDC.
     env:
       RUSTUP_TOOLCHAIN: stable
-      COMPARE_IMPLEMENTATIONS: >-
-        ${{ (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmarks:compare')) ||
-            (github.event_name == 'workflow_dispatch' && inputs.compare) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,3 +63,30 @@ jobs:
             else
               uv run --only-dev --locked cargo codspeed run -p astral-yaml-dev --bench yaml -m simulation
             fi
+
+  python:
+    name: CodSpeed (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Authenticate uploads to CodSpeed with OIDC.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Build the Python extension
+        env:
+          BENCHMARK_GROUP: ${{ env.COMPARE_IMPLEMENTATIONS == 'true' && 'compare' || 'dev' }}
+        run: uv sync --locked --python 3.14 --no-editable --group "$BENCHMARK_GROUP"
+
+      - name: Run Python benchmarks
+        uses: CodSpeedHQ/action@61efe07e57e55bedeab750c434504de272a56e8c # v5.6.1
+        with:
+          mode: simulation
+          run: .venv/bin/pytest benchmarks --codspeed
