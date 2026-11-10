@@ -104,3 +104,10 @@ Use the same version (e.g. `0.2.0`) for both workflows on `main`.
 
 1. Run [Prepare release](https://github.com/astral-sh/astral-yaml/actions/workflows/release-prepare.yml) and merge its PR.
 2. Run [Release](https://github.com/astral-sh/astral-yaml/actions/workflows/release.yml) and approve `release-gate`.
+
+Before the first Python release, configure a PyPI trusted publisher for
+`astral-yaml` using the GitHub repository `astral-sh/astral-yaml`, workflow
+`release.yml`, and environment `release`. The workflow builds and tests PGO
+wheels on x64 and ARM64 Linux, macOS, and Windows before approval. After
+approval, it publishes the wheels and source distribution to PyPI and the
+Rust crates to crates.io, then creates the GitHub release.
