@@ -28,3 +28,8 @@ The parser defaults to:
 Users may configure higher limits, subject to astral-yaml's upper limits.
 See the documentation for more information on those limits and how to
 configure them.
+
+The Python bindings apply the parser's default limits to loading and dumping.
+Loading also bounds the work spent on numeric mapping keys that share a
+Python hash. Aliases reuse the Python object created for their anchor, so
+repeated aliases do not multiply the number of constructed values.

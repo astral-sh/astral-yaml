@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const PACKAGES: [&str; 2] = ["astral-yaml", "astral-yaml-serde"];
+const PACKAGES: [&str; 3] = ["astral-yaml", "astral-yaml-serde", "astral-yaml-python"];
 
 #[derive(Deserialize)]
 struct Metadata {
@@ -35,23 +35,13 @@ enum Message {
     Other,
 }
 
-#[derive(Deserialize)]
-struct Report {
-    data: Vec<Coverage>,
-}
-
-#[derive(Deserialize)]
-struct Coverage {
-    totals: Totals,
-}
-
-#[derive(Deserialize)]
+#[derive(Default)]
 struct Totals {
     lines: Count,
     functions: Count,
 }
 
-#[derive(Deserialize)]
+#[derive(Default)]
 struct Count {
     count: u64,
     covered: u64,
@@ -143,16 +133,8 @@ fn artifacts(messages: &str, members: &BTreeSet<String>) -> Result<BTreeSet<Path
     Ok(executables)
 }
 
-fn enforce_thresholds(json: &str) -> Result<()> {
-    let report: Report = serde_json::from_str(json)?;
-    let [coverage] = report.data.as_slice() else {
-        return Err("expected one LLVM coverage summary".into());
-    };
-
-    for (name, total) in [
-        ("line", &coverage.totals.lines),
-        ("function", &coverage.totals.functions),
-    ] {
+fn enforce_thresholds(totals: &Totals) -> Result<()> {
+    for (name, total) in [("line", &totals.lines), ("function", &totals.functions)] {
         // Compare counts, since displayed percentages can round up to 100%.
         if total.count == 0 || total.covered != total.count {
             return Err(format!(
@@ -164,6 +146,30 @@ fn enforce_thresholds(json: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn coverage_totals(lcov: &str) -> Result<Totals> {
+    // DA records count hits at a source line across all compiled copies.
+    let mut totals = Totals::default();
+    let mut source = "";
+    for record in lcov.lines() {
+        if let Some(path) = record.strip_prefix("SF:") {
+            source = path;
+        } else if let Some(line) = record.strip_prefix("DA:") {
+            let (number, hits) = line.split_once(',').ok_or("invalid LCOV line record")?;
+            totals.lines.count += 1;
+            if hits.parse::<u64>()? == 0 {
+                eprintln!("Uncovered line at {source}:{number}");
+            } else {
+                totals.lines.covered += 1;
+            }
+        } else if let Some(count) = record.strip_prefix("FNF:") {
+            totals.functions.count += count.parse::<u64>()?;
+        } else if let Some(count) = record.strip_prefix("FNH:") {
+            totals.functions.covered += count.parse::<u64>()?;
+        }
+    }
+    Ok(totals)
 }
 
 struct Toolchain {
@@ -210,6 +216,39 @@ fn toolchain(root: &Path) -> Result<Toolchain> {
     })
 }
 
+fn python_coverage(root: &Path, directory: &Path, profile: &Path) -> Result<(PathBuf, PathBuf)> {
+    let mut uv = Command::new("uv");
+    uv.current_dir(root)
+        .env("UV_PROJECT_ENVIRONMENT", directory.join("venv"))
+        .env("CARGO_TARGET_DIR", directory.join("build"))
+        .env("LLVM_PROFILE_FILE", profile)
+        .args(["run", "--locked", "--no-dev", "--group", "test"])
+        .args([
+            "--config-settings-package",
+            "astral-yaml:maturin.build-args=--profile dev --locked -- -Cinstrument-coverage",
+        ]);
+    if let Some(python) = env::var_os("PYO3_PYTHON") {
+        uv.arg("--python").arg(python);
+    }
+    let paths = output(uv.args([
+        "python",
+        "-c",
+        "import json, sys; from astral_yaml import astral_yaml; print(json.dumps([sys.executable, astral_yaml.__file__]))",
+    ]))?;
+    let (python, extension): (PathBuf, PathBuf) = serde_json::from_str(&paths)?;
+    for args in [&["run", "-m", "pytest"][..], &["report"]] {
+        execute(
+            Command::new(&python)
+                .current_dir(root)
+                .env("LLVM_PROFILE_FILE", profile)
+                .env("COVERAGE_FILE", directory.join(".coverage"))
+                .args(["-m", "coverage"])
+                .args(args),
+        )?;
+    }
+    Ok((python, extension))
+}
+
 pub(crate) fn run(html: bool) -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -241,6 +280,9 @@ pub(crate) fn run(html: bool) -> Result<()> {
         return Err("no YAML sources found for coverage".into());
     }
 
+    let profile_pattern = profiles.join("%m-%p.profraw");
+    let (interpreter, extension) = python_coverage(&root, &directory, &profile_pattern)?;
+
     // Build separately so test stdout cannot be mistaken for Cargo JSON messages.
     // The explicit host target keeps build scripts and proc macros uninstrumented.
     let test_command = || {
@@ -252,7 +294,8 @@ pub(crate) fn run(html: bool) -> Result<()> {
             .arg("--target-dir")
             .arg(directory.join("build"))
             .env("CARGO_ENCODED_RUSTFLAGS", coverage_flags())
-            .env("LLVM_PROFILE_FILE", profiles.join("%m-%p.profraw"))
+            .env("LLVM_PROFILE_FILE", &profile_pattern)
+            .env("PYO3_PYTHON", &interpreter)
             .env("CARGO_INCREMENTAL", "0");
 
         for package in PACKAGES {
@@ -263,28 +306,17 @@ pub(crate) fn run(html: bool) -> Result<()> {
     };
     let messages =
         output(test_command().args(["--no-run", "--message-format=json-render-diagnostics"]))?;
-    let executables = artifacts(&messages, &members)?;
+    let mut executables = artifacts(&messages, &members)?;
+    executables.insert(extension);
     execute(&mut test_command())?;
 
     let profile = directory.join("coverage.profdata");
-    let mut merge = Command::new(toolchain.profdata);
-    merge.args(["merge", "-sparse", "-o"]).arg(&profile);
-    let mut raw_profiles = Vec::new();
-
-    for entry in fs::read_dir(&profiles)? {
-        let path = entry?.path();
-
-        if path.extension().is_some_and(|ext| ext == "profraw") {
-            raw_profiles.push(path);
-        }
-    }
-
-    if raw_profiles.is_empty() {
-        return Err("tests did not produce any coverage profiles".into());
-    }
-
-    raw_profiles.sort();
-    execute(merge.args(raw_profiles))?;
+    execute(
+        Command::new(toolchain.profdata)
+            .args(["merge", "-sparse", "-o"])
+            .arg(&profile)
+            .arg(profiles),
+    )?;
 
     report(
         &toolchain.cov,
@@ -313,29 +345,42 @@ fn report(
 
     report_args.push("-sources".into());
     report_args.extend(sources.into_iter().map(PathBuf::into_os_string));
-    execute(Command::new(llvm_cov).arg("report").args(&report_args))?;
 
-    if html {
-        let html_directory = directory.join("html");
-        reset_directory(&html_directory)?;
-        execute(
-            Command::new(llvm_cov)
-                .args(["show", "-format=html", "-show-line-counts-or-regions"])
-                .arg("-output-dir")
-                .arg(&html_directory)
-                .args(&report_args),
-        )?;
-        println!(
-            "HTML report: {}",
-            html_directory.join("index.html").display()
-        );
-    }
-
+    let lcov = output(
+        Command::new(llvm_cov)
+            .args(["export", "-format=lcov", "-skip-branches"])
+            .args(&report_args),
+    )?;
+    let totals = coverage_totals(&lcov)?;
+    fs::write(directory.join("coverage.info"), lcov)?;
     let summary = output(
         Command::new(llvm_cov)
             .args(["export", "-summary-only"])
             .args(&report_args),
     )?;
-    fs::write(directory.join("summary.json"), &summary)?;
-    enforce_thresholds(&summary)
+    fs::write(directory.join("summary.json"), summary)?;
+    println!(
+        "Workspace coverage: {}/{} lines and {}/{} functions",
+        totals.lines.covered, totals.lines.count, totals.functions.covered, totals.functions.count
+    );
+
+    if html {
+        let html_directory = directory.join("html");
+        reset_directory(&html_directory)?;
+        let index = html_directory.join("index.html");
+        execute(
+            Command::new(llvm_cov)
+                .args([
+                    "show",
+                    "-format=html",
+                    "-show-instantiations=false",
+                    "-show-line-counts",
+                ])
+                .args(&report_args)
+                .stdout(fs::File::create(&index)?),
+        )?;
+        println!("HTML report: {}", index.display());
+    }
+
+    enforce_thresholds(&totals)
 }
