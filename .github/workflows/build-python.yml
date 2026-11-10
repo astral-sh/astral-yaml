@@ -36,36 +36,26 @@ jobs:
           enable-cache: false
 
       - name: Install Rust with LLVM profiling tools
-        if: runner.os != 'Linux'
         run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
 
-      # MSVC's linker produces an unreadable LLVM profile on Windows ARM64.
-      # https://github.com/rust-lang/rust/issues/156675
-      - name: Use LLVM's linker for the Windows ARM64 target
-        if: matrix.os == 'windows-11-arm'
-        shell: bash
-        run: |
-          echo "CARGO_BUILD_TARGET=aarch64-pc-windows-msvc" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=rust-lld" >> "$GITHUB_ENV"
-
-      - name: Build manylinux PGO wheel
-        if: runner.os == 'Linux'
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: ${{ runner.arch == 'ARM64' && 'aarch64' || 'x86_64' }}
-          maturin-version: v1.16.0
-          manylinux: "2_17"
-          rustup-components: llvm-tools-preview
-          docker-options: --env UV_LOCKED=1 --env UV_NO_DEFAULT_GROUPS=true
-          args: --release --locked --pgo --interpreter /opt/python/cp313-cp313/bin/python --out dist
-
       - name: Build PGO wheel
-        if: runner.os != 'Linux'
-        run: uv build --wheel -C "maturin.build-args=--locked --compatibility pypi"
+        shell: bash
         env:
           MATURIN_PGO: "1"
           UV_LOCKED: "1"
           UV_NO_DEFAULT_GROUPS: "true"
+          # MSVC's linker corrupts PGO profiles on Windows ARM64 (rust-lang/rust#156675).
+          CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: rust-lld
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            docker run --rm --label "astral-yaml-wheel=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RUNNER_ARCH" \
+              -v "$PWD:/io" -w /io -v "$(rustc --print sysroot):/opt/rust:ro" \
+              -e MATURIN_PGO -e UV_LOCKED -e UV_NO_DEFAULT_GROUPS -e UV_PYTHON=/opt/python/cp313-cp313/bin/python \
+              "quay.io/pypa/manylinux2014_$(uname -m)" timeout 20m bash -ec \
+              'PATH=/opt/rust/bin:$PATH uv build --wheel -C "maturin.build-args=--locked --compatibility manylinux_2_17"'
+          else
+            uv build --wheel -C "maturin.build-args=--locked --compatibility pypi"
+          fi
 
       - name: Test the release wheel
         shell: bash
