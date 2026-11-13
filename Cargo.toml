@@ -9,15 +9,15 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Keep these requirements aligned with workspace.package.version.
-astral-yaml = { version = "0.0.3", path = "crates/astral-yaml" }
-astral-yaml-serde = { version = "0.0.3", path = "crates/astral-yaml-serde" }
+astral-yaml = { version = "0.0.4", path = "crates/astral-yaml" }
+astral-yaml-serde = { version = "0.0.4", path = "crates/astral-yaml-serde" }
 
 # Omit a version so Cargo excludes this development helper when publishing.
 astral-yaml-dev = { path = "crates/astral-yaml-dev" }
