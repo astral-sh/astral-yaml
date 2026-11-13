@@ -601,6 +601,27 @@ fn replacing_a_collection_with_a_scalar_keeps_its_detached_comment(source: &str)
 }
 
 #[test]
+fn replacing_a_sequence_preserves_header_and_detached_comments() {
+    let source = indoc! {r"
+        &items # header
+        - first
+
+        # gap
+
+        - last
+    "};
+    let document = edit::<Value>(source, |mut root| root.set([1, 2]));
+    insta::assert_snapshot!(document.source(), @"
+    &items # header
+    - 1
+
+    # gap
+
+    - 2
+    ");
+}
+
+#[test]
 fn inserting_a_leading_comment_preserves_the_inline_comment() {
     let document = edit::<String>("old # existing\n", |mut root| {
         root.insert_comment(0, " explanation", CommentPlacement::Leading)

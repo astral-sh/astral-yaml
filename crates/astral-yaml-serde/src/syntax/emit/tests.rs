@@ -211,6 +211,8 @@ fn scalar(
 #[test_case(ScalarStyle::Literal)]
 #[test_case(ScalarStyle::Folded)]
 fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
+    use astral_yaml::NodeKind;
+
     // Flow folding and block chomping:
     // https://yaml.org/spec/1.2.2/#65-line-folding
     // https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
@@ -241,16 +243,19 @@ fn scalar_emission_preserves_representable_line_breaks(style: ScalarStyle) {
                     format!("{}value: {text}", " ".repeat(indent))
                 };
                 let stream = astral_yaml::parse(&source).unwrap();
-                let mut node = stream.node(stream.documents()[0].root).unwrap();
-                if let astral_yaml::NodeKind::Sequence { items, .. } = &node.kind {
-                    node = stream.node(items[0]).unwrap();
-                } else if let astral_yaml::NodeKind::Mapping { entries, .. } = &node.kind {
-                    node = stream.node(entries[0].value).unwrap();
-                }
-                assert!(
-                    matches!(&node.kind, astral_yaml::NodeKind::Scalar(scalar) if scalar.value == value && scalar.style == style),
-                    "{style:?}, {flow}, {indent}, {value:?} -> {text:?}"
-                );
+                let root = stream.node(stream.documents()[0].root).unwrap();
+                let is_expected_scalar = |id| {
+                    matches!(&stream.node(id).unwrap().kind, NodeKind::Scalar(scalar)
+                        if scalar.value == value && scalar.style == style)
+                };
+                let preserved = if flow {
+                    matches!(&root.kind, NodeKind::Sequence { items, .. }
+                        if items.len() == 1 && is_expected_scalar(items[0]))
+                } else {
+                    matches!(&root.kind, NodeKind::Mapping { entries, .. }
+                        if entries.len() == 1 && is_expected_scalar(entries[0].value))
+                };
+                assert!(preserved, "{style:?}, {value:?} -> {source:?}");
             }
         }
     }
@@ -664,11 +669,10 @@ fn root_scalar_candidates_respect_document_position() {
     ] {
         for replacement in ["---", "... text"] {
             let mut document = DocumentSyntax::parse(source).unwrap();
-            if let NodeKind::Scalar { value, .. } =
-                &mut document.source.nodes[document.source.root.index()].kind
-            {
-                replacement.clone_into(value);
-            }
+            document.source.nodes[document.source.root.index()].kind = NodeKind::Scalar {
+                value: replacement.to_owned(),
+                style: ScalarStyle::Plain,
+            };
             outputs.push(document.normalized_yaml().unwrap());
         }
     }
