@@ -137,10 +137,11 @@ fn bytes_borrow_or_decode_as_needed() {
         "!!seq [97, 98, 99]",
         "! abc",
     ] {
-        assert_eq!(from_str::<Bytes>(source).unwrap(), Bytes(b"abc".to_vec()));
+        let bytes = from_str::<Bytes>(source).unwrap();
+        assert_eq!(bytes, Bytes(b"abc".to_vec()));
         assert_eq!(
             from_value::<Bytes>(from_str(source).unwrap()).unwrap(),
-            Bytes(b"abc".to_vec())
+            bytes
         );
     }
 
@@ -199,6 +200,8 @@ fn ignored_fields_accept_numbers_outside_native_ranges(extra: &str) {
 fn ignored_fields_still_validate_their_values() {
     let value = from_str::<Known>("known: 1\nextra: [null, {a: true}]").unwrap();
     assert_eq!(value, Known { known: 1 });
+    let tree = from_str("known: 1\nextra: !Note text").unwrap();
+    assert_eq!(from_value::<Known>(tree).unwrap(), value);
 
     // Mapping keys must be unique and explicit core tags must match their content.
     // The cyclic sequence exercises the Serde traversal limit.

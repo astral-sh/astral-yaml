@@ -48,6 +48,8 @@ where
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
+    let tree = from_str(&yaml).unwrap();
+    assert_eq!(&from_value::<T>(tree).unwrap(), value, "{yaml:?}");
 }
 
 // The explicit cases use tag shorthands, a verbatim tag and the non-specific `!`.
@@ -109,8 +111,6 @@ fn derived_types() {
         Kind::Struct { value: -2 },
     ] {
         roundtrip(&value);
-        let tree = from_str(&to_string(&value).unwrap()).unwrap();
-        assert_eq!(from_value::<Kind>(tree).unwrap(), value);
     }
 
     roundtrip(&Wrapper(42));
@@ -669,7 +669,8 @@ fn arbitrary_values_report_integer_overflow(source: &str) {
 
 #[test]
 fn arbitrary_values_and_alias_limits() {
-    from_str::<Value>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    let value = from_str::<Value>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
     assert!(from_str::<Value>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Value>("&a !Values [*a]").is_err());
 

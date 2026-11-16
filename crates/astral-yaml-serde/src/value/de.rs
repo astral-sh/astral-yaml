@@ -20,22 +20,6 @@ use std::iter;
 /// # Errors
 ///
 /// Returns an error if the value cannot be deserialized as `T`.
-///
-/// ```
-/// use astral_yaml_serde::{Value, from_str, from_value};
-/// use serde::Deserialize;
-///
-/// #[derive(Deserialize)]
-/// struct Settings {
-///     port: u16,
-/// }
-///
-/// let value: Value = from_str("port: 443")?;
-/// assert_eq!(Settings::deserialize(&value)?.port, 443);
-/// let settings: Settings = from_value(value)?;
-/// assert_eq!(settings.port, 443);
-/// # Ok::<(), astral_yaml_serde::Error>(())
-/// ```
 #[expect(
     clippy::needless_pass_by_value,
     reason = "the convenience API consumes its input"
@@ -150,10 +134,8 @@ impl<'de> Deserializer<'de> for &'de Value {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match name {
-            tagged::NAME => match self {
-                Value::Tagged(tagged) => visitor.visit_enum(variant(&tagged.tag, &tagged.value)),
-                _ => Err(Error::new("expected an explicit YAML tag")),
-            },
+            tagged::NAME if matches!(self, Value::Tagged(_)) => self.deserialize_any(visitor),
+            tagged::NAME => Err(Error::new("expected an explicit YAML tag")),
             spanned::NAME | commented::NAME => {
                 Err(Error::new("a YAML value has no source metadata"))
             }
@@ -167,17 +149,13 @@ impl<'de> Deserializer<'de> for &'de Value {
         variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Error> {
-        match self {
-            Value::String(tag) => {
-                return BorrowedStrDeserializer::new(tag).deserialize_enum(name, variants, visitor);
-            }
-            Value::Mapping(entries) => {
-                if let [(Value::String(tag), value)] = entries.as_slice() {
-                    return visitor.visit_enum(variant(tag, value));
-                }
-            }
-            _ => {}
+        if let Value::String(tag) = self {
+            return BorrowedStrDeserializer::new(tag).deserialize_enum(name, variants, visitor);
         }
+        if let Some([(Value::String(tag), value)]) = self.as_mapping() {
+            return visitor.visit_enum(variant(tag, value));
+        }
+
         Err(Error::new(
             "expected an enum name or a single-entry mapping",
         ))

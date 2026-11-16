@@ -26,13 +26,16 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 /// by value, and all NaNs compare equal.
 ///
 /// ```
-/// use astral_yaml_serde::{Value, from_str, to_string};
+/// use astral_yaml_serde::{Value, from_str, from_value, to_string};
+/// use serde::Deserialize;
 ///
 /// let mut ports: Value = from_str("[80, 443]")?;
 /// if let Some(items) = ports.as_sequence_mut() {
+///     assert_eq!(u16::deserialize(&items[0])?, 80);
 ///     items.push(Value::Unsigned(8080));
 /// }
 /// assert_eq!(to_string(&ports)?, "[80, 443, 8080]\n");
+/// assert_eq!(from_value::<Vec<u16>>(ports)?, [80, 443, 8080]);
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
 #[derive(Clone, Debug, Default, Serialize)]
