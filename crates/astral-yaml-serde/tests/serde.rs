@@ -1,10 +1,13 @@
-use astral_yaml::Encoding;
+use astral_yaml::{Budget, Encoding};
 use astral_yaml_dev::diagnostic_snapshot;
 use test_case::test_case;
 
 mod support;
 
-use astral_yaml_serde::{from_str, from_stream, to_string};
+use astral_yaml_serde::{
+    Commented, DeserializationPolicy, from_document_with_policy, from_str, from_str_with_policy,
+    from_stream, to_string,
+};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -538,6 +541,49 @@ fn located_failures_and_document_count() {
 
     let stream = astral_yaml::parse("42").unwrap();
     assert_eq!(from_stream::<u64>(&stream).unwrap(), 42);
+}
+
+#[test]
+fn serde_work_budget_shares_alias_costs_across_documents() {
+    let stream = astral_yaml::parse("--- [&item value, *item]\n--- [other]\n").unwrap();
+    let budget = Budget::new(5);
+    let policy = DeserializationPolicy {
+        work_budget: Some(&budget),
+    };
+    let values: Vec<&str> = from_document_with_policy(&stream, 0, policy).unwrap();
+    assert_eq!(values, ["value", "value"]);
+    assert_eq!(budget.remaining(), 1);
+
+    let error = from_document_with_policy::<Vec<&str>>(&stream, 1, policy).unwrap_err();
+    assert_eq!(error.message, "deserialization resource limit exceeded");
+    assert_eq!(budget.remaining(), 0);
+}
+
+#[test]
+fn serde_work_budget_can_exceed_the_default_limit() {
+    let items = "x,".repeat(999);
+    let aliases = ",*items".repeat(1_000);
+    let source = format!("[&items [{items}x]{aliases}]");
+    let error = from_str::<de::IgnoredAny>(&source).unwrap_err();
+    assert_eq!(error.message, "deserialization resource limit exceeded");
+
+    let budget = Budget::new(1_010_000);
+    let policy = DeserializationPolicy {
+        work_budget: Some(&budget),
+    };
+    from_str_with_policy::<de::IgnoredAny>(&source, policy).unwrap();
+}
+
+#[test]
+fn serde_work_budget_also_covers_comment_processing() {
+    let source = "42 # note\n";
+    let budget = Budget::new(2);
+    let policy = DeserializationPolicy {
+        work_budget: Some(&budget),
+    };
+    let error = from_str_with_policy::<Commented<'_, u8>>(source, policy).unwrap_err();
+    assert_eq!(error.message, "deserialization resource limit exceeded");
+    assert_eq!(budget.remaining(), 0);
 }
 
 // https://yaml.org/spec/1.2.2/#81-block-scalar-styles

@@ -11,6 +11,37 @@ use std::collections::HashSet;
 
 type Result<T> = std::result::Result<T, Error>;
 
+const DEFAULT_WORK_LIMIT: usize = 1_000_000;
+
+/// Policy for deserializing YAML documents.
+///
+/// The parser limits, deserialization depth, and expanded scalar byte limit
+/// apply independently of this policy.
+///
+/// ```
+/// use astral_yaml::Budget;
+/// use astral_yaml_serde::{DeserializationPolicy, from_str_with_policy};
+///
+/// let budget = Budget::new(100);
+/// let policy = DeserializationPolicy {
+///     work_budget: Some(&budget),
+///     ..DeserializationPolicy::default()
+/// };
+/// let ports: Vec<u16> = from_str_with_policy("[80, 443]", policy)?;
+/// assert_eq!(ports, [80, 443]);
+/// # Ok::<(), astral_yaml_serde::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DeserializationPolicy<'budget> {
+    /// Allowance for node visits, alias traversal, and comment processing.
+    ///
+    /// By default, each call starts with 1,000,000 work units. Supply a budget
+    /// to keep track of the remaining allowance or share it across calls.
+    /// Charges made before an error remain in effect. The work charged depends
+    /// on the destination type and can change between releases.
+    pub work_budget: Option<&'budget Budget>,
+}
+
 fn is_core_tag(tag: &str) -> bool {
     tag == "!" || CoreType::from_tag(tag).is_some()
 }
@@ -30,8 +61,20 @@ fn is_core_tag(tag: &str) -> bool {
 /// Returns an error if `source` is invalid YAML, does not contain exactly one
 /// document, cannot be deserialized as `T`, or exceeds a resource limit.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
+    from_str_with_policy(source, DeserializationPolicy::default())
+}
+
+/// Deserialize a YAML 1.2 document using the supplied policy.
+/// Syntax parsing uses the default limits from [`astral_yaml::parse`].
+///
+/// # Errors
+/// Returns the same kinds of errors as [`from_str`], using the policy's work budget.
+pub fn from_str_with_policy<'de, T: Deserialize<'de>>(
+    source: &'de str,
+    policy: DeserializationPolicy<'_>,
+) -> Result<T> {
     let stream = astral_yaml::parse(source)?;
-    from_stream(&stream)
+    from_stream_with_policy(&stream, policy)
 }
 
 /// Deserialize a parsed stream containing exactly one document.
@@ -40,11 +83,18 @@ pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
 /// Returns an error if the stream does not contain exactly one document,
 /// the value cannot be deserialized as `T`, or a resource limit is exceeded.
 pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> {
+    from_stream_with_policy(stream, DeserializationPolicy::default())
+}
+
+fn from_stream_with_policy<'de, T: Deserialize<'de>>(
+    stream: &Stream<'de>,
+    policy: DeserializationPolicy<'_>,
+) -> Result<T> {
     if stream.documents().len() != 1 {
         return Err(Error::at("expected exactly one document", stream.span()));
     }
 
-    from_document(stream, 0)
+    from_document_with_policy(stream, 0, policy)
 }
 
 /// Deserialize the document at zero-based `index` in `stream`.
@@ -53,33 +103,47 @@ pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> 
 /// Returns an error if `index` is out of bounds, the value cannot be deserialized
 /// as `T`, or a resource limit is exceeded.
 pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usize) -> Result<T> {
+    from_document_with_policy(stream, index, DeserializationPolicy::default())
+}
+
+/// Deserialize the document at zero-based `index` using the supplied policy.
+///
+/// # Errors
+/// Returns the same kinds of errors as [`from_document`], using the policy's work budget.
+pub fn from_document_with_policy<'de, T: Deserialize<'de>>(
+    stream: &Stream<'de>,
+    index: usize,
+    policy: DeserializationPolicy<'_>,
+) -> Result<T> {
     let doc = stream
         .documents()
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
 
-    Context::new(Parsed::new(stream, index)).deserialize(doc.root)
+    let default_budget = Budget::new(DEFAULT_WORK_LIMIT);
+    let budget = policy.work_budget.unwrap_or(&default_budget);
+    Context::new(Parsed::new(stream, index), budget).deserialize(doc.root)
 }
 
 #[cfg(feature = "editable")]
 impl<'de> crate::syntax::ValueRef<'de> {
     pub(crate) fn deserialize<T: Deserialize<'de>>(self) -> Result<T> {
-        Context::new(self).deserialize(self.root())
+        Context::new(self, &Budget::new(DEFAULT_WORK_LIMIT)).deserialize(self.root())
     }
 }
 
-struct Context<I> {
+struct Context<'budget, I> {
     input: I,
-    budget: Budget,
+    budget: &'budget Budget,
     // Shared by expanded scalar text, enum names, and tags used as mapping keys.
     scalar_budget: Budget,
 }
 
-impl<I> Context<I> {
-    fn new(input: I) -> Self {
+impl<'budget, I> Context<'budget, I> {
+    fn new(input: I, budget: &'budget Budget) -> Self {
         Self {
             input,
-            budget: Budget::new(1_000_000),
+            budget,
             scalar_budget: Budget::new(64 * 1024 * 1024),
         }
     }
@@ -111,7 +175,8 @@ impl<I> Context<I> {
 /// Check each mapping in the editable document independently of that visitor.
 #[cfg(feature = "editable")]
 pub(crate) fn check_document_keys(stream: &Stream<'_>) -> Result<()> {
-    let context = Context::new(Parsed::new(stream, 0));
+    let budget = Budget::new(DEFAULT_WORK_LIMIT);
+    let context = Context::new(Parsed::new(stream, 0), &budget);
     for (index, node) in stream.nodes().iter().enumerate() {
         if let astral_yaml::NodeKind::Mapping { entries, .. } = &node.kind
             && entries.len() > 1
@@ -131,7 +196,8 @@ pub(crate) fn canonical_key(source: &str) -> Result<String> {
     let stream = astral_yaml::parse(source)?;
     // The serializer emits exactly one node for each key.
     let document = &stream.documents()[0];
-    let context = Context::new(Parsed::new(&stream, 0));
+    let budget = Budget::new(DEFAULT_WORK_LIMIT);
+    let context = Context::new(Parsed::new(&stream, 0), &budget);
     let key = context.deserializer(document.root).key(&mut Vec::new())?;
 
     let mut identity = String::new();
@@ -158,7 +224,7 @@ struct Deserializer<C> {
     yaml_tag: bool,
 }
 
-impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
+impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>> {
     #[inline]
     fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
@@ -277,7 +343,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     }
 
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-        let mut comments = self.context.input.comments(self.id, &self.context.budget)?;
+        let mut comments = self.context.input.comments(self.id, self.context.budget)?;
         self.context
             .budget
             .try_charge(comments.len())
@@ -899,7 +965,7 @@ macro_rules! integer_methods {
 }
 
 impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
-    for Deserializer<&'input Context<I>>
+    for Deserializer<&'input Context<'input, I>>
 {
     type Error = Error;
 
@@ -1156,7 +1222,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
 }
 
 struct MetadataAccess<'input, I> {
-    de: Deserializer<&'input Context<I>>,
+    de: Deserializer<&'input Context<'input, I>>,
     metadata: Metadata,
     index: usize,
 }
@@ -1242,7 +1308,7 @@ impl<'de> SeqAccess<'de> for CommentAccess<'_, 'de> {
 }
 
 struct Sequence<'input, I> {
-    de: Deserializer<&'input Context<I>>,
+    de: Deserializer<&'input Context<'input, I>>,
     items: &'input [NodeId],
     index: usize,
 }
@@ -1270,7 +1336,7 @@ impl<'input, 'de: 'input, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'input
 }
 
 struct Mapping<'input, I, E> {
-    de: Deserializer<&'input Context<I>>,
+    de: Deserializer<&'input Context<'input, I>>,
     entries: &'input [E],
     index: usize,
     pending: Option<&'input E>,
@@ -1377,7 +1443,7 @@ impl<'input, 'de: 'input, I: Input<'de>> MapAccess<'de> for TagMapping<'input, I
 }
 
 struct Enumeration<'input, I> {
-    de: Deserializer<&'input Context<I>>,
+    de: Deserializer<&'input Context<'input, I>>,
     variant: &'input str,
     value: VariantValue,
 }
@@ -1389,7 +1455,7 @@ enum VariantValue {
 }
 
 impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
-    fn payload(&self) -> Result<Deserializer<&'input Context<I>>> {
+    fn payload(&self) -> Result<Deserializer<&'input Context<'input, I>>> {
         match self.value {
             VariantValue::Unit => Err(Error::new("expected a variant payload")),
             VariantValue::Node(id) => {
@@ -1490,9 +1556,10 @@ mod tests {
                 _ => None,
             })
             .unwrap();
+        let budget = Budget::new(100);
         let context = Context {
             scalar_budget: Budget::new(bytes),
-            ..Context::new(super::Parsed::new(&stream, 0))
+            ..Context::new(super::Parsed::new(&stream, 0), &budget)
         };
 
         let result = context
@@ -1529,7 +1596,7 @@ mod tests {
         let stream = astral_yaml::parse("!Text hello").unwrap();
         let context = Context {
             input: super::Parsed::new(&stream, 0),
-            budget: Budget::new(visits),
+            budget: &Budget::new(visits),
             scalar_budget: Budget::new(100),
         };
         let de = Deserializer {
@@ -1554,7 +1621,7 @@ mod tests {
         for bytes in [7, 8] {
             let context = Context {
                 input: super::Parsed::new(&stream, 0),
-                budget: Budget::new(10),
+                budget: &Budget::new(10),
                 scalar_budget: Budget::new(bytes),
             };
             let de = Deserializer {
@@ -1596,7 +1663,7 @@ mod tests {
         let stream = astral_yaml::parse("# before\n42 # after").unwrap();
         let context = Context {
             input: super::Parsed::new(&stream, 0),
-            budget: Budget::new(2),
+            budget: &Budget::new(2),
             scalar_budget: Budget::new(100),
         };
         let de = Deserializer {
@@ -1620,7 +1687,7 @@ mod tests {
             let de = Deserializer {
                 context: &Context {
                     input: super::Parsed::new(&stream, 0),
-                    budget: visits,
+                    budget: &visits,
                     scalar_budget: bytes,
                 },
                 id: stream.documents()[0].root,
@@ -1733,7 +1800,7 @@ mod tests {
         let de = Deserializer {
             context: &Context {
                 input: super::Parsed::new(&stream, 0),
-                budget: visits,
+                budget: &visits,
                 scalar_budget: bytes,
             },
             id: stream.documents()[0].root,
@@ -1776,7 +1843,7 @@ mod tests {
         let de = Deserializer {
             context: &Context {
                 input: super::Parsed::new(&stream, 0),
-                budget: visits,
+                budget: &visits,
                 scalar_budget: bytes,
             },
             id: alias.unwrap(),
