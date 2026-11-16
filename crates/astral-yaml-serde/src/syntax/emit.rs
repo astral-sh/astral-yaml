@@ -2,7 +2,7 @@ use super::layout::Layout;
 use super::view::Syntax;
 use super::{Comment, CommentPosition, DocumentSyntax, NodeKind};
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
+use astral_yaml::{Budget, CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 use std::borrow::Cow;
 
 #[cfg(test)]
@@ -26,7 +26,7 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         region: placement.diagnostic_span,
         at_column_zero: placement.at_column_zero,
         output: String::new(),
-        work: options.max_nodes,
+        work: Budget::new(options.max_nodes),
         ending: EmitterEnding::Token,
         last_block_child_indent: None,
     };
@@ -281,7 +281,7 @@ struct Emitter<'syntax, 'layout, Location> {
     region: Span,
     at_column_zero: bool,
     output: String,
-    work: usize,
+    work: Budget,
     ending: EmitterEnding,
     last_block_child_indent: Option<usize>,
 }
@@ -585,10 +585,10 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         };
         let indent = context.indent;
         let flow = context.in_flow();
-        if depth >= self.options.max_depth || self.work == 0 {
+        if depth >= self.options.max_depth || self.work.try_charge(1).is_none() {
             return Err(self.error("emission resource limit exceeded"));
         }
-        self.work -= 1;
+
         self.prefix(&mut comments, indent)?;
         self.properties(id, indent, flow, &mut comments)?;
         let node = &self.document.nodes[id.index()];

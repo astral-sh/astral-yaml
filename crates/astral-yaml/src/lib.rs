@@ -25,6 +25,7 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
+mod budget;
 pub mod comments;
 pub mod emit;
 mod error;
@@ -34,6 +35,7 @@ pub mod schema;
 mod source;
 mod warnings;
 
+pub use budget::Budget;
 pub use error::Error;
 pub use model::{
     CollectionStyle, Comment, Directive, Document, Entry, Node, NodeId, NodeKind, Property, Scalar,

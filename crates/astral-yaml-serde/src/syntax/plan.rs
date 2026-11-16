@@ -10,8 +10,7 @@ use super::splice::{self, Boundary};
 use super::view::Syntax;
 use super::{Comment, Node, NodeKind, emit};
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml::{Error, NodeId, Span};
-use std::cell::Cell;
+use astral_yaml::{Budget, Error, NodeId, Span};
 use std::collections::HashSet;
 
 pub(super) struct Plan<'plan> {
@@ -19,7 +18,7 @@ pub(super) struct Plan<'plan> {
     pub(super) candidate: Syntax<'plan, Option<Span>>,
     pub(super) parents: &'plan [Option<NodeId>],
     pub(super) changes: Changes,
-    pub(super) work: &'plan Cell<usize>,
+    pub(super) work: &'plan Budget,
 }
 
 /// A subtree and the source range reserved for its replacement.

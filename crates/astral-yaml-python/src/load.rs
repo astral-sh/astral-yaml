@@ -6,7 +6,7 @@ use std::fmt;
 
 use astral_yaml::schema::{self, CoreType, ScalarType};
 use astral_yaml::{
-    Entry, NodeId, NodeKind, ParseOptions, Scalar, ScalarStyle, Source, Span, Stream,
+    Budget, Entry, NodeId, NodeKind, ParseOptions, Scalar, ScalarStyle, Source, Span, Stream,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -133,7 +133,7 @@ fn document<'py>(
             stream: &stream,
             encoded,
             anchors: HashMap::new(),
-            key_bytes: ParseOptions::default().max_input_bytes,
+            key_bytes: Budget::new(ParseOptions::default().max_input_bytes),
         }
         .value(doc.root),
         [_, second, ..] => Err(located("expected one YAML document", second.span, encoded)),
@@ -145,7 +145,7 @@ struct Loader<'py, 'a> {
     stream: &'a Stream<'a>,
     encoded: Option<&'a Source<'a>>,
     anchors: HashMap<NodeId, Bound<'py, PyAny>>,
-    key_bytes: usize,
+    key_bytes: Budget,
 }
 
 impl<'py> Loader<'py, '_> {
@@ -242,7 +242,7 @@ impl<'py> Loader<'py, '_> {
     // different integers with the same hash compares each key with all preceding
     // keys in that bucket. Integer hashing and comparison can also scan its digits.
     fn charge_numeric_key(
-        &mut self,
+        &self,
         key: &Bound<'py, PyAny>,
         digits: usize,
         span: Span,
@@ -251,11 +251,9 @@ impl<'py> Loader<'py, '_> {
         let count = hashes.entry(key.hash()?).or_default();
         *count += 1;
         let bytes = digits.saturating_mul(*count);
-        self.key_bytes = self
-            .key_bytes
-            .checked_sub(bytes)
-            .ok_or_else(|| self.error("numeric mapping key work limit exceeded", span))?;
-        Ok(())
+        self.key_bytes
+            .try_charge(bytes)
+            .ok_or_else(|| self.error("numeric mapping key work limit exceeded", span))
     }
 
     fn remember(&mut self, id: NodeId, value: &Bound<'py, PyAny>) {

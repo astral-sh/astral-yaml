@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
-use astral_yaml::ParseOptions;
 use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
+use astral_yaml::{Budget, ParseOptions};
 use pyo3::exceptions::{PyOSError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
@@ -52,7 +52,7 @@ fn output_limit() -> PyErr {
 
 struct Dumper<'py> {
     output: LimitedWriter<fn() -> PyErr>,
-    remaining_nodes: usize,
+    nodes: Budget,
     max_depth: usize,
     // Hold a reference to every visited container so its identity stays valid.
     seen: BTreeMap<usize, (Bound<'py, PyAny>, usize)>,
@@ -65,7 +65,7 @@ impl<'py> Dumper<'py> {
     fn serialize(value: &Bound<'py, PyAny>, options: ParseOptions) -> PyResult<String> {
         let mut dumper = Self {
             output: LimitedWriter::new(options.max_input_bytes, output_limit),
-            remaining_nodes: options.max_nodes,
+            nodes: Budget::new(options.max_nodes),
             max_depth: options.max_depth,
             seen: BTreeMap::new(),
             anchors: BTreeMap::new(),
@@ -87,12 +87,11 @@ impl<'py> Dumper<'py> {
         anchored.finish()
     }
 
-    fn enter(&mut self, depth: usize) -> PyResult<()> {
+    fn enter(&self, depth: usize) -> PyResult<()> {
         if depth > self.max_depth {
             return Err(YAMLError::new_err("serialization nesting limit exceeded"));
         }
-        self.remaining_nodes = self.remaining_nodes.checked_sub(1).ok_or_else(node_limit)?;
-        Ok(())
+        self.nodes.try_charge(1).ok_or_else(node_limit)
     }
 
     fn node(&mut self, value: &Bound<'py, PyAny>, depth: usize) -> PyResult<()> {
@@ -204,7 +203,7 @@ impl<'py> Dumper<'py> {
         // Take strong references under the dictionary lock before recursing.
         // Serializing a child can run Python finalizers that mutate the original dictionary.
         let entries = pyo3::sync::critical_section::with_critical_section(dict, || {
-            if dict.len() > self.remaining_nodes / 2 {
+            if dict.len() > self.nodes.remaining() / 2 {
                 return Err(node_limit());
             }
             Ok(dict.iter().collect::<Vec<_>>())

@@ -2,9 +2,8 @@
 
 use crate::comments::CommentCache;
 use crate::{AttachedComment, Error};
-use astral_yaml::{NodeId, ScalarStyle, Span, Stream};
+use astral_yaml::{Budget, NodeId, ScalarStyle, Span, Stream};
 use std::borrow::Cow;
-use std::cell::Cell;
 
 /// The input chooses a borrowed node representation at compile time. A parsed
 /// document can then be deserialized directly from its syntax tree, even when
@@ -17,11 +16,7 @@ pub(super) trait Input<'de> {
     type Entry: Entry;
 
     fn node(&self, id: NodeId) -> Result<Self::Node<'_>, Error>;
-    fn comments(
-        &self,
-        id: NodeId,
-        budget: &Cell<usize>,
-    ) -> Result<Vec<AttachedComment<'de>>, Error>;
+    fn comments(&self, id: NodeId, budget: &Budget) -> Result<Vec<AttachedComment<'de>>, Error>;
 }
 
 pub(super) trait Node<'input, 'de>: Copy {
@@ -60,11 +55,7 @@ impl<'de> Input<'de> for Parsed<'_, 'de> {
         Ok(self.stream.node(id).expect("ID belongs to this stream"))
     }
 
-    fn comments(
-        &self,
-        id: NodeId,
-        budget: &Cell<usize>,
-    ) -> Result<Vec<AttachedComment<'de>>, Error> {
+    fn comments(&self, id: NodeId, budget: &Budget) -> Result<Vec<AttachedComment<'de>>, Error> {
         Ok(self.comments.get(self.stream, id, budget)?.to_vec())
     }
 }
@@ -106,11 +97,7 @@ impl<'de> Input<'de> for crate::syntax::ValueRef<'de> {
         Ok((*self).node(id)?)
     }
 
-    fn comments(
-        &self,
-        id: NodeId,
-        _budget: &Cell<usize>,
-    ) -> Result<Vec<AttachedComment<'de>>, Error> {
+    fn comments(&self, id: NodeId, _budget: &Budget) -> Result<Vec<AttachedComment<'de>>, Error> {
         use crate::syntax::NodeKind;
 
         let mut comments = Vec::new();

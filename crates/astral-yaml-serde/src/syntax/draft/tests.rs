@@ -1,7 +1,7 @@
 use super::{Draft, ReplacementStyle};
 use crate::syntax::{CommentPosition, DocumentSyntax, NodeKind};
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle};
+use astral_yaml::{Budget, CollectionStyle, Error, NodeId, ScalarStyle};
 use astral_yaml_dev::indoc;
 use std::collections::HashSet;
 use test_case::test_case;
@@ -138,15 +138,15 @@ fn failed_mutations_leave_the_tree_and_membership_unchanged() {
             draft.insert_entry(draft.root(), 0, "key", "[").map(|_| ())
         }),
         ("replacement removal budget", "[a, b]", |draft| {
-            draft.work.set(2);
+            draft.work = Budget::new(2);
             draft.replace(draft.root(), "new", ReplacementStyle::FromValue)
         }),
         ("sequence removal budget", "[[a, b]]", |draft| {
-            draft.work.set(1);
+            draft.work = Budget::new(1);
             draft.remove_item(draft.root(), 0)
         }),
         ("mapping removal budget", "{key: [a, b]}", |draft| {
-            draft.work.set(1);
+            draft.work = Budget::new(1);
             draft.remove_entry(draft.root(), 0)
         }),
         ("scalar type change", "true", |draft| {
@@ -205,7 +205,7 @@ fn edits_charge_elements_shifted_or_visited_before_mutation(
     let root = draft.root();
     let before = draft.node(root).kind.clone();
     let comments = draft.node(root).comments.clone();
-    draft.work.set(2);
+    draft.work = Budget::new(2);
 
     assert_eq!(
         edit(&mut draft, root).unwrap_err().message,
