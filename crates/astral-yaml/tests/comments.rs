@@ -12,15 +12,14 @@ fn slot_allocation_requires_budget_for_all_direct_children(collection: &str) {
     assert_eq!(error.span.slice(&source), Some(collection));
 }
 
-#[test]
-fn looking_for_a_comment_owner_charges_each_descent() {
-    let source = "[[[item # note\n]]]";
+// The budget covers source lines, syntax nodes, then visits during owner lookup.
+#[test_case("item\n... # note", 2 + 1 + 1; "end marker attaches at the root")]
+#[test_case("[[[item # note\n]]]", 2 + 4 + 4; "lookup descends to the scalar")]
+fn comment_owner_lookup_charges_each_visit(source: &str, required: usize) {
     let stream = astral_yaml::parse(source).unwrap();
-    // After indexing both lines and all four nodes, locating the comment
-    // visits the root and descends through three children to the scalar.
-    let error = CommentIndex::with_work_budget(&stream, 0, &Budget::new(9)).unwrap_err();
+    let error = CommentIndex::with_work_budget(&stream, 0, &Budget::new(required - 1)).unwrap_err();
     assert_eq!(error.span.slice(source), Some("# note"));
-    assert!(CommentIndex::with_work_budget(&stream, 0, &Budget::new(10)).is_ok());
+    assert!(CommentIndex::with_work_budget(&stream, 0, &Budget::new(required)).is_ok());
 }
 
 // https://yaml.org/spec/1.2.2/#822-block-mappings
