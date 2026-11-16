@@ -87,7 +87,7 @@ jobs:
     timeout-minutes: 10
     environment: release
     permissions:
-      id-token: write # Authenticate to PyPI with OIDC.
+      id-token: write # Sign attestations and authenticate to PyPI with OIDC.
     steps:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
@@ -98,6 +98,9 @@ jobs:
           pattern: python-dist-*
           path: dist/
           merge-multiple: true
+
+      - name: Attest wheels and source distribution
+        uses: astral-sh/attest-action@39b6ce43875c196a579e31635b11aa2a2036384a # v0.0.7
 
       - name: Publish wheels and source distribution
         run: uv publish --trusted-publishing always
