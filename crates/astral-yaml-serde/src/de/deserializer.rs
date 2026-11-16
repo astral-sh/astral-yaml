@@ -89,10 +89,9 @@ impl<I> Context<I> {
     where
         I: Input<'de>,
     {
-        T::deserialize(self.deserializer(id)).map_err(|mut error| {
-            if error.span.is_none() {
-                error.span = self.input.node(id).ok().and_then(Node::span);
-            }
+        let de = self.deserializer(id);
+        T::deserialize(de).map_err(|error| {
+            let mut error = de.locate(error);
             error.path.get_or_insert_with(|| "$".to_owned());
             error
         })
@@ -205,6 +204,17 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
             yaml_tag: false,
             ..self
         }
+    }
+
+    fn locate(self, mut error: Error) -> Error {
+        if error.span.is_none() {
+            error.span = self.context.input.node(self.id).ok().and_then(Node::span);
+        }
+        error
+    }
+
+    fn deserialize_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
+        seed.deserialize(self).map_err(|error| self.locate(error))
     }
 
     fn metadata<V: Visitor<'de>>(self, visitor: V, metadata: Metadata) -> Result<V::Value> {
@@ -1128,7 +1138,11 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
                         variant: key.value(),
                         value: VariantValue::Node(value),
                     })
-                    .map_err(|error| error.in_path(format_args!("[{:?}]", key.value())))
+                    .map_err(|error| {
+                        error
+                            .located(key.span())
+                            .in_path(format_args!("[{:?}]", key.value()))
+                    })
             }
             _ => Err(Error::at(
                 "expected an enum name or a single-entry mapping",
@@ -1257,7 +1271,9 @@ impl<'input, 'de: 'input, I: Input<'de>> SeqAccess<'de> for &mut Sequence<'input
         };
 
         self.index += 1;
-        seed.deserialize(self.de.child(id))
+        self.de
+            .child(id)
+            .deserialize_seed(seed)
             .map(Some)
             .map_err(|error| error.in_path(format_args!("[{index}]")))
     }
@@ -1308,7 +1324,9 @@ impl<'input, 'de: 'input, I: Input<'de, Entry = E>, E: Entry + 'input> MapAccess
 
         self.pending = Some(entry);
         self.index += 1;
-        seed.deserialize(self.de.child(entry.ids().0))
+        self.de
+            .child(entry.ids().0)
+            .deserialize_seed(seed)
             .map(Some)
             .map_err(|error| error.in_path(format_args!(".key_at({index})")))
     }
@@ -1319,7 +1337,9 @@ impl<'input, 'de: 'input, I: Input<'de, Entry = E>, E: Entry + 'input> MapAccess
             .take()
             .ok_or_else(|| Error::new("mapping value requested before key"))?
             .ids();
-        seed.deserialize(self.de.child(value))
+        self.de
+            .child(value)
+            .deserialize_seed(seed)
             .map_err(|error| self.value_error(key, error))
     }
 
@@ -1430,7 +1450,7 @@ impl<'input, 'de: 'input, I: Input<'de>> VariantAccess<'de> for Enumeration<'inp
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-        seed.deserialize(self.payload()?)
+        self.payload()?.deserialize_seed(seed)
     }
 
     fn tuple_variant<V: Visitor<'de>>(self, _: usize, visitor: V) -> Result<V::Value> {
