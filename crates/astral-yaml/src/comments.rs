@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::ops::ControlFlow::{self, Break, Continue};
 use std::ops::Range;
 
+const WORK_LIMIT_EXCEEDED: &str = "deserialization resource limit exceeded";
+
 /// A comment's placement relative to the node that owns it.
 /// Collecting the comment through an ancestor does not change its placement.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -97,7 +99,10 @@ impl<'source> CommentIndex<'source> {
             nodes: Vec::with_capacity(32),
             slots: Vec::with_capacity(16),
         };
-        budget.try_charge(1).ok_or(work_limit(doc.span))?;
+        budget.try_charge(1).ok_or(Error {
+            span: doc.span,
+            message: WORK_LIMIT_EXCEEDED,
+        })?;
         tree.push(stream, doc.root)?;
         if tree.nodes[0].span.is_empty() {
             // An empty document's header comments precede the place where its
@@ -227,7 +232,10 @@ impl Tree<'_, '_> {
     ) -> Result<Range<usize>, Error> {
         self.budget
             .try_charge(count * children_per_slot)
-            .ok_or(work_limit(span))?;
+            .ok_or(Error {
+                span,
+                message: WORK_LIMIT_EXCEEDED,
+            })?;
         let slots = self.slots.len()..self.slots.len() + count;
         self.slots.resize_with(slots.end, Slot::default);
         Ok(slots)
@@ -345,7 +353,10 @@ impl Tree<'_, '_> {
         let at = comment.span.start();
         let mut index = 0;
         loop {
-            self.budget.try_charge(1).ok_or(work_limit(comment.span))?;
+            self.budget.try_charge(1).ok_or(Error {
+                span: comment.span,
+                message: WORK_LIMIT_EXCEEDED,
+            })?;
             if index == 0 {
                 if marker_lines.binary_search(&self.lines.line(at)).is_ok() {
                     return Ok((0, CommentPlacement::Inline));
@@ -507,9 +518,10 @@ impl Lines {
         let mut blanks = 0;
 
         loop {
-            budget
-                .try_charge(1)
-                .ok_or(work_limit(Span { start, end: start }))?;
+            budget.try_charge(1).ok_or(Error {
+                span: Span { start, end: start },
+                message: WORK_LIMIT_EXCEEDED,
+            })?;
             let end = start
                 + memchr::memchr2(b'\r', b'\n', &bytes[start..]).unwrap_or(bytes.len() - start);
             let column_start = end - source[start..end].trim_start_matches('\u{feff}').len();
@@ -555,13 +567,6 @@ impl Lines {
         let before = self.line(before);
         let after = self.line(after);
         after > before && self.lines[after].blanks > self.lines[before + 1].blanks
-    }
-}
-
-fn work_limit(span: Span) -> Error {
-    Error {
-        span,
-        message: "deserialization resource limit exceeded",
     }
 }
 
