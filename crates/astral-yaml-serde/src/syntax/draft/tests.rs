@@ -1,8 +1,10 @@
 use super::{Draft, ReplacementStyle};
 use crate::syntax::{CommentPosition, DocumentSyntax, NodeKind};
+use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, Error, NodeId, ScalarStyle};
 use astral_yaml_dev::indoc;
 use std::collections::HashSet;
+use test_case::test_case;
 
 /// Derive ownership from the child edges, independently of the arena's index.
 fn assert_ownership(draft: &Draft) {
@@ -185,4 +187,31 @@ fn failed_mutations_leave_the_tree_and_membership_unchanged() {
         ),
     ]
     "#);
+}
+
+#[test_case("[a,b,c,d]", |d, root| d.insert_item(root, 0, "v").map(drop); "insert before items")]
+#[test_case("[a,b,c,d]", |d, root| d.remove_item(root, 0); "remove before items")]
+#[test_case("{a: 1,b: 2,c: 3,d: 4}", |d, root| d.insert_entry(root, 0, "k", "v").map(drop); "insert before entries")]
+#[test_case("{a: 1,b: 2,c: 3,d: 4}", |d, root| d.remove_entry(root, 0); "remove before entries")]
+#[test_case("[\n\n#a\n\n#b\n\n#c\n\nx]", |d, root| d.remove_item(root, 0); "retarget last item comments")]
+#[test_case("{\n\n#a\n\n#b\n\n#c\n\nx: y}", |d, root| d.remove_entry(root, 0); "retarget last entry comments")]
+#[test_case("#a\n#b\n#c\n#d\nx", |d, root| d.insert_comment(root, 0, "new", CommentPlacement::Leading); "insert before comments")]
+#[test_case("#a\n#b\n#c\n#d\nx", |d, root| d.remove_comment(root, 0); "remove before comments")]
+fn edits_charge_elements_shifted_or_visited_before_mutation(
+    source: &str,
+    edit: fn(&mut Draft, NodeId) -> Result<(), Error>,
+) {
+    let mut draft = Draft::from(&DocumentSyntax::parse(source).unwrap());
+    let root = draft.root();
+    let before = draft.node(root).kind.clone();
+    let comments = draft.node(root).comments.clone();
+    draft.work.set(2);
+
+    assert_eq!(
+        edit(&mut draft, root).unwrap_err().message,
+        "editing resource limit exceeded"
+    );
+    assert_eq!(draft.node(root).kind, before);
+    assert_eq!(draft.node(root).comments, comments);
+    assert_ownership(&draft);
 }

@@ -302,6 +302,9 @@ impl Draft {
         if index > items.len() {
             return Err(self.error("item index out of bounds"));
         }
+        let shifted = items.len() - index;
+        self.charge(shifted)?;
+
         let document = self.parse_value(yaml, Some(id), self.available())?;
         let child = self.attach(document, Some(id), None);
         self.sequence_items_mut(id)?.insert(index, child);
@@ -314,6 +317,9 @@ impl Draft {
             return Err(self.error("item index out of bounds"));
         };
         let following = items.get(index + 1).copied();
+        // Retargeting comments visits the whole list, even for the last item.
+        let shifted = items.len() - index - 1;
+        self.charge(shifted + self.node(id).comments.len())?;
         let removed = self.removal([child])?;
         self.sequence_items_mut(id)?.remove(index);
         self.slots[id.index()]
@@ -334,6 +340,9 @@ impl Draft {
         if index > entries.len() {
             return Err(self.error("entry index out of bounds"));
         }
+        let shifted = entries.len() - index;
+        self.charge(shifted)?;
+
         // Parse the key and value before attaching either one. Failed parsing cannot
         // leave a live key without an entry owning it.
         let key = self.parse_value(key, Some(id), self.available())?;
@@ -354,6 +363,8 @@ impl Draft {
             return Err(self.error("entry index out of bounds"));
         };
         let following = entries.get(index + 1).map(|&(key, _)| key);
+        let shifted = entries.len() - index - 1;
+        self.charge(shifted + self.node(id).comments.len())?;
         let removed = self.removal([key, value])?;
         self.mapping_entries_mut(id)?.remove(index);
         self.slots[id.index()]
@@ -410,10 +421,11 @@ impl Draft {
         placement: CommentPlacement,
     ) -> Result<(), Error> {
         self.comment_text(text)?;
-        let comments = &mut self.slots[id.index()].node.comments;
+        let comments = &self.node(id).comments;
         if index > comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
+        self.charge(comments.len() - index)?;
         let position = match placement {
             CommentPlacement::Leading => CommentPosition::Before,
             CommentPlacement::Detached => comments[index..]
@@ -423,7 +435,7 @@ impl Draft {
                 .unwrap_or(CommentPosition::After),
             CommentPlacement::Inline | CommentPlacement::Trailing => CommentPosition::After,
         };
-        comments.insert(
+        self.slots[id.index()].node.comments.insert(
             index,
             Comment {
                 text: text.to_owned(),
@@ -450,11 +462,12 @@ impl Draft {
     }
 
     pub(super) fn remove_comment(&mut self, id: NodeId, index: usize) -> Result<(), Error> {
-        let comments = &mut self.slots[id.index()].node.comments;
+        let comments = &self.node(id).comments;
         if index >= comments.len() {
             return Err(self.error("comment index out of bounds"));
         }
-        comments.remove(index);
+        self.charge(comments.len() - index - 1)?;
+        self.slots[id.index()].node.comments.remove(index);
         Ok(())
     }
 
