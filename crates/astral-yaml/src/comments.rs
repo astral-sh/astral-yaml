@@ -88,12 +88,13 @@ impl<'source> CommentIndex<'source> {
             tree.nodes[0].span = Span { start: at, end: at };
         }
 
+        // A start marker can share its line with the root's children.
+        // Only directives and end markers occupy an entire framing line.
         let mut marker_lines: Vec<_> = doc
             .directives
             .iter()
             .map(|d| tree.lines.line(d.span.start()))
             .collect();
-        marker_lines.extend(doc.start_marker.map(|s| tree.lines.line(s.start())));
         let ends = stream.document_end_markers();
         let ends = &ends[ends.partition_point(|span| span.start() < start)
             ..ends.partition_point(|span| span.start() < end)];
