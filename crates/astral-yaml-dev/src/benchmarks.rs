@@ -1,6 +1,6 @@
 //! Fixed benchmark fixtures and equivalent deserialization workloads.
 
-use crate::Value;
+use astral_yaml_serde::Value;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;

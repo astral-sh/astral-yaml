@@ -5,9 +5,8 @@ use std::collections::{HashMap, HashSet};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, NodeId, ScalarStyle};
 
-use crate::Value;
-use astral_yaml_serde::Editable;
 use astral_yaml_serde::edit::{Cursor, Node, NodeKind};
+use astral_yaml_serde::{Editable, Value};
 
 /// Some source graphs contain cycles. This projection leaves them available
 /// for syntax inspection without expanding aliases during deserialization.
@@ -271,7 +270,7 @@ impl Tree {
         match &self.kind {
             Kind::Scalar(Scalar::Null) => Value::Null,
             Kind::Scalar(Scalar::Boolean(value)) => Value::Bool(*value),
-            Kind::Scalar(Scalar::Integer(value)) => Value::Integer(*value),
+            Kind::Scalar(Scalar::Integer(value)) => Value::Integer(i128::from(*value)),
             Kind::Scalar(text) => Value::String(text.value()),
             Kind::Sequence(items) => Value::Sequence(items.iter().map(Self::value).collect()),
             Kind::Mapping(entries) => Value::Mapping(

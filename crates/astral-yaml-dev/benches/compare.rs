@@ -1,4 +1,5 @@
-use astral_yaml_dev::{Value, benchmarks};
+use astral_yaml_dev::benchmarks;
+use astral_yaml_serde::Value;
 use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 use serde::Deserialize;
 
@@ -18,16 +19,16 @@ fn normalize_deser_value(value: &deser_value::Value) -> Value {
     match value.kind() {
         Kind::Null => Value::Null,
         Kind::Bool(value) => Value::Bool(*value),
-        Kind::U64(value) => Value::Unsigned(*value),
-        Kind::I64(value) => Value::Integer(*value),
+        Kind::U64(value) => Value::Unsigned(u128::from(*value)),
+        Kind::I64(value) => Value::Integer(i128::from(*value)),
         Kind::F32(value) => Value::Float(f64::from(*value)),
         Kind::F64(value) => Value::Float(*value),
         Kind::Str(value) | Kind::Lexical(value) => Value::String(value.clone()),
         Kind::Implicit(value) => match value.value() {
             ImplicitValue::Null => Value::Null,
             ImplicitValue::Bool(value) => Value::Bool(value),
-            ImplicitValue::U64(value) => Value::Unsigned(value),
-            ImplicitValue::I64(value) => Value::Integer(value),
+            ImplicitValue::U64(value) => Value::Unsigned(u128::from(value)),
+            ImplicitValue::I64(value) => Value::Integer(i128::from(value)),
             ImplicitValue::F64(value) => Value::Float(value),
             other => panic!("unsupported implicit Deser value: {other:?}"),
         },
@@ -184,7 +185,7 @@ mod parse {
 mod deserialize {
     use std::fmt;
 
-    use astral_yaml_dev::Value;
+    use astral_yaml_serde::Value;
     use divan::{Bencher, black_box};
 
     use super::{deser_documents, documents, fixture, saphyr_options, yaml_serde_documents};

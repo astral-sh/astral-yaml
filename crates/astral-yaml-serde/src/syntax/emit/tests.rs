@@ -516,7 +516,7 @@ fn normalized_syntax_preserves_values_and_comments() {
     // The same representation graph may have different presentations, including different node styles.
     // The editor also retains the text of every comment.
     // https://yaml.org/spec/1.2.2/#323-presentation-stream
-    use astral_yaml_dev::Value;
+    use crate::Value;
     for source in [
         "42",
         "'null'",

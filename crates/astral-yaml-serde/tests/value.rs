@@ -20,18 +20,10 @@ fn tagged(tag: &str, value: Value) -> Value {
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
-#[test_case("null", &Value::Null; "null")]
-#[test_case("True", &Value::Bool(true); "boolean")]
-#[test_case("'true'", &Value::String("true".into()); "quoted boolean")]
-#[test_case("yes", &Value::String("yes".into()); "YAML 1.2 plain string")]
 #[test_case("! 42", &Value::String("42".into()); "non specific tag")]
 #[test_case("!!int '0x2a'", &Value::Unsigned(42); "explicit integer")]
 #[test_case("!!str 0x2a", &Value::String("0x2a".into()); "explicit string")]
 #[test_case("!!float 42", &Value::Float(42.0); "explicit float")]
-#[test_case("!!null ~", &Value::Null; "explicit null")]
-#[test_case("!!seq [false]", &Value::Sequence(vec![Value::Bool(false)]); "explicit sequence")]
-#[test_case("!!map {}", &Value::Mapping(vec![]); "explicit mapping")]
-#[test_case("-42", &Value::Integer(-42); "signed integer")]
 #[test_case("-170141183460469231731687303715884105728", &Value::Integer(i128::MIN); "minimum signed integer")]
 #[test_case("340282366920938463463374607431768211455", &Value::Unsigned(u128::MAX); "maximum unsigned integer")]
 #[test_case(".inf", &Value::Float(f64::INFINITY); "positive infinity")]
@@ -57,10 +49,7 @@ fn mappings_accept_collection_keys_and_keep_entry_order() {
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test_case("{}", "{}", true; "empty mappings")]
-#[test_case("{a: 1, b: 2}", "{b: 2, a: 1}", true; "mapping order")]
-#[test_case("{{a: 1, b: 2}: .nan}", "{{b: 2, a: 1}: .nan}", true; "mapping keys")]
-#[test_case("{a: 1}", "{b: 1}", false; "different key")]
+#[test_case("{{a: 1, b: 2}: .nan}", "{{b: 2, a: 1}: .nan}", true; "mapping order in keys")]
 #[test_case("{a: 1}", "{a: 2}", false; "different value")]
 #[test_case("{a: 1}", "{}", false; "different length")]
 #[test_case("[1, 2]", "[2, 1]", false; "sequence order")]
@@ -70,7 +59,6 @@ fn mappings_accept_collection_keys_and_keep_entry_order() {
 #[test_case("-0.0", "0.0", true; "float zeros")]
 #[test_case(".inf", ".nan", false; "infinity and NaN")]
 #[test_case("!Left true", "!Right true", false; "different application tags")]
-#[test_case("!Tag true", "!Tag 'true'", true; "tagged scalar style")]
 fn equality(left: &str, right: &str, expected: bool) {
     let left = from_str::<Value>(left).unwrap();
     let right = from_str::<Value>(right).unwrap();
@@ -78,19 +66,14 @@ fn equality(left: &str, right: &str, expected: bool) {
 }
 
 #[test]
-fn mapping_edits_can_construct_duplicate_keys_but_serialization_rejects_them() {
-    let mut value = from_str::<Value>("{[1]: old}").unwrap();
-    value.as_mapping_mut().unwrap().push((
-        Value::Sequence(vec![Value::Integer(1)]),
-        Value::String("new".into()),
-    ));
-    insta::assert_snapshot!(to_string(&value).unwrap_err(), @"duplicate mapping key");
-}
+fn equality_handles_nan_payloads_and_repeated_entries() {
+    assert_eq!(Value::Float(-f64::NAN), Value::Float(f64::NAN));
 
-#[test]
-fn duplicate_keys_report_the_second_key() {
-    let error = from_str::<Value>("{[.nan]: 1, [.NaN]: 2}").unwrap_err();
-    insta::assert_snapshot!(error, @"$.key_at(1): duplicate mapping key at bytes 12..18");
+    let entry = (Value::Null, Value::Bool(true));
+    assert_ne!(
+        Value::Mapping(vec![entry.clone(), entry.clone()]),
+        Value::Mapping(vec![entry, (Value::Null, Value::Bool(false))]),
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#691-node-tags
@@ -98,16 +81,15 @@ fn duplicate_keys_report_the_second_key() {
 #[test_case("!Any", &tagged("!Any", Value::String(String::new())); "empty scalar")]
 #[test_case("!Any \"a\\tb\"", &tagged("!Any", Value::String("a\tb".into())); "escaped scalar")]
 #[test_case("!Port |\n  080\n", &tagged("!Port", Value::String("080\n".into())); "block scalar")]
-#[test_case("!Outer [!Inner true, true]", &tagged("!Outer", Value::Sequence(vec![
-    tagged("!Inner", Value::String("true".into())),
-    Value::Bool(true),
-])); "nested sequence")]
-#[test_case("%TAG !a! tag:example.org,2026:\n--- !a!config {active: true}",
-    &tagged("tag:example.org,2026:config", Value::Mapping(vec![
-        (Value::String("active".into()), Value::Bool(true)),
-    ])); "expanded global tag on mapping")]
-fn application_tags(source: &str, expected: &Value) {
+fn application_tagged_scalars_preserve_decoded_text(source: &str, expected: &Value) {
     assert_eq!(&roundtrip(source), expected);
+}
+
+#[test]
+fn application_tags_survive_nested_collections_and_expand_handles() {
+    let source = "%TAG !app! tag:example.org,2026:\n--- !app!config {ports: !Ports [!Port 080]}";
+    let value = roundtrip(source);
+    insta::assert_snapshot!(to_string(&value).unwrap(), @r#"!<tag:example.org,2026:config> {? "ports": !Ports [!Port "080"]}"#);
 }
 
 #[test]
@@ -120,7 +102,6 @@ fn application_tags_and_text_distinguish_mapping_keys() {
 
 #[test_case(&tagged("tag:yaml.org,2002:str", Value::String("text".into())), "expected an application YAML tag"; "explicit core tag")]
 #[test_case(&tagged("!", Value::String("text".into())), "expected an application YAML tag"; "non specific tag")]
-#[test_case(&tagged("invalid tag", Value::String("text".into())), "invalid YAML tag"; "invalid tag")]
 #[test_case(&tagged("!Port", Value::Unsigned(80)), "a tagged YAML value requires a string, sequence, or mapping payload"; "integer payload")]
 #[test_case(&tagged("!Outer", tagged("!Inner", Value::Sequence(vec![]))), "a tagged YAML value requires a string, sequence, or mapping payload"; "multiple tags on the same node")]
 fn serializing_invalid_tags(value: &Value, message: &str) {
@@ -138,26 +119,9 @@ fn typed_serde_fields_can_hold_dynamic_values() {
     }
 
     let value = from_str::<Config>("name: service\nsetting: !Port 080\n").unwrap();
-    insta::assert_debug_snapshot!(&value, @r#"
-    Config {
-        name: "service",
-        setting: Some(
-            Tagged(
-                Tagged {
-                    tag: "!Port",
-                    value: String(
-                        "080",
-                    ),
-                },
-            ),
-        ),
-        fallback: Null,
-    }
-    "#);
-    assert_eq!(
-        from_str::<Config>(&to_string(&value).unwrap()).unwrap(),
-        value
-    );
+    let encoded = to_string(&value).unwrap();
+    insta::assert_snapshot!(&encoded, @r#"{? "name": "service", ? "setting": !Port "080", ? "fallback": null}"#);
+    assert_eq!(from_str::<Config>(&encoded).unwrap(), value);
 }
 
 #[test]

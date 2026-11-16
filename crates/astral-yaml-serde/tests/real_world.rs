@@ -1,5 +1,5 @@
-use astral_yaml_dev::Value;
 use astral_yaml_dev::fixtures::manifest;
+use astral_yaml_serde::Value;
 
 #[test]
 fn real_world_values_comments_and_serialization() {

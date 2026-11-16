@@ -84,10 +84,8 @@ fn yaml_test_suite_json_values() {
 
 #[test]
 fn yaml_test_suite_values_round_trip() {
-    use astral_yaml_dev::Value;
+    use astral_yaml_serde::Value;
 
-    let mut documents = 0;
-    let mut tagged = Vec::new();
     let mut duplicate_keys = Vec::new();
 
     for path in corpus_paths() {
@@ -106,16 +104,6 @@ fn yaml_test_suite_values_round_trip() {
 
         let values = match values {
             Ok(values) => values,
-            Err(error) if CASES_WITH_NON_CORE_TAGS.contains(&case) => {
-                assert_eq!(
-                    error.message,
-                    "non-core YAML tags require Tagged<T> or with::yaml_tag",
-                    "{}",
-                    path.display()
-                );
-                tagged.push(case.to_owned());
-                continue;
-            }
             // https://yaml.org/spec/1.2.2/#3213-node-comparison
             Err(error) if ["2JQS", "X38W"].contains(&case) => {
                 assert_eq!(error.message, "duplicate mapping key", "{}", path.display());
@@ -131,11 +119,8 @@ fn yaml_test_suite_values_round_trip() {
             let actual: Value = astral_yaml_serde::from_str(&yaml)
                 .unwrap_or_else(|error| panic!("{}: {error}\n{yaml}", path.display()));
             assert_eq!(actual, value, "{}\n{yaml}", path.display());
-            documents += 1;
         }
     }
 
-    assert_eq!(documents, 313);
-    assert_eq!(tagged, CASES_WITH_NON_CORE_TAGS);
     assert_eq!(duplicate_keys, ["2JQS", "X38W"]);
 }

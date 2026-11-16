@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use astral_yaml_dev::{Value, benchmarks};
-use astral_yaml_serde::{Spanned, from_str, to_string};
+use astral_yaml_dev::benchmarks;
+use astral_yaml_serde::{Spanned, Value, from_str, to_string};
 use benchmarks::{FIXTURES, documents};
 
 type Fields = Spanned<BTreeMap<String, Spanned<Value>>>;
@@ -32,8 +32,8 @@ fn main() {
 }
 
 mod astral {
-    use astral_yaml_dev::{Value, benchmarks};
-    use astral_yaml_serde::{Spanned, to_string};
+    use astral_yaml_dev::benchmarks;
+    use astral_yaml_serde::{Spanned, Value, to_string};
     use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
     use divan::{Bencher, black_box};
 
@@ -124,8 +124,8 @@ mod astral {
 
 #[cfg(feature = "editable")]
 mod editable {
-    use astral_yaml_dev::{Value, indoc};
-    use astral_yaml_serde::Editable;
+    use astral_yaml_dev::indoc;
+    use astral_yaml_serde::{Editable, Value};
     use divan::{Bencher, black_box};
 
     const SOURCE: &str = indoc! {r"
