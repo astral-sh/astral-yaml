@@ -3,7 +3,7 @@ use test_case::test_case;
 mod support;
 
 use astral_yaml_dev::diagnostic_snapshot;
-use astral_yaml_serde::{Error, Tagged, from_str, to_string};
+use astral_yaml_serde::{Error, Tagged, Value, from_str, to_string};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,8 @@ fn every_integer_width_checks_its_boundaries() {
                 for value in [<$ty>::MIN, 0, <$ty>::MAX] {
                     let yaml = to_string(&value).unwrap();
                     assert_eq!(from_str::<$ty>(&yaml).unwrap(), value);
+                    let tree = from_str::<Value>(&yaml).unwrap();
+                    assert_eq!(<$ty>::deserialize(&tree).unwrap(), value);
                 }
 
                 assert!(from_str::<$ty>(&format!("{}0", <$ty>::MAX)).is_err());
@@ -136,7 +138,10 @@ fn bytes_borrow_or_decode_as_needed() {
         "!!seq [97, 98, 99]",
         "! abc",
     ] {
-        assert_eq!(from_str::<Bytes>(source).unwrap(), Bytes(b"abc".to_vec()));
+        let bytes = from_str::<Bytes>(source).unwrap();
+        assert_eq!(bytes, Bytes(b"abc".to_vec()));
+        let tree = from_str::<Value>(source).unwrap();
+        assert_eq!(Bytes::deserialize(&tree).unwrap(), bytes);
     }
 
     assert_eq!(
@@ -149,6 +154,9 @@ fn bytes_borrow_or_decode_as_needed() {
     assert_eq!(borrowed, b"abc");
     assert!(std::ptr::eq(borrowed.as_ptr(), source[1..].as_ptr()));
     assert!(from_str::<&[u8]>("\"a\\nb\"").is_err());
+
+    let value: Value = from_str(source).unwrap();
+    assert_eq!(<&[u8]>::deserialize(&value).unwrap(), b"abc");
 
     for bytes in [vec![], vec![0, 1, 128, 255]] {
         let value = Bytes(bytes);
@@ -191,6 +199,8 @@ fn ignored_fields_accept_numbers_outside_native_ranges(extra: &str) {
 fn ignored_fields_still_validate_their_values() {
     let value = from_str::<Known>("known: 1\nextra: [null, {a: true}]").unwrap();
     assert_eq!(value, Known { known: 1 });
+    let tree = from_str::<Value>("known: 1\nextra: !Note text").unwrap();
+    assert_eq!(Known::deserialize(&tree).unwrap(), value);
 
     // Mapping keys must be unique and explicit core tags must match their content.
     // The cyclic sequence exercises the Serde traversal limit.

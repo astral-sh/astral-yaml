@@ -42,12 +42,13 @@ struct Pair(i16, String);
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Unit;
 
-fn roundtrip<T>(value: &T)
+fn roundtrip<T>(value: &T) -> String
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug,
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
+    yaml
 }
 
 // The explicit cases use tag shorthands, a verbatim tag and the non-specific `!`.
@@ -99,6 +100,8 @@ fn derived_types() {
 
     let yaml = to_string(&config).unwrap();
     assert_eq!(from_str::<Configuration<'_>>(&yaml).unwrap(), config);
+    let value = from_str::<Value>(source).unwrap();
+    assert_eq!(Configuration::deserialize(&value).unwrap(), config);
 
     for value in [
         Kind::Unit,
@@ -106,7 +109,9 @@ fn derived_types() {
         Kind::Tuple(7, false),
         Kind::Struct { value: -2 },
     ] {
-        roundtrip(&value);
+        let yaml = roundtrip(&value);
+        let tree = from_str::<Value>(&yaml).unwrap();
+        assert_eq!(Kind::deserialize(&tree).unwrap(), value, "{yaml:?}");
     }
 
     roundtrip(&Wrapper(42));
@@ -129,6 +134,30 @@ fn derived_types() {
     );
     assert_eq!(from_tag::<Kind>("!Unit").unwrap(), Kind::Unit);
     assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
+}
+
+#[test]
+fn struct_values_require_mappings() {
+    let value = from_str::<Value>("[astral, true, 1, 1.5, [], null]").unwrap();
+    insta::assert_snapshot!(Configuration::deserialize(&value).unwrap_err(), @"expected a mapping");
+}
+
+#[test]
+fn struct_variant_values_require_mappings() {
+    let value = from_str::<Value>("{Struct: [42]}").unwrap();
+    insta::assert_snapshot!(Kind::deserialize(&value).unwrap_err(), @"expected a mapping");
+}
+
+#[test_case("[]"; "sequence")]
+#[test_case("{Unit: null, Other: null}"; "multiple variants")]
+#[test_case("{true: null}"; "non-string enum name")]
+#[test_case("!Unit"; "application tag")]
+fn enum_values_require_a_name_or_single_entry(source: &str) {
+    let value = from_str::<Value>(source).unwrap();
+    assert_eq!(
+        Kind::deserialize(&value).unwrap_err().message,
+        "expected an enum name or a single-entry mapping"
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
@@ -365,10 +394,16 @@ fn all_string_characters_and_complex_keys() {
     roundtrip(&'🌍');
     assert!(from_str::<char>("ab").is_err());
 
-    roundtrip(&BTreeMap::from([
+    let keyed = BTreeMap::from([
         (vec![1, 2], "first".to_owned()),
         (vec![], "second".to_owned()),
-    ]));
+    ]);
+    let yaml = roundtrip(&keyed);
+    let tree = from_str::<Value>(&yaml).unwrap();
+    assert_eq!(
+        BTreeMap::<Vec<i32>, String>::deserialize(&tree).unwrap(),
+        keyed
+    );
 
     // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let map: BTreeMap<String, Vec<String>> = from_str("a: &a [one, two]\nb: *a\n").unwrap();
@@ -653,7 +688,8 @@ fn arbitrary_values_report_integer_overflow(source: &str) {
 
 #[test]
 fn arbitrary_values_and_alias_limits() {
-    from_str::<Value>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    let value = from_str::<Value>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
     assert!(from_str::<Value>("!Config {key: 1, key: 2}").is_err());
     assert!(from_str::<Value>("&a !Values [*a]").is_err());
 

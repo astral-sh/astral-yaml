@@ -4,9 +4,17 @@ use serde::ser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+mod de;
+
 pub(crate) const NAME: &str = "$astral_yaml::Value";
 
 /// An owned YAML value that can be read and written through Serde.
+///
+/// Pass `&Value` to [`Deserialize::deserialize`] to decode a Rust type from the
+/// stored values, with borrowing supported. The tree lacks original scalar
+/// spellings and source metadata. Ordinary enums use string names and
+/// single-entry mappings. Mapping entries are passed to the destination in
+/// order, including duplicates in manually built values.
 ///
 /// Explicit core tags resolve through the YAML 1.2 core schema. Application
 /// tags retain their expanded name and decoded scalar text, so `!Port 080`
@@ -20,12 +28,15 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 ///
 /// ```
 /// use astral_yaml_serde::{Value, from_str, to_string};
+/// use serde::Deserialize;
 ///
 /// let mut ports: Value = from_str("[80, 443]")?;
 /// if let Some(items) = ports.as_sequence_mut() {
+///     assert_eq!(u16::deserialize(&items[0])?, 80);
 ///     items.push(Value::Unsigned(8080));
 /// }
 /// assert_eq!(to_string(&ports)?, "[80, 443, 8080]\n");
+/// assert_eq!(Vec::<u16>::deserialize(&ports)?, [80, 443, 8080]);
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
 #[derive(Clone, Debug, Default, Serialize)]
