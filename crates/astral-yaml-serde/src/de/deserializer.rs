@@ -11,6 +11,34 @@ use std::collections::HashSet;
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Options for deserializing a YAML document.
+///
+/// The nesting and expanded scalar byte limits apply independently of these options.
+///
+/// ```
+/// use astral_yaml_serde::{DeserializeOptions, from_str_with_options};
+///
+/// let ports: Vec<u16> = from_str_with_options(
+///     "[80, 443]",
+///     DeserializeOptions { max_work: 2_000_000 },
+/// ).unwrap();
+/// assert_eq!(ports, [80, 443]);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct DeserializeOptions {
+    /// Maximum work units per document, including node visits, alias traversal,
+    /// and comment processing. Defaults to 1,000,000.
+    pub max_work: usize,
+}
+
+impl Default for DeserializeOptions {
+    fn default() -> Self {
+        Self {
+            max_work: 1_000_000,
+        }
+    }
+}
+
 fn is_core_tag(tag: &str) -> bool {
     tag == "!" || CoreType::from_tag(tag).is_some()
 }
@@ -30,8 +58,20 @@ fn is_core_tag(tag: &str) -> bool {
 /// Returns an error if `source` is invalid YAML, does not contain exactly one
 /// document, cannot be deserialized as `T`, or exceeds a resource limit.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
+    from_str_with_options(source, DeserializeOptions::default())
+}
+
+/// Deserialize a YAML 1.2 document with an explicit Serde work limit.
+/// Syntax parsing uses the default limits from [`astral_yaml::parse`].
+///
+/// # Errors
+/// Returns the same kinds of errors as [`from_str`], using the supplied work limit.
+pub fn from_str_with_options<'de, T: Deserialize<'de>>(
+    source: &'de str,
+    options: DeserializeOptions,
+) -> Result<T> {
     let stream = astral_yaml::parse(source)?;
-    from_stream(&stream)
+    from_stream_with_options(&stream, options)
 }
 
 /// Deserialize a parsed stream containing exactly one document.
@@ -40,11 +80,23 @@ pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
 /// Returns an error if the stream does not contain exactly one document,
 /// the value cannot be deserialized as `T`, or a resource limit is exceeded.
 pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> {
+    from_stream_with_options(stream, DeserializeOptions::default())
+}
+
+/// Deserialize a parsed stream containing exactly one document with an
+/// explicit Serde work limit.
+///
+/// # Errors
+/// Returns the same kinds of errors as [`from_stream`], using the supplied work limit.
+pub fn from_stream_with_options<'de, T: Deserialize<'de>>(
+    stream: &Stream<'de>,
+    options: DeserializeOptions,
+) -> Result<T> {
     if stream.documents().len() != 1 {
         return Err(Error::at("expected exactly one document", stream.span()));
     }
 
-    from_document(stream, 0)
+    from_document_with_options(stream, 0, options)
 }
 
 /// Deserialize the document at zero-based `index` in `stream`.
@@ -53,18 +105,31 @@ pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> 
 /// Returns an error if `index` is out of bounds, the value cannot be deserialized
 /// as `T`, or a resource limit is exceeded.
 pub fn from_document<'de, T: Deserialize<'de>>(stream: &Stream<'de>, index: usize) -> Result<T> {
+    from_document_with_options(stream, index, DeserializeOptions::default())
+}
+
+/// Deserialize the document at zero-based `index` with an explicit Serde work limit.
+/// Each call starts with the full work allowance.
+///
+/// # Errors
+/// Returns the same kinds of errors as [`from_document`], using the supplied work limit.
+pub fn from_document_with_options<'de, T: Deserialize<'de>>(
+    stream: &Stream<'de>,
+    index: usize,
+    options: DeserializeOptions,
+) -> Result<T> {
     let doc = stream
         .documents()
         .get(index)
         .ok_or_else(|| Error::at("document index out of bounds", stream.span()))?;
 
-    Context::new(Parsed::new(stream, index)).deserialize(doc.root)
+    Context::new(Parsed::new(stream, index), options).deserialize(doc.root)
 }
 
 #[cfg(feature = "editable")]
 impl<'de> crate::syntax::ValueRef<'de> {
     pub(crate) fn deserialize<T: Deserialize<'de>>(self) -> Result<T> {
-        Context::new(self).deserialize(self.root())
+        Context::new(self, DeserializeOptions::default()).deserialize(self.root())
     }
 }
 
@@ -76,10 +141,10 @@ struct Context<I> {
 }
 
 impl<I> Context<I> {
-    fn new(input: I) -> Self {
+    fn new(input: I, options: DeserializeOptions) -> Self {
         Self {
             input,
-            budget: Budget::new(1_000_000),
+            budget: Budget::new(options.max_work),
             scalar_budget: Budget::new(64 * 1024 * 1024),
         }
     }
@@ -111,7 +176,7 @@ impl<I> Context<I> {
 /// Check each mapping in the editable document independently of that visitor.
 #[cfg(feature = "editable")]
 pub(crate) fn check_document_keys(stream: &Stream<'_>) -> Result<()> {
-    let context = Context::new(Parsed::new(stream, 0));
+    let context = Context::new(Parsed::new(stream, 0), DeserializeOptions::default());
     for (index, node) in stream.nodes().iter().enumerate() {
         if let astral_yaml::NodeKind::Mapping { entries, .. } = &node.kind
             && entries.len() > 1
@@ -131,7 +196,7 @@ pub(crate) fn canonical_key(source: &str) -> Result<String> {
     let stream = astral_yaml::parse(source)?;
     // The serializer emits exactly one node for each key.
     let document = &stream.documents()[0];
-    let context = Context::new(Parsed::new(&stream, 0));
+    let context = Context::new(Parsed::new(&stream, 0), DeserializeOptions::default());
     let key = context.deserializer(document.root).key(&mut Vec::new())?;
 
     let mut identity = String::new();
@@ -1492,7 +1557,10 @@ mod tests {
             .unwrap();
         let context = Context {
             scalar_budget: Budget::new(bytes),
-            ..Context::new(super::Parsed::new(&stream, 0))
+            ..Context::new(
+                super::Parsed::new(&stream, 0),
+                super::DeserializeOptions::default(),
+            )
         };
 
         let result = context

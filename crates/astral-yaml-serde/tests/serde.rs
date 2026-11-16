@@ -4,7 +4,10 @@ use test_case::test_case;
 
 mod support;
 
-use astral_yaml_serde::{from_str, from_stream, to_string};
+use astral_yaml_serde::{
+    DeserializeOptions, from_document_with_options, from_str, from_str_with_options, from_stream,
+    from_stream_with_options, to_string,
+};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -538,6 +541,28 @@ fn located_failures_and_document_count() {
 
     let stream = astral_yaml::parse("42").unwrap();
     assert_eq!(from_stream::<u64>(&stream).unwrap(), 42);
+}
+
+#[test]
+fn serde_work_limit_counts_alias_visits() {
+    let source = "[&item value, *item]";
+    let options = DeserializeOptions { max_work: 3 };
+    let error = from_str_with_options::<Vec<&str>>(source, options).unwrap_err();
+    assert_eq!(error.message, "deserialization resource limit exceeded");
+
+    let stream = astral_yaml::parse(source).unwrap();
+    let options = DeserializeOptions { max_work: 4 };
+    let values: Vec<&str> = from_stream_with_options(&stream, options).unwrap();
+    assert_eq!(values, ["value", "value"]);
+}
+
+#[test]
+fn serde_work_limit_applies_to_each_document_independently() {
+    let stream = astral_yaml::parse("--- [one]\n--- [two]\n").unwrap();
+    let options = DeserializeOptions { max_work: 2 };
+    let first: Vec<&str> = from_document_with_options(&stream, 0, options).unwrap();
+    let second: Vec<&str> = from_document_with_options(&stream, 1, options).unwrap();
+    assert_eq!((first, second), (vec!["one"], vec!["two"]));
 }
 
 // https://yaml.org/spec/1.2.2/#81-block-scalar-styles
