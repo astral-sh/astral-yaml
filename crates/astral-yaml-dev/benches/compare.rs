@@ -1,6 +1,5 @@
-use astral_yaml_dev::benchmarks;
+use astral_yaml_dev::benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 use astral_yaml_serde::Value;
-use benchmarks::{FIXTURES, ServiceConfig, documents, fixture, services_fixture};
 use serde::Deserialize;
 
 fn deser_documents<'a, T: deser::Deserialize<'a>>(source: &'a str) -> Vec<T> {
@@ -61,7 +60,7 @@ fn main() {
     for &(name, source) in FIXTURES {
         parse::check_counts(name, source);
 
-        let values = benchmarks::astral(source);
+        let values = documents::<Value>(source);
         assert_eq!(values, yaml_serde_documents(source));
         assert_eq!(
             values,

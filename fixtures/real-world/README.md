@@ -60,9 +60,9 @@ comments. Benchmark inputs stay fixed as the corpus changes.
 ## Syntax and construction cases
 
 The manifest records syntax rejections separately from construction errors.
-These inputs stay unmodified and remain covered by snapshots and assertions.
-The manifest records errors from deserializing without tag capture in
-`serde_error`. Round-trip tests use `Value` to preserve application tags.
+`serde_error` describes construction errors when reading without tag capture.
+The `Value` round-trip tests preserve application tags and check the recorded
+duplicate-key error.
 
 `sentry-compose.yaml` is a syntax rejection. The closing bracket in
 `seaweedfs.healthcheck.test` is at the mapping key's indentation rather than

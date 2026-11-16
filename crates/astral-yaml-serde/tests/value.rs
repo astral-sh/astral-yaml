@@ -5,11 +5,11 @@ use astral_yaml_serde::{
 use serde::Deserialize;
 use test_case::test_case;
 
-fn roundtrip(source: &str) -> Value {
+fn roundtrip(source: &str) -> String {
     let value = from_str::<Value>(source).unwrap();
     let serialized = to_string(&value).unwrap();
     assert_eq!(from_str::<Value>(&serialized).unwrap(), value);
-    value
+    serialized
 }
 
 fn tagged(tag: &str, value: Value) -> Value {
@@ -51,16 +51,14 @@ fn equality_handles_nan_payloads_and_repeated_entries() {
 #[test]
 fn tagged_values_keep_the_expanded_name_and_scalar_text() {
     let source = "%TAG !app! tag:example.org,2026:\n--- !app!config [&ports !Ports [&port !Port 080, *port], *ports]";
-    let value = roundtrip(source);
-    insta::assert_snapshot!(to_string(&value).unwrap(), @r#"!<tag:example.org,2026:config> [!Ports [!Port "080", !Port "080"], !Ports [!Port "080", !Port "080"]]"#);
+    insta::assert_snapshot!(roundtrip(source), @r#"!<tag:example.org,2026:config> [!Ports [!Port "080", !Port "080"], !Ports [!Port "080", !Port "080"]]"#);
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
 #[test]
 fn core_values_roundtrip_in_mapping_keys_and_values() {
     let source = "{!Port 080: one, !Port 80: two, [0, ! 4]: !!int '0x2a', {right: 2, left: 1}: [-.inf, .inf, .nan]}";
-    let value = roundtrip(source);
-    insta::assert_snapshot!(to_string(&value).unwrap(), @r#"{? !Port "080": "one", ? !Port "80": "two", ? [0, "4"]: 42, ? {? "right": 2, ? "left": 1}: [-.inf, .inf, .nan]}"#);
+    insta::assert_snapshot!(roundtrip(source), @r#"{? !Port "080": "one", ? !Port "80": "two", ? [0, "4"]: 42, ? {? "right": 2, ? "left": 1}: [-.inf, .inf, .nan]}"#);
 }
 
 #[test_case(&tagged("tag:yaml.org,2002:str", Value::String("text".into())), "expected an application YAML tag"; "explicit core tag")]

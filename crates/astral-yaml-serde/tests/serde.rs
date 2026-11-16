@@ -535,6 +535,8 @@ fn located_failures_and_document_count() {
 
     let stream = astral_yaml::parse("42").unwrap();
     assert_eq!(from_stream::<u64>(&stream).unwrap(), 42);
+    let error = astral_yaml_serde::from_document::<Value>(&stream, 1).unwrap_err();
+    assert_eq!(error.message, "document index out of bounds");
 }
 
 #[test]
