@@ -377,6 +377,27 @@ fn properties_and_block_scalar_headers_belong_to_their_node() {
 }
 
 #[test]
+fn start_marker_can_share_a_line_with_child_syntax() {
+    let source = "--- {field: [one # item\n]} # root\n";
+    let value: Commented<'_, BTreeMap<String, Vec<Commented<'_, String>>>> =
+        from_str(source).unwrap();
+    let snapshot = comment_snapshot(
+        source,
+        &[
+            ("root", &value.comments),
+            ("item", &value["field"][0].comments),
+        ],
+    );
+    insta::assert_snapshot!(snapshot, @"
+      |
+    1 | --- {field: [one # item
+      |                  ^^^^^^ root: Inline, item: Inline
+    2 | ]} # root
+      |    ^^^^^^ root: Inline
+    ");
+}
+
+#[test]
 fn document_markers_and_gaps_stay_with_the_correct_root() {
     let source = r"# preamble
 
