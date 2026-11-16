@@ -17,6 +17,16 @@ assert config == {"ports": [80, 443], "mode": "on"}
 `load` and `loads` accept at most one document per call. Empty or
 comment-only input returns `None`. A second document raises `yaml.YAMLError`.
 
+Use `load_all` for an open text or binary file and `loads_all` for a string
+or encoded bytes. Both return a list in document order. An empty or
+comment-only stream gives `[]`, and an explicit empty document contributes
+`None`. An error in any document raises during the call.
+
+```python
+configs = yaml.loads_all("---\nmode: on\n---\nports: [80, 443]\n")
+assert configs == [{"mode": "on"}, {"ports": [80, 443]}]
+```
+
 Mapping keys must be scalars and must stay unique when converted to Python.
 For example, `{true: first, 1: second}` raises `yaml.YAMLError` because
 `True == 1` in Python.

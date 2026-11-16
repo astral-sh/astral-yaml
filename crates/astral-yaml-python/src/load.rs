@@ -18,16 +18,40 @@ use crate::{YAMLError, unicode_text};
 #[pyfunction]
 pub(super) fn loads<'py>(data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let limit = ParseOptions::default().max_input_bytes;
-    match Input::extract(data, limit)? {
-        Input::Text(text) => document(data.py(), text, None),
-        Input::Bytes(bytes) => decode(data.py(), &bytes),
-    }
+    Input::extract(data, limit)?.deserialize(data.py(), DocumentMode::Single)
 }
 
 /// Deserialize a YAML document from an open text or binary file.
 #[pyfunction]
 pub(super) fn load<'py>(fp: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    read_document(fp, ParseOptions::default().max_input_bytes)
+    read_documents(
+        fp,
+        ParseOptions::default().max_input_bytes,
+        DocumentMode::Single,
+    )
+}
+
+/// Deserialize all YAML documents from text or encoded bytes into a list.
+#[pyfunction]
+pub(super) fn loads_all<'py>(data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let limit = ParseOptions::default().max_input_bytes;
+    Input::extract(data, limit)?.deserialize(data.py(), DocumentMode::All)
+}
+
+/// Deserialize all YAML documents from an open text or binary file into a list.
+#[pyfunction]
+pub(super) fn load_all<'py>(fp: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    read_documents(
+        fp,
+        ParseOptions::default().max_input_bytes,
+        DocumentMode::All,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum DocumentMode {
+    Single,
+    All,
 }
 
 enum Input<'a> {
@@ -63,6 +87,17 @@ impl<'a> Input<'a> {
             Self::Bytes(bytes) => bytes,
         }
     }
+
+    fn deserialize<'py>(&self, py: Python<'py>, mode: DocumentMode) -> PyResult<Bound<'py, PyAny>> {
+        match self {
+            Self::Text(text) => documents(py, text, None, mode),
+            Self::Bytes(bytes) => {
+                let source =
+                    Source::from_bytes(bytes).map_err(|err| YAMLError::new_err(err.to_string()))?;
+                documents(py, source.text(), Some(&source), mode)
+            }
+        }
+    }
 }
 
 fn check_size(size: usize, limit: usize) -> PyResult<()> {
@@ -72,7 +107,11 @@ fn check_size(size: usize, limit: usize) -> PyResult<()> {
     Ok(())
 }
 
-fn read_document<'py>(fp: &Bound<'py, PyAny>, limit: usize) -> PyResult<Bound<'py, PyAny>> {
+fn read_documents<'py>(
+    fp: &Bound<'py, PyAny>,
+    limit: usize,
+    mode: DocumentMode,
+) -> PyResult<Bound<'py, PyAny>> {
     let read = fp
         .getattr_opt(pyo3::intern!(fp.py(), "read"))?
         .ok_or_else(|| {
@@ -93,20 +132,15 @@ fn read_document<'py>(fp: &Bound<'py, PyAny>, limit: usize) -> PyResult<Bound<'p
         }
 
         if input.as_bytes().is_empty() {
-            return if is_text {
-                let source = std::str::from_utf8(&buffer).expect("buffer contains only UTF-8 text");
-                document(fp.py(), source, None)
+            let input = if is_text {
+                Input::Text(std::str::from_utf8(&buffer).expect("buffer contains only UTF-8 text"))
             } else {
-                decode(fp.py(), &buffer)
+                Input::Bytes(Cow::Borrowed(&buffer))
             };
+            return input.deserialize(fp.py(), mode);
         }
         buffer.extend_from_slice(input.as_bytes());
     }
-}
-
-fn decode<'py>(py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyAny>> {
-    let source = Source::from_bytes(bytes).map_err(|err| YAMLError::new_err(err.to_string()))?;
-    document(py, source.text(), Some(&source))
 }
 
 fn located(message: impl fmt::Display, span: Span, source: Option<&Source<'_>>) -> PyErr {
@@ -120,23 +154,27 @@ fn located(message: impl fmt::Display, span: Span, source: Option<&Source<'_>>) 
     ))
 }
 
-fn document<'py>(
+fn documents<'py>(
     py: Python<'py>,
     text: &str,
     encoded: Option<&Source<'_>>,
+    mode: DocumentMode,
 ) -> PyResult<Bound<'py, PyAny>> {
     let stream = astral_yaml::parse(text).map_err(|err| located(err.message, err.span, encoded))?;
-    match stream.documents() {
-        [] => Ok(py.None().into_bound(py)),
-        [doc] => Loader {
-            py,
-            stream: &stream,
-            encoded,
-            anchors: HashMap::new(),
-            key_work: Budget::new(ParseOptions::default().max_input_bytes),
-        }
-        .value(doc.root),
-        [_, second, ..] => Err(located("expected one YAML document", second.span, encoded)),
+    let mut loader = Loader {
+        py,
+        stream: &stream,
+        encoded,
+        anchors: HashMap::new(),
+        key_work: Budget::new(ParseOptions::default().max_input_bytes),
+    };
+    match mode {
+        DocumentMode::Single => match stream.documents() {
+            [] => Ok(py.None().into_bound(py)),
+            [doc] => loader.value(doc.root),
+            [_, second, ..] => Err(located("expected one YAML document", second.span, encoded)),
+        },
+        DocumentMode::All => Ok(loader.all()?.into_any()),
     }
 }
 
@@ -149,6 +187,15 @@ struct Loader<'py, 'a> {
 }
 
 impl<'py> Loader<'py, '_> {
+    fn all(mut self) -> PyResult<Bound<'py, PyList>> {
+        let list = PyList::empty(self.py);
+        for doc in self.stream.documents() {
+            list.append(self.value(doc.root)?)?;
+            self.anchors = HashMap::new();
+        }
+        Ok(list)
+    }
+
     fn error(&self, message: impl fmt::Display, span: Span) -> PyErr {
         located(message, span, self.encoded)
     }
