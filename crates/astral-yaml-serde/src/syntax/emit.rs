@@ -524,22 +524,22 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         Ok(())
     }
 
-    /// Close a flow collection, keeping full-line suffix comments inside its delimiters.
-    /// An inline comment on the closing delimiter stays outside.
+    /// Close a flow collection after writing the suffix comments that belong inside it.
     fn flow_end(
         &mut self,
         delimiter: &str,
         id: NodeId,
         comments: &mut Comments<'_, Location>,
         indent: usize,
-        mut needs_separator: bool,
+        has_entries: bool,
     ) -> Result<(), Error> {
+        let mut needs_separator = has_entries;
         let node_span = self.document.nodes[id.index()].span.into();
         while let Some(comment) = comments.take_if(|comment| {
-            let full_line = matches!(
-                comment.placement,
-                CommentPlacement::Trailing | CommentPlacement::Detached
-            );
+            // Without a last entry, full-line comments inside the delimiters
+            // are detached. Emit a trailing comment after the closing token.
+            let full_line = comment.placement == CommentPlacement::Detached
+                || (has_entries && comment.placement == CommentPlacement::Trailing);
             let inside = comment
                 .span
                 .into()

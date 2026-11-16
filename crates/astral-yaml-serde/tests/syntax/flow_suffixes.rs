@@ -4,8 +4,9 @@
 
 use test_case::test_case;
 
-use super::support::normalize;
-use crate::syntax::DocumentSyntax;
+use super::support::{edited, normalize};
+use crate::syntax::{DocumentSyntax, Editor};
+use astral_yaml::Error;
 use astral_yaml_dev::{formatdoc, indoc};
 
 #[test]
@@ -220,4 +221,28 @@ fn flow_comment_layouts_normalize_idempotently(open: &str, body: &str, close: &s
             }
         }
     }
+}
+
+#[test_case("[x,\n # c\n]", |editor| editor.remove_item(editor.root(), 0) => "[]\n# c\n"; "sequence")]
+#[test_case("{x: y,\n # c\n}", |editor| editor.remove_entry(editor.root(), 0) => "{}\n# c\n"; "mapping")]
+fn removing_the_last_entry_keeps_the_collection_trailing_comment(
+    source: &str,
+    operation: fn(&mut Editor<'_>) -> Result<(), Error>,
+) -> String {
+    edited(source, operation).into_yaml()
+}
+
+#[test]
+fn an_empty_complex_key_keeps_its_exterior_trailing_comment() {
+    let source = "? []\n # q\n: value";
+    let mut document = DocumentSyntax::parse(source).unwrap();
+    document
+        .edit(|root| root.into_mapping()?.set("other", true).map(|_| ()))
+        .unwrap();
+    insta::assert_snapshot!(document.source(), @r#"
+    ? []
+    # q
+    : value
+    "other": true
+    "#);
 }
