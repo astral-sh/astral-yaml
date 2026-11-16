@@ -9,6 +9,7 @@ use serde::ser::{self, SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU8;
 use support::YamlTag;
 
 // A YAML integer can exceed the range of the requested native type.
@@ -237,6 +238,48 @@ fn enum_payloads_and_aliases() {
     ] {
         assert!(from_str::<Variant>(source).is_err(), "{source}");
     }
+}
+
+#[test_case("[1, 0, 3]", from_str::<Vec<NonZeroU8>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+1 | [1, 0, 3]
+  |     ^ $[1]: invalid value: integer `0`, expected a nonzero u8
+"); "sequence item")]
+#[test_case("{1: a, 0: b}", from_str::<BTreeMap<NonZeroU8, String>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+1 | {1: a, 0: b}
+  |        ^ $.key_at(1): invalid value: integer `0`, expected a nonzero u8
+"); "mapping key")]
+#[test_case("{limit: [1, 0]}", from_str::<BTreeMap<String, Vec<NonZeroU8>>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @r#"
+  |
+1 | {limit: [1, 0]}
+  |             ^ $["limit"][1]: invalid value: integer `0`, expected a nonzero u8
+"#); "nested value")]
+#[test_case("{limit: 0}", from_str::<BTreeMap<String, NonZeroU8>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @r#"
+  |
+1 | {limit: 0}
+  |         ^ $["limit"]: invalid value: integer `0`, expected a nonzero u8
+"#); "mapping value")]
+#[test_case("{Ok: 0}", from_str::<Result<NonZeroU8, String>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @r#"
+  |
+1 | {Ok: 0}
+  |      ^ $["Ok"]: invalid value: integer `0`, expected a nonzero u8
+"#); "variant payload")]
+#[test_case("{Other: 1}", from_str::<Result<NonZeroU8, String>> => with |diagnostic| insta::assert_snapshot!(diagnostic, @r#"
+  |
+1 | {Other: 1}
+  |  ^^^^^ $["Other"]: unknown variant `Other`, expected `Ok` or `Err`
+"#); "unknown variant")]
+#[test_case("[&n 0, *n]", from_str::<(u8, NonZeroU8)> => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+1 | [&n 0, *n]
+  |        ^^ $[1]: invalid value: integer `0`, expected a nonzero u8
+"); "alias use")]
+fn visitor_errors_point_to_the_rejected_value<'de, T: fmt::Debug>(
+    source: &'de str,
+    parse: fn(&'de str) -> Result<T, Error>,
+) -> String {
+    diagnostic_snapshot(source, parse(source).unwrap_err())
 }
 
 // Custom visitors exercise consumption and access-order contracts.
