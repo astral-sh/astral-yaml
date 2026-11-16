@@ -27,7 +27,6 @@ enum Presentation {
 pub(super) struct Layout {
     tails: Vec<Tail>,
     presentation: Vec<Presentation>,
-    descendant_inline: bool,
 }
 
 impl Layout {
@@ -40,21 +39,15 @@ impl Layout {
         let mut layout = Self {
             tails: vec![Tail::Closed; document.nodes.len()],
             presentation: vec![Presentation::Unchanged; document.nodes.len()],
-            descendant_inline: false,
         };
         while let Some((id, prefix_before_slot)) = pending.pop() {
             let node = &document.nodes[id.index()];
             order.push(id);
-            if id != document.root {
-                layout.descendant_inline |= node
-                    .comments
-                    .iter()
-                    .any(|comment| comment.placement == CommentPlacement::Inline);
-                if emit::block_collection(&node.kind, false)
-                    && !emit::block_headers_cover_comments(node, prefix_before_slot)
-                {
-                    layout.presentation[id.index()] = Presentation::FlowCollection;
-                }
+            if id != document.root
+                && emit::block_collection(&node.kind, false)
+                && !emit::block_headers_cover_comments(node, prefix_before_slot)
+            {
+                layout.presentation[id.index()] = Presentation::FlowCollection;
             }
             let header = node.anchor.is_some() || node.tag.is_some();
             match &node.kind {
@@ -160,12 +153,6 @@ impl Layout {
 
     pub(super) fn flow(&self, id: NodeId) -> bool {
         matches!(self.presentation[id.index()], Presentation::FlowCollection)
-    }
-
-    /// Return whether the root must start on a separate line from the document marker.
-    /// Otherwise its descendants' inline comments could attach to that marker.
-    pub(super) fn separate_root(&self) -> bool {
-        self.descendant_inline
     }
 
     pub(super) fn scalar_style(&self, id: NodeId, style: ScalarStyle) -> ScalarStyle {

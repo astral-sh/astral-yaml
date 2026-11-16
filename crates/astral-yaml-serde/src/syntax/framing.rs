@@ -142,7 +142,6 @@ pub(super) fn prepare(
     // framing outside the complete subtree rewrite, not just the root token.
     let root_start = splice::region(original, original.root, OuterComments::Exclude).start();
     let root_line = (layout.inline.start.is_some()
-        || syntax.separate_root()
         || (original.nodes[original.root.index()].span.is_empty() && !insertions.is_empty()))
         && original
             .start_marker
