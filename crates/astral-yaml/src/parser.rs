@@ -3,8 +3,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::{
-    CollectionStyle, Comment, Directive, Document, Entry, Error, Node, NodeId, NodeKind, Property,
-    Scalar, ScalarStyle, Span, Stream,
+    Budget, CollectionStyle, Comment, Directive, Document, Entry, Error, Node, NodeId, NodeKind,
+    Property, Scalar, ScalarStyle, Span, Stream,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -113,10 +113,10 @@ pub fn parse_with_options(source: &str, options: ParseOptions) -> Result<Stream<
         comments: Vec::new(),
         anchors: HashMap::new(),
         tags: HashMap::new(),
-        remaining_tag_bytes: options.max_input_bytes,
+        tag_bytes: Budget::new(options.max_input_bytes),
         byte_order_marks: Vec::new(),
         document_end_markers: Vec::new(),
-        elements: 0,
+        elements: Budget::new(options.max_nodes),
         deepest_node: 0,
         line_start: 0,
         lf_window: Cell::new(Span::default()),
@@ -135,10 +135,10 @@ struct Parser<'source> {
     comments: Vec<Comment<'source>>,
     anchors: HashMap<&'source str, NodeId>,
     tags: HashMap<&'source str, &'source str>,
-    remaining_tag_bytes: usize,
+    tag_bytes: Budget,
     byte_order_marks: Vec<Span>,
     document_end_markers: Vec<Span>,
-    elements: usize,
+    elements: Budget,
     deepest_node: usize,
     line_start: usize,
     lf_window: Cell<Span>,
@@ -235,13 +235,10 @@ impl<'source> Parser<'source> {
         true
     }
 
-    fn reserve_element(&mut self) -> Result<()> {
-        if self.elements == self.options.max_nodes {
-            return Err(self.error("syntax element limit exceeded"));
-        }
-
-        self.elements += 1;
-        Ok(())
+    fn reserve_element(&self) -> Result<()> {
+        self.elements
+            .try_charge(1)
+            .ok_or_else(|| self.error("syntax element limit exceeded"))
     }
 
     fn comment(&mut self) -> Result<()> {
@@ -1136,7 +1133,7 @@ impl<'source> Parser<'source> {
         })
     }
 
-    fn shorthand_tag(&mut self, start: usize) -> Result<Cow<'source, str>> {
+    fn shorthand_tag(&self, start: usize) -> Result<Cow<'source, str>> {
         let raw = &self.source[start..self.pos];
         if raw == "!" {
             return Ok(Cow::Borrowed(raw));
@@ -1157,9 +1154,8 @@ impl<'source> Parser<'source> {
         }
 
         let suffix = tag_uri(suffix).ok_or_else(|| self.error("invalid tag URI"))?;
-        self.remaining_tag_bytes = self
-            .remaining_tag_bytes
-            .checked_sub(prefix.len() + suffix.len())
+        self.tag_bytes
+            .try_charge(prefix.len() + suffix.len())
             .ok_or_else(|| self.error("expanded tag byte limit exceeded"))?;
 
         let expanded = if prefix == handle {

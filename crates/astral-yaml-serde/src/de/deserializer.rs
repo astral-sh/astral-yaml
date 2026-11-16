@@ -2,12 +2,11 @@ use super::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarO
 use crate::with::yaml_tag;
 use crate::{AttachedComment, CommentPlacement, Error, commented, spanned, tagged};
 use astral_yaml::schema::{self, CoreType, ScalarType};
-use astral_yaml::{NodeId, ScalarStyle, Span, Stream};
+use astral_yaml::{Budget, NodeId, ScalarStyle, Span, Stream};
 use serde::de::{
     self, Deserialize, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
     VariantAccess, Visitor,
 };
-use std::cell::Cell;
 use std::collections::HashSet;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -71,17 +70,17 @@ impl<'de> crate::syntax::ValueRef<'de> {
 
 struct Context<I> {
     input: I,
-    budget: Cell<usize>,
+    budget: Budget,
     // Shared by expanded scalar text, enum names, and tags used as mapping keys.
-    scalar_budget: Cell<usize>,
+    scalar_budget: Budget,
 }
 
 impl<I> Context<I> {
     fn new(input: I) -> Self {
         Self {
             input,
-            budget: Cell::new(1_000_000),
-            scalar_budget: Cell::new(64 * 1024 * 1024),
+            budget: Budget::new(1_000_000),
+            scalar_budget: Budget::new(64 * 1024 * 1024),
         }
     }
 
@@ -163,22 +162,18 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     #[inline]
     fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
-        if self.depth >= 64 || self.context.budget.get() == 0 {
+        if self.depth >= 64 || self.context.budget.try_charge(1).is_none() {
             return Err(Error::at(
                 "deserialization resource limit exceeded",
                 node.span(),
             ));
         }
 
-        self.context.budget.set(self.context.budget.get() - 1);
         if let NodeKind::Scalar(scalar) = node.kind() {
-            let remaining = self
-                .context
+            self.context
                 .scalar_budget
-                .get()
-                .checked_sub(scalar.value().len())
+                .try_charge(scalar.value().len())
                 .ok_or_else(|| Error::at("expanded scalar byte limit exceeded", node.span()))?;
-            self.context.scalar_budget.set(remaining);
         }
 
         Ok(node)
@@ -283,18 +278,15 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
 
     fn comments<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         let mut comments = self.context.input.comments(self.id, &self.context.budget)?;
-        let remaining = self
-            .context
+        self.context
             .budget
-            .get()
-            .checked_sub(comments.len())
+            .try_charge(comments.len())
             .ok_or_else(|| {
                 Error::at(
                     "deserialization resource limit exceeded",
                     self.context.input.node(self.id).ok().and_then(Node::span),
                 )
             })?;
-        self.context.budget.set(remaining);
 
         comments.sort_unstable_by_key(|comment| comment.comment.span.start());
         let records = comments.iter().map(|comment| {
@@ -344,16 +336,13 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
     }
 
     fn variant_name(self, name: &'input str) -> Result<de::value::StrDeserializer<'input, Error>> {
-        let remaining = self
-            .context
+        self.context
             .scalar_budget
-            .get()
-            .checked_sub(name.len())
+            .try_charge(name.len())
             .ok_or_else(|| {
                 let span = self.context.input.node(self.id).ok().and_then(Node::span);
                 Error::at("expanded scalar byte limit exceeded", span)
             })?;
-        self.context.scalar_budget.set(remaining);
 
         Ok(de::value::StrDeserializer::new(name))
     }
@@ -553,13 +542,10 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<I>> {
         {
             // Aliases can bring the same tag into many keys. Charge for each
             // occurrence before hashing or comparing the tag text.
-            let remaining = self
-                .context
+            self.context
                 .scalar_budget
-                .get()
-                .checked_sub(tag.len())
+                .try_charge(tag.len())
                 .ok_or_else(|| Error::at("expanded key tag byte limit exceeded", node.span()))?;
-            self.context.scalar_budget.set(remaining);
 
             // Application tags define their own scalar types. Without an
             // application-specific canonical form, compare the scalar text.
@@ -1468,7 +1454,7 @@ impl<'input, 'de: 'input, I: Input<'de>> VariantAccess<'de> for Enumeration<'inp
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, Context, Deserializer, ScalarType, TagState, VariantValue};
+    use super::{Budget, Context, Deserializer, ScalarType, TagState, VariantValue};
     use serde::Deserialize;
     use serde::de::SeqAccess;
 
@@ -1504,15 +1490,17 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let context = Context::new(super::Parsed::new(&stream, 0));
-        context.scalar_budget.set(bytes);
+        let context = Context {
+            scalar_budget: Budget::new(bytes),
+            ..Context::new(super::Parsed::new(&stream, 0))
+        };
 
         let result = context
             .deserializer(id)
             .check_mapping_keys(entries, Some(span));
         if accepted {
             result.unwrap();
-            assert_eq!(context.scalar_budget.get(), 0);
+            assert_eq!(context.scalar_budget.remaining(), 0);
         } else {
             let error = result.unwrap_err();
             let message = format!("{}: {}", error.path.unwrap(), error.message);
@@ -1526,15 +1514,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn metadata_protocols_can_be_ignored() {
+    #[test_case::test_case(crate::spanned::NAME, 100 => true; "span")]
+    #[test_case::test_case(crate::commented::NAME, 100 => true; "comments")]
+    #[test_case::test_case(crate::tagged::NAME, 100 => true; "tag")]
+    #[test_case::test_case(crate::with::yaml_tag::NAME, 100 => true; "yaml tag")]
+    #[test_case::test_case("Transparent", 100 => true; "transparent wrapper")]
+    #[test_case::test_case(crate::spanned::NAME, 1 => false; "span wrapper consumes the last visit")]
+    fn ignoring_metadata_protocols_respects_the_visit_budget(
+        name: &'static str,
+        visits: usize,
+    ) -> bool {
         use serde::Deserializer as _;
 
         let stream = astral_yaml::parse("!Text hello").unwrap();
         let context = Context {
             input: super::Parsed::new(&stream, 0),
-            budget: Cell::new(100),
-            scalar_budget: Cell::new(100),
+            budget: Budget::new(visits),
+            scalar_budget: Budget::new(100),
         };
         let de = Deserializer {
             context: &context,
@@ -1544,24 +1540,8 @@ mod tests {
             yaml_tag: true,
         };
 
-        for name in [
-            crate::spanned::NAME,
-            crate::commented::NAME,
-            crate::tagged::NAME,
-            crate::with::yaml_tag::NAME,
-            "Transparent",
-        ] {
-            context.scalar_budget.set(100);
-            de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
-                .unwrap();
-        }
-
-        // The wrapper consumes one visit before the payload is requested.
-        context.budget.set(1);
-        assert!(
-            de.deserialize_newtype_struct(crate::spanned::NAME, serde::de::IgnoredAny)
-                .is_err()
-        );
+        de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
+            .is_ok()
     }
 
     #[test]
@@ -1574,8 +1554,8 @@ mod tests {
         for bytes in [7, 8] {
             let context = Context {
                 input: super::Parsed::new(&stream, 0),
-                budget: Cell::new(10),
-                scalar_budget: Cell::new(bytes),
+                budget: Budget::new(10),
+                scalar_budget: Budget::new(bytes),
             };
             let de = Deserializer {
                 context: &context,
@@ -1593,7 +1573,7 @@ mod tests {
             match access.variant_seed(PhantomData::<String>) {
                 Ok((name, _)) => {
                     assert_eq!(name, "long-tag");
-                    assert_eq!(context.scalar_budget.get(), 0);
+                    assert_eq!(context.scalar_budget.remaining(), 0);
                 }
                 Err(error) => {
                     assert_eq!(bytes, 7);
@@ -1616,8 +1596,8 @@ mod tests {
         let stream = astral_yaml::parse("# before\n42 # after").unwrap();
         let context = Context {
             input: super::Parsed::new(&stream, 0),
-            budget: Cell::new(2),
-            scalar_budget: Cell::new(100),
+            budget: Budget::new(2),
+            scalar_budget: Budget::new(100),
         };
         let de = Deserializer {
             context: &context,
@@ -1635,8 +1615,8 @@ mod tests {
         let mut spans = Vec::new();
 
         for budget in [2, 11, 12] {
-            let visits = Cell::new(budget);
-            let bytes = Cell::new(100);
+            let visits = Budget::new(budget);
+            let bytes = Budget::new(100);
             let de = Deserializer {
                 context: &Context {
                     input: super::Parsed::new(&stream, 0),
@@ -1654,7 +1634,7 @@ mod tests {
                 let value = result.unwrap();
                 assert_eq!(value.comments.len(), 2);
                 assert_eq!(value.comments, value.value.comments);
-                assert_eq!(de.context.budget.get(), 0);
+                assert_eq!(de.context.budget.remaining(), 0);
             } else {
                 let error = result.unwrap_err();
                 spans.push((
@@ -1748,8 +1728,8 @@ mod tests {
     #[test]
     fn scalar_and_visit_budgets_stop_at_the_boundary() {
         let stream = astral_yaml::parse("abc").unwrap();
-        let visits = Cell::new(2);
-        let bytes = Cell::new(3);
+        let visits = Budget::new(2);
+        let bytes = Budget::new(3);
         let de = Deserializer {
             context: &Context {
                 input: super::Parsed::new(&stream, 0),
@@ -1764,7 +1744,10 @@ mod tests {
 
         de.node().unwrap();
         assert_eq!(
-            (de.context.budget.get(), de.context.scalar_budget.get()),
+            (
+                de.context.budget.remaining(),
+                de.context.scalar_budget.remaining()
+            ),
             (1, 0)
         );
         assert_eq!(
@@ -1788,8 +1771,8 @@ mod tests {
             }
         }
 
-        let visits = Cell::new(4);
-        let bytes = Cell::new(6);
+        let visits = Budget::new(4);
+        let bytes = Budget::new(6);
         let de = Deserializer {
             context: &Context {
                 input: super::Parsed::new(&stream, 0),
@@ -1806,7 +1789,10 @@ mod tests {
         // https://yaml.org/spec/1.2.2/#71-alias-nodes
         assert_eq!(de.scalar(ScalarType::String).unwrap().0.value, "abc");
         assert_eq!(
-            (de.context.budget.get(), de.context.scalar_budget.get()),
+            (
+                de.context.budget.remaining(),
+                de.context.scalar_budget.remaining()
+            ),
             (2, 3)
         );
         assert_eq!(

@@ -1,4 +1,5 @@
 use super::{Input, Loader, read_document};
+use astral_yaml::Budget;
 use pyo3::prelude::*;
 use test_case::test_case;
 
@@ -42,7 +43,7 @@ fn numeric_key_work_budget(budget: usize, accepted: bool) {
             stream: &stream,
             encoded: None,
             anchors: std::collections::HashMap::new(),
-            key_bytes: budget,
+            key_bytes: Budget::new(budget),
         };
         assert_eq!(loader.value(stream.documents()[0].root).is_ok(), accepted);
     });

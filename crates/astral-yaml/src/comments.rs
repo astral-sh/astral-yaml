@@ -1,6 +1,6 @@
 //! Comment attachment to syntax nodes.
 
-use crate::{CollectionStyle, Comment, Error, NodeId, NodeKind, Span, Stream};
+use crate::{Budget, CollectionStyle, Comment, Error, NodeId, NodeKind, Span, Stream};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -38,16 +38,16 @@ pub struct CommentIndex<'source> {
 
 impl<'source> CommentIndex<'source> {
     /// Assign comments in `stream.documents()[document]` to their owning nodes.
-    /// Use [`Self::with_budget`] to control or share the work limit.
+    /// Use [`Self::with_work_budget`] to control or share the work limit.
     ///
     /// # Errors
     /// Returns an error if `document` is out of bounds or the work limit is exceeded.
     pub fn new(stream: &Stream<'source>, document: usize) -> Result<Self, Error> {
-        Self::with_budget(stream, document, &Cell::new(1_000_000))
+        Self::with_work_budget(stream, document, &Budget::new(1_000_000))
     }
 
-    /// Build a comment index, charging source lines, node visits, and comment
-    /// assignments to `budget`.
+    /// Build a comment index using the remaining work allowance in a cell.
+    /// The cell reflects work consumed even if indexing fails.
     ///
     /// # Errors
     /// Returns an error if `document` is out of bounds or `budget` is exhausted.
@@ -55,6 +55,22 @@ impl<'source> CommentIndex<'source> {
         stream: &Stream<'source>,
         document: usize,
         budget: &Cell<usize>,
+    ) -> Result<Self, Error> {
+        let work = Budget::new(budget.get());
+        let index = Self::with_work_budget(stream, document, &work);
+        budget.set(work.remaining());
+        index
+    }
+
+    /// Build a comment index, charging source lines, node visits, and comment
+    /// assignments to `budget`.
+    ///
+    /// # Errors
+    /// Returns an error if `document` is out of bounds or `budget` is exhausted.
+    pub fn with_work_budget(
+        stream: &Stream<'source>,
+        document: usize,
+        budget: &Budget,
     ) -> Result<Self, Error> {
         let doc = stream.documents().get(document).ok_or(Error {
             span: stream.span(),
@@ -211,7 +227,7 @@ struct Slot {
 struct Tree<'source, 'budget> {
     source: &'source str,
     lines: Lines,
-    budget: &'budget Cell<usize>,
+    budget: &'budget Budget,
     nodes: Vec<Node>,
     slots: Vec<Slot>,
 }
@@ -450,7 +466,7 @@ struct Lines {
 }
 
 impl Lines {
-    fn new(source: &str, range: Range<usize>, budget: &Cell<usize>) -> Result<Self, Error> {
+    fn new(source: &str, range: Range<usize>, budget: &Budget) -> Result<Self, Error> {
         let bytes = &source.as_bytes()[..range.end];
         let mut result = Self {
             lines: Vec::with_capacity(32),
@@ -511,11 +527,27 @@ impl Lines {
     }
 }
 
-fn charge(budget: &Cell<usize>, span: Span) -> Result<(), Error> {
-    let remaining = budget.get().checked_sub(1).ok_or(Error {
+fn charge(budget: &Budget, span: Span) -> Result<(), Error> {
+    budget.try_charge(1).ok_or(Error {
         span,
         message: "deserialization resource limit exceeded",
-    })?;
-    budget.set(remaining);
-    Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(5, true, 1; "successful index")]
+    #[test_case(3, false, 0; "partial index")]
+    fn indexing_updates_the_callers_cell(limit: usize, succeeds: bool, remaining: usize) {
+        let stream = crate::parse("42 # note\n").unwrap();
+        let budget = Cell::new(limit);
+        assert_eq!(
+            CommentIndex::with_budget(&stream, 0, &budget).is_ok(),
+            succeeds
+        );
+        assert_eq!(budget.get(), remaining);
+    }
 }

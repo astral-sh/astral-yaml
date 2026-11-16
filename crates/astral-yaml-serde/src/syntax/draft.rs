@@ -5,8 +5,7 @@ use super::view::Syntax;
 use super::{Comment, CommentPosition, DocumentSyntax, Node, NodeKind, emit};
 use crate::ser::INSERTED_BYTE_LIMIT;
 use astral_yaml::comments::CommentPlacement;
-use astral_yaml::{CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
-use std::cell::Cell;
+use astral_yaml::{Budget, CollectionStyle, Error, NodeId, ParseOptions, ScalarStyle, Span};
 use std::collections::HashMap;
 
 #[cfg(test)]
@@ -44,8 +43,8 @@ pub(super) struct Draft {
     root: NodeId,
     options: ParseOptions,
     diagnostic_span: Span,
-    work: Cell<usize>,
-    remaining_bytes: usize,
+    work: Budget,
+    inserted_bytes: Budget,
 }
 
 /// The intended result of a transaction, used to check the rendered YAML.
@@ -57,7 +56,7 @@ pub(super) struct Candidate {
     requested_styles: Vec<NodeId>,
     options: ParseOptions,
     diagnostic_span: Span,
-    work: Cell<usize>,
+    work: Budget,
 }
 
 /// A parsed Serde value. Its nodes form a tree, so only child IDs need relocation.
@@ -79,8 +78,8 @@ impl From<&DocumentSyntax> for Draft {
             root: document.root,
             options: document.options,
             diagnostic_span: document.nodes[document.root.index()].span,
-            work: Cell::new(document.options.max_nodes),
-            remaining_bytes: document.options.max_input_bytes,
+            work: Budget::new(document.options.max_nodes),
+            inserted_bytes: Budget::new(document.options.max_input_bytes),
         };
         for index in 0..draft.slots.len() {
             draft.link_children(NodeId::from_index(index));
@@ -141,15 +140,13 @@ impl Draft {
     }
 
     pub(super) fn byte_budget(&self) -> (usize, Span) {
-        (self.remaining_bytes, self.diagnostic_span)
+        (self.inserted_bytes.remaining(), self.diagnostic_span)
     }
 
-    fn introduce(&mut self, bytes: usize) -> Result<(), Error> {
-        self.remaining_bytes = self
-            .remaining_bytes
-            .checked_sub(bytes)
-            .ok_or_else(|| self.error(INSERTED_BYTE_LIMIT))?;
-        Ok(())
+    fn introduce(&self, bytes: usize) -> Result<(), Error> {
+        self.inserted_bytes
+            .try_charge(bytes)
+            .ok_or_else(|| self.error(INSERTED_BYTE_LIMIT))
     }
 
     fn parse_value<'source>(
@@ -558,7 +555,7 @@ impl Candidate {
         &self.parents
     }
 
-    pub(super) fn work(&self) -> &Cell<usize> {
+    pub(super) fn work(&self) -> &Budget {
         &self.work
     }
 

@@ -1,7 +1,7 @@
 use crate::Error;
 use astral_yaml::comments::CommentIndex;
-use astral_yaml::{NodeId, Stream};
-use std::cell::{Cell, OnceCell};
+use astral_yaml::{Budget, NodeId, Stream};
+use std::cell::OnceCell;
 
 pub use astral_yaml::comments::{AttachedComment, CommentPlacement};
 
@@ -22,12 +22,12 @@ impl<'de> CommentCache<'de> {
         &self,
         stream: &Stream<'de>,
         id: NodeId,
-        budget: &Cell<usize>,
+        budget: &Budget,
     ) -> Result<&[AttachedComment<'de>], Error> {
         let index = self
             .index
             .get_or_init(|| {
-                CommentIndex::with_budget(stream, self.document, budget).map_err(Error::from)
+                CommentIndex::with_work_budget(stream, self.document, budget).map_err(Error::from)
             })
             .as_ref()
             .map_err(Clone::clone)?;
@@ -37,7 +37,7 @@ impl<'de> CommentCache<'de> {
 }
 #[cfg(test)]
 mod tests {
-    use super::{Cell, CommentCache};
+    use super::{Budget, CommentCache};
 
     #[test]
     fn indexing_is_bounded_and_cached_including_failures() {
@@ -47,18 +47,18 @@ mod tests {
 
         // Two lines, one node, and one comment ownership record.
         for limit in 0..=4 {
-            let budget = Cell::new(limit);
+            let budget = Budget::new(limit);
             let cache = CommentCache::new(0);
             let result = cache.get(&stream, root, &budget);
             if limit == 4 {
                 assert_eq!(result.unwrap().len(), 1);
-                assert_eq!(budget.get(), 0);
+                assert_eq!(budget.remaining(), 0);
                 assert_eq!(cache.get(&stream, root, &budget).unwrap().len(), 1);
             } else {
                 let error = result.unwrap_err();
-                budget.set(100);
+                let budget = Budget::new(100);
                 assert_eq!(cache.get(&stream, root, &budget).unwrap_err(), error);
-                assert_eq!(budget.get(), 100);
+                assert_eq!(budget.remaining(), 100);
                 spans.push((
                     format!("budget {limit}: {}", error.message),
                     error.span.unwrap(),
@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn documents_without_comments_do_not_build_a_tree() {
         let stream = astral_yaml::parse("---\n1 # first\n---\n2\n").unwrap();
-        let budget = Cell::new(0);
+        let budget = Budget::new(0);
         let cache = CommentCache::new(1);
         assert_eq!(
             cache
