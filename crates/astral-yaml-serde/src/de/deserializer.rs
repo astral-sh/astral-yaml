@@ -86,11 +86,7 @@ pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> 
     from_stream_with_policy(stream, DeserializationPolicy::default())
 }
 
-/// Deserialize a parsed stream containing exactly one document using the supplied policy.
-///
-/// # Errors
-/// Returns the same kinds of errors as [`from_stream`], using the policy's work budget.
-pub fn from_stream_with_policy<'de, T: Deserialize<'de>>(
+fn from_stream_with_policy<'de, T: Deserialize<'de>>(
     stream: &Stream<'de>,
     policy: DeserializationPolicy<'_>,
 ) -> Result<T> {

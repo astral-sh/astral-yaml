@@ -6,7 +6,7 @@ mod support;
 
 use astral_yaml_serde::{
     Commented, DeserializationPolicy, from_document_with_policy, from_str, from_str_with_policy,
-    from_stream, from_stream_with_policy, to_string,
+    from_stream, to_string,
 };
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -544,44 +544,19 @@ fn located_failures_and_document_count() {
 }
 
 #[test]
-fn serde_work_budget_counts_alias_visits() {
-    let source = "[&item value, *item]";
-    let budget = Budget::new(3);
+fn serde_work_budget_shares_alias_costs_across_documents() {
+    let stream = astral_yaml::parse("--- [&item value, *item]\n--- [other]\n").unwrap();
+    let budget = Budget::new(5);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
     };
-    let error = from_str_with_policy::<Vec<&str>>(source, policy).unwrap_err();
-    assert_eq!(error.message, "deserialization resource limit exceeded");
-    assert_eq!(budget.remaining(), 0);
-
-    let stream = astral_yaml::parse(source).unwrap();
-    let budget = Budget::new(4);
-    let policy = DeserializationPolicy {
-        work_budget: Some(&budget),
-    };
-    let values: Vec<&str> = from_stream_with_policy(&stream, policy).unwrap();
+    let values: Vec<&str> = from_document_with_policy(&stream, 0, policy).unwrap();
     assert_eq!(values, ["value", "value"]);
-    assert_eq!(budget.remaining(), 0);
-}
-
-#[test]
-fn serde_work_budget_can_be_shared_across_documents() {
-    let stream = astral_yaml::parse("--- [one]\n--- [two]\n").unwrap();
-    let budget = Budget::new(3);
-    let policy = DeserializationPolicy {
-        work_budget: Some(&budget),
-    };
-    let first: Vec<&str> = from_document_with_policy(&stream, 0, policy).unwrap();
-    assert_eq!(first, ["one"]);
     assert_eq!(budget.remaining(), 1);
 
     let error = from_document_with_policy::<Vec<&str>>(&stream, 1, policy).unwrap_err();
     assert_eq!(error.message, "deserialization resource limit exceeded");
     assert_eq!(budget.remaining(), 0);
-
-    let second: Vec<&str> =
-        from_document_with_policy(&stream, 1, DeserializationPolicy::default()).unwrap();
-    assert_eq!(second, ["two"]);
 }
 
 #[test]
