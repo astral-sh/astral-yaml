@@ -1,7 +1,6 @@
 use astral_yaml::Budget;
 use astral_yaml_serde::{
-    DeserializationPolicy, Spanned, Tagged, Value, from_str, from_str_with_policy, from_value,
-    to_string,
+    DeserializationPolicy, Spanned, Tagged, Value, from_str, from_str_with_policy, to_string,
 };
 use serde::Deserialize;
 use test_case::test_case;
@@ -143,7 +142,8 @@ fn accessors_check_the_value_type_and_integer_range() {
 #[test_case("256"; "unsigned overflow")]
 #[test_case("-1"; "negative integer")]
 fn value_integer_conversions_check_range(source: &str) {
-    let result = from_value::<u8>(from_str(source).unwrap());
+    let tree = from_str::<Value>(source).unwrap();
+    let result = u8::deserialize(&tree);
     assert_eq!(result.unwrap_err().message, "integer out of range");
 }
 
@@ -160,8 +160,8 @@ fn floats_decode_from_stored_numbers(source: &str, expected: f32) {
 
 #[test]
 fn value_float_conversion_rejects_overflow() {
-    let tree = from_str("1e100").unwrap();
-    insta::assert_snapshot!(from_value::<f32>(tree).unwrap_err(), @"float out of range");
+    let tree = from_str::<Value>("1e100").unwrap();
+    insta::assert_snapshot!(f32::deserialize(&tree).unwrap_err(), @"float out of range");
 }
 
 #[test]

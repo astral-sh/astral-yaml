@@ -6,7 +6,7 @@ mod support;
 
 use astral_yaml_serde::{
     Commented, DeserializationPolicy, Value, from_document_with_policy, from_str,
-    from_str_with_policy, from_stream, from_value, to_string,
+    from_str_with_policy, from_stream, to_string,
 };
 use serde::de;
 use serde::{Deserialize, Serialize};
@@ -48,8 +48,8 @@ where
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
-    let tree = from_str(&yaml).unwrap();
-    assert_eq!(&from_value::<T>(tree).unwrap(), value, "{yaml:?}");
+    let tree = from_str::<Value>(&yaml).unwrap();
+    assert_eq!(&T::deserialize(&tree).unwrap(), value, "{yaml:?}");
 }
 
 // The explicit cases use tag shorthands, a verbatim tag and the non-specific `!`.
@@ -140,9 +140,9 @@ fn derived_types() {
 #[test_case("{true: null}"; "non-string enum name")]
 #[test_case("!Unit"; "application tag")]
 fn enum_values_require_a_name_or_single_entry(source: &str) {
-    let value = from_str(source).unwrap();
+    let value = from_str::<Value>(source).unwrap();
     assert_eq!(
-        from_value::<Kind>(value).unwrap_err().message,
+        Kind::deserialize(&value).unwrap_err().message,
         "expected an enum name or a single-entry mapping"
     );
 }

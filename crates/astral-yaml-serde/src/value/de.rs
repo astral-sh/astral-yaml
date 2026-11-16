@@ -3,30 +3,9 @@ use crate::{Error, commented, spanned, tagged};
 use serde::de::value::{
     BorrowedStrDeserializer, MapAccessDeserializer, MapDeserializer, SeqDeserializer,
 };
-use serde::de::{DeserializeOwned, EnumAccess, IntoDeserializer, Visitor};
+use serde::de::{EnumAccess, IntoDeserializer, Visitor};
 use serde::{Deserializer, forward_to_deserialize_any};
 use std::iter;
-
-/// Deserialize an owned Rust type from a YAML value.
-///
-/// This reads the types stored in the tree. The original scalar spelling and
-/// source metadata are unavailable. Use [`serde::Deserialize::deserialize`]
-/// with `&Value` for a result that borrows from the tree.
-///
-/// Use [`crate::Tagged`] to read an application tag and its payload. Ordinary
-/// enums use string names and single-entry mappings. Mapping entries are passed
-/// to the destination in order, including duplicates in manually built values.
-///
-/// # Errors
-///
-/// Returns an error if the value cannot be deserialized as `T`.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "the convenience API consumes its input"
-)]
-pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
-    T::deserialize(&value)
-}
 
 impl<'de> IntoDeserializer<'de, Error> for &'de Value {
     type Deserializer = Self;
