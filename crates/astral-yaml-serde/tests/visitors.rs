@@ -3,7 +3,7 @@ use test_case::test_case;
 mod support;
 
 use astral_yaml_dev::diagnostic_snapshot;
-use astral_yaml_serde::{Error, Tagged, from_str, to_string};
+use astral_yaml_serde::{Error, Tagged, Value, from_str, from_value, to_string};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ fn every_integer_width_checks_its_boundaries() {
                 for value in [<$ty>::MIN, 0, <$ty>::MAX] {
                     let yaml = to_string(&value).unwrap();
                     assert_eq!(from_str::<$ty>(&yaml).unwrap(), value);
+                    assert_eq!(from_value::<$ty>(from_str(&yaml).unwrap()).unwrap(), value);
                 }
 
                 assert!(from_str::<$ty>(&format!("{}0", <$ty>::MAX)).is_err());
@@ -137,6 +138,10 @@ fn bytes_borrow_or_decode_as_needed() {
         "! abc",
     ] {
         assert_eq!(from_str::<Bytes>(source).unwrap(), Bytes(b"abc".to_vec()));
+        assert_eq!(
+            from_value::<Bytes>(from_str(source).unwrap()).unwrap(),
+            Bytes(b"abc".to_vec())
+        );
     }
 
     assert_eq!(
@@ -149,6 +154,9 @@ fn bytes_borrow_or_decode_as_needed() {
     assert_eq!(borrowed, b"abc");
     assert!(std::ptr::eq(borrowed.as_ptr(), source[1..].as_ptr()));
     assert!(from_str::<&[u8]>("\"a\\nb\"").is_err());
+
+    let value: Value = from_str(source).unwrap();
+    assert_eq!(<&[u8]>::deserialize(&value).unwrap(), b"abc");
 
     for bytes in [vec![], vec![0, 1, 128, 255]] {
         let value = Bytes(bytes);

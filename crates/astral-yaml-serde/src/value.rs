@@ -4,9 +4,16 @@ use serde::ser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+mod de;
+
+pub use de::from_value;
+
 pub(crate) const NAME: &str = "$astral_yaml::Value";
 
 /// An owned YAML value that can be read and written through Serde.
+///
+/// Use [`from_value`] to decode an owned Rust type or
+/// [`Deserialize::deserialize`] with `&Value` to borrow from the tree.
 ///
 /// Explicit core tags resolve through the YAML 1.2 core schema. Application
 /// tags retain their expanded name and decoded scalar text, so `!Port 080`

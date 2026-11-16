@@ -33,4 +33,4 @@ pub use error::Error;
 pub use ser::to_string;
 pub use spanned::Spanned;
 pub use tagged::Tagged;
-pub use value::Value;
+pub use value::{Value, from_value};

@@ -1,6 +1,7 @@
 use astral_yaml::Budget;
 use astral_yaml_serde::{
-    DeserializationPolicy, Tagged, Value, from_str, from_str_with_policy, to_string,
+    DeserializationPolicy, Spanned, Tagged, Value, from_str, from_str_with_policy, from_value,
+    to_string,
 };
 use serde::Deserialize;
 use test_case::test_case;
@@ -128,4 +129,81 @@ fn accessors_check_the_value_type_and_integer_range() {
     list.as_sequence_mut().unwrap().push(Value::Integer(42));
     let (_, list) = &value.as_mapping().unwrap()[0];
     assert_eq!(list.as_sequence(), Some([Value::Unsigned(42)].as_slice()));
+}
+
+#[test]
+fn value_deserializes_from_a_tree_with_complex_keys_and_tags() {
+    let tree = from_str::<Value>(
+        "{[1, true]: [null, -2, 1.25, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455, !Port 080]}",
+    )
+    .unwrap();
+    assert_eq!(Value::deserialize(&tree).unwrap(), tree);
+}
+
+#[test]
+fn a_tagged_payload_can_borrow_from_the_value() {
+    let tree = from_str::<Value>("!Port 080").unwrap();
+    insta::assert_debug_snapshot!(Tagged::<&str>::deserialize(&tree).unwrap(), @r#"
+    Tagged {
+        tag: "!Port",
+        value: "080",
+    }
+    "#);
+
+    insta::assert_snapshot!(Tagged::<u8>::deserialize(&tree).unwrap_err(), @"expected an integer");
+    insta::assert_snapshot!(Tagged::<&str>::deserialize(&Value::Null).unwrap_err(), @"expected an explicit YAML tag");
+    insta::assert_snapshot!(Spanned::<Value>::deserialize(&tree).unwrap_err(), @"a YAML value has no source metadata");
+}
+
+#[test_case("256"; "unsigned overflow")]
+#[test_case("-1"; "negative integer")]
+fn value_integer_conversions_check_range(source: &str) {
+    let tree = from_str(source).unwrap();
+    assert_eq!(
+        from_value::<u8>(tree).unwrap_err().message,
+        "integer out of range"
+    );
+}
+
+#[test_case("-2", -2.0; "signed integer")]
+#[test_case("2", 2.0; "unsigned integer")]
+#[test_case("1.25", 1.25; "float")]
+#[test_case(".inf", f32::INFINITY; "infinity")]
+fn floats_decode_from_stored_numbers(source: &str, expected: f32) {
+    let value = from_str::<Value>(source).unwrap();
+    assert_eq!(
+        f32::deserialize(&value).unwrap().to_bits(),
+        expected.to_bits()
+    );
+    assert_eq!(
+        f64::deserialize(&value).unwrap().to_bits(),
+        f64::from(expected).to_bits(),
+    );
+}
+
+#[test]
+fn value_float_conversion_rejects_overflow() {
+    let tree = from_str("1e100").unwrap();
+    insta::assert_snapshot!(from_value::<f32>(tree).unwrap_err(), @"float out of range");
+}
+
+#[test]
+fn value_conversion_uses_the_stored_type() {
+    let integer = from_str::<Value>("0x2a").unwrap();
+    insta::assert_snapshot!(String::deserialize(&integer).unwrap_err(), @"invalid type: integer `42`, expected a string");
+
+    let string = Value::String("42".into());
+    insta::assert_snapshot!(f32::deserialize(&string).unwrap_err(), @"expected a number");
+    insta::assert_snapshot!(f64::deserialize(&string).unwrap_err(), @"expected a number");
+}
+
+#[test]
+fn options_and_ignored_fields_read_from_a_value() {
+    #[derive(Debug, Deserialize)]
+    struct Config {
+        port: Option<u16>,
+    }
+
+    let tree = from_str("port: 443\nextra: !Note text").unwrap();
+    assert_eq!(from_value::<Config>(tree).unwrap().port, Some(443));
 }

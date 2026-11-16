@@ -6,7 +6,7 @@ mod support;
 
 use astral_yaml_serde::{
     Commented, DeserializationPolicy, Value, from_document_with_policy, from_str,
-    from_str_with_policy, from_stream, to_string,
+    from_str_with_policy, from_stream, from_value, to_string,
 };
 use serde::de;
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,8 @@ fn derived_types() {
 
     let yaml = to_string(&config).unwrap();
     assert_eq!(from_str::<Configuration<'_>>(&yaml).unwrap(), config);
+    let value = from_str::<Value>(source).unwrap();
+    assert_eq!(Configuration::deserialize(&value).unwrap(), config);
 
     for value in [
         Kind::Unit,
@@ -107,6 +109,8 @@ fn derived_types() {
         Kind::Struct { value: -2 },
     ] {
         roundtrip(&value);
+        let tree = from_str(&to_string(&value).unwrap()).unwrap();
+        assert_eq!(from_value::<Kind>(tree).unwrap(), value);
     }
 
     roundtrip(&Wrapper(42));
@@ -129,6 +133,18 @@ fn derived_types() {
     );
     assert_eq!(from_tag::<Kind>("!Unit").unwrap(), Kind::Unit);
     assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
+}
+
+#[test_case("[]"; "sequence")]
+#[test_case("{Unit: null, Other: null}"; "multiple variants")]
+#[test_case("{true: null}"; "non-string enum name")]
+#[test_case("!Unit"; "application tag")]
+fn enum_values_require_a_name_or_single_entry(source: &str) {
+    let value = from_str(source).unwrap();
+    assert_eq!(
+        from_value::<Kind>(value).unwrap_err().message,
+        "expected an enum name or a single-entry mapping"
+    );
 }
 
 // https://yaml.org/spec/1.2.2/#1032-tag-resolution
