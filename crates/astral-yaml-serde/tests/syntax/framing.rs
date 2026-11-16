@@ -169,7 +169,20 @@ fn retained_stream_marks_count_toward_the_edit_limit(
 }
 
 #[test]
-fn descendant_inline_comments_are_separate_from_document_markers() {
+fn editing_a_flow_item_keeps_the_original_marker_line() {
+    let mut document = crate::Editable::<Vec<String>>::parse("--- [a, # c\n b]").unwrap();
+    document.set_at([1], "new").unwrap();
+    assert_eq!(document.source(), "--- [a, # c\n new]");
+}
+
+#[test]
+fn normalization_keeps_flow_item_comments_on_the_marker_line() {
+    let document = DocumentSyntax::parse("--- [a, # c\n b]").unwrap();
+    assert_eq!(document.normalized_yaml().unwrap(), "--- [a, # c\n   b]");
+}
+
+#[test]
+fn descendant_inline_comments_preserve_the_document_marker_line() {
     use crate::syntax::NodeKind;
     use astral_yaml::comments::CommentPlacement;
 
@@ -197,23 +210,20 @@ fn descendant_inline_comments_are_separate_from_document_markers() {
         },
     );
     insta::assert_snapshot!(diff, @"
-    @@ -1,2 +1,4 @@
+    @@ -1,2 +1,3 @@
      # root
     ---- {key: value}
-    +--- ⏎
-    +{? key # added
+    +--- {? key # added
     +  : value}
 
-    @@ -1 +1,3 @@
+    @@ -1 +1,2 @@
     ---- [item]
-    +--- ⏎
-    +[item # added
+    +--- [item # added
     +  ]
 
-    @@ -1,2 +1,4 @@
+    @@ -1,2 +1,3 @@
     ---- &root {key: value}
-    +--- ⏎
-    +&root {? key # added
+    +--- &root {? key # added
     +  : value}
      ...
     ");
