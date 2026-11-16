@@ -112,17 +112,17 @@ pub(super) fn prepare(
             .and_then(|index| match original.end_marker {
                 None => Some(removed_boundary.unwrap_or(original.text.len())),
                 Some(marker) => {
-                    let end = line_end(&original.text, marker.end());
-                    root.comments
+                    let marker_line =
+                        super::span(marker.end(), line_end(&original.text, marker.end()));
+                    root.comments[index + 1..]
                         .iter()
-                        .position(|comment| {
+                        .any(|comment| {
                             comment.placement == CommentPlacement::Inline
-                                && comment.span.is_some_and(|span| {
-                                    span.start() >= marker.end() && span.end() <= end
-                                })
+                                && comment
+                                    .span
+                                    .is_some_and(|span| super::contains(marker_line, span))
                         })
-                        .filter(|&inline| index < inline)
-                        .map(|_| marker.start())
+                        .then_some(marker.start())
                 }
             })
     } else {
