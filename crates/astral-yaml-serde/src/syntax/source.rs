@@ -315,16 +315,30 @@ mod tests {
 
     // https://yaml.org/spec/1.2.2/#822-block-mappings
     #[test]
-    fn omitted_values_can_share_a_trivia_gap() {
-        let source = "? ? leaf  # nested\nflow: [last:  # gap\n ]\n";
+    fn nested_omitted_values_share_an_insertion_point() {
+        // Each `?` introduces a mapping key. Both keys omit their `:` value indicator.
+        let source = astral_yaml_dev::indoc! {"
+            ?
+              ? leaf  # nested key
+            flow:
+              {
+                last:  # flow value
+              }
+        "};
         let stream = astral_yaml::parse(source).unwrap();
         let spans = contents(source, stream.nodes(), stream.documents()[0].root);
-        let following: Vec<_> = spans
+        let insertion_points: Vec<_> = spans
             .into_iter()
             .filter(|span| span.is_empty())
-            .map(|span| source[span.start()..].lines().next().unwrap())
+            .map(astral_yaml::Span::start)
             .collect();
-        assert_eq!(following, ["# nested", "# nested", "]"]);
+
+        let before_comment = source.find("# nested key").unwrap();
+        let before_closing_brace = source.find('}').unwrap();
+        assert_eq!(
+            insertion_points,
+            [before_comment, before_comment, before_closing_brace]
+        );
     }
 
     #[test]
