@@ -95,6 +95,7 @@ impl<'source> CommentIndex<'source> {
             nodes: Vec::with_capacity(32),
             slots: Vec::with_capacity(16),
         };
+        charge(budget, doc.span, 1)?;
         tree.push(stream, doc.root)?;
         if tree.nodes[0].span.is_empty() {
             // An empty document's header comments precede the place where its
@@ -119,7 +120,7 @@ impl<'source> CommentIndex<'source> {
         let mut owned: Vec<_> = comments
             .iter()
             .map(|comment| {
-                charge(budget, comment.span)?;
+                charge(budget, comment.span, 1)?;
                 let (owner, placement) = if marker_lines
                     .binary_search(&tree.lines.line(comment.span.start()))
                     .is_ok()
@@ -136,7 +137,7 @@ impl<'source> CommentIndex<'source> {
                     // root's children, regardless of their indentation.
                     (0, tree.placement(tree.nodes[0].span, comment))
                 } else {
-                    tree.owner(0, comment)
+                    tree.owner(0, comment)?
                 };
 
                 Ok((
@@ -233,9 +234,21 @@ struct Tree<'source, 'budget> {
 }
 
 impl Tree<'_, '_> {
+    /// Charge the direct children before making room for the collection's slots.
+    fn reserve_slots(
+        &mut self,
+        count: usize,
+        children_per_slot: usize,
+        span: Span,
+    ) -> Result<Range<usize>, Error> {
+        charge(self.budget, span, count * children_per_slot)?;
+        let slots = self.slots.len()..self.slots.len() + count;
+        self.slots.resize_with(slots.end, Slot::default);
+        Ok(slots)
+    }
+
     fn push(&mut self, stream: &Stream<'_>, id: NodeId) -> Result<usize, Error> {
         let node = stream.node(id).expect("syntax node belongs to stream");
-        charge(self.budget, node.span)?;
         let index = self.nodes.len();
         self.nodes.push(Node {
             id,
@@ -259,8 +272,7 @@ impl Tree<'_, '_> {
         let collection = match &node.kind {
             NodeKind::Mapping { entries, style } => {
                 // Reserve the parent's slots before appending any child slots.
-                let slots = self.slots.len()..self.slots.len() + entries.len();
-                self.slots.resize_with(slots.end, Slot::default);
+                let slots = self.reserve_slots(entries.len(), 2, node.span)?;
 
                 for (offset, entry) in entries.iter().enumerate() {
                     let key = self.push(stream, entry.key)?;
@@ -274,9 +286,12 @@ impl Tree<'_, '_> {
                         *value_span = Span { start: at, end: at };
                     }
                     let end = entry.span.end().max(value_span.end());
-                    let separator = skip_trivia(self.source, self.nodes[key].span.end());
-                    let colon =
-                        (self.source.as_bytes().get(separator) == Some(&b':')).then_some(separator);
+                    // Nested explicit keys can end at the same byte. Each entry
+                    // owns only the separation up to its own value indicator.
+                    let entry_source = &source[..entry.span.end()];
+                    let separator = skip_trivia(entry_source, self.nodes[key].span.end());
+                    let colon = (entry_source.as_bytes().get(separator) == Some(&b':'))
+                        .then_some(separator);
                     self.slots[slots.start + offset] = Slot {
                         start: entry.span.start(),
                         end,
@@ -300,8 +315,7 @@ impl Tree<'_, '_> {
             }
             NodeKind::Sequence { items, style } => {
                 let start = collection_start();
-                let slots = self.slots.len()..self.slots.len() + items.len();
-                self.slots.resize_with(slots.end, Slot::default);
+                let slots = self.reserve_slots(items.len(), 1, node.span)?;
                 let mut previous_end = start;
 
                 for (offset, &item) in items.iter().enumerate() {
@@ -336,12 +350,21 @@ impl Tree<'_, '_> {
         Ok(index)
     }
 
-    fn owner(&self, index: usize, comment: &Comment<'_>) -> (usize, CommentPlacement) {
+    fn owner(
+        &self,
+        index: usize,
+        comment: &Comment<'_>,
+    ) -> Result<(usize, CommentPlacement), Error> {
+        // Each comment is charged once before the root lookup.
+        if index != 0 {
+            charge(self.budget, comment.span, 1)?;
+        }
+
         let node = &self.nodes[index];
         let at = comment.span.start();
         let inline = self.lines.inline(at);
         let Some(collection) = &node.collection else {
-            return (index, self.placement(node.span, comment));
+            return Ok((index, self.placement(node.span, comment)));
         };
 
         // An opening delimiter or property header separates the collection
@@ -357,7 +380,7 @@ impl Tree<'_, '_> {
             || (explicit_header && at < collection.start)
             || (collection.flow && at >= node.span.end())
         {
-            return (index, self.placement(node.span, comment));
+            return Ok((index, self.placement(node.span, comment)));
         }
 
         let slots = &self.slots[collection.slots.clone()];
@@ -375,7 +398,7 @@ impl Tree<'_, '_> {
             && (collection.flow || self.lines.column(at) == self.lines.column(collection.start))
             && !self.lines.blank_between(comment.span.end(), slot.start)
         {
-            return (slot.value, CommentPlacement::Leading);
+            return Ok((slot.value, CommentPlacement::Leading));
         }
 
         if let Some(slot) = previous
@@ -397,10 +420,14 @@ impl Tree<'_, '_> {
             CommentPlacement::Detached
         };
 
-        (index, placement)
+        Ok((index, placement))
     }
 
-    fn slot_owner(&self, slot: &Slot, comment: &Comment<'_>) -> (usize, CommentPlacement) {
+    fn slot_owner(
+        &self,
+        slot: &Slot,
+        comment: &Comment<'_>,
+    ) -> Result<(usize, CommentPlacement), Error> {
         let at = comment.span.start();
         if let Some(key) = slot.key
             && (at < self.nodes[key].span.end() || slot.colon.is_some_and(|colon| at < colon))
@@ -410,7 +437,7 @@ impl Tree<'_, '_> {
 
         let value = &self.nodes[slot.value];
         if at < value.span.start() && (self.lines.inline(at) || value.collection.is_none()) {
-            return (slot.value, self.placement(value.span, comment));
+            return Ok((slot.value, self.placement(value.span, comment)));
         }
 
         self.owner(slot.value, comment)
@@ -478,7 +505,7 @@ impl Lines {
         let mut blanks = 0;
 
         loop {
-            charge(budget, Span { start, end: start })?;
+            charge(budget, Span { start, end: start }, 1)?;
             let end = start
                 + memchr::memchr2(b'\r', b'\n', &bytes[start..]).unwrap_or(bytes.len() - start);
             let column_start = end - source[start..end].trim_start_matches('\u{feff}').len();
@@ -527,8 +554,8 @@ impl Lines {
     }
 }
 
-fn charge(budget: &Budget, span: Span) -> Result<(), Error> {
-    budget.try_charge(1).ok_or(Error {
+fn charge(budget: &Budget, span: Span, amount: usize) -> Result<(), Error> {
+    budget.try_charge(amount).ok_or(Error {
         span,
         message: "deserialization resource limit exceeded",
     })
