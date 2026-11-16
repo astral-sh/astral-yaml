@@ -1,3 +1,4 @@
+use crate::{Error, Span};
 use std::cell::Cell;
 
 /// A remaining allowance for work or bytes.
@@ -31,11 +32,22 @@ impl Budget {
         self.remaining.set(self.remaining().checked_sub(amount)?);
         Some(())
     }
+
+    /// Deduct `amount`, reporting exhaustion at `span`.
+    ///
+    /// # Errors
+    /// If the charge exceeds the remaining allowance, return `message` at `span`
+    /// and leave the balance unchanged.
+    #[inline]
+    pub fn charge_at(&self, amount: usize, span: Span, message: &'static str) -> Result<(), Error> {
+        self.try_charge(amount).ok_or(Error { span, message })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Budget;
+    use crate::{Error, Span};
 
     #[test]
     fn a_failed_charge_preserves_the_balance() {
@@ -45,5 +57,18 @@ mod tests {
         assert_eq!(budget.try_charge(3), Some(()));
         assert_eq!(budget.try_charge(0), Some(()));
         assert_eq!(budget.try_charge(1), None);
+    }
+
+    #[test]
+    fn charge_at_reports_the_callers_span_and_message() {
+        let budget = Budget::new(1);
+        let span = Span::new(4, 7).unwrap();
+        let message = "item limit exceeded";
+
+        budget.charge_at(1, span, message).unwrap();
+        assert_eq!(
+            budget.charge_at(1, span, message),
+            Err(Error { span, message })
+        );
     }
 }
