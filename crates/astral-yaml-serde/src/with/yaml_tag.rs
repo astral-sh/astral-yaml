@@ -35,7 +35,9 @@
 //! local tags as singleton mappings, which means [`crate::Spanned`] and
 //! [`crate::Tagged`] cannot recover metadata inside that buffer.
 //!
-//! YAML tag handling requires this crate's serializer and deserializer.
+//! Emitting tags requires this crate's serializer. The adapter interprets local
+//! tags when decoding YAML source. When decoding from a [`crate::Value`], use
+//! [`crate::Tagged`] to access the tag and payload.
 
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

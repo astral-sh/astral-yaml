@@ -136,6 +136,18 @@ fn derived_types() {
     assert_eq!(from_str::<Kind>("! Unit").unwrap(), Kind::Unit);
 }
 
+#[test]
+fn struct_values_require_mappings() {
+    let value = from_str::<Value>("[astral, true, 1, 1.5, [], null]").unwrap();
+    insta::assert_snapshot!(Configuration::deserialize(&value).unwrap_err(), @"expected a mapping");
+}
+
+#[test]
+fn struct_variant_values_require_mappings() {
+    let value = from_str::<Value>("{Struct: [42]}").unwrap();
+    insta::assert_snapshot!(Kind::deserialize(&value).unwrap_err(), @"expected a mapping");
+}
+
 #[test_case("[]"; "sequence")]
 #[test_case("{Unit: null, Other: null}"; "multiple variants")]
 #[test_case("{true: null}"; "non-string enum name")]

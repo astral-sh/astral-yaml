@@ -43,10 +43,7 @@ impl<'de> Deserializer<'de> for &'de Value {
             Value::Float(value) => visitor.visit_f64(*value),
             Value::String(value) => visitor.visit_borrowed_str(value),
             Value::Sequence(items) => SeqDeserializer::new(items.iter()).deserialize_any(visitor),
-            Value::Mapping(entries) => {
-                MapDeserializer::new(entries.iter().map(|(key, value)| (key, value)))
-                    .deserialize_any(visitor)
-            }
+            Value::Mapping(_) => self.deserialize_map(visitor),
             Value::Tagged(tagged) => visitor.visit_enum(variant(&tagged.tag, &tagged.value)),
         }
     }
@@ -122,6 +119,24 @@ impl<'de> Deserializer<'de> for &'de Value {
         }
     }
 
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        let Value::Mapping(entries) = self else {
+            return Err(Error::new("expected a mapping"));
+        };
+
+        MapDeserializer::new(entries.iter().map(|(key, value)| (key, value)))
+            .deserialize_any(visitor)
+    }
+
+    fn deserialize_struct<V: Visitor<'de>>(
+        self,
+        _: &'static str,
+        _: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Error> {
+        self.deserialize_map(visitor)
+    }
+
     fn deserialize_enum<V: Visitor<'de>>(
         self,
         name: &'static str,
@@ -145,7 +160,7 @@ impl<'de> Deserializer<'de> for &'de Value {
     }
 
     forward_to_deserialize_any! {
-        bool char str string unit unit_struct seq tuple tuple_struct map struct identifier
+        bool char str string unit unit_struct seq tuple tuple_struct identifier
     }
 }
 
