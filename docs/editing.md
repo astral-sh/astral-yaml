@@ -10,7 +10,7 @@ uses Serde's derive feature.
 
 ```toml
 [dependencies]
-astral-yaml-serde = { version = "0.1.0", features = ["editable"] }
+astral-yaml-serde = { version = "0.0.4", features = ["editable"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
