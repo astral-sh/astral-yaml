@@ -35,6 +35,23 @@ fn a_stream_suffix_before_the_document_keeps_its_inline_comment(style: &str) {
     );
 }
 
+// Only an inline comment on the first document end marker can occupy its header.
+// https://yaml.org/spec/1.2.2/#912-document-markers
+#[test]
+fn a_second_end_marker_keeps_its_inline_comment() {
+    let source = "x\n...\n\n# detached\n... # second marker\n";
+    let mut document = crate::Editable::<String>::parse(source).unwrap();
+
+    document
+        .edit(|mut root| root.set_scalar_style(astral_yaml::ScalarStyle::Literal))
+        .unwrap();
+
+    assert_eq!(
+        document.source(),
+        "|-\n  x\n...\n\n# detached\n... # second marker\n"
+    );
+}
+
 // A byte order mark can occur between the document and the following suffixes.
 // https://yaml.org/spec/1.2.2/#rule-l-yaml-stream
 // https://yaml.org/spec/1.2.2/#rule-l-document-suffix

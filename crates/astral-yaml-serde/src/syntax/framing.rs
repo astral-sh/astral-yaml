@@ -111,18 +111,19 @@ pub(super) fn prepare(
             .position(|comment| layout.kind.needs_suffix_boundary(comment))
             .and_then(|index| match original.end_marker {
                 None => Some(removed_boundary.unwrap_or(original.text.len())),
-                Some(marker) => root
-                    .comments
-                    .iter()
-                    .position(|comment| {
-                        comment.placement == CommentPlacement::Inline
-                            && comment.span.is_some_and(|span| {
-                                span.start() >= marker.end()
-                                    && span.end() <= line_end(&original.text, marker.end())
-                            })
-                    })
-                    .filter(|&inline| index < inline)
-                    .map(|_| marker.start()),
+                Some(marker) => {
+                    let marker_line =
+                        super::span(marker.end(), line_end(&original.text, marker.end()));
+                    root.comments[index + 1..]
+                        .iter()
+                        .any(|comment| {
+                            comment.placement == CommentPlacement::Inline
+                                && comment
+                                    .span
+                                    .is_some_and(|span| super::contains(marker_line, span))
+                        })
+                        .then_some(marker.start())
+                }
             })
     } else {
         None
