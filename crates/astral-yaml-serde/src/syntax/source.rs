@@ -9,13 +9,23 @@ use astral_yaml::{NodeId, ParseOptions, Span};
 /// These ranges are separate because properties can start on a different line
 /// or at a different indentation.
 pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: NodeId) -> Vec<Span> {
+    // The parser records empty nodes in source order. Nested explicit keys can
+    // omit several values at the same byte before a single run of trivia.
+    let mut last_empty = None;
     nodes
         .iter()
         .enumerate()
         .map(|(index, node)| {
             if node.span.is_empty() {
                 let start = node.span.start();
-                let next = astral_yaml::comments::skip_trivia(source, start);
+                if let Some((previous, content)) = last_empty
+                    && previous == start
+                {
+                    return content;
+                }
+
+                let inline = source.len() - source[start..].trim_start_matches([' ', '\t']).len();
+                let next = astral_yaml::comments::skip_trivia(source, inline);
                 // Keep separation after block indicators. At a flow delimiter
                 // or an empty document root, retain all preceding comment lines.
                 let at = if index == root.index()
@@ -23,9 +33,11 @@ pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: Node
                 {
                     next
                 } else {
-                    source.len() - source[start..].trim_start_matches([' ', '\t']).len()
+                    inline
                 };
-                return super::span(at, at);
+                let content = super::span(at, at);
+                last_empty = Some((start, content));
+                return content;
             }
             let properties_end = node
                 .anchor
@@ -35,7 +47,7 @@ pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: Node
                 .max()
                 .unwrap_or(node.span.start());
             super::span(
-                astral_yaml::comments::skip_trivia(source, properties_end).min(node.span.end()),
+                astral_yaml::comments::skip_trivia(&source[..node.span.end()], properties_end),
                 node.span.end(),
             )
         })
@@ -298,8 +310,36 @@ impl<'source> Frame<'source> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Insertion, Locations};
+    use super::{Insertion, Locations, contents};
     use crate::syntax::span;
+
+    // https://yaml.org/spec/1.2.2/#822-block-mappings
+    #[test]
+    fn nested_omitted_values_share_an_insertion_point() {
+        // Each `?` introduces a mapping key. Both keys omit their `:` value indicator.
+        let source = astral_yaml_dev::indoc! {"
+            ?
+              ? leaf  # nested key
+            flow:
+              {
+                last:  # flow value
+              }
+        "};
+        let stream = astral_yaml::parse(source).unwrap();
+        let spans = contents(source, stream.nodes(), stream.documents()[0].root);
+        let insertion_points: Vec<_> = spans
+            .into_iter()
+            .filter(|span| span.is_empty())
+            .map(astral_yaml::Span::start)
+            .collect();
+
+        let before_comment = source.find("# nested key").unwrap();
+        let before_closing_brace = source.find('}').unwrap();
+        assert_eq!(
+            insertion_points,
+            [before_comment, before_comment, before_closing_brace]
+        );
+    }
 
     #[test]
     fn an_insertion_inside_a_span_moves_only_its_end() {
