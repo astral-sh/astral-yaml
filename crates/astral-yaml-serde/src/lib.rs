@@ -23,8 +23,8 @@ pub mod with;
 pub use commented::Commented;
 pub use comments::{AttachedComment, CommentPlacement};
 pub use de::{
-    DeserializeOptions, from_document, from_document_with_options, from_str, from_str_with_options,
-    from_stream, from_stream_with_options,
+    DeserializationPolicy, from_document, from_document_with_policy, from_str,
+    from_str_with_policy, from_stream, from_stream_with_policy,
 };
 #[cfg(feature = "editable")]
 pub use editable::{Editable, EditableYaml};
