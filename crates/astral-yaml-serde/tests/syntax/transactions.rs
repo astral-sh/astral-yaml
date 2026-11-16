@@ -604,6 +604,58 @@ fn impossible_comment_placement_and_combined_output_overflow_roll_back() {
 }
 
 #[test]
+fn disjoint_rewrites_share_the_output_byte_budget() {
+    let source = "[\n    'a',\n    'b',\n    'c'\n]";
+    let mut document = DocumentSyntax::parse_with_options(
+        source,
+        ParseOptions {
+            max_input_bytes: 48,
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+
+    let error = document
+        .edit(|root| {
+            let mut items = root.into_sequence()?;
+            for index in 0..items.len() {
+                items.item(index)?.set("v\nv\nv")?;
+            }
+            Ok(())
+        })
+        .unwrap_err();
+
+    // The final replacement exceeds the bytes left by the first two.
+    assert_eq!(error.message, "emitted YAML exceeds input byte limit");
+    assert_eq!(error.span.unwrap().slice(source), Some("'c'"));
+    assert_eq!(document.source(), source);
+}
+
+#[test]
+fn disjoint_rewrites_fit_with_a_shorter_quoted_scalar() {
+    let source = "['xxxxx',\nhello]";
+    let expected = "['''x''',\n\"x\\nx\\nx\\nx\\n\"]";
+    let mut document = DocumentSyntax::parse_with_options(
+        source,
+        ParseOptions {
+            max_input_bytes: expected.len(),
+            ..ParseOptions::default()
+        },
+    )
+    .unwrap();
+
+    document
+        .edit(|root| {
+            let mut items = root.into_sequence()?;
+            items.item(0)?.set("'x'")?;
+            items.item(1)?.set("x\nx\nx\nx\n")?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(document.source(), expected);
+}
+
+#[test]
 fn repeated_navigation_is_bounded() {
     let mut document = DocumentSyntax::parse_with_options(
         "42",

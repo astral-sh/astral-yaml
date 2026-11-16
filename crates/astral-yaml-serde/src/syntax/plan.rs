@@ -227,18 +227,29 @@ impl Plan<'_> {
             .find(|rewrite| rewrite.id == self.candidate.root);
         let mut root_comments = if root_region.is_some() || self.changes.root_comments {
             let region = root_region.map(|rewrite| rewrite.boundary.body());
-            Some(self.root_comments(region, &layout)?)
+            self.root_comments(region, &layout)?
         } else {
-            None
+            RootComments::default()
         };
-        let mut patches = root_comments
-            .as_mut()
-            .map_or_else(Vec::new, |comments| std::mem::take(&mut comments.patches));
+        let mut patches = std::mem::take(&mut root_comments.patches);
+        // All replacement text remains live until the source patches are joined.
+        // Include comment patches on either side of the document body.
+        let comment_bytes = patches
+            .iter()
+            .chain(&root_comments.after_body)
+            .map(|(_, text)| text.len())
+            .sum();
+        let retained_bytes = Budget::new(
+            self.original
+                .options
+                .max_input_bytes
+                .saturating_sub(comment_bytes),
+        );
         let emission = self.original.emission(self.candidate);
         for rewrite in &regions {
             let id = rewrite.id;
             let comments = if id == self.candidate.root {
-                &root_comments.as_ref().expect("root comment plan").rendered
+                &root_comments.rendered
             } else {
                 &self.candidate.nodes[id.index()].comments
             };
@@ -250,12 +261,16 @@ impl Plan<'_> {
                 comments,
                 syntax,
             )?;
+            retained_bytes
+                .try_charge(rendered.text.len())
+                .ok_or(Error {
+                    span: rewrite.boundary.body(),
+                    message: "emitted YAML exceeds input byte limit",
+                })?;
             patches.push((rendered.span, rendered.text));
         }
-        if let Some(comments) = root_comments.as_mut() {
-            patches.append(&mut comments.after_body);
-            comments.finish_separation(self.original, &mut patches);
-        }
+        patches.append(&mut root_comments.after_body);
+        root_comments.finish_separation(self.original, &mut patches);
         splice::apply(
             self.original,
             patches,
