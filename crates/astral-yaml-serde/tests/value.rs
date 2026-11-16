@@ -149,6 +149,7 @@ fn value_integer_conversions_check_range(source: &str) {
 
 #[test_case("-2", -2.0; "signed integer")]
 #[test_case("2", 2.0; "unsigned integer")]
+#[test_case("1.25", 1.25; "finite float")]
 #[test_case(".inf", f32::INFINITY; "infinity")]
 fn floats_decode_from_stored_numbers(source: &str, expected: f32) {
     let value = from_str::<Value>(source).unwrap();

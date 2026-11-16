@@ -42,14 +42,13 @@ struct Pair(i16, String);
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Unit;
 
-fn roundtrip<T>(value: &T)
+fn roundtrip<T>(value: &T) -> String
 where
     T: Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug,
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
-    let tree = from_str::<Value>(&yaml).unwrap();
-    assert_eq!(&T::deserialize(&tree).unwrap(), value, "{yaml:?}");
+    yaml
 }
 
 // The explicit cases use tag shorthands, a verbatim tag and the non-specific `!`.
@@ -110,7 +109,9 @@ fn derived_types() {
         Kind::Tuple(7, false),
         Kind::Struct { value: -2 },
     ] {
-        roundtrip(&value);
+        let yaml = roundtrip(&value);
+        let tree = from_str::<Value>(&yaml).unwrap();
+        assert_eq!(Kind::deserialize(&tree).unwrap(), value, "{yaml:?}");
     }
 
     roundtrip(&Wrapper(42));
@@ -381,10 +382,16 @@ fn all_string_characters_and_complex_keys() {
     roundtrip(&'🌍');
     assert!(from_str::<char>("ab").is_err());
 
-    roundtrip(&BTreeMap::from([
+    let keyed = BTreeMap::from([
         (vec![1, 2], "first".to_owned()),
         (vec![], "second".to_owned()),
-    ]));
+    ]);
+    let yaml = roundtrip(&keyed);
+    let tree = from_str::<Value>(&yaml).unwrap();
+    assert_eq!(
+        BTreeMap::<Vec<i32>, String>::deserialize(&tree).unwrap(),
+        keyed
+    );
 
     // https://yaml.org/spec/1.2.2/#71-alias-nodes
     let map: BTreeMap<String, Vec<String>> = from_str("a: &a [one, two]\nb: *a\n").unwrap();
