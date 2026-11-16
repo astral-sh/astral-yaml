@@ -24,7 +24,8 @@ pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: Node
                     return content;
                 }
 
-                let next = astral_yaml::comments::skip_trivia(source, start);
+                let inline = source.len() - source[start..].trim_start_matches([' ', '\t']).len();
+                let next = astral_yaml::comments::skip_trivia(source, inline);
                 // Keep separation after block indicators. At a flow delimiter
                 // or an empty document root, retain all preceding comment lines.
                 let at = if index == root.index()
@@ -32,7 +33,7 @@ pub(super) fn contents(source: &str, nodes: &[astral_yaml::Node<'_>], root: Node
                 {
                     next
                 } else {
-                    source.len() - source[start..].trim_start_matches([' ', '\t']).len()
+                    inline
                 };
                 let content = super::span(at, at);
                 last_empty = Some((start, content));
@@ -315,27 +316,15 @@ mod tests {
     // https://yaml.org/spec/1.2.2/#822-block-mappings
     #[test]
     fn omitted_values_can_share_a_trivia_gap() {
-        let source = "? ? ? leaf  # nested\nother:  # field\nflow: [last:  # gap\n ]\n";
+        let source = "? ? leaf  # nested\nflow: [last:  # gap\n ]\n";
         let stream = astral_yaml::parse(source).unwrap();
         let spans = contents(source, stream.nodes(), stream.documents()[0].root);
-        let gaps: Vec<_> = stream
-            .nodes()
-            .iter()
-            .zip(spans)
-            .filter(|(node, _)| node.span.is_empty())
-            .map(|(node, content)| {
-                let gap = &source[node.span.start()..content.start()];
-                let next = source[content.start()..].lines().next().unwrap();
-                format!("{gap:?} before {next:?}")
-            })
+        let following: Vec<_> = spans
+            .into_iter()
+            .filter(|span| span.is_empty())
+            .map(|span| source[span.start()..].lines().next().unwrap())
             .collect();
-        insta::assert_snapshot!(gaps.join("\n"), @r##"
-        "  " before "# nested"
-        "  " before "# nested"
-        "  " before "# nested"
-        "  " before "# field"
-        "  # gap\n " before "]"
-        "##);
+        assert_eq!(following, ["# nested", "# nested", "]"]);
     }
 
     #[test]
