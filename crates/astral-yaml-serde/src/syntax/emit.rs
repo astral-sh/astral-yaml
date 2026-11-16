@@ -815,6 +815,17 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
             self.ending = EmitterEnding::BlockScalar;
             return Ok(());
         }
+        // A flow scalar can occupy column zero in a multiline collection. Indent
+        // a marker spelling so it stays scalar content before retained whitespace.
+        if context.in_flow()
+            && text
+                .strip_prefix("---")
+                .or_else(|| text.strip_prefix("..."))
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '\n']))
+            && self.at_document_boundary()
+        {
+            self.push(" ")?;
+        }
         self.push(&text)
     }
 
