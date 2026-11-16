@@ -30,21 +30,31 @@ fn text_reader_byte_limit(limit: usize, accepted: bool) {
     });
 }
 
-#[test_case(5, false; "one byte short")]
-#[test_case(6, true; "exact collision budget")]
-fn numeric_key_work_budget(budget: usize, accepted: bool) {
+// Python hashes -1 and -2 identically, including when the key is an alias.
+#[test_case("[&n -1, {-2: a, *n : b}]", 6; "equal hashes with an alias")]
+// These small integers have distinct hashes with the same low bits.
+#[test_case("{1: a, 9: b, 17: c}", 7; "distinct hashes")]
+#[test_case("{a: a, 1: b, z: c}", 3; "mixed key types")]
+#[test_case("{a: a, b: b, null: c}", 0; "map without numeric keys")]
+#[test_case("[{1: a}, {2: b}]", 2; "shared across mappings")]
+fn numeric_key_work_budget(source: &str, minimum_budget: usize) {
     Python::initialize();
     Python::attach(|py| {
-        // Python's -1 and -2 hash to the same value. The alias key charges
-        // for comparing its two digits against both keys in that bucket.
-        let stream = astral_yaml::parse("[&n -1, {-2: a, *n : b}]").unwrap();
-        let mut loader = Loader {
-            py,
-            stream: &stream,
-            encoded: None,
-            anchors: std::collections::HashMap::new(),
-            key_bytes: Budget::new(budget),
+        let stream = astral_yaml::parse(source).unwrap();
+        let load = |budget| {
+            Loader {
+                py,
+                stream: &stream,
+                encoded: None,
+                anchors: std::collections::HashMap::new(),
+                key_work: Budget::new(budget),
+            }
+            .value(stream.documents()[0].root)
         };
-        assert_eq!(loader.value(stream.documents()[0].root).is_ok(), accepted);
+
+        load(minimum_budget).unwrap();
+        if minimum_budget > 0 {
+            assert!(load(minimum_budget - 1).is_err());
+        }
     });
 }

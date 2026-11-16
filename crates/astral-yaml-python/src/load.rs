@@ -133,7 +133,7 @@ fn document<'py>(
             stream: &stream,
             encoded,
             anchors: HashMap::new(),
-            key_bytes: Budget::new(ParseOptions::default().max_input_bytes),
+            key_work: Budget::new(ParseOptions::default().max_input_bytes),
         }
         .value(doc.root),
         [_, second, ..] => Err(located("expected one YAML document", second.span, encoded)),
@@ -145,7 +145,7 @@ struct Loader<'py, 'a> {
     stream: &'a Stream<'a>,
     encoded: Option<&'a Source<'a>>,
     anchors: HashMap<NodeId, Bound<'py, PyAny>>,
-    key_bytes: Budget,
+    key_work: Budget,
 }
 
 impl<'py> Loader<'py, '_> {
@@ -208,6 +208,7 @@ impl<'py> Loader<'py, '_> {
         self.remember(id, dict.as_any());
         let mut seen_nan = false;
         let mut hashes = BTreeMap::new();
+        let mut numeric_keys = 0;
 
         for entry in entries {
             let key_node = &self.stream.nodes()[entry.key.index()];
@@ -222,38 +223,33 @@ impl<'py> Loader<'py, '_> {
 
             let key = self.value(entry.key)?;
             // Scalar keys other than strings and None are numbers (including bool).
-            let duplicate_nan = if key.is_exact_instance_of::<PyString>() || key.is_none() {
-                false
+            let is_numeric = !key.is_exact_instance_of::<PyString>() && !key.is_none();
+            let work = if is_numeric {
+                // Distinct numeric hashes can follow overlapping probe sequences.
+                // Charge for probing every preceding key, plus scanning integer
+                // digits when hashing this key or comparing equal hashes.
+                let matches = hashes.entry(key.hash()?).or_insert(0);
+                let probes = dict.len() - *matches;
+                *matches += 1;
+                numeric_keys += 1;
+                probes.saturating_add(scalar.value.len().saturating_mul(*matches))
             } else {
-                self.charge_numeric_key(&key, scalar.value.len(), span, &mut hashes)?;
-                // Python considers distinct NaN objects unequal. YAML has one NaN key.
-                key.cast::<PyFloat>().is_ok_and(|n| n.value().is_nan())
-                    && std::mem::replace(&mut seen_nan, true)
+                // String and None lookups can also probe preceding numeric keys.
+                numeric_keys
             };
+            self.key_work
+                .try_charge(work)
+                .ok_or_else(|| self.error("numeric mapping key work limit exceeded", span))?;
+
+            // Python considers distinct NaN objects unequal. YAML has one NaN key.
+            let duplicate_nan = key.cast::<PyFloat>().is_ok_and(|n| n.value().is_nan())
+                && std::mem::replace(&mut seen_nan, true);
             if duplicate_nan || dict.contains(&key)? {
                 return Err(self.error("duplicate mapping key", span));
             }
             dict.set_item(key, self.value(entry.value)?)?;
         }
         Ok(dict.into_any())
-    }
-
-    // Python's numeric hashes are deterministic. Constructing a dict from many
-    // different integers with the same hash compares each key with all preceding
-    // keys in that bucket. Integer hashing and comparison can also scan its digits.
-    fn charge_numeric_key(
-        &self,
-        key: &Bound<'py, PyAny>,
-        digits: usize,
-        span: Span,
-        hashes: &mut BTreeMap<isize, usize>,
-    ) -> PyResult<()> {
-        let count = hashes.entry(key.hash()?).or_default();
-        *count += 1;
-        let bytes = digits.saturating_mul(*count);
-        self.key_bytes
-            .try_charge(bytes)
-            .ok_or_else(|| self.error("numeric mapping key work limit exceeded", span))
     }
 
     fn remember(&mut self, id: NodeId, value: &Bound<'py, PyAny>) {
