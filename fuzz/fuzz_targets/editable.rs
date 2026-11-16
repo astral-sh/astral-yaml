@@ -2,9 +2,8 @@
 
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, ScalarStyle, Source};
-use astral_yaml_dev::Value;
 use astral_yaml_serde::edit::{Cursor, NodeKind};
-use astral_yaml_serde::{Editable, Error, from_str, to_string};
+use astral_yaml_serde::{Editable, Error, Value, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
 
 // YAML 1.2.2 §5.1, production [1]. The reader also accepts some characters

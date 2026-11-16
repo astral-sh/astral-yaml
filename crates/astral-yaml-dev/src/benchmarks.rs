@@ -1,6 +1,5 @@
 //! Fixed benchmark fixtures and equivalent deserialization workloads.
 
-use crate::Value;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -20,15 +19,6 @@ pub const FIXTURES: &[(&str, &str)] = &[
         include_str!("../../../fixtures/real-world/openapi-petstore.yaml"),
     ),
 ];
-
-/// Deserializes every document with astral-yaml.
-///
-/// # Panics
-/// Panics if the input cannot be deserialized.
-#[must_use]
-pub fn astral(source: &str) -> Vec<Value> {
-    documents(source)
-}
 
 /// Parses and deserializes every document into the requested type.
 ///

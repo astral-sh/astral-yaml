@@ -15,6 +15,7 @@ mod spanned;
 #[cfg(feature = "editable")]
 mod syntax;
 mod tagged;
+mod value;
 
 #[cfg(feature = "editable")]
 pub mod edit;
@@ -32,3 +33,4 @@ pub use error::Error;
 pub use ser::to_string;
 pub use spanned::Spanned;
 pub use tagged::Tagged;
+pub use value::Value;

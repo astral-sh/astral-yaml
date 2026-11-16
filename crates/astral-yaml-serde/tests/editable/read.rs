@@ -1,5 +1,5 @@
 use astral_yaml_serde::edit::CommentPlacement;
-use astral_yaml_serde::{Commented, Editable, Spanned, Tagged, from_str};
+use astral_yaml_serde::{Commented, Editable, Spanned, Tagged, Value as YamlValue, from_str};
 use serde_json::Value;
 
 #[test]
@@ -128,7 +128,7 @@ fn reads_report_a_dangling_alias_without_preventing_repair() {
 fn reads_apply_tag_resolution() {
     // The explicit local tag identifies the value for the application.
     // https://yaml.org/spec/1.2.2/#691-node-tags
-    let mut document = Editable::<Value>::parse("null").unwrap();
+    let mut document = Editable::<YamlValue>::parse("null").unwrap();
     document
         .edit(|mut root| {
             root.set(Tagged {
@@ -138,9 +138,11 @@ fn reads_apply_tag_resolution() {
             let tagged: Tagged<u8> = root.read()?;
             assert_eq!(tagged.tag, "!label");
             assert_eq!(tagged.value, 9);
-            root.set(())
+            let value: YamlValue = root.read()?;
+            root.set(value)
         })
         .unwrap();
+    insta::assert_snapshot!(document.source(), @r#"!<!label> "9""#);
 }
 
 #[test]

@@ -1,8 +1,7 @@
 #![no_main]
 #![forbid(unsafe_code)]
 
-use astral_yaml_dev::Value;
-use astral_yaml_serde::{Tagged, from_str, to_string};
+use astral_yaml_serde::{Tagged, Value, from_str, to_string};
 use libfuzzer_sys::fuzz_target;
 use serde::{Deserialize, Serialize};
 

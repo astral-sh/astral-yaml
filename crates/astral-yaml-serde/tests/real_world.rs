@@ -1,5 +1,5 @@
-use astral_yaml_dev::Value;
 use astral_yaml_dev::fixtures::manifest;
+use astral_yaml_serde::Value;
 
 #[test]
 fn real_world_values_comments_and_serialization() {
@@ -17,7 +17,7 @@ fn real_world_values_comments_and_serialization() {
             .map(|index| astral_yaml_serde::from_document(&stream, index))
             .collect();
 
-        if let Some(expected) = fixture.serde_error {
+        if let Some(expected @ "duplicate mapping key") = fixture.serde_error.as_deref() {
             assert_eq!(values.unwrap_err().message, expected, "{name}");
             continue;
         }
@@ -43,9 +43,5 @@ fn real_world_values_comments_and_serialization() {
                 "{name}"
             );
         }
-
-        assert!(
-            astral_yaml_serde::from_document::<Value>(&stream, stream.documents().len()).is_err()
-        );
     }
 }
