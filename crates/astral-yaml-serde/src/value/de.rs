@@ -36,6 +36,10 @@ use std::iter;
 /// assert_eq!(settings.port, 443);
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the convenience API consumes its input"
+)]
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
     T::deserialize(&value)
 }
