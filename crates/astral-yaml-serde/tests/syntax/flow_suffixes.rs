@@ -221,3 +221,37 @@ fn flow_comment_layouts_normalize_idempotently(open: &str, body: &str, close: &s
         }
     }
 }
+
+#[test_case("[x,\n # c\n]", true => "[]\n# c\n"; "sequence")]
+#[test_case("{x: y,\n # c\n}", false => "{}\n# c\n"; "mapping")]
+fn removing_the_last_entry_keeps_the_collection_trailing_comment(
+    source: &str,
+    sequence: bool,
+) -> String {
+    let mut document = DocumentSyntax::parse(source).unwrap();
+    document
+        .edit_syntax(|editor| {
+            if sequence {
+                editor.remove_item(editor.root(), 0)
+            } else {
+                editor.remove_entry(editor.root(), 0)
+            }
+        })
+        .unwrap();
+    document.into_yaml()
+}
+
+#[test]
+fn an_empty_complex_key_keeps_its_exterior_trailing_comment() {
+    let source = "? []\n # q\n: value";
+    let mut document = DocumentSyntax::parse(source).unwrap();
+    document
+        .edit(|root| root.into_mapping()?.set("other", true).map(|_| ()))
+        .unwrap();
+    insta::assert_snapshot!(document.source(), @r#"
+    ? []
+    # q
+    : value
+    "other": true
+    "#);
+}
