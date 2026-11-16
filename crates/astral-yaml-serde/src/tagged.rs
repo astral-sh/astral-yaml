@@ -1,3 +1,4 @@
+use astral_yaml::schema::CoreType;
 use serde::de::{EnumAccess, VariantAccess, Visitor};
 use serde::ser::SerializeTupleStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -6,6 +7,11 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 pub(crate) const NAME: &str = "$astral_yaml::Tagged";
+
+// The non-specific tag also follows core schema resolution.
+pub(crate) fn is_core_tag(tag: &str) -> bool {
+    tag == "!" || CoreType::from_tag(tag).is_some()
+}
 
 /// A deserialized value with its explicit YAML tag.
 ///
