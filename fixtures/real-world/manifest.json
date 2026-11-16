@@ -5044,7 +5044,8 @@
     "sha256": "76f9c0c14991e519fd167b4bb7f97236297c5d5d18ab4e383e61f62e00add120",
     "license": "LICENSE-cloudposse-atmos",
     "notice": "NOTICE-cloudposse-atmos",
-    "notice_path": "NOTICE"
+    "notice_path": "NOTICE",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "cloudposse/atmos",
@@ -5174,7 +5175,8 @@
     "sha256": "1c4ed3f2956657fb0aa8f9b503dde958be72a61e046d936c03c3ed0860baa5f7",
     "license": "LICENSE-cloudposse-atmos",
     "notice": "NOTICE-cloudposse-atmos",
-    "notice_path": "NOTICE"
+    "notice_path": "NOTICE",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "cloudposse/atmos",
@@ -5239,7 +5241,8 @@
     "sha256": "e9d6f753fb01946d1612c14663ed4ef251860975101f41df557d57acc4b55dff",
     "license": "LICENSE-cloudposse-atmos",
     "notice": "NOTICE-cloudposse-atmos",
-    "notice_path": "NOTICE"
+    "notice_path": "NOTICE",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "cloudposse/atmos",
@@ -5317,7 +5320,8 @@
     "sha256": "9283bf25f164fc5c0f1b60754d9283617f1868f52ac0729fbdb35fa7736edf2a",
     "license": "LICENSE-cloudposse-atmos",
     "notice": "NOTICE-cloudposse-atmos",
-    "notice_path": "NOTICE"
+    "notice_path": "NOTICE",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "cloudposse/atmos",
@@ -5408,7 +5412,8 @@
     "sha256": "7d9b2c5cc6d6fc8fe51e865e5997576d955b8c8a6052b2261aed32effba0b1ba",
     "license": "LICENSE-cloudposse-atmos",
     "notice": "NOTICE-cloudposse-atmos",
-    "notice_path": "NOTICE"
+    "notice_path": "NOTICE",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "cloudposse/atmos",
@@ -5482,7 +5487,8 @@
     "bytes": 9299,
     "file": "squidfunk-mkdocs-material-mkdocs-98d0f806.yaml",
     "sha256": "252558246c760af93d932565786e20848bcf246cb69b1c3b6bde8fc1e822e249",
-    "license": "LICENSE-squidfunk-mkdocs-material"
+    "license": "LICENSE-squidfunk-mkdocs-material",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "dagster-io/dagster",
@@ -6245,7 +6251,8 @@
     "bytes": 5276,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-taggingrootvolumesinec2-tagging-root-volume-0033b5e4.yaml",
     "sha256": "149bf169ad3d2adebf99ea2bbbcab10d1a902add7cdb7b84a499e125530b4fb7",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6256,7 +6263,8 @@
     "bytes": 1589,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-customresources-getfromjson-example-templates-getfromjson-consumer-00da8bfb.yaml",
     "sha256": "540511c374f05ed0c9aaefaa75a2ec2c3926b108ac163a81c9b9b405aeab0e1f",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6278,7 +6286,8 @@
     "bytes": 21306,
     "file": "aws-cloudformation-aws-cloudformation-templates-neptunedb-neptune-04ad27df.yaml",
     "sha256": "d89e03307dcb9a58f1242a7477e1a93da68076f8caffa77c50c40004ac41db57",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6289,7 +6298,8 @@
     "bytes": 2262,
     "file": "aws-cloudformation-aws-cloudformation-templates-rainmodules-cloudfront-nocache-0611542c.yaml",
     "sha256": "bbdb45c63452c771a1904e846aa4ef3a5470ffa90b4f269bdd5ea7a391ea2847",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6300,7 +6310,8 @@
     "bytes": 5719,
     "file": "aws-cloudformation-aws-cloudformation-templates-elasticache-elasticache-snapshot-06d0965d.yaml",
     "sha256": "fffb9a297293443321bb49d0b862c9d57f5795061c07dce9f8c3aa401f1a58a8",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6311,7 +6322,8 @@
     "bytes": 1992,
     "file": "aws-cloudformation-aws-cloudformation-templates-directoryservice-directoryservicesimplead-06e8d458.yaml",
     "sha256": "05a3a509fe059384829125f1fb09b2ca3df9c4e342bd9abe45ad7b38df61aac1",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6322,7 +6334,8 @@
     "bytes": 1024,
     "file": "aws-cloudformation-aws-cloudformation-templates-sns-snstopic-06f5f13b.yaml",
     "sha256": "d61ba39c830673c86f16c9ca25eb94fd3a0bc9f759e87bc3b3c76500aaa389fd",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6333,7 +6346,8 @@
     "bytes": 6475,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-amazoncloudwatchagent-ssm-redhat-09d9ea86.yaml",
     "sha256": "d4cbda17e716b53bf9ad0c61b038fd40a8497a802c0cd57b2a63cdc0d255feb7",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6344,7 +6358,8 @@
     "bytes": 13555,
     "file": "aws-cloudformation-aws-cloudformation-templates-ecs-ecs-schedule-example-0ad0203c.yaml",
     "sha256": "2643cb7e1cfec8bd4a704c8ec2c9d44af9166d158298afd68f25e4ae225f6972",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6355,7 +6370,8 @@
     "bytes": 4308,
     "file": "aws-cloudformation-aws-cloudformation-templates-emr-emrclusterwithadditionalsecuritygroups-13996516.yaml",
     "sha256": "d56af60ae613082884ab6972238dcdb4ae83fa99a937f527947a87321e629b98",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6366,7 +6382,8 @@
     "bytes": 4320,
     "file": "aws-cloudformation-aws-cloudformation-templates-rainmodules-vpc-13ca6b8b.yaml",
     "sha256": "c21cddbf9f34f2dd5179a28f42ee2c699dce515bf278c0b8360a0adfcbc4a977",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6377,7 +6394,8 @@
     "bytes": 1058,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-fn-foreach-s3-outputs-1d153d46.yaml",
     "sha256": "451163d0c4c337616a3bb5a7174ab375d957db4fd99613c63031c8ebf1efd3c4",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6388,7 +6406,8 @@
     "bytes": 3856,
     "file": "aws-cloudformation-aws-cloudformation-templates-emr-emrclustergangliawithsparkors3backedhbase-1d77106f.yaml",
     "sha256": "2a91eb996e91ae99e949427655f59ecd5cb616638433443c928117061ef35a8a",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6399,7 +6418,8 @@
     "bytes": 25470,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-cloudfrontcustomoriginlambda-edge-cloudfront-20774144.yaml",
     "sha256": "c5dd8c2b5f2a07aeb09dc38c9c407060324f632ca368c6bb7cea248f692781af",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6410,7 +6430,8 @@
     "bytes": 5503,
     "file": "aws-cloudformation-aws-cloudformation-templates-rainmodules-bucket-20dadc3b.yaml",
     "sha256": "e782b2b71df59a597af01a6e5336beaeb056afadbc24911b1b93a10f194199c0",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6421,7 +6442,8 @@
     "bytes": 2143,
     "file": "aws-cloudformation-aws-cloudformation-templates-elasticloadbalancing-networkloadbalancerwitheips-20db62e8.yaml",
     "sha256": "04545221e7d1033d804645af7556f6327d47027d675374fe5d9e13d3b4e104d2",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6432,7 +6454,8 @@
     "bytes": 6361,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-amazoncloudwatchagent-ssm-debian-248e6cd2.yaml",
     "sha256": "4c1f62d732b26895f5705395c25094090a54e79ea418d5b25eac8d215d7bc6f3",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6443,7 +6466,8 @@
     "bytes": 6919,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-operatingsystems-rhel9-cfn-hup-2742f0b2.yaml",
     "sha256": "d1d2c537e26041da0ee49c72d07f3f88a23722c07aecadb7cd7cb09dd205911f",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6454,7 +6478,8 @@
     "bytes": 5407,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-amazoncloudwatchagent-inline-windows-29c0c93c.yaml",
     "sha256": "b9024f2fe47627a4d2bc1274ba96b05f924e392287f7f15c7d5ceb7387fda197",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6465,7 +6490,8 @@
     "bytes": 3341,
     "file": "aws-cloudformation-aws-cloudformation-templates-sqs-sqsstandardqueue-2a04457c.yaml",
     "sha256": "3c61cc2683fb9ca38baee54bae32434cbfb8045d146e89102d065dea1aad9221",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6476,7 +6502,8 @@
     "bytes": 9246,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-cloudformationendpointsignals-cfn-endpoint-creationpolicy-2b74e9eb.yaml",
     "sha256": "ddb0e23a790e5f01c2c22a55e8ba494f056826b28e6c9db0e597d0503768ccf6",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6487,7 +6514,8 @@
     "bytes": 3960,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-vscode-vscodeserver-2d5b16cc.yaml",
     "sha256": "2f192d6d0f8eb2dd2976c9531bb86537bdf3cbbb2a29f3cbd4f899f1e0983026",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6498,7 +6526,8 @@
     "bytes": 2113,
     "file": "aws-cloudformation-aws-cloudformation-templates-efs-efsaccesspoint-2ea0bd66.yaml",
     "sha256": "28a83e2600e59d302078cc5284c24670571e48017d0938df2f5419b723b5ea88",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6509,7 +6538,8 @@
     "bytes": 3441,
     "file": "aws-cloudformation-aws-cloudformation-templates-ec2-eip-with-association-32b86137.yaml",
     "sha256": "f2a24e885f89176736488c6b9cb640f7ffe53b6fbbf5b71274c78ceee5be78f2",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6520,7 +6550,8 @@
     "bytes": 8866,
     "file": "aws-cloudformation-aws-cloudformation-templates-elasticloadbalancing-elbstickinesssample-32db7e8c.yaml",
     "sha256": "66a21b28b6bb6fae0ceb5771a39d085e6fa36a545022c6ddd3a8622c0eee29c9",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6531,7 +6562,8 @@
     "bytes": 1371,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-stacksets-common-resources-3b82cffd.yaml",
     "sha256": "6b787f490c9a7738c31c0703cb36375e17a7d392f0256e473233dc61bdf53b8d",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6542,7 +6574,8 @@
     "bytes": 5882,
     "file": "aws-cloudformation-aws-cloudformation-templates-servicecatalog-portfolio-40259e9c.yaml",
     "sha256": "0fa46619e24e025c17c535f4616cf1721217c988ef4d3a417ba4b3447d41261a",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6553,7 +6586,8 @@
     "bytes": 603,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-macrosexamples-count-template-40978da8.yaml",
     "sha256": "52b212bffee19e884ec51fd3ecd2ae6344f58a7d75bc68e0ff650740224a2688",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6564,7 +6598,8 @@
     "bytes": 4426,
     "file": "aws-cloudformation-aws-cloudformation-templates-directoryservice-directoryservicemicrosoftad-42dded4e.yaml",
     "sha256": "584c7f0db9382f19e22f0776c3f00c58cd5c25cae61bedfcf00d08d2905d5612",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6575,7 +6610,8 @@
     "bytes": 18008,
     "file": "aws-cloudformation-aws-cloudformation-templates-ecs-fargatelaunchtype-clusters-private-vpc-4501c05f.yaml",
     "sha256": "e2b7f0218c5197095204afda382890f3f4d65bd3cf19d6d3dd5d861cbb564ee6",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6586,7 +6622,8 @@
     "bytes": 732,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-macrosexamples-boto3-macro-485af359.yaml",
     "sha256": "cbd760554bd4fb029050606f8517679163c6c6e8754d152439844c4dc8b9b450",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6597,7 +6634,8 @@
     "bytes": 18250,
     "file": "aws-cloudformation-aws-cloudformation-templates-solutions-directoryadclients-directory-ad-clients-48d1086d.yaml",
     "sha256": "dbcb39f98759e904990e245a20b6da115f2fe317eb551d05450983fb5fc8a951",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6608,7 +6646,8 @@
     "bytes": 1839,
     "file": "aws-cloudformation-aws-cloudformation-templates-cloudformation-macrosexamples-datefunctions-date-48ee1951.yaml",
     "sha256": "597839f8714c771ccd8444cc827974bcd12a3d97b1d27fadc16a67037b1a465f",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "aws-cloudformation/aws-cloudformation-templates",
@@ -6619,7 +6658,8 @@
     "bytes": 5480,
     "file": "aws-cloudformation-aws-cloudformation-templates-ecs-fargatelaunchtype-services-private-subnet-public-service-491f11b9.yaml",
     "sha256": "9a1313638bb5082de64da5938f5fe3c083d70466bdcc12a548ac22166d39e2b7",
-    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates"
+    "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "spack/spack",
@@ -7245,7 +7285,8 @@
     "sha256": "69bb501255d0584aa64c8340931f166450d89dfa4c082da0b356e994051b2e56",
     "license": "LICENSE-aws-cloudformation-aws-cloudformation-templates",
     "notice": "NOTICE-aws-cloudformation-aws-cloudformation-templates",
-    "notice_path": "NOTICE.txt"
+    "notice_path": "NOTICE.txt",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "common-workflow-language/workflows",
@@ -7346,7 +7387,8 @@
     "bytes": 160,
     "file": "unity-editor-build-settings.yaml",
     "sha256": "1942c088ddfeeef348fdf12390e2a2d6da51056e197458d67969d44e7b2cbbd3",
-    "license": "LICENSE-mirror"
+    "license": "LICENSE-mirror",
+    "serde_error": "non-core YAML tags require Tagged<T> or with::yaml_tag"
   },
   {
     "repository": "MirrorNetworking/Mirror",

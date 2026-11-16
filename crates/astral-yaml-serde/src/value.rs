@@ -1,6 +1,6 @@
 use crate::{Tagged, tagged::is_core_tag};
 use serde::de::{EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor};
-use serde::ser::{self, SerializeMap};
+use serde::ser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
@@ -8,16 +8,12 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 
 /// An owned YAML value that can be read and written through Serde.
 ///
-/// Scalars use the YAML 1.2 core schema. Explicit core tags determine the
-/// value's type. Application tags retain their expanded name and use strings
-/// for scalar payloads. For example, `!Port 080` contains the string `"080"`.
-/// Use [`Tagged<T>`] to capture a tag with a particular Rust payload type.
+/// Explicit core tags resolve through the YAML 1.2 core schema. Application
+/// tags retain their expanded name and decoded scalar text, so `!Port 080`
+/// contains `"080"`. Use [`Tagged<T>`] for a specific Rust payload type.
 ///
-/// Application tag capture requires direct access to this crate's deserializer.
-/// Serde's buffers for `flatten` and untagged enums cannot capture tags.
-/// Aliases expand into owned values, subject to the deserializer's depth and
-/// resource limits. Use `Editable<Value>` with the `editable` feature to
-/// preserve source formatting and comments when editing a document.
+/// Serde's `flatten` and untagged-enum buffers cannot capture application tags.
+/// Alias expansion is bounded by the deserializer's depth and resource limits.
 ///
 /// Mapping equality ignores entry order. Signed and unsigned integers compare
 /// by value, and all NaNs compare equal.
@@ -32,7 +28,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 /// assert_eq!(to_string(&ports)?, "[80, 443, 8080]\n");
 /// # Ok::<(), astral_yaml_serde::Error>(())
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(untagged)]
 pub enum Value {
     /// A YAML null.
     #[default]
@@ -52,12 +49,12 @@ pub enum Value {
     /// Mapping entries in input order. Both keys and values can be any YAML value.
     ///
     /// YAML serialization rejects duplicate keys.
-    Mapping(Vec<(Self, Self)>),
+    Mapping(#[serde(serialize_with = "serialize_mapping")] Vec<(Self, Self)>),
     /// A value with an explicit application tag.
     ///
     /// The payload must be a string, sequence, or mapping. YAML serialization
     /// rejects an invalid tag or a payload of any other type.
-    Tagged(Box<Tagged<Self>>),
+    Tagged(#[serde(serialize_with = "serialize_tagged")] Box<Tagged<Self>>),
 }
 
 impl Value {
@@ -188,39 +185,29 @@ impl PartialEq for Value {
 
 impl Eq for Value {}
 
-impl Serialize for Value {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Null => serializer.serialize_unit(),
-            Self::Bool(value) => serializer.serialize_bool(*value),
-            Self::Integer(value) => serializer.serialize_i128(*value),
-            Self::Unsigned(value) => serializer.serialize_u128(*value),
-            Self::Float(value) => serializer.serialize_f64(*value),
-            Self::String(value) => serializer.serialize_str(value),
-            Self::Sequence(items) => items.serialize(serializer),
-            Self::Mapping(entries) => {
-                let mut map = serializer.serialize_map(Some(entries.len()))?;
-                for (key, value) in entries {
-                    map.serialize_entry(key, value)?;
-                }
-                map.end()
-            }
-            Self::Tagged(tagged) => {
-                if is_core_tag(&tagged.tag) {
-                    return Err(ser::Error::custom("expected an application YAML tag"));
-                }
-                if !matches!(
-                    tagged.value,
-                    Self::String(_) | Self::Sequence(_) | Self::Mapping(_)
-                ) {
-                    return Err(ser::Error::custom(
-                        "a tagged YAML value requires a string, sequence, or mapping payload",
-                    ));
-                }
-                tagged.serialize(serializer)
-            }
-        }
+fn serialize_mapping<S: Serializer>(
+    entries: &[(Value, Value)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(entries.iter().map(|(key, value)| (key, value)))
+}
+
+fn serialize_tagged<S: Serializer>(
+    tagged: &Tagged<Value>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if is_core_tag(&tagged.tag) {
+        return Err(ser::Error::custom("expected an application YAML tag"));
     }
+    if !matches!(
+        tagged.value,
+        Value::String(_) | Value::Sequence(_) | Value::Mapping(_)
+    ) {
+        return Err(ser::Error::custom(
+            "a tagged YAML value requires a string, sequence, or mapping payload",
+        ));
+    }
+    tagged.serialize(serializer)
 }
 
 impl<'de> Deserialize<'de> for Value {

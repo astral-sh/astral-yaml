@@ -216,20 +216,8 @@ fn tags_in_mapping_keys() {
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison
-#[test_case("{!Text one: 1, one: 2}"; "tagged and untagged scalars")]
-#[test_case("{!Items [1]: a, !Other [1]: b}"; "sequences with different tags")]
-#[test_case("{!Config {a: 1}: a, !Other {a: 1}: b}"; "mappings with different tags")]
-fn distinct_tagged_mapping_keys(source: &str) {
-    let value = from_str::<Value>(source).unwrap();
-    assert_eq!(value.as_mapping().unwrap().len(), 2);
-    assert_eq!(
-        from_str::<Value>(&to_string(&value).unwrap()).unwrap(),
-        value
-    );
-}
-
-// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test_case("{!Text one: 1, !Text one: 2}"; "scalars")]
+#[test_case("{!Port 080: one, !Port '080': two}"; "same scalar in different styles")]
 #[test_case("{&key !Text one: 1, *key : 2}"; "alias")]
 #[test_case("{!Items [1]: a, !Items [1]: b}"; "sequences")]
 #[test_case("{!Config {a: 1, b: 2}: a, !Config {b: 2, a: 1}: b}"; "reordered mappings")]

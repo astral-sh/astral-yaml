@@ -1,5 +1,6 @@
 use astral_yaml_dev::fixtures::manifest;
 use astral_yaml_serde::Value;
+use serde::de::IgnoredAny;
 
 #[test]
 fn real_world_values_comments_and_serialization() {
@@ -18,8 +19,16 @@ fn real_world_values_comments_and_serialization() {
             .collect();
 
         if let Some(expected) = fixture.serde_error {
-            assert_eq!(values.unwrap_err().message, expected, "{name}");
-            continue;
+            let error = (0..stream.documents().len())
+                .find_map(|index| {
+                    astral_yaml_serde::from_document::<IgnoredAny>(&stream, index).err()
+                })
+                .unwrap_or_else(|| panic!("{name}: expected {expected}"));
+            assert_eq!(error.message, expected, "{name}");
+            if expected == "duplicate mapping key" {
+                assert_eq!(values.unwrap_err().message, expected, "{name}");
+                continue;
+            }
         }
 
         let values = values.unwrap_or_else(|error| panic!("{name}: {error}"));

@@ -8,7 +8,7 @@ use astral_yaml_serde::{
     Commented, DeserializationPolicy, Value, from_document_with_policy, from_str,
     from_str_with_policy, from_stream, to_string,
 };
-use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::de;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -640,85 +640,20 @@ fn deserialize_encoded_streams(encoding: Encoding) {
     }
 }
 
-#[derive(Debug)]
-struct Anything;
-
-impl<'de> Deserialize<'de> for Anything {
-    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct AnyVisitor;
-
-        impl<'de> Visitor<'de> for AnyVisitor {
-            type Value = Anything;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("any YAML value")
-            }
-
-            fn visit_unit<E: de::Error>(self) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_bool<E: de::Error>(self, _: bool) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_i64<E: de::Error>(self, _: i64) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_i128<E: de::Error>(self, _: i128) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_u64<E: de::Error>(self, _: u64) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_u128<E: de::Error>(self, _: u128) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_f64<E: de::Error>(self, _: f64) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_str<E: de::Error>(self, _: &str) -> Result<Anything, E> {
-                Ok(Anything)
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Anything, A::Error> {
-                while seq.next_element::<Anything>()?.is_some() {}
-
-                Ok(Anything)
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Anything, A::Error> {
-                while map.next_entry::<Anything, Anything>()?.is_some() {}
-
-                Ok(Anything)
-            }
-        }
-
-        deserializer.deserialize_any(AnyVisitor)
-    }
-}
-
 // A native integer type can have a smaller range than a YAML integer.
 // https://yaml.org/spec/1.2.2/#10213-integer
 #[test_case("340282366920938463463374607431768211456"; "unsigned overflow")]
 #[test_case("-170141183460469231731687303715884105729"; "signed overflow")]
 fn arbitrary_values_report_integer_overflow(source: &str) {
-    let error = from_str::<Anything>(source).unwrap_err();
+    let error = from_str::<Value>(source).unwrap_err();
     assert_eq!(error.message, "integer out of range");
 }
 
 #[test]
 fn arbitrary_values_and_alias_limits() {
-    from_str::<Anything>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
-    assert!(from_str::<Anything>("!Values [!Text hello, !Count 42]").is_err());
-    from_tag::<Anything>("!Values [hello, 42]").unwrap();
-    assert!(from_str::<Anything>("!Config {key: 1, key: 2}").is_err());
-    assert!(from_str::<Anything>("&a [*a]").is_err());
+    from_str::<Value>("[null, true, -2, 3, 4.5, text, {a: b}, -170141183460469231731687303715884105728, 340282366920938463463374607431768211455]").unwrap();
+    assert!(from_str::<Value>("!Config {key: 1, key: 2}").is_err());
+    assert!(from_str::<Value>("&a !Values [*a]").is_err());
 
     // A sequence or mapping may contain itself. This Serde reader bounds traversal.
     // https://yaml.org/spec/1.2.2/#3211-nodes
@@ -735,7 +670,7 @@ fn arbitrary_values_and_alias_limits() {
         writeln!(bomb, "{name}: &{name} [*{previous}, *{previous}]").unwrap();
     }
 
-    assert!(from_str::<Anything>(&bomb).is_err());
+    assert!(from_str::<Value>(&bomb).is_err());
 }
 
 #[test]
@@ -853,7 +788,7 @@ fn mapping_key_uniqueness_uses_core_types() {
         "{first: 0, [a]: 1, [a]: 2}",
         "{!!str true: a, 'true': b}",
     ] {
-        let error = from_str::<Anything>(source).unwrap_err();
+        let error = from_str::<Value>(source).unwrap_err();
         assert_eq!(error.message, "duplicate mapping key", "{source}: {error}");
         let ignored_error = from_str::<de::IgnoredAny>(source).unwrap_err();
         assert_eq!(
@@ -863,7 +798,7 @@ fn mapping_key_uniqueness_uses_core_types() {
         );
     }
 
-    from_str::<Anything>("{1: a, '1': b, true: c, 'true': d}").unwrap();
+    from_str::<Value>("{1: a, '1': b, true: c, 'true': d}").unwrap();
 
     let source = "{9007199254740992: first, 9007199254740993: second}";
     assert_eq!(
@@ -1001,8 +936,8 @@ fn mapping_key_uniqueness_across_mapping_sizes(count: usize) -> String {
 #[test]
 fn collection_tags_must_match_the_requested_type() {
     for source in ["!!str []", "!!int {}", "!!map []", "!!seq {}"] {
-        assert!(from_str::<Anything>(source).is_err(), "{source}");
+        assert!(from_str::<Value>(source).is_err(), "{source}");
     }
 
-    from_str::<Anything>("!!map {a: !!seq [1]}").unwrap();
+    from_str::<Value>("!!map {a: !!seq [1]}").unwrap();
 }

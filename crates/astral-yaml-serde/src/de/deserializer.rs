@@ -855,15 +855,14 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         }
     }
 
-    fn visit_any<V: Visitor<'de>>(
+    fn visit_any<const CAPTURE_TAGS: bool, V: Visitor<'de>>(
         self,
         visitor: V,
         visit_number: impl FnOnce(ScalarOf<'input, 'de, I>, ScalarType, V) -> Result<V::Value>,
-        capture_tags: bool,
     ) -> Result<V::Value> {
         let node = self.raw_node()?;
 
-        if capture_tags
+        if CAPTURE_TAGS
             && self.tag_state == TagState::Unconsumed
             && let Some(tag) = node.tag().filter(|tag| !is_core_tag(tag))
         {
@@ -874,7 +873,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
             return visitor.visit_enum(Enumeration {
                 de: self,
                 variant: tag,
-                value: VariantValue::ApplicationTag { scalar_text },
+                value: VariantValue::ApplicationTag(scalar_text),
             });
         }
 
@@ -904,7 +903,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
                 depth: self.depth + 1,
                 ..self
             }
-            .visit_any(visitor, visit_number, capture_tags),
+            .visit_any::<CAPTURE_TAGS, _>(visitor, visit_number),
         }
     }
 }
@@ -984,7 +983,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.visit_any(visitor, Self::visit_number, false)
+        self.visit_any::<false, _>(visitor, Self::visit_number)
     }
 
     integer_methods! {
@@ -1074,7 +1073,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let node = self.node()?;
-        // Preserve application tags for an inner Value, Tagged<T>, or yaml_tag adapter.
+        // Preserve application tags for the inner deserializer.
         // Core tags retain their normal resolution, including !!null as None.
         let application_tag = self.tag_state == TagState::Unconsumed
             && node.tag().is_some_and(|tag| !is_core_tag(tag));
@@ -1131,7 +1130,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
         }
 
         if name == value::NAME {
-            return self.visit_any(visitor, Self::visit_number, true);
+            return self.visit_any::<true, _>(visitor, Self::visit_number);
         }
 
         self.node()?;
@@ -1226,20 +1225,15 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     }
 
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.visit_any(
-            de::IgnoredAny,
-            |s, kind, ignored| {
-                // Explicit float tags require a decimal spelling for integers.
-                if kind == ScalarType::Float
-                    && matches!(s.value().as_bytes(), [b'0', b'o' | b'x', ..])
-                {
-                    return Err(Error::at("invalid float", s.span()));
-                }
+        self.visit_any::<false, _>(de::IgnoredAny, |s, kind, ignored| {
+            // Explicit float tags require a decimal spelling for integers.
+            if kind == ScalarType::Float && matches!(s.value().as_bytes(), [b'0', b'o' | b'x', ..])
+            {
+                return Err(Error::at("invalid float", s.span()));
+            }
 
-                Ok(ignored)
-            },
-            false,
-        )?;
+            Ok(ignored)
+        })?;
         visitor.visit_unit()
     }
 }
@@ -1475,7 +1469,7 @@ enum VariantValue<'input> {
     Unit,
     Node(NodeId),
     Tagged,
-    ApplicationTag { scalar_text: Option<&'input str> },
+    ApplicationTag(Option<&'input str>),
 }
 
 impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
@@ -1486,9 +1480,10 @@ impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
                 self.de.node()?;
                 Ok(self.de.child(id))
             }
-            VariantValue::Tagged => {
-                let node = self.de.node()?;
-                let tag_state = if node.tag().is_some_and(is_core_tag) {
+            VariantValue::Tagged | VariantValue::ApplicationTag(_) => {
+                let tag_state = if matches!(self.value, VariantValue::Tagged)
+                    && self.de.node()?.tag().is_some_and(is_core_tag)
+                {
                     TagState::ConsumedCore
                 } else {
                     TagState::ConsumedApplication
@@ -1501,11 +1496,6 @@ impl<'input, 'de: 'input, I: Input<'de>> Enumeration<'input, I> {
                     ..self.de
                 })
             }
-            VariantValue::ApplicationTag { .. } => Ok(Deserializer {
-                tag_state: TagState::ConsumedApplication,
-                yaml_tag: false,
-                ..self.de
-            }),
         }
     }
 }
@@ -1534,10 +1524,7 @@ impl<'input, 'de: 'input, I: Input<'de>> VariantAccess<'de> for Enumeration<'inp
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         // Application tags define their own scalar types. Keep the decoded text,
         // as we do for tagged scalars when checking mapping key identity.
-        if let VariantValue::ApplicationTag {
-            scalar_text: Some(text),
-        } = self.value
-        {
+        if let VariantValue::ApplicationTag(Some(text)) = self.value {
             return seed.deserialize(de::value::StrDeserializer::<Error>::new(text));
         }
 
