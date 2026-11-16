@@ -2,7 +2,7 @@ use test_case::{test_case, test_matrix};
 
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
-use astral_yaml_serde::edit::{CollectionStyle, CommentPlacement, ScalarStyle};
+use astral_yaml_serde::edit::{CollectionStyle, CommentPlacement, PathSegment, ScalarStyle};
 use astral_yaml_serde::{Editable, Tagged};
 use serde::Deserialize;
 
@@ -200,6 +200,24 @@ fn typed_root_setters_distinguish_strings_from_document_markers(prefix: &str, va
     };
     assert_eq!(document.source(), format!("{prefix}{expected}\n"));
     assert_eq!(document.value(), value);
+}
+
+// Document markers are recognized at column zero even inside a flow collection.
+// https://yaml.org/spec/1.2.2/#912-document-markers
+#[test_case("[one,\nold]", 1, "--- x", "[one,\n --- x]"; "start marker in an item")]
+#[test_case("[one,\nold]", 1, "... end", "[one,\n ... end]"; "end marker in an item")]
+#[test_case("{key:\nold\n}", "key", "...", "{key:\n ...\n}"; "mapping value")]
+#[test_case("[old]", 0, "...", "[...]"; "inline item")]
+#[test_case("[\nold\n]", 0, "---word", "[\n---word\n]"; "plain prefix")]
+fn flow_scalar_edits_at_column_zero(
+    source: &str,
+    segment: impl Into<PathSegment<'static>>,
+    value: &str,
+    expected: &str,
+) {
+    let mut document = Editable::<serde_json::Value>::parse(source).unwrap();
+    document.set_at([segment], value).unwrap();
+    assert_eq!(document.source(), expected);
 }
 
 #[test]
