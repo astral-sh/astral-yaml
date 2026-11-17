@@ -10,10 +10,12 @@ use serde::de::{
 };
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::hash::Hash;
 
 type Result<T> = std::result::Result<T, Error>;
 
 const DEFAULT_WORK_LIMIT: usize = 1_000_000;
+const SMALL_MAPPING_LIMIT: usize = 8;
 
 /// Policy for deserializing YAML documents.
 ///
@@ -175,7 +177,7 @@ impl<'budget, I> Context<'budget, I> {
         })
     }
 
-    fn deserializer(&self, id: NodeId) -> Deserializer<'_, '_, &Self> {
+    fn deserializer(&self, id: NodeId) -> NodeDeserializer<'_, '_, I> {
         Deserializer {
             context: self,
             id,
@@ -242,7 +244,9 @@ struct Deserializer<'key, 'input, C> {
     scalar_key: Option<&'key Cell<Option<ScalarKey<'input>>>>,
 }
 
-impl<'input, 'de: 'input, I: Input<'de>> Deserializer<'_, 'input, &'input Context<'input, I>> {
+type NodeDeserializer<'key, 'input, I> = Deserializer<'key, 'input, &'input Context<'input, I>>;
+
+impl<'input, 'de: 'input, I: Input<'de>> NodeDeserializer<'_, 'input, I> {
     #[inline]
     fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
@@ -734,11 +738,11 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<'_, 'input, &'input Contex
     fn check_mapping_keys(self, entries: &[I::Entry], span: Option<Span>) -> Result<bool> {
         // Avoid constructing canonical keys for small string-key mappings.
         // Other key types fall back to check_general_keys.
-        if entries.len() > 8 {
+        if entries.len() > SMALL_MAPPING_LIMIT {
             return self.check_general_keys(entries, span);
         }
 
-        let mut strings = [""; 8];
+        let mut strings = [""; SMALL_MAPPING_LIMIT];
 
         for (index, (key, _)) in entries.iter().map(Entry::ids).enumerate() {
             let de = self.child(key);
@@ -769,12 +773,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<'_, 'input, &'input Contex
     }
 
     fn check_general_keys(self, entries: &[I::Entry], span: Option<Span>) -> Result<bool> {
-        // Keep up to eight canonical keys on the stack. Use a hash set beyond
-        // that threshold to avoid quadratic duplicate checks.
-        let mut small_keys = [const { Key::Null }; 8];
-        let mut large_keys =
-            (entries.len() > small_keys.len()).then(|| HashSet::with_capacity(entries.len()));
-
+        let mut keys = KeySet::new(entries.len(), || HashSet::with_capacity(entries.len()));
         let mut ancestors = Vec::new();
         let mut can_overlap = false;
         for (index, (id, _)) in entries.iter().map(Entry::ids).enumerate() {
@@ -784,15 +783,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<'_, 'input, &'input Contex
                 .map_err(|error| error.in_path(format_args!(".key_at({index})")))?;
             // Distinct YAML strings already have distinct decoded text.
             can_overlap |= !matches!(key, Key::String(_));
-            let unique = if let Some(keys) = &mut large_keys {
-                keys.insert(key)
-            } else {
-                let duplicate = small_keys[..index].contains(&key);
-                small_keys[index] = key;
-                !duplicate
-            };
-
-            if !unique {
+            if !keys.insert(key) {
                 let span = self.context.input.node(id).map_or(span, Node::span);
                 let error = Error::at("duplicate mapping key", span);
                 return Err(error.in_path(format_args!(".key_at({index})")));
@@ -817,7 +808,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<'_, 'input, &'input Contex
         let can_overlap = self.check_mapping_keys(entries, node.span())?;
         let scalar_keys =
             (can_overlap && entries.len() > 1 && !self.context.allow_overlapping_keys)
-                .then(|| ScalarKeys::new(entries.len()));
+                .then(|| KeySet::new(entries.len(), HashSet::new));
 
         let mut access = Mapping {
             de: self,
@@ -1030,9 +1021,7 @@ macro_rules! integer_methods {
     };
 }
 
-impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
-    for Deserializer<'_, 'input, &'input Context<'input, I>>
-{
+impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de> for NodeDeserializer<'_, 'input, I> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -1300,7 +1289,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
 }
 
 struct MetadataAccess<'key, 'input, I> {
-    de: Deserializer<'key, 'input, &'input Context<'input, I>>,
+    de: NodeDeserializer<'key, 'input, I>,
     metadata: Metadata,
     index: usize,
 }
@@ -1386,7 +1375,7 @@ impl<'de> SeqAccess<'de> for CommentAccess<'_, 'de> {
 }
 
 struct Sequence<'key, 'input, I> {
-    de: Deserializer<'key, 'input, &'input Context<'input, I>>,
+    de: NodeDeserializer<'key, 'input, I>,
     items: &'input [NodeId],
     index: usize,
 }
@@ -1422,29 +1411,31 @@ enum ScalarKey<'input> {
     Float(u64),
 }
 
-enum ScalarKeys<'input> {
+/// Keep small mappings on the stack and use hashing for larger mappings.
+enum KeySet<K> {
     Small {
-        keys: [ScalarKey<'input>; 8],
+        keys: [Option<K>; SMALL_MAPPING_LIMIT],
         len: usize,
     },
-    Large(HashSet<ScalarKey<'input>>),
+    Large(HashSet<K>),
 }
 
-impl<'input> ScalarKeys<'input> {
-    fn new(entries: usize) -> Self {
-        if entries <= 8 {
+impl<K: Eq + Hash> KeySet<K> {
+    fn new(entries: usize, large_set: impl FnOnce() -> HashSet<K>) -> Self {
+        if entries <= SMALL_MAPPING_LIMIT {
             Self::Small {
-                keys: [ScalarKey::Text(""); 8],
+                keys: [const { None }; SMALL_MAPPING_LIMIT],
                 len: 0,
             }
         } else {
-            Self::Large(HashSet::new())
+            Self::Large(large_set())
         }
     }
 
-    fn insert(&mut self, key: ScalarKey<'input>) -> bool {
+    fn insert(&mut self, key: K) -> bool {
         match self {
             Self::Small { keys, len } => {
+                let key = Some(key);
                 if keys[..*len].contains(&key) {
                     return false;
                 }
@@ -1459,11 +1450,11 @@ impl<'input> ScalarKeys<'input> {
 }
 
 struct Mapping<'key, 'input, I, E> {
-    de: Deserializer<'key, 'input, &'input Context<'input, I>>,
+    de: NodeDeserializer<'key, 'input, I>,
     entries: &'input [E],
     index: usize,
     pending: Option<&'input E>,
-    scalar_keys: Option<ScalarKeys<'input>>,
+    scalar_keys: Option<KeySet<ScalarKey<'input>>>,
     overlap: Option<Error>,
 }
 
@@ -1586,7 +1577,7 @@ impl<'input, 'de: 'input, I: Input<'de>> MapAccess<'de> for TagMapping<'_, 'inpu
 }
 
 struct Enumeration<'key, 'input, I> {
-    de: Deserializer<'key, 'input, &'input Context<'input, I>>,
+    de: NodeDeserializer<'key, 'input, I>,
     variant: &'input str,
     value: VariantValue<'input>,
 }
@@ -1599,7 +1590,7 @@ enum VariantValue<'input> {
 }
 
 impl<'key, 'input, 'de: 'input, I: Input<'de>> Enumeration<'key, 'input, I> {
-    fn payload(&self) -> Result<Deserializer<'key, 'input, &'input Context<'input, I>>> {
+    fn payload(&self) -> Result<NodeDeserializer<'key, 'input, I>> {
         match self.value {
             VariantValue::Unit => Err(Error::new("expected a variant payload")),
             VariantValue::Node(id) => {
@@ -1753,19 +1744,14 @@ mod tests {
         use serde::Deserializer as _;
 
         let stream = astral_yaml::parse("!Text hello").unwrap();
+        let budget = Budget::new(visits);
         let context = Context {
-            input: super::Parsed::new(&stream, 0),
-            budget: &Budget::new(visits),
             scalar_budget: Budget::new(100),
-            allow_overlapping_keys: false,
+            ..Context::new(super::Parsed::new(&stream, 0), &budget)
         };
         let de = Deserializer {
-            context: &context,
-            id: stream.documents()[0].root,
-            depth: 0,
-            tag_state: TagState::Unconsumed,
             yaml_tag: true,
-            scalar_key: None,
+            ..context.deserializer(stream.documents()[0].root)
         };
 
         de.deserialize_newtype_struct(name, serde::de::IgnoredAny)
@@ -1780,22 +1766,13 @@ mod tests {
         let stream = astral_yaml::parse("!long-tag x").unwrap();
 
         for bytes in [7, 8] {
+            let budget = Budget::new(10);
             let context = Context {
-                input: super::Parsed::new(&stream, 0),
-                budget: &Budget::new(10),
                 scalar_budget: Budget::new(bytes),
-                allow_overlapping_keys: false,
-            };
-            let de = Deserializer {
-                context: &context,
-                id: stream.documents()[0].root,
-                depth: 0,
-                tag_state: TagState::Unconsumed,
-                yaml_tag: false,
-                scalar_key: None,
+                ..Context::new(super::Parsed::new(&stream, 0), &budget)
             };
             let access = super::Enumeration {
-                de,
+                de: context.deserializer(stream.documents()[0].root),
                 variant: "long-tag",
                 value: VariantValue::Tagged,
             };
@@ -1824,20 +1801,12 @@ mod tests {
     #[test]
     fn spans_do_not_index_comments() {
         let stream = astral_yaml::parse("# before\n42 # after").unwrap();
+        let budget = Budget::new(2);
         let context = Context {
-            input: super::Parsed::new(&stream, 0),
-            budget: &Budget::new(2),
             scalar_budget: Budget::new(100),
-            allow_overlapping_keys: false,
+            ..Context::new(super::Parsed::new(&stream, 0), &budget)
         };
-        let de = Deserializer {
-            context: &context,
-            id: stream.documents()[0].root,
-            depth: 0,
-            tag_state: TagState::Unconsumed,
-            yaml_tag: false,
-            scalar_key: None,
-        };
+        let de = context.deserializer(stream.documents()[0].root);
         assert_eq!(crate::Spanned::<u8>::deserialize(de).unwrap().value, 42);
     }
 
@@ -1848,20 +1817,11 @@ mod tests {
 
         for budget in [2, 11, 12] {
             let visits = Budget::new(budget);
-            let bytes = Budget::new(100);
-            let de = Deserializer {
-                context: &Context {
-                    input: super::Parsed::new(&stream, 0),
-                    budget: &visits,
-                    scalar_budget: bytes,
-                    allow_overlapping_keys: false,
-                },
-                id: stream.documents()[0].root,
-                depth: 0,
-                tag_state: TagState::Unconsumed,
-                yaml_tag: false,
-                scalar_key: None,
+            let context = Context {
+                scalar_budget: Budget::new(100),
+                ..Context::new(super::Parsed::new(&stream, 0), &visits)
             };
+            let de = context.deserializer(stream.documents()[0].root);
 
             let result = crate::Commented::<crate::Commented<'_, u8>>::deserialize(de);
             if budget == 12 {
@@ -1963,20 +1923,11 @@ mod tests {
     fn scalar_and_visit_budgets_stop_at_the_boundary() {
         let stream = astral_yaml::parse("abc").unwrap();
         let visits = Budget::new(2);
-        let bytes = Budget::new(3);
-        let de = Deserializer {
-            context: &Context {
-                input: super::Parsed::new(&stream, 0),
-                budget: &visits,
-                scalar_budget: bytes,
-                allow_overlapping_keys: false,
-            },
-            id: stream.documents()[0].root,
-            depth: 0,
-            tag_state: TagState::Unconsumed,
-            yaml_tag: false,
-            scalar_key: None,
+        let context = Context {
+            scalar_budget: Budget::new(3),
+            ..Context::new(super::Parsed::new(&stream, 0), &visits)
         };
+        let de = context.deserializer(stream.documents()[0].root);
 
         de.node().unwrap();
         assert_eq!(
@@ -2008,19 +1959,13 @@ mod tests {
         }
 
         let visits = Budget::new(4);
-        let bytes = Budget::new(6);
+        let context = Context {
+            scalar_budget: Budget::new(6),
+            ..Context::new(super::Parsed::new(&stream, 0), &visits)
+        };
         let de = Deserializer {
-            context: &Context {
-                input: super::Parsed::new(&stream, 0),
-                budget: &visits,
-                scalar_budget: bytes,
-                allow_overlapping_keys: false,
-            },
-            id: alias.unwrap(),
-            depth: 0,
             tag_state: TagState::ConsumedApplication,
-            yaml_tag: false,
-            scalar_key: None,
+            ..context.deserializer(alias.unwrap())
         };
 
         // The alias refers to the tagged scalar.
