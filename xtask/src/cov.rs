@@ -222,7 +222,15 @@ fn python_coverage(root: &Path, directory: &Path, profile: &Path) -> Result<(Pat
         .env("UV_PROJECT_ENVIRONMENT", directory.join("venv"))
         .env("CARGO_TARGET_DIR", directory.join("build"))
         .env("LLVM_PROFILE_FILE", profile)
-        .args(["run", "--locked", "--no-dev", "--group", "test"])
+        // A mixed project's editable install writes the extension into the source tree.
+        .args([
+            "run",
+            "--locked",
+            "--no-editable",
+            "--no-dev",
+            "--group",
+            "test",
+        ])
         .args([
             "--config-settings-package",
             "astral-yaml:maturin.build-args=--profile dev --locked -- -Cinstrument-coverage",

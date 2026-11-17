@@ -2,9 +2,8 @@ import io
 from collections.abc import Callable
 from unittest.mock import Mock
 
-import pytest
-
 import astral_yaml as yaml
+import pytest
 
 
 def test_python_scalar_construction() -> None:

@@ -1,6 +1,5 @@
-import pytest
-
 import astral_yaml as yaml
+import pytest
 
 
 def test_distinct_nan_keys() -> None:

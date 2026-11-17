@@ -1,10 +1,15 @@
 import io
 import math
 import sys
-
-import pytest
+from importlib.resources import files
 
 import astral_yaml as yaml
+import pytest
+
+
+@pytest.mark.parametrize("filename", ["__init__.pyi", "py.typed"])
+def test_package_typing_files(filename: str) -> None:
+    assert files(yaml).joinpath(filename).is_file()
 
 
 def test_round_trip() -> None:
