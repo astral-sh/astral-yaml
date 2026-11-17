@@ -52,9 +52,6 @@ src = [".", "crates/astral-yaml-python/python"]
 [tool.ruff.lint]
 extend-select = ["ANN", "I", "UP"]
 
-[tool.ty.environment]
-root = [".", "crates/astral-yaml-python/python"]
-
 [tool.uv]
 require-build-hashes = true
 preview-features = ["build-dependency-hashes"]

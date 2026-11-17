@@ -36,11 +36,11 @@ span refers to.
 ## Checks
 
 ```sh
-uv run --only-dev --locked ruff format --check scripts benchmarks crates/astral-yaml-python/python crates/astral-yaml-python/tests
-uv run --only-dev --locked ruff check scripts benchmarks crates/astral-yaml-python/python crates/astral-yaml-python/tests
+uv run --only-dev --locked ruff format --check scripts benchmarks crates/astral-yaml-python
+uv run --only-dev --locked ruff check scripts benchmarks crates/astral-yaml-python
 uv sync --locked --script scripts/release.py
 uv run --only-dev --locked ty check --python "$(uv python find --script scripts/release.py)" scripts
-uv run --only-dev --locked ty check --python-version 3.11 crates/astral-yaml-python/python/astral_yaml/__init__.pyi benchmarks crates/astral-yaml-python/tests
+uv run --locked ty check --python-version 3.11 crates/astral-yaml-python/python/astral_yaml/__init__.pyi benchmarks crates/astral-yaml-python/tests
 
 cargo fmt --all --check
 cargo fmt --manifest-path fuzz/Cargo.toml --check
