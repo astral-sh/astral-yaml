@@ -43,9 +43,6 @@ module-name = "astral_yaml.astral_yaml"
 pgo-command = "python -m pytest"
 pgo-dependency-group = "test"
 
-[tool.ruff]
-src = [".", "crates/astral-yaml-python/python"]
-
 [tool.ruff.per-file-target-version]
 "scripts/**" = "py314"
 

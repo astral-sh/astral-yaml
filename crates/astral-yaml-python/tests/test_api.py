@@ -2,9 +2,8 @@ import io
 import math
 import sys
 
-import pytest
-
 import astral_yaml as yaml
+import pytest
 
 
 def test_round_trip() -> None:

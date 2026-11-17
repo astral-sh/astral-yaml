@@ -4,10 +4,9 @@ from io import BytesIO, StringIO
 from pathlib import Path
 from typing import NamedTuple
 
+import astral_yaml
 import pytest
 from pytest_codspeed import BenchmarkFixture
-
-import astral_yaml
 
 
 class YamlAPI(NamedTuple):
