@@ -1,4 +1,4 @@
-use super::{DocumentMode, Input, Loader, read_documents};
+use super::{Input, Loader, read_input};
 use astral_yaml::Budget;
 use pyo3::prelude::*;
 use test_case::test_case;
@@ -26,10 +26,7 @@ fn text_reader_byte_limit(limit: usize, accepted: bool) {
             .unwrap()
             .call_method1("StringIO", ("é",))
             .unwrap();
-        assert_eq!(
-            read_documents(&reader, limit, DocumentMode::Single).is_ok(),
-            accepted
-        );
+        assert_eq!(read_input(&reader, limit).is_ok(), accepted);
     });
 }
 

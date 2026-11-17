@@ -24,11 +24,8 @@ pub(super) fn loads<'py>(data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>
 /// Deserialize a YAML document from an open text or binary file.
 #[pyfunction]
 pub(super) fn load<'py>(fp: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    read_documents(
-        fp,
-        ParseOptions::default().max_input_bytes,
-        DocumentMode::Single,
-    )
+    let limit = ParseOptions::default().max_input_bytes;
+    read_input(fp, limit)?.deserialize(fp.py(), DocumentMode::Single)
 }
 
 /// Deserialize all YAML documents from text or encoded bytes into a list.
@@ -41,11 +38,8 @@ pub(super) fn loads_all<'py>(data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Py
 /// Deserialize all YAML documents from an open text or binary file into a list.
 #[pyfunction]
 pub(super) fn load_all<'py>(fp: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    read_documents(
-        fp,
-        ParseOptions::default().max_input_bytes,
-        DocumentMode::All,
-    )
+    let limit = ParseOptions::default().max_input_bytes;
+    read_input(fp, limit)?.deserialize(fp.py(), DocumentMode::All)
 }
 
 #[derive(Clone, Copy)]
@@ -55,7 +49,7 @@ enum DocumentMode {
 }
 
 enum Input<'a> {
-    Text(&'a str),
+    Text(Cow<'a, str>),
     Bytes(Cow<'a, [u8]>),
 }
 
@@ -64,7 +58,7 @@ impl<'a> Input<'a> {
         let input = if let Ok(text) = obj.cast::<PyString>() {
             // Encoding a Python string can allocate a UTF-8 cache.
             check_size(text.code_point_len()?, limit)?;
-            Self::Text(unicode_text(text)?)
+            Self::Text(Cow::Borrowed(unicode_text(text)?))
         } else if let Ok(bytes) = obj.cast::<PyBytes>() {
             Self::Bytes(Cow::Borrowed(bytes.as_bytes()))
         } else if let Ok(array) = obj.cast::<PyByteArray>() {
@@ -107,11 +101,7 @@ fn check_size(size: usize, limit: usize) -> PyResult<()> {
     Ok(())
 }
 
-fn read_documents<'py>(
-    fp: &Bound<'py, PyAny>,
-    limit: usize,
-    mode: DocumentMode,
-) -> PyResult<Bound<'py, PyAny>> {
+fn read_input(fp: &Bound<'_, PyAny>, limit: usize) -> PyResult<Input<'static>> {
     let read = fp
         .getattr_opt(pyo3::intern!(fp.py(), "read"))?
         .ok_or_else(|| {
@@ -131,15 +121,16 @@ fn read_documents<'py>(
             return Err(PyTypeError::new_err("read() mixed text and binary data"));
         }
 
-        if input.as_bytes().is_empty() {
-            let input = if is_text {
-                Input::Text(std::str::from_utf8(&buffer).expect("buffer contains only UTF-8 text"))
+        let bytes = input.as_bytes();
+        if bytes.is_empty() {
+            return Ok(if is_text {
+                let text = String::from_utf8(buffer).expect("buffer contains only UTF-8 text");
+                Input::Text(Cow::Owned(text))
             } else {
-                Input::Bytes(Cow::Borrowed(&buffer))
-            };
-            return input.deserialize(fp.py(), mode);
+                Input::Bytes(Cow::Owned(buffer))
+            });
         }
-        buffer.extend_from_slice(input.as_bytes());
+        buffer.extend_from_slice(bytes);
     }
 }
 
