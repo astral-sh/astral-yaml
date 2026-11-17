@@ -38,16 +38,22 @@ testpaths = ["crates/astral-yaml-python/tests"]
 
 [tool.maturin]
 manifest-path = "crates/astral-yaml-python/Cargo.toml"
-module-name = "astral_yaml"
+python-source = "crates/astral-yaml-python/python"
+module-name = "astral_yaml.astral_yaml"
 pgo-command = "python -m pytest"
 pgo-dependency-group = "test"
-include = [{ path = "astral_yaml.pyi", format = "sdist" }]
+
+[tool.ruff]
+src = [".", "crates/astral-yaml-python/python"]
 
 [tool.ruff.per-file-target-version]
 "scripts/**" = "py314"
 
 [tool.ruff.lint]
 extend-select = ["ANN", "I", "UP"]
+
+[tool.ty.environment]
+root = [".", "crates/astral-yaml-python/python"]
 
 [tool.uv]
 require-build-hashes = true
@@ -71,8 +77,10 @@ build-constraint-dependencies = [
 ]
 cache-keys = [
     { file = "pyproject.toml" },
-    { file = "astral_yaml.pyi" },
     { env = "MATURIN_PGO" },
+    { file = "crates/astral-yaml-python/python/**/*.py" },
+    { file = "crates/astral-yaml-python/python/**/*.pyi" },
+    { file = "crates/astral-yaml-python/python/astral_yaml/py.typed" },
     { file = "crates/astral-yaml-python/tests/**/*.py" },
     { file = "Cargo.toml" },
     { file = "Cargo.lock" },

@@ -1,6 +1,8 @@
 /target/
 /.venv/
 /dist/
+/crates/astral-yaml-python/python/astral_yaml/*.so
+/crates/astral-yaml-python/python/astral_yaml/*.pyd
 /.coverage
 __pycache__/
 /fuzz/target/
