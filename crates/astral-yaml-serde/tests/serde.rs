@@ -870,6 +870,7 @@ fn mapping_key_uniqueness_uses_core_types() {
     ");
     "quoted and plain"
 )]
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
 #[test_case(
     "{1: &text '1', *text : bar}"
     => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
@@ -905,82 +906,50 @@ fn overlapping_keys_can_be_allowed() {
         ..DeserializationPolicy::default()
     };
     let restored = from_str_with_policy::<BTreeMap<String, String>>(source, policy).unwrap();
-    assert_eq!(restored, BTreeMap::from([("1".into(), "bar".into())]));
+    insta::assert_compact_debug_snapshot!(restored, @r#"{"1": "bar"}"#);
 
+    // YAML node equality accounts for the key's resolved tag.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
     let typed_keys = from_str::<Value>(source).unwrap();
-    assert_eq!(
-        typed_keys,
-        Value::Mapping(vec![
-            (Value::String("1".into()), Value::String("foo".into())),
-            (Value::Unsigned(1), Value::String("bar".into())),
-        ])
-    );
+    insta::assert_compact_debug_snapshot!(typed_keys, @r#"Mapping([(String("1"), String("foo")), (Unsigned(1), String("bar"))])"#);
 
-    let error =
-        from_str_with_policy::<BTreeMap<String, String>>("{1: a, 01: b}", policy).unwrap_err();
-    assert_eq!(error.message, "duplicate mapping key");
+    let source = "{1: a, 01: b}";
+    let error = from_str_with_policy::<BTreeMap<String, String>>(source, policy).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @"
+      |
+    1 | {1: a, 01: b}
+      |        ^^ $.key_at(1): duplicate mapping key
+    ");
 }
 
-#[test]
-fn overlapping_borrowed_and_wrapped_keys() {
-    #[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
-    struct Text<'a>(#[serde(borrow)] &'a str);
-
-    let source = "{true: 1, 'true': 2}";
-    let error = from_str::<BTreeMap<&str, u8>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
-    let error = from_str::<BTreeMap<Option<Text<'_>>, u8>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
-
-    let source = "{null: 1, 'null': 2}";
-    let keys = from_str::<BTreeMap<Option<Text<'_>>, u8>>(source).unwrap();
-    assert_eq!(keys, BTreeMap::from([(None, 1), (Some(Text("null")), 2)]));
-}
-
-#[test]
-fn overlapping_struct_field_identifiers() {
-    #[derive(Debug, Deserialize)]
-    struct Fields {
-        #[serde(rename = "true")]
-        _flag: u8,
-    }
-
-    let source = "{true: 1, 'true': 2}";
-    let error = from_str::<Fields>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
-}
-
-#[test_case(7; "eight entries")]
-#[test_case(8; "nine entries")]
-fn overlapping_keys_across_mapping_sizes(count: usize) {
+#[test_case(7 => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+6 | 5: value
+7 | 6: value
+8 | '0': duplicate
+  | ^^^ $.key_at(7): mapping keys overlap after conversion
+"); "eight entries")]
+#[test_case(8 => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+7 | 6: value
+8 | 7: value
+9 | '0': duplicate
+  | ^^^ $.key_at(8): mapping keys overlap after conversion
+"); "nine entries")]
+fn overlapping_keys_across_mapping_sizes(count: usize) -> String {
     let mut source = String::new();
     for key in 0..count {
         writeln!(source, "{key}: value").unwrap();
     }
     writeln!(source, "'0': duplicate").unwrap();
-
-    let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "$.key_at({count}): mapping keys overlap after conversion at bytes {}..{}",
-            source.len() - "'0': duplicate\n".len(),
-            source.len() - ": duplicate\n".len(),
-        )
-    );
+    overlapping_string_keys(&source)
 }
 
 #[test]
 fn converted_keys_are_scoped_to_each_mapping() {
     let source = "[{1: first, 2: second}, {'1': third, 2: fourth}]";
     let mappings = from_str::<Vec<BTreeMap<&str, &str>>>(source).unwrap();
-    assert_eq!(
-        mappings,
-        [
-            BTreeMap::from([("1", "first"), ("2", "second")]),
-            BTreeMap::from([("1", "third"), ("2", "fourth")]),
-        ]
-    );
+    insta::assert_compact_debug_snapshot!(mappings, @r#"[{"1": "first", "2": "second"}, {"1": "third", "2": "fourth"}]"#);
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison

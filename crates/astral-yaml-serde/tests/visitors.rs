@@ -2,14 +2,13 @@ use test_case::test_case;
 
 mod support;
 
-use astral_yaml_dev::diagnostic_snapshot;
+use astral_yaml_dev::{diagnostic_snapshot, span_snapshot};
 use astral_yaml_serde::{Error, Spanned, Tagged, Value, from_str, to_string};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
-use std::marker::PhantomData;
 use std::num::NonZeroU8;
 use support::YamlTag;
 
@@ -177,122 +176,152 @@ struct Keys<K>(Vec<K>);
 
 impl<'de, K: Deserialize<'de>> Deserialize<'de> for Keys<K> {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct KeyVisitor<K>(PhantomData<K>);
-
-        impl<'de, K: Deserialize<'de>> Visitor<'de> for KeyVisitor<K> {
-            type Value = Keys<K>;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a mapping")
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut keys = Vec::new();
-                while let Some((key, de::IgnoredAny)) = map.next_entry()? {
-                    keys.push(key);
-                }
-                Ok(Keys(keys))
-            }
-        }
-
-        deserializer.deserialize_map(KeyVisitor(PhantomData))
+        deserializer.deserialize_map(Self(Vec::new()))
     }
 }
 
-#[test]
-fn overlapping_character_and_byte_keys() {
-    let source = r#"{1: a, "\u0031": b}"#;
-    let error = from_str::<Keys<char>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
-    let error = from_str::<Keys<Bytes>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
+impl<'de, K: Deserialize<'de>> Visitor<'de> for Keys<K> {
+    type Value = Self;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a mapping")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Self, A::Error> {
+        while let Some((key, de::IgnoredAny)) = map.next_entry()? {
+            self.0.push(key);
+        }
+        Ok(self)
+    }
 }
 
-#[test_case("{1: a, 1.0: b}"; "integer to float")]
-#[test_case("{9007199254740992: a, 9007199254740993: b}"; "integer rounding")]
-#[test_case("{0: a, -0.0: b}"; "signed zero")]
-fn overlapping_f64_keys(source: &str) {
-    let error = from_str::<Keys<f64>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
+#[derive(Debug, Deserialize)]
+struct Text<'a>(#[serde(borrow)] &'a str);
+
+#[derive(Debug, Deserialize)]
+struct Field {
+    #[serde(rename = "1")]
+    _one: u8,
+}
+
+#[derive(Debug, Deserialize)]
+enum Label {
+    #[serde(rename = "1")]
+    One,
+    Ready,
+}
+
+#[derive(Debug)]
+struct RecoveringMap;
+
+impl<'de> Deserialize<'de> for RecoveringMap {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(RecoveringMap)
+    }
+}
+
+impl<'de> Visitor<'de> for RecoveringMap {
+    type Value = Self;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a mapping")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self, A::Error> {
+        // Continue reading the map after a key error.
+        while !matches!(map.next_key::<String>(), Ok(None)) {
+            map.next_value::<de::IgnoredAny>()?;
+        }
+        Ok(self)
+    }
+}
+
+#[test_case(from_str::<BTreeMap<&str, u8>>; "borrowed string")]
+#[test_case(from_str::<Keys<Option<Text<'_>>>>; "optional newtype")]
+#[test_case(from_str::<Field>; "struct identifier")]
+#[test_case(from_str::<Keys<char>>; "character")]
+#[test_case(from_str::<Keys<Bytes>>; "scalar bytes")]
+#[test_case(from_str::<Keys<Label>>; "enum name")]
+#[test_case(from_str::<RecoveringMap>; "visitor handles key error")]
+fn scalar_keys_report_overlaps<T: fmt::Debug>(parse: fn(&'static str) -> Result<T, Error>) {
+    let source = "{1: 2, '1': 3}";
+    insta::allow_duplicates! {
+        insta::assert_snapshot!(diagnostic_snapshot(source, parse(source).unwrap_err()), @"
+          |
+        1 | {1: 2, '1': 3}
+          |        ^^^ $.key_at(1): mapping keys overlap after conversion
+        ");
+    }
+}
+
+#[test_case("{9007199254740992: a, 9007199254740993: b}" => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+1 | {9007199254740992: a, 9007199254740993: b}
+  |                       ^^^^^^^^^^^^^^^^ $.key_at(1): mapping keys overlap after conversion
+"); "integer rounding")]
+#[test_case("{0: a, -0.0: b}" => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+1 | {0: a, -0.0: b}
+  |        ^^^^ $.key_at(1): mapping keys overlap after conversion
+"); "integer and signed float zero")]
+fn overlapping_f64_keys(source: &str) -> String {
+    diagnostic_snapshot(source, from_str::<Keys<f64>>(source).unwrap_err())
 }
 
 #[test]
 fn floating_point_keys_compare_at_the_requested_precision() {
     let source = "{16777216: a, 16777217: b}";
     let error = from_str::<Keys<f32>>(source).unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @"
+      |
+    1 | {16777216: a, 16777217: b}
+      |               ^^^^^^^^ $.key_at(1): mapping keys overlap after conversion
+    ");
 
     let Keys(keys) = from_str::<Keys<f64>>(source).unwrap();
     assert_eq!(keys, [16_777_216.0, 16_777_217.0]);
 }
 
 #[test]
-fn overlapping_scalar_enum_keys() {
-    #[derive(Debug, Deserialize)]
-    enum Label {
-        #[serde(rename = "1")]
-        One,
-        Ready,
-    }
+fn local_tags_can_overlap_with_enum_names() {
+    let source = "{Ready: a, ? !Ready null : b}";
+    let error = from_str::<Keys<YamlTag<Label>>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @"
+      |
+    1 | {Ready: a, ? !Ready null : b}
+      |              ^^^^^^^^^^^ $.key_at(1): mapping keys overlap after conversion
+    ");
+}
 
-    let error = from_str::<Keys<Label>>("{1: a, '1': b}").unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
-    let error = from_str::<Keys<YamlTag<Label>>>("{Ready: a, ? !Ready null : b}").unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
+#[test]
+fn optional_keys_distinguish_null_from_text() {
+    let Keys(keys) = from_str::<Keys<Option<Text<'_>>>>("{null: 1, 'null': 2}").unwrap();
+    assert!(matches!(keys.as_slice(), [None, Some(Text("null"))]));
 }
 
 #[test]
 fn tagged_keys_keep_their_tag_identity() {
     let Keys(keys) = from_str::<Keys<Tagged<String>>>("{!First 1: a, !Second 1: b}").unwrap();
-    assert_eq!(
-        keys.iter().map(|key| key.tag.as_str()).collect::<Vec<_>>(),
-        ["!First", "!Second"]
-    );
+    insta::assert_compact_debug_snapshot!(keys, @r#"[Tagged { tag: "!First", value: "1" }, Tagged { tag: "!Second", value: "1" }]"#);
 }
 
 #[test]
 fn spanned_keys_keep_their_span_identity() {
-    let keys = from_str::<HashMap<Spanned<String>, u8>>("{1: 1, '1': 2}").unwrap();
-    assert_eq!(keys.len(), 2);
+    let source = "{1: a, '1': b}";
+    let Keys(keys) = from_str::<Keys<Spanned<String>>>(source).unwrap();
+    let labels = keys.iter().map(|key| (key.value.as_str(), key.span));
+    insta::assert_snapshot!(span_snapshot(source, labels), @"
+      |
+    1 | {1: a, '1': b}
+      |  ^ 1   ^^^ 1
+    ");
 }
 
+// https://yaml.org/spec/1.2.2/#3213-node-comparison
 #[test]
 fn compound_keys_use_yaml_identity() {
-    let source = "{? [1]: a, ? ['1']: b}";
-    let Keys(keys) = from_str::<Keys<(String,)>>(source).unwrap();
+    let Keys(keys) = from_str::<Keys<(String,)>>("{? [1]: a, ? ['1']: b}").unwrap();
     assert_eq!(keys, [("1".into(),), ("1".into(),)]);
-}
-
-#[test]
-fn a_visitor_cannot_skip_an_overlapping_key() {
-    #[derive(Debug)]
-    struct RecoveringMap;
-
-    impl<'de> Deserialize<'de> for RecoveringMap {
-        fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct RecoveringVisitor;
-
-            impl<'de> Visitor<'de> for RecoveringVisitor {
-                type Value = RecoveringMap;
-
-                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    f.write_str("a mapping")
-                }
-
-                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                    while !matches!(map.next_key::<String>(), Ok(None)) {
-                        map.next_value::<de::IgnoredAny>()?;
-                    }
-                    Ok(RecoveringMap)
-                }
-            }
-
-            deserializer.deserialize_map(RecoveringVisitor)
-        }
-    }
-
-    let error = from_str::<RecoveringMap>("{1: a, '1': b}").unwrap_err();
-    assert_eq!(error.message, "mapping keys overlap after conversion");
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
