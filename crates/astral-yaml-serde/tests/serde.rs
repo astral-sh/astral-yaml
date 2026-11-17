@@ -580,6 +580,7 @@ fn serde_work_budget_shares_alias_costs_across_documents() {
     let budget = Budget::new(5);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     let values: Vec<&str> = from_document_with_policy(&stream, 0, policy).unwrap();
     assert_eq!(values, ["value", "value"]);
@@ -601,6 +602,7 @@ fn serde_work_budget_can_exceed_the_default_limit() {
     let budget = Budget::new(1_010_000);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     from_str_with_policy::<de::IgnoredAny>(&source, policy).unwrap();
 }
@@ -611,6 +613,7 @@ fn serde_work_budget_also_covers_comment_processing() {
     let budget = Budget::new(2);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     let error = from_str_with_policy::<Commented<'_, u8>>(source, policy).unwrap_err();
     assert_eq!(error.message, "deserialization resource limit exceeded");
@@ -854,6 +857,129 @@ fn mapping_key_uniqueness_uses_core_types() {
     assert_eq!(
         from_str::<BTreeMap<Option<String>, String>>(": value\n").unwrap(),
         BTreeMap::from([(None, "value".into())])
+    );
+}
+
+#[test_case(
+    "\"1\": foo\n1: bar\n"
+    => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+      |
+    1 | \"1\": foo
+    2 | 1: bar
+      | ^ $.key_at(1): mapping keys overlap after conversion
+    ");
+    "quoted and plain"
+)]
+#[test_case(
+    "{1: &text '1', *text : bar}"
+    => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+      |
+    1 | {1: &text '1', *text : bar}
+      |                ^^^^^ $.key_at(1): mapping keys overlap after conversion
+    ");
+    "alias key"
+)]
+fn overlapping_string_keys(source: &str) -> String {
+    let error = from_str::<BTreeMap<String, String>>(source).unwrap_err();
+    diagnostic_snapshot(source, error)
+}
+
+#[test]
+fn decoded_keys_can_overlap_in_a_nested_mapping() {
+    let source = "outer:\n  TRUE: a\n  \"\\x54RUE\": b\n";
+    let error = from_str::<BTreeMap<String, BTreeMap<String, String>>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @r#"
+      |
+    1 | outer:
+    2 |   TRUE: a
+    3 |   "\x54RUE": b
+      |   ^^^^^^^^^ $["outer"].key_at(1): mapping keys overlap after conversion
+    "#);
+}
+
+#[test]
+fn overlapping_keys_can_be_allowed() {
+    let source = "{'1': foo, 1: bar}";
+    let policy = DeserializationPolicy {
+        allow_overlapping_keys: true,
+        ..DeserializationPolicy::default()
+    };
+    let restored = from_str_with_policy::<BTreeMap<String, String>>(source, policy).unwrap();
+    assert_eq!(restored, BTreeMap::from([("1".into(), "bar".into())]));
+
+    let typed_keys = from_str::<Value>(source).unwrap();
+    assert_eq!(
+        typed_keys,
+        Value::Mapping(vec![
+            (Value::String("1".into()), Value::String("foo".into())),
+            (Value::Unsigned(1), Value::String("bar".into())),
+        ])
+    );
+
+    let error =
+        from_str_with_policy::<BTreeMap<String, String>>("{1: a, 01: b}", policy).unwrap_err();
+    assert_eq!(error.message, "duplicate mapping key");
+}
+
+#[test]
+fn overlapping_borrowed_and_wrapped_keys() {
+    #[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+    struct Text<'a>(#[serde(borrow)] &'a str);
+
+    let source = "{true: 1, 'true': 2}";
+    let error = from_str::<BTreeMap<&str, u8>>(source).unwrap_err();
+    assert_eq!(error.message, "mapping keys overlap after conversion");
+    let error = from_str::<BTreeMap<Option<Text<'_>>, u8>>(source).unwrap_err();
+    assert_eq!(error.message, "mapping keys overlap after conversion");
+
+    let source = "{null: 1, 'null': 2}";
+    let keys = from_str::<BTreeMap<Option<Text<'_>>, u8>>(source).unwrap();
+    assert_eq!(keys, BTreeMap::from([(None, 1), (Some(Text("null")), 2)]));
+}
+
+#[test]
+fn overlapping_struct_field_identifiers() {
+    #[derive(Debug, Deserialize)]
+    struct Fields {
+        #[serde(rename = "true")]
+        _flag: u8,
+    }
+
+    let source = "{true: 1, 'true': 2}";
+    let error = from_str::<Fields>(source).unwrap_err();
+    assert_eq!(error.message, "mapping keys overlap after conversion");
+}
+
+#[test_case(7; "eight entries")]
+#[test_case(8; "nine entries")]
+fn overlapping_keys_across_mapping_sizes(count: usize) {
+    let mut source = String::new();
+    for key in 0..count {
+        writeln!(source, "{key}: value").unwrap();
+    }
+    writeln!(source, "'0': duplicate").unwrap();
+
+    let error = from_str::<BTreeMap<String, String>>(&source).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "$.key_at({count}): mapping keys overlap after conversion at bytes {}..{}",
+            source.len() - "'0': duplicate\n".len(),
+            source.len() - ": duplicate\n".len(),
+        )
+    );
+}
+
+#[test]
+fn converted_keys_are_scoped_to_each_mapping() {
+    let source = "[{1: first, 2: second}, {'1': third, 2: fourth}]";
+    let mappings = from_str::<Vec<BTreeMap<&str, &str>>>(source).unwrap();
+    assert_eq!(
+        mappings,
+        [
+            BTreeMap::from([("1", "first"), ("2", "second")]),
+            BTreeMap::from([("1", "third"), ("2", "fourth")]),
+        ]
     );
 }
 

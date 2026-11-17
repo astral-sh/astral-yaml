@@ -114,6 +114,27 @@ fn type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
     assert_eq!(config.syntax().source(), source);
 }
 
+#[test]
+fn overlapping_keys_roll_back_both_views() {
+    use std::collections::BTreeMap;
+
+    let source = "\"1\": first\nother: second\n";
+    let mut document = Editable::<BTreeMap<String, String>>::parse(source).unwrap();
+    let error = document
+        .edit(|root| root.into_mapping()?.key_at(1)?.set(1))
+        .unwrap_err();
+
+    assert_eq!(error.message, "mapping keys overlap after conversion");
+    assert_eq!(document.source(), source);
+    assert_eq!(
+        document.value(),
+        &BTreeMap::from([
+            ("1".into(), "first".into()),
+            ("other".into(), "second".into())
+        ])
+    );
+}
+
 // A flow sequence needs a closing bracket. A two-document stream is valid YAML,
 // but Editable accepts a single document.
 // https://yaml.org/spec/1.2.2/#rule-c-flow-sequence
