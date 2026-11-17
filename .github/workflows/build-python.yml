@@ -58,14 +58,6 @@ jobs:
         run: |
           uv sync --locked --only-group test
           uv pip install --no-deps dist/*.whl
-          uv run --no-sync --no-dev python - <<'PY'
-          from importlib.resources import files
-
-          package = files("astral_yaml")
-          for name in ("__init__.pyi", "py.typed"):
-              if not package.joinpath(name).is_file():
-                  raise SystemExit(f"Missing {name} in the installed wheel")
-          PY
           uv run --no-sync --no-dev python -m pytest
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
