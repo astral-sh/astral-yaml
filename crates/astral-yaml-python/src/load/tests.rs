@@ -1,4 +1,4 @@
-use super::{Input, Loader, read_document};
+use super::{Input, Loader, read_input};
 use astral_yaml::Budget;
 use pyo3::prelude::*;
 use test_case::test_case;
@@ -26,7 +26,7 @@ fn text_reader_byte_limit(limit: usize, accepted: bool) {
             .unwrap()
             .call_method1("StringIO", ("é",))
             .unwrap();
-        assert_eq!(read_document(&reader, limit).is_ok(), accepted);
+        assert_eq!(read_input(&reader, limit).is_ok(), accepted);
     });
 }
 
@@ -56,5 +56,30 @@ fn numeric_key_work_budget(source: &str, minimum_budget: usize) {
         if minimum_budget > 0 {
             assert!(load(minimum_budget - 1).is_err());
         }
+    });
+}
+
+#[test]
+fn numeric_key_work_budget_spans_documents() {
+    Python::initialize();
+    Python::attach(|py| {
+        let stream = astral_yaml::parse("--- {1: a}\n--- {2: b}\n").unwrap();
+        let load = |budget| {
+            Loader {
+                py,
+                stream: &stream,
+                encoded: None,
+                anchors: std::collections::HashMap::new(),
+                key_work: Budget::new(budget),
+            }
+            .all()
+        };
+
+        load(2).unwrap();
+        let error = load(1).unwrap_err();
+        assert_eq!(
+            error.value(py).to_string(),
+            "numeric mapping key work limit exceeded at bytes 16..17"
+        );
     });
 }

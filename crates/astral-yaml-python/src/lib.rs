@@ -40,7 +40,7 @@ pub mod bindings {
     #[pymodule_export]
     use super::dump::{dump, dumps};
     #[pymodule_export]
-    use super::load::{load, loads};
+    use super::load::{load, load_all, loads, loads_all};
 }
 
 #[cfg(test)]
