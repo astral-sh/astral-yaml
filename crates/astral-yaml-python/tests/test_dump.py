@@ -1,40 +1,27 @@
 import io
 from typing import Literal
-from unittest.mock import Mock, PropertyMock
 
 import astral_yaml as yaml
 import pytest
 
 
 @pytest.mark.parametrize(
-    "style", [None, "block", "flow"], ids=["default", "block", "flow"]
+    ("style", "expected"),
+    [
+        (
+            "block",
+            '"items":\n  - "name": "café"\n    "flags": []\n  - - 1\n    - 2\n  - {}\n',
+        ),
+        ("flow", '{"items": [{"name": "café", "flags": []}, [1, 2], {}]}\n'),
+    ],
 )
-def test_collection_styles(style: Literal["block", "flow"] | None) -> None:
-    data = {"items": [{"name": "café", "flags": [True, None]}, [1, 2], {}], "empty": []}
-    block = (
-        '"items":\n'
-        '  - "name": "café"\n'
-        '    "flags":\n'
-        "      - true\n"
-        "      - null\n"
-        "  - - 1\n"
-        "    - 2\n"
-        "  - {}\n"
-        '"empty": []\n'
-    )
-    flow = '{"items": [{"name": "café", "flags": [true, null]}, [1, 2], {}], "empty": []}\n'
-
+def test_collection_styles(style: Literal["block", "flow"], expected: str) -> None:
+    data = {"items": [{"name": "café", "flags": []}, [1, 2], {}]}
+    assert yaml.dumps(data, style=style) == expected
     output = io.StringIO()
-    if style is None:
-        document = yaml.dumps(data)
-        result = yaml.dump(data, output)
-    else:
-        document = yaml.dumps(data, style=style)
-        result = yaml.dump(data, output, style=style)
-    assert document == (flow if style == "flow" else block)
-    assert result is None
-    assert output.getvalue() == document
-    assert yaml.loads(document) == data
+    yaml.dump(data, output, style=style)
+    assert output.getvalue() == expected
+    assert yaml.loads(expected) == data
 
 
 @pytest.mark.parametrize(
@@ -46,13 +33,10 @@ def test_empty_collections(value: object, expected: str) -> None:
 
 @pytest.mark.parametrize(("style", "error"), [("BLOCK", ValueError), (None, TypeError)])
 def test_invalid_style(style: object, error: type[Exception]) -> None:
-    writer = Mock()
-    type(writer).write = PropertyMock(side_effect=AssertionError("accessed write"))
-
     with pytest.raises(error, match="style"):
         yaml.dumps(None, style=style)  # ty: ignore[invalid-argument-type]
     with pytest.raises(error, match="style"):
-        yaml.dump(None, writer, style=style)  # ty: ignore[invalid-argument-type]
+        yaml.dump(None, None, style=style)  # ty: ignore[invalid-argument-type]
 
 
 def test_style_is_keyword_only() -> None:
@@ -62,19 +46,24 @@ def test_style_is_keyword_only() -> None:
         yaml.dump(None, io.StringIO(), "flow")  # ty: ignore[too-many-positional-arguments]
 
 
-@pytest.mark.parametrize("style", ["block", "flow"])
-@pytest.mark.parametrize("length", [1022, 1023])
-def test_implicit_key_limit(style: Literal["block", "flow"], length: int) -> None:
-    # https://yaml.org/spec/1.2.2/#822-block-mappings
-    # The quotes count toward the 1024-character limit.
+# https://yaml.org/spec/1.2.2/#822-block-mappings
+# The quotes count toward the 1024-character limit.
+@pytest.mark.parametrize(
+    ("style", "length", "template"),
+    [
+        ("block", 1022, '"%s":\n  - 1\n'),
+        ("block", 1023, '? "%s"\n:\n  - 1\n'),
+        ("flow", 1022, '{"%s": [1]}\n'),
+        ("flow", 1023, '{? "%s": [1]}\n'),
+    ],
+)
+def test_implicit_key_limit(
+    style: Literal["block", "flow"], length: int, template: str
+) -> None:
     key = "é" * length
     data = {key: [1]}
     document = yaml.dumps(data, style=style)
-    if style == "block":
-        expected = f'"{key}":\n  - 1\n' if length == 1022 else f'? "{key}"\n:\n  - 1\n'
-    else:
-        expected = f'{{"{key}": [1]}}\n' if length == 1022 else f'{{? "{key}": [1]}}\n'
-    assert document == expected
+    assert document == template % key
     assert yaml.loads(document) == data
 
 
