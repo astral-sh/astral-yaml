@@ -580,6 +580,7 @@ fn serde_work_budget_shares_alias_costs_across_documents() {
     let budget = Budget::new(5);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     let values: Vec<&str> = from_document_with_policy(&stream, 0, policy).unwrap();
     assert_eq!(values, ["value", "value"]);
@@ -601,6 +602,7 @@ fn serde_work_budget_can_exceed_the_default_limit() {
     let budget = Budget::new(1_010_000);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     from_str_with_policy::<de::IgnoredAny>(&source, policy).unwrap();
 }
@@ -611,6 +613,7 @@ fn serde_work_budget_also_covers_comment_processing() {
     let budget = Budget::new(2);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     let error = from_str_with_policy::<Commented<'_, u8>>(source, policy).unwrap_err();
     assert_eq!(error.message, "deserialization resource limit exceeded");
@@ -855,6 +858,98 @@ fn mapping_key_uniqueness_uses_core_types() {
         from_str::<BTreeMap<Option<String>, String>>(": value\n").unwrap(),
         BTreeMap::from([(None, "value".into())])
     );
+}
+
+#[test_case(
+    "\"1\": foo\n1: bar\n"
+    => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+      |
+    1 | \"1\": foo
+    2 | 1: bar
+      | ^ $.key_at(1): mapping keys overlap after conversion
+    ");
+    "quoted and plain"
+)]
+// https://yaml.org/spec/1.2.2/#71-alias-nodes
+#[test_case(
+    "{1: &text '1', *text : bar}"
+    => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+      |
+    1 | {1: &text '1', *text : bar}
+      |                ^^^^^ $.key_at(1): mapping keys overlap after conversion
+    ");
+    "alias key"
+)]
+fn overlapping_string_keys(source: &str) -> String {
+    let error = from_str::<BTreeMap<String, String>>(source).unwrap_err();
+    diagnostic_snapshot(source, error)
+}
+
+#[test]
+fn decoded_keys_can_overlap_in_a_nested_mapping() {
+    let source = "outer:\n  TRUE: a\n  \"\\x54RUE\": b\n";
+    let error = from_str::<BTreeMap<String, BTreeMap<String, String>>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @r#"
+      |
+    1 | outer:
+    2 |   TRUE: a
+    3 |   "\x54RUE": b
+      |   ^^^^^^^^^ $["outer"].key_at(1): mapping keys overlap after conversion
+    "#);
+}
+
+#[test]
+fn overlapping_keys_can_be_allowed() {
+    let source = "{'1': foo, 1: bar}";
+    let policy = DeserializationPolicy {
+        allow_overlapping_keys: true,
+        ..DeserializationPolicy::default()
+    };
+    let restored = from_str_with_policy::<BTreeMap<String, String>>(source, policy).unwrap();
+    insta::assert_compact_debug_snapshot!(restored, @r#"{"1": "bar"}"#);
+
+    // YAML node equality accounts for the key's resolved tag.
+    // https://yaml.org/spec/1.2.2/#3213-node-comparison
+    let typed_keys = from_str::<Value>(source).unwrap();
+    insta::assert_compact_debug_snapshot!(typed_keys, @r#"Mapping([(String("1"), String("foo")), (Unsigned(1), String("bar"))])"#);
+
+    let source = "{1: a, 01: b}";
+    let error = from_str_with_policy::<BTreeMap<String, String>>(source, policy).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @"
+      |
+    1 | {1: a, 01: b}
+      |        ^^ $.key_at(1): duplicate mapping key
+    ");
+}
+
+#[test_case(7 => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+6 | 5: value
+7 | 6: value
+8 | '0': duplicate
+  | ^^^ $.key_at(7): mapping keys overlap after conversion
+"); "eight entries")]
+#[test_case(8 => with |diagnostic| insta::assert_snapshot!(diagnostic, @"
+  |
+7 | 6: value
+8 | 7: value
+9 | '0': duplicate
+  | ^^^ $.key_at(8): mapping keys overlap after conversion
+"); "nine entries")]
+fn overlapping_keys_across_mapping_sizes(count: usize) -> String {
+    let mut source = String::new();
+    for key in 0..count {
+        writeln!(source, "{key}: value").unwrap();
+    }
+    writeln!(source, "'0': duplicate").unwrap();
+    overlapping_string_keys(&source)
+}
+
+#[test]
+fn converted_keys_are_scoped_to_each_mapping() {
+    let source = "[{1: first, 2: second}, {'1': third, 2: fourth}]";
+    let mappings = from_str::<Vec<BTreeMap<&str, &str>>>(source).unwrap();
+    insta::assert_compact_debug_snapshot!(mappings, @r#"[{"1": "first", "2": "second"}, {"1": "third", "2": "fourth"}]"#);
 }
 
 // https://yaml.org/spec/1.2.2/#3213-node-comparison

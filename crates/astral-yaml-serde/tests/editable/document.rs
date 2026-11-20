@@ -1,9 +1,10 @@
 use test_case::test_case;
 
 use astral_yaml::ParseOptions;
-use astral_yaml_dev::{edit_diff, indoc, span_snapshot};
+use astral_yaml_dev::{diagnostic_snapshot, edit_diff, indoc, span_snapshot};
 use astral_yaml_serde::{Editable, Error, Spanned, Tagged};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -41,7 +42,6 @@ fn typed_edits_preserve_unknown_fields_and_refresh_metadata() {
 #[test]
 fn duplicate_keys_abort_edits_even_when_the_field_handles_the_error() {
     use serde::Deserializer;
-    use std::collections::BTreeMap;
 
     #[derive(Deserialize)]
     struct Config {
@@ -112,6 +112,27 @@ fn type_and_duplicate_key_failures_roll_back_both_views(operation: usize) {
     assert!(result.is_err());
     assert_eq!(config.value().timeout.value, 30);
     assert_eq!(config.syntax().source(), source);
+}
+
+#[test]
+fn overlapping_keys_roll_back_both_views() {
+    let source = "\"1\": first\nother: second\n";
+    let mut document = Editable::<BTreeMap<String, String>>::parse(source).unwrap();
+    let before = document.value().clone();
+    let error = document
+        .edit(|root| root.into_mapping()?.key_at(1)?.set(1))
+        .unwrap_err();
+
+    // The diagnostic points into the candidate document that failed to commit.
+    let candidate = source.replace("other:", "1:");
+    insta::assert_snapshot!(diagnostic_snapshot(&candidate, error), @r#"
+      |
+    1 | "1": first
+    2 | 1: second
+      | ^ $.key_at(1): mapping keys overlap after conversion
+    "#);
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value(), &before);
 }
 
 // A flow sequence needs a closing bracket. A two-document stream is valid YAML,
