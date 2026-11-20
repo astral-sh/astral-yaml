@@ -1,7 +1,6 @@
 //! Serialize Python built-ins to a YAML document.
 
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 
 use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
 use astral_yaml::{Budget, CollectionStyle, ParseOptions};
@@ -98,8 +97,14 @@ fn separate(output: &mut Output, block_indent: Option<usize>) -> PyResult<()> {
     }
 }
 
-fn newline(output: &mut Output, indent: usize) -> PyResult<()> {
-    output.display(format_args!("\n{:indent$}", ""))
+fn newline(output: &mut Output, mut indent: usize) -> PyResult<()> {
+    const SPACES: &str = "                ";
+    output.push_str("\n")?;
+    while indent > SPACES.len() {
+        output.push_str(SPACES)?;
+        indent -= SPACES.len();
+    }
+    output.push_str(&SPACES[..indent])
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -108,13 +113,34 @@ struct AnchorSite {
     block_indent: Option<usize>,
 }
 
+// Hold a reference to each container so its identity stays valid.
+type Visit<'py> = (Bound<'py, PyAny>, AnchorSite);
+
+#[derive(Default)]
+struct Visits<'py> {
+    // Keep short documents allocation-free for identity tracking.
+    inline: [Option<Visit<'py>>; 2],
+    overflow: BTreeMap<usize, Option<Visit<'py>>>,
+}
+
+impl<'py> Visits<'py> {
+    #[inline(never)]
+    fn slot(&mut self, value: &Bound<'py, PyAny>) -> &mut Option<Visit<'py>> {
+        for slot in &mut self.inline {
+            if slot.as_ref().is_none_or(|(seen, _)| seen.is(value)) {
+                return slot;
+            }
+        }
+        self.overflow.entry(value.as_ptr() as usize).or_default()
+    }
+}
+
 struct Dumper<'py> {
     output: Output,
     nodes: Budget,
     max_depth: usize,
     style: CollectionStyle,
-    // Hold a reference to every visited container so its identity stays valid.
-    seen: BTreeMap<usize, (Bound<'py, PyAny>, AnchorSite)>,
+    seen: Visits<'py>,
     // First occurrences need an anchor only when we encounter an alias later.
     // Source order lets us insert all anchors with one linear copy.
     anchors: BTreeMap<AnchorSite, usize>,
@@ -131,7 +157,7 @@ impl<'py> Dumper<'py> {
             nodes: Budget::new(options.max_nodes),
             max_depth: options.max_depth,
             style,
-            seen: BTreeMap::new(),
+            seen: Visits::default(),
             anchors: BTreeMap::new(),
         };
         dumper.node(value, Position::Inline(1))?;
@@ -179,7 +205,7 @@ impl<'py> Dumper<'py> {
         }
     }
 
-    #[inline]
+    #[inline(never)]
     fn scalar(&mut self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         if let Some(text) = as_builtin::<PyString>(value) {
             // CPython may allocate a UTF-8 copy on the first conversion.
@@ -195,13 +221,7 @@ impl<'py> Dumper<'py> {
         } else if let Some(integer) = as_builtin::<PyInt>(value) {
             self.integer(integer)?;
         } else if let Some(float) = as_builtin::<PyFloat>(value) {
-            let number = float.value();
-            if let Some(spelling) = non_finite_float(number) {
-                self.output.push_str(spelling)?;
-            } else {
-                // Debug formatting retains the fractional part of integral floats.
-                self.output.display(format_args!("{number:?}"))?;
-            }
+            write_float(&mut self.output, float.value())?;
         } else {
             return Ok(false);
         }
@@ -210,7 +230,7 @@ impl<'py> Dumper<'py> {
 
     fn integer(&mut self, integer: &Bound<'_, PyInt>) -> PyResult<()> {
         if let Ok(small) = integer.extract::<i64>() {
-            return self.output.display(small);
+            return write_decimal(&mut self.output, small, 0);
         }
 
         // Each decimal digit carries fewer than four bits. Bound the size of
@@ -235,44 +255,48 @@ impl<'py> Dumper<'py> {
         prepare: impl FnOnce(&Budget, &mut Output) -> PyResult<I>,
         mut write_entry: impl FnMut(&mut Self, I::Item) -> PyResult<()>,
     ) -> PyResult<()> {
-        let slot = match self.seen.entry(value.as_ptr() as usize) {
-            Entry::Vacant(slot) => slot,
-            Entry::Occupied(slot) => {
-                let (_, site) = slot.get();
-                let next = self.anchors.len() + 1;
-                let label = self.anchors.entry(*site).or_insert(next);
-                position.start(&mut self.output, None)?;
-                return self.output.display(format_args!("*id{label}"));
-            }
-        };
+        let slot = self.seen.slot(value);
+        if let Some((_, site)) = slot {
+            let site = *site;
+            return self.alias(site, position);
+        }
 
-        let mut entries = prepare(&self.nodes, &mut self.output)?.peekable();
-        let block = self.style == CollectionStyle::Block && entries.peek().is_some();
+        let mut entries = prepare(&self.nodes, &mut self.output)?;
+        let first = entries.next();
+        let block = self.style == CollectionStyle::Block && first.is_some();
         let block_indent = block.then_some(position.indent());
         position.start(&mut self.output, block_indent)?;
         let site = AnchorSite {
             offset: self.output.as_ref().len(),
             block_indent,
         };
-        slot.insert((value.clone(), site));
+        *slot = Some((value.clone(), site));
 
-        if let Some(indent) = block_indent {
-            for (index, entry) in entries.enumerate() {
-                if index > 0 {
-                    newline(&mut self.output, indent)?;
+        if !block {
+            self.output.push_str(opening)?;
+        }
+        if let Some(first) = first {
+            write_entry(self, first)?;
+            for entry in entries {
+                match block_indent {
+                    Some(indent) => newline(&mut self.output, indent)?,
+                    None => self.output.push_str(", ")?,
                 }
                 write_entry(self, entry)?;
             }
-            Ok(())
-        } else {
-            self.output.push_str(opening)?;
-            let mut first = true;
-            for entry in entries {
-                self.output.separator(&mut first)?;
-                write_entry(self, entry)?;
-            }
-            self.output.push_str(closing)
         }
+        if !block {
+            self.output.push_str(closing)?;
+        }
+        Ok(())
+    }
+
+    #[cold]
+    fn alias(&mut self, site: AnchorSite, position: Position) -> PyResult<()> {
+        let next = self.anchors.len() + 1;
+        let label = self.anchors.entry(site).or_insert(next);
+        position.start(&mut self.output, None)?;
+        self.output.display(format_args!("*id{label}"))
     }
 
     fn sequence(
@@ -306,8 +330,8 @@ impl<'py> Dumper<'py> {
                 }
                 Ok(dict.iter().collect::<Vec<_>>())
             })?;
-            // Allow for a short scalar key and value, their quotes, and the separators.
-            output.reserve(entries.len().saturating_mul(16).min(4096));
+            // Allow for the key, value, and their surrounding YAML syntax.
+            output.reserve(entries.len().saturating_mul(24).min(4096));
             Ok(entries.into_iter())
         };
 
@@ -348,6 +372,60 @@ impl<'py> Dumper<'py> {
         }
         self.output.push_str(":")
     }
+}
+
+fn write_float(output: &mut Output, number: f64) -> PyResult<()> {
+    if let Some(spelling) = non_finite_float(number) {
+        return output.push_str(spelling);
+    }
+
+    // In this range Debug uses fixed notation and each float's rounding
+    // interval contains at most one millionth. If that millionth rounds
+    // back to the input, its shortest spelling ends at the last nonzero
+    // fractional digit (or .0 for an integer).
+    let scaled = (number * 1e6).round();
+    if !(1e-4..1e9).contains(&number.abs()) || (scaled / 1e6).to_bits() != number.to_bits() {
+        return output.display(format_args!("{number:?}"));
+    }
+    #[allow(clippy::cast_possible_truncation)] // Rounded and bounded by 1e15.
+    let mut value = scaled as i64;
+    let mut places = 6;
+    while places > 1 && value % 10 == 0 {
+        value /= 10;
+        places -= 1;
+    }
+    write_decimal(output, value, places)
+}
+
+/// Write a signed coefficient with `places` fractional digits.
+fn write_decimal(output: &mut Output, value: i64, places: usize) -> PyResult<()> {
+    let mut digits = value.unsigned_abs();
+    let mut buffer = [0; 21]; // 19 digits, a sign, and a decimal point.
+    let mut start = buffer.len();
+    let mut prepend = |byte| {
+        start -= 1;
+        buffer[start] = byte;
+    };
+
+    for _ in 0..places {
+        prepend(b'0' + (digits % 10) as u8);
+        digits /= 10;
+    }
+    if places > 0 {
+        prepend(b'.');
+    }
+
+    loop {
+        prepend(b'0' + (digits % 10) as u8);
+        digits /= 10;
+        if digits == 0 {
+            break;
+        }
+    }
+    if value < 0 {
+        prepend(b'-');
+    }
+    output.push_str(std::str::from_utf8(&buffer[start..]).expect("ASCII decimal"))
 }
 
 fn node_limit() -> PyErr {

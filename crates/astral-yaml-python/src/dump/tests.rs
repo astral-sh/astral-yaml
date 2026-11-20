@@ -2,7 +2,35 @@ use super::Dumper;
 use astral_yaml::{CollectionStyle, ParseOptions};
 use pyo3::prelude::*;
 use std::ffi::CStr;
-use test_case::test_matrix;
+use test_case::{test_case, test_matrix};
+
+#[test_case(i64::MIN)]
+#[test_case(i64::MAX)]
+#[test_case(0)]
+fn integer_spelling(value: i64) {
+    let mut output = super::Output::new(20, super::output_limit);
+    super::write_decimal(&mut output, value, 0).unwrap();
+    assert_eq!(output.as_ref(), value.to_string());
+}
+
+#[test_case(0.0)]
+#[test_case(0.0001)]
+#[test_case(0.000_101)]
+#[test_case(0.01)]
+#[test_case(0.123)]
+#[test_case(1.0)]
+#[test_case(10.000_01)]
+#[test_case(999_999_999.999_999)]
+#[test_case(1e9)]
+fn float_spelling(boundary: f64) {
+    for value in [boundary.next_down(), boundary, boundary.next_up()] {
+        for number in [value, -value] {
+            let mut output = super::Output::new(64, super::output_limit);
+            super::write_float(&mut output, number).unwrap();
+            assert_eq!(output.as_ref(), format!("{number:?}"));
+        }
+    }
+}
 
 #[test_matrix(
     [CollectionStyle::Block, CollectionStyle::Flow],
@@ -34,7 +62,7 @@ fn limits(
 
 #[test_matrix(
     [CollectionStyle::Block, CollectionStyle::Flow],
-    [c"[[]] * 2", c"[[0]] * 2", c"{'ports': [80, 443]}"]
+    [c"[[]] * 2", c"[[0]] * 2", c"{'ports': [80, 443]}", c"[[[[[[[[[[1, 2]]]]]]]]]]"]
 )]
 fn byte_limit_counts_complete_output(style: CollectionStyle, expression: &CStr) {
     Python::initialize();
