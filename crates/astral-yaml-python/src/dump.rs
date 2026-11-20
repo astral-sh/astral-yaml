@@ -1,29 +1,34 @@
 //! Serialize Python built-ins to a YAML document.
 
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 
 use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
-use astral_yaml::{Budget, ParseOptions};
-use pyo3::exceptions::{PyOSError, PyTypeError};
+use astral_yaml::{Budget, CollectionStyle, ParseOptions};
+use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 use crate::YAMLError;
 
 /// Serialize a Python value as a YAML 1.2 document.
-#[pyfunction]
-pub(super) fn dumps(obj: &Bound<'_, PyAny>) -> PyResult<String> {
-    Dumper::serialize(obj, ParseOptions::default())
+///
+/// Use style="flow" for compact collections with brackets and braces.
+#[pyfunction(signature = (obj, *, style = "block"))]
+pub(super) fn dumps(obj: &Bound<'_, PyAny>, style: &str) -> PyResult<String> {
+    Dumper::serialize(obj, ParseOptions::default(), parse_style(style)?)
 }
 
 /// Serialize a Python value and write the document to a text stream.
-#[pyfunction]
-pub(super) fn dump(obj: &Bound<'_, PyAny>, fp: &Bound<'_, PyAny>) -> PyResult<()> {
+///
+/// Use style="flow" for compact collections with brackets and braces.
+#[pyfunction(signature = (obj, fp, *, style = "block"))]
+pub(super) fn dump(obj: &Bound<'_, PyAny>, fp: &Bound<'_, PyAny>, style: &str) -> PyResult<()> {
+    let style = parse_style(style)?;
     let write = fp
         .getattr_opt(pyo3::intern!(fp.py(), "write"))?
         .ok_or_else(|| PyTypeError::new_err("expected a text stream with a write method"))?;
-    let text = PyString::new(obj.py(), &dumps(obj)?);
+    let text = Dumper::serialize(obj, ParseOptions::default(), style)?;
+    let text = PyString::new(obj.py(), &text);
     let written = write.call1((&text,))?;
     if let Ok(count) = written.cast::<PyInt>()
         && count.lt(text.code_point_len()?)?
@@ -33,6 +38,14 @@ pub(super) fn dump(obj: &Bound<'_, PyAny>, fp: &Bound<'_, PyAny>) -> PyResult<()
         ));
     }
     Ok(())
+}
+
+fn parse_style(style: &str) -> PyResult<CollectionStyle> {
+    match style {
+        "block" => Ok(CollectionStyle::Block),
+        "flow" => Ok(CollectionStyle::Flow),
+        _ => Err(PyValueError::new_err("style must be 'block' or 'flow'")),
+    }
 }
 
 // Avoid building a PyO3 cast error while trying the other builtin types.
@@ -50,38 +63,92 @@ fn output_limit() -> PyErr {
     YAMLError::new_err("serialized YAML exceeds the output byte limit")
 }
 
+type Output = LimitedWriter<fn() -> PyErr>;
+
+/// Where a node starts relative to its enclosing collection's indicator.
+#[derive(Clone, Copy)]
+enum Position {
+    Inline,
+    SequenceItem(usize),
+    MappingValue(usize),
+}
+
+impl Position {
+    fn start_inline(self, output: &mut Output) -> PyResult<()> {
+        match self {
+            Self::Inline => Ok(()),
+            Self::SequenceItem(_) | Self::MappingValue(_) => output.push_str(" "),
+        }
+    }
+
+    fn start_block(self, output: &mut Output) -> PyResult<usize> {
+        match self {
+            Self::Inline => Ok(0),
+            Self::SequenceItem(indent) => {
+                self.start_inline(output)?;
+                Ok(indent)
+            }
+            Self::MappingValue(indent) => {
+                newline(output, indent)?;
+                Ok(indent)
+            }
+        }
+    }
+}
+
+fn newline(output: &mut Output, indent: usize) -> PyResult<()> {
+    output.display(format_args!("\n{:indent$}", ""))
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct AnchorSite {
+    offset: usize,
+    block_indent: Option<usize>,
+}
+
 struct Dumper<'py> {
-    output: LimitedWriter<fn() -> PyErr>,
+    output: Output,
     nodes: Budget,
     max_depth: usize,
+    style: CollectionStyle,
     // Hold a reference to every visited container so its identity stays valid.
-    seen: BTreeMap<usize, (Bound<'py, PyAny>, usize)>,
+    seen: BTreeMap<usize, (Bound<'py, PyAny>, AnchorSite)>,
     // First occurrences need an anchor only when we encounter an alias later.
     // Source order lets us insert all anchors with one linear copy.
-    anchors: BTreeMap<usize, usize>,
+    anchors: BTreeMap<AnchorSite, usize>,
 }
 
 impl<'py> Dumper<'py> {
-    fn serialize(value: &Bound<'py, PyAny>, options: ParseOptions) -> PyResult<String> {
+    fn serialize(
+        value: &Bound<'py, PyAny>,
+        options: ParseOptions,
+        style: CollectionStyle,
+    ) -> PyResult<String> {
         let mut dumper = Self {
             output: LimitedWriter::new(options.max_input_bytes, output_limit),
             nodes: Budget::new(options.max_nodes),
             max_depth: options.max_depth,
+            style,
             seen: BTreeMap::new(),
             anchors: BTreeMap::new(),
         };
-        dumper.node(value, 1)?;
+        dumper.node(value, 1, Position::Inline)?;
         dumper.output.push_str("\n")?;
         if dumper.anchors.is_empty() {
             return dumper.output.finish();
         }
 
-        let mut anchored = LimitedWriter::new(options.max_input_bytes, output_limit);
+        let mut anchored = Output::new(options.max_input_bytes, output_limit);
         let mut start = 0;
-        for (offset, label) in dumper.anchors {
-            anchored.push_str(&dumper.output.as_ref()[start..offset])?;
-            anchored.display(format_args!("&id{label} "))?;
-            start = offset;
+        for (site, label) in dumper.anchors {
+            anchored.push_str(&dumper.output.as_ref()[start..site.offset])?;
+            anchored.display(format_args!("&id{label}"))?;
+            if let Some(indent) = site.block_indent {
+                newline(&mut anchored, indent)?;
+            } else {
+                anchored.push_str(" ")?;
+            }
+            start = site.offset;
         }
         anchored.push_str(&dumper.output.as_ref()[start..])?;
         anchored.finish()
@@ -94,19 +161,24 @@ impl<'py> Dumper<'py> {
         self.nodes.try_charge(1).ok_or_else(node_limit)
     }
 
-    fn node(&mut self, value: &Bound<'py, PyAny>, depth: usize) -> PyResult<()> {
+    fn node(
+        &mut self,
+        value: &Bound<'py, PyAny>,
+        depth: usize,
+        position: Position,
+    ) -> PyResult<()> {
         self.enter(depth)?;
-        if self.scalar(value)? {
-            return Ok(());
-        }
-
         if let Some(list) = as_builtin::<PyList>(value) {
-            self.sequence(value, list.iter(), depth)
+            self.sequence(value, list.iter(), depth, position)
         } else if let Some(tuple) = as_builtin::<PyTuple>(value) {
-            self.sequence(value, tuple.iter_borrowed(), depth)
+            self.sequence(value, tuple.iter_borrowed(), depth, position)
         } else if let Some(dict) = as_builtin::<PyDict>(value) {
-            self.mapping(dict, depth)
+            self.mapping(dict, depth, position)
         } else {
+            position.start_inline(&mut self.output)?;
+            if self.scalar(value)? {
+                return Ok(());
+            }
             Err(PyTypeError::new_err(format!(
                 "cannot serialize an object of type '{}'",
                 value.get_type().name()?
@@ -160,19 +232,55 @@ impl<'py> Dumper<'py> {
         self.output.push_str(decimal.to_str()?)
     }
 
-    fn alias(&mut self, value: &Bound<'py, PyAny>) -> PyResult<bool> {
-        match self.seen.entry(value.as_ptr() as usize) {
-            Entry::Vacant(entry) => {
-                entry.insert((value.clone(), self.output.as_ref().len()));
-                Ok(false)
+    fn alias(&mut self, value: &Bound<'py, PyAny>, position: Position) -> PyResult<bool> {
+        let Some((_, site)) = self.seen.get(&(value.as_ptr() as usize)) else {
+            return Ok(false);
+        };
+        let next = self.anchors.len() + 1;
+        let label = self.anchors.entry(*site).or_insert(next);
+        position.start_inline(&mut self.output)?;
+        self.output.display(format_args!("*id{label}"))?;
+        Ok(true)
+    }
+
+    fn start_collection(
+        &mut self,
+        value: &Bound<'py, PyAny>,
+        position: Position,
+        block: bool,
+        opening: &str,
+    ) -> PyResult<Option<usize>> {
+        let block_indent = if block {
+            Some(position.start_block(&mut self.output)?)
+        } else {
+            position.start_inline(&mut self.output)?;
+            None
+        };
+        self.seen.insert(
+            value.as_ptr() as usize,
+            (
+                value.clone(),
+                AnchorSite {
+                    offset: self.output.as_ref().len(),
+                    block_indent,
+                },
+            ),
+        );
+        if block_indent.is_none() {
+            self.output.push_str(opening)?;
+        }
+        Ok(block_indent)
+    }
+
+    fn entry_separator(&mut self, first: &mut bool, block_indent: Option<usize>) -> PyResult<()> {
+        if let Some(indent) = block_indent {
+            if std::mem::take(first) {
+                Ok(())
+            } else {
+                newline(&mut self.output, indent)
             }
-            Entry::Occupied(entry) => {
-                let (_, offset) = entry.get();
-                let next = self.anchors.len() + 1;
-                let label = self.anchors.entry(*offset).or_insert(next);
-                self.output.display(format_args!("*id{label}"))?;
-                Ok(true)
-            }
+        } else {
+            self.output.separator(first)
         }
     }
 
@@ -181,22 +289,39 @@ impl<'py> Dumper<'py> {
         value: &Bound<'py, PyAny>,
         items: impl Iterator<Item = impl AsRef<Py<PyAny>>>,
         depth: usize,
+        position: Position,
     ) -> PyResult<()> {
-        if self.alias(value)? {
+        if self.alias(value, position)? {
             return Ok(());
         }
 
-        self.output.push_str("[")?;
+        let mut items = items.peekable();
+        let block = self.style == CollectionStyle::Block && items.peek().is_some();
+        let block_indent = self.start_collection(value, position, block, "[")?;
         let mut first = true;
         for item in items {
-            self.output.separator(&mut first)?;
-            self.node(item.as_ref().bind(value.py()), depth + 1)?;
+            self.entry_separator(&mut first, block_indent)?;
+            let position = if let Some(indent) = block_indent {
+                self.output.push_str("-")?;
+                Position::SequenceItem(indent + 2)
+            } else {
+                Position::Inline
+            };
+            self.node(item.as_ref().bind(value.py()), depth + 1, position)?;
         }
-        self.output.push_str("]")
+        if block_indent.is_none() {
+            self.output.push_str("]")?;
+        }
+        Ok(())
     }
 
-    fn mapping(&mut self, dict: &Bound<'py, PyDict>, depth: usize) -> PyResult<()> {
-        if self.alias(dict.as_any())? {
+    fn mapping(
+        &mut self,
+        dict: &Bound<'py, PyDict>,
+        depth: usize,
+        position: Position,
+    ) -> PyResult<()> {
+        if self.alias(dict.as_any(), position)? {
             return Ok(());
         }
 
@@ -211,11 +336,12 @@ impl<'py> Dumper<'py> {
         // Allow for a short scalar key and value, their quotes, and the separators.
         self.output
             .reserve(entries.len().saturating_mul(16).min(4096));
-        self.output.push_str("{")?;
+        let block = self.style == CollectionStyle::Block && !entries.is_empty();
+        let block_indent = self.start_collection(dict.as_any(), position, block, "{")?;
         let mut first = true;
         let mut has_nan = false;
         for (key, value) in entries {
-            self.output.separator(&mut first)?;
+            self.entry_separator(&mut first, block_indent)?;
             self.enter(depth + 1)?;
             let start = self.output.as_ref().len();
             if !self.scalar(&key)? {
@@ -228,10 +354,25 @@ impl<'py> Dumper<'py> {
             {
                 return Err(YAMLError::new_err("duplicate mapping key .nan"));
             }
-            self.output.finish_implicit_key(start)?;
-            self.node(&value, depth + 1)?;
+            let position = if let Some(indent) = block_indent {
+                let key = &self.output.as_ref()[start..];
+                // https://yaml.org/spec/1.2.2/#822-block-mappings
+                if key.len() > 1024 && key.chars().count() > 1024 {
+                    self.output.insert_explicit_key(start)?;
+                    newline(&mut self.output, indent)?;
+                }
+                self.output.push_str(":")?;
+                Position::MappingValue(indent + 2)
+            } else {
+                self.output.finish_implicit_key(start)?;
+                Position::Inline
+            };
+            self.node(&value, depth + 1, position)?;
         }
-        self.output.push_str("}")
+        if block_indent.is_none() {
+            self.output.push_str("}")?;
+        }
+        Ok(())
     }
 }
 

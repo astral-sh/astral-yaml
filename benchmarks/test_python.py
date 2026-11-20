@@ -26,7 +26,10 @@ class YamlAPI(NamedTuple):
 def api(request: pytest.FixtureRequest) -> YamlAPI:
     if request.param == "astral-yaml":
         return YamlAPI(
-            astral_yaml.loads, astral_yaml.load, astral_yaml.dumps, astral_yaml.dump
+            astral_yaml.loads,
+            astral_yaml.load,
+            partial(astral_yaml.dumps, style="flow"),
+            partial(astral_yaml.dump, style="flow"),
         )
 
     yaml = pytest.importorskip(
