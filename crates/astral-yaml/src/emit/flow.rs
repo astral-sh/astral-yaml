@@ -206,8 +206,12 @@ impl<F> LimitedWriter<F> {
 
     #[inline]
     fn check_bytes(&mut self, bytes: usize) -> fmt::Result {
-        self.failed |= bytes > self.remaining();
-        if self.failed { Err(fmt::Error) } else { Ok(()) }
+        if self.failed || bytes > self.remaining() {
+            self.failed = true;
+            Err(fmt::Error)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -228,6 +232,20 @@ impl<F> Write for LimitedWriter<F> {
 }
 
 impl<E, F: Fn() -> E> FlowWrite<E> for LimitedWriter<F> {
+    #[inline]
+    fn quote(&mut self, value: &str) -> Result<(), E> {
+        self.check(value.len() + 2)?;
+        self.reserve(value.len() + 3);
+        // A byte expands to at most six bytes (a backslash, 'u', and
+        // four hex digits). Check each fragment only near the limit.
+        let result = if value.len() <= (self.remaining() - 2) / 6 {
+            super::write_quoted(&mut self.text, value)
+        } else {
+            super::write_quoted(self, value)
+        };
+        self.write_result(result)
+    }
+
     fn finish(mut self) -> Result<String, E> {
         self.check(0)?;
         Ok(self.text)
@@ -278,6 +296,15 @@ impl<E, F: Fn() -> E> FlowWrite<E> for LimitedWriter<F> {
 #[cfg(test)]
 mod tests {
     use super::{FlowWrite, LimitedWriter};
+
+    #[test_case::test_case(9, Ok("[\"\\u0000\""); "full escape fits")]
+    #[test_case::test_case(8, Err("limit"); "one byte short")]
+    fn quote_counts_the_full_escape(limit: usize, expected: Result<&str, &str>) {
+        let mut writer = LimitedWriter::new(limit, || "limit");
+        writer.push_str("[").unwrap();
+        assert_eq!(writer.quote("\0"), expected.map(|_| ()));
+        assert_eq!(writer.finish().as_deref().map_err(|e| *e), expected);
+    }
 
     // https://yaml.org/spec/1.2.2/#flow-mapping-implicit-keys
     #[test_case::test_case(1024, 2, Ok(""); "implicit key at the character limit")]

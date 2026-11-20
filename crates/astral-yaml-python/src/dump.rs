@@ -1,7 +1,6 @@
 //! Serialize Python built-ins to a YAML document.
 
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 
 use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
 use astral_yaml::{Budget, CollectionStyle, ParseOptions};
@@ -10,6 +9,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 use crate::YAMLError;
+
+mod decimal;
+use decimal::Decimal;
 
 /// Serialize a Python value as a YAML 1.2 document.
 ///
@@ -99,7 +101,14 @@ fn separate(output: &mut Output, block_indent: Option<usize>) -> PyResult<()> {
 }
 
 fn newline(output: &mut Output, indent: usize) -> PyResult<()> {
-    output.display(format_args!("\n{:indent$}", ""))
+    const SPACES: &str = "                ";
+    output.push_str("\n")?;
+    let mut remaining = indent;
+    while remaining > SPACES.len() {
+        output.push_str(SPACES)?;
+        remaining -= SPACES.len();
+    }
+    output.push_str(&SPACES[..remaining])
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -108,13 +117,34 @@ struct AnchorSite {
     block_indent: Option<usize>,
 }
 
+// Hold a reference to each container so its identity stays valid.
+type Visit<'py> = (Bound<'py, PyAny>, AnchorSite);
+
+#[derive(Default)]
+struct Visits<'py> {
+    // Keep short documents allocation-free for identity tracking.
+    inline: [Option<Visit<'py>>; 2],
+    overflow: BTreeMap<usize, Option<Visit<'py>>>,
+}
+
+impl<'py> Visits<'py> {
+    #[inline(never)]
+    fn slot(&mut self, value: &Bound<'py, PyAny>) -> &mut Option<Visit<'py>> {
+        for slot in &mut self.inline {
+            if slot.as_ref().is_none_or(|(seen, _)| seen.is(value)) {
+                return slot;
+            }
+        }
+        self.overflow.entry(value.as_ptr() as usize).or_default()
+    }
+}
+
 struct Dumper<'py> {
     output: Output,
     nodes: Budget,
     max_depth: usize,
     style: CollectionStyle,
-    // Hold a reference to every visited container so its identity stays valid.
-    seen: BTreeMap<usize, (Bound<'py, PyAny>, AnchorSite)>,
+    seen: Visits<'py>,
     // First occurrences need an anchor only when we encounter an alias later.
     // Source order lets us insert all anchors with one linear copy.
     anchors: BTreeMap<AnchorSite, usize>,
@@ -131,7 +161,7 @@ impl<'py> Dumper<'py> {
             nodes: Budget::new(options.max_nodes),
             max_depth: options.max_depth,
             style,
-            seen: BTreeMap::new(),
+            seen: Visits::default(),
             anchors: BTreeMap::new(),
         };
         dumper.node(value, Position::Inline(1))?;
@@ -179,7 +209,7 @@ impl<'py> Dumper<'py> {
         }
     }
 
-    #[inline]
+    #[inline(never)]
     fn scalar(&mut self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
         if let Some(text) = as_builtin::<PyString>(value) {
             // CPython may allocate a UTF-8 copy on the first conversion.
@@ -198,6 +228,8 @@ impl<'py> Dumper<'py> {
             let number = float.value();
             if let Some(spelling) = non_finite_float(number) {
                 self.output.push_str(spelling)?;
+            } else if let Some(decimal) = Decimal::from_float(number) {
+                decimal.write(&mut self.output)?;
             } else {
                 // Debug formatting retains the fractional part of integral floats.
                 self.output.display(format_args!("{number:?}"))?;
@@ -210,7 +242,7 @@ impl<'py> Dumper<'py> {
 
     fn integer(&mut self, integer: &Bound<'_, PyInt>) -> PyResult<()> {
         if let Ok(small) = integer.extract::<i64>() {
-            return self.output.display(small);
+            return Decimal::Integer(small).write(&mut self.output);
         }
 
         // Each decimal digit carries fewer than four bits. Bound the size of
@@ -235,44 +267,49 @@ impl<'py> Dumper<'py> {
         prepare: impl FnOnce(&Budget, &mut Output) -> PyResult<I>,
         mut write_entry: impl FnMut(&mut Self, I::Item) -> PyResult<()>,
     ) -> PyResult<()> {
-        let slot = match self.seen.entry(value.as_ptr() as usize) {
-            Entry::Vacant(slot) => slot,
-            Entry::Occupied(slot) => {
-                let (_, site) = slot.get();
-                let next = self.anchors.len() + 1;
-                let label = self.anchors.entry(*site).or_insert(next);
-                position.start(&mut self.output, None)?;
-                return self.output.display(format_args!("*id{label}"));
-            }
-        };
+        let slot = self.seen.slot(value);
+        if let Some((_, site)) = slot {
+            let site = *site;
+            return self.alias(site, position);
+        }
 
-        let mut entries = prepare(&self.nodes, &mut self.output)?.peekable();
-        let block = self.style == CollectionStyle::Block && entries.peek().is_some();
+        let mut entries = prepare(&self.nodes, &mut self.output)?;
+        let first = entries.next();
+        let block = self.style == CollectionStyle::Block && first.is_some();
         let block_indent = block.then_some(position.indent());
         position.start(&mut self.output, block_indent)?;
         let site = AnchorSite {
             offset: self.output.as_ref().len(),
             block_indent,
         };
-        slot.insert((value.clone(), site));
+        *slot = Some((value.clone(), site));
 
-        if let Some(indent) = block_indent {
-            for (index, entry) in entries.enumerate() {
-                if index > 0 {
+        if !block {
+            self.output.push_str(opening)?;
+        }
+        if let Some(first) = first {
+            write_entry(self, first)?;
+            for entry in entries {
+                if let Some(indent) = block_indent {
                     newline(&mut self.output, indent)?;
+                } else {
+                    self.output.push_str(", ")?;
                 }
                 write_entry(self, entry)?;
             }
-            Ok(())
-        } else {
-            self.output.push_str(opening)?;
-            let mut first = true;
-            for entry in entries {
-                self.output.separator(&mut first)?;
-                write_entry(self, entry)?;
-            }
-            self.output.push_str(closing)
         }
+        if !block {
+            self.output.push_str(closing)?;
+        }
+        Ok(())
+    }
+
+    #[cold]
+    fn alias(&mut self, site: AnchorSite, position: Position) -> PyResult<()> {
+        let next = self.anchors.len() + 1;
+        let label = self.anchors.entry(site).or_insert(next);
+        position.start(&mut self.output, None)?;
+        self.output.display(format_args!("*id{label}"))
     }
 
     fn sequence(
@@ -306,8 +343,8 @@ impl<'py> Dumper<'py> {
                 }
                 Ok(dict.iter().collect::<Vec<_>>())
             })?;
-            // Allow for a short scalar key and value, their quotes, and the separators.
-            output.reserve(entries.len().saturating_mul(16).min(4096));
+            // Allow for the key, value, and their surrounding YAML syntax.
+            output.reserve(entries.len().saturating_mul(24).min(4096));
             Ok(entries.into_iter())
         };
 
