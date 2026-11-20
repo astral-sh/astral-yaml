@@ -110,6 +110,26 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
         Ok(())
     }
 
+    /// Insert `? ` if the single-line key at `start` exceeds the
+    /// [implicit key limit]. Return whether the indicator was inserted.
+    ///
+    /// [implicit key limit]: https://yaml.org/spec/1.2.2/#822-block-mappings
+    ///
+    /// # Panics
+    /// Panics if `start` is outside the output or falls inside a UTF-8 character.
+    ///
+    /// # Errors
+    /// Returns an error if the indicator exceeds the budget.
+    #[inline]
+    fn mark_explicit_key(&mut self, start: usize) -> Result<bool, E> {
+        let key = &self.as_ref()[start..];
+        if key.len() > 1024 && key.chars().count() > 1024 {
+            self.insert_explicit_key(start)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Finish a single-line key, inserting `? ` if the encoded key exceeds
     /// the [implicit key limit] of 1024 source characters.
     ///
@@ -122,10 +142,7 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
     /// Returns an error if the indicators exceed the budget.
     #[inline]
     fn finish_implicit_key(&mut self, start: usize) -> Result<(), E> {
-        let key = &self.as_ref()[start..];
-        if key.len() > 1024 && key.chars().count() > 1024 {
-            self.insert_explicit_key(start)?;
-        }
+        self.mark_explicit_key(start)?;
         self.push_str(": ")
     }
 }
