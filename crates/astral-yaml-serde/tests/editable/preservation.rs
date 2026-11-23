@@ -42,7 +42,7 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
         assert_eq!(document.value().copy, "");
         diffs.push(edit_diff(source, document.source()));
     }
-    insta::assert_snapshot!(diffs.join("\n"), @r#"
+    insta::assert_snapshot!(diffs.join("\n"), @"
     @@ -1,4 +1,5 @@
     -plain: &empty
     -tagged: !custom
@@ -50,7 +50,7 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
     +tagged: !<!custom> ⏎
      copy: *empty
      other: keep
-    +"enabled": true
+    +enabled: true
 
     @@ -1,4 +1,3 @@
     -plain: &empty
@@ -66,7 +66,7 @@ fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
     -copy: *empty
     -other: keep
     +{plain: &empty , tagged: !<!custom> , copy: *empty, other: keep}
-    "#);
+    ");
 }
 
 #[test]
@@ -94,14 +94,14 @@ fn structural_edits_preserve_separate_block_scalar_comments() {
             content
         "}
     );
-    insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
     @@ -1,3 +1,4 @@
      text: &text # anchor
        | # header
     -    content
     +  content
-    +"enabled": true
-    "#);
+    +enabled: true
+    ");
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn unrelated_collection_edits_preserve_chomping_around_detached_comments(
             .edit(|root| root.into_mapping()?.set("added", "new").map(|_| ()))
             .unwrap();
         expected["added"] = serde_json::json!("new");
-        format!("{block}\"added\": \"new\"\n")
+        format!("{block}added: \"new\"\n")
     };
     assert_eq!(document.source(), yaml);
     assert_eq!(document.value(), &expected);
@@ -392,7 +392,7 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         +  # detached
          ⏎
         -  key: old
-        +  {key: old, "added": "new"}
+        +  {key: old, added: "new"}
          unknown: keep
     "#);
     "detached comment"
@@ -409,7 +409,7 @@ fn typed_insertions_keep_flow_delimiter_comments() {
         -outer:
          # leading
         -  {key: old}
-        +outer: {key: old, "added": "new"}
+        +outer: {key: old, added: "new"}
          unknown: keep
     "#);
     "leading comment"

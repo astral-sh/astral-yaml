@@ -921,6 +921,9 @@ pub(super) fn key_form<Location>(
     // explicit key. The implicit limit includes properties and escapes.
     let position = if flow {
         ScalarPosition::Flow
+    } else if *style == ScalarStyle::Plain && !value.contains('\n') {
+        // The following separator can make a final ':' plain content.
+        ScalarPosition::BlockKey
     } else {
         ScalarPosition::Block
     };

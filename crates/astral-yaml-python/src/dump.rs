@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float};
+use astral_yaml::emit::{FlowWrite, LimitedWriter, non_finite_float, plain_block_string_key};
 use astral_yaml::{Budget, CollectionStyle, ParseOptions};
 use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -162,20 +162,28 @@ impl<'py> Dumper<'py> {
         };
         dumper.node(value, Position::Inline(1))?;
         dumper.output.push_str("\n")?;
-        if dumper.anchors.is_empty() {
-            return dumper.output.finish();
+        if !dumper.anchors.is_empty() {
+            let mut anchored = Output::new(options.max_input_bytes, output_limit);
+            let mut start = 0;
+            for (site, label) in dumper.anchors {
+                anchored.push_str(&dumper.output.as_ref()[start..site.offset])?;
+                anchored.display(format_args!("&id{label}"))?;
+                separate(&mut anchored, site.block_indent)?;
+                start = site.offset;
+            }
+            anchored.push_str(&dumper.output.as_ref()[start..])?;
+            dumper.output = anchored;
         }
-
-        let mut anchored = Output::new(options.max_input_bytes, output_limit);
-        let mut start = 0;
-        for (site, label) in dumper.anchors {
-            anchored.push_str(&dumper.output.as_ref()[start..site.offset])?;
-            anchored.display(format_args!("&id{label}"))?;
-            separate(&mut anchored, site.block_indent)?;
-            start = site.offset;
+        // A plain key can start the stream with a non-ASCII character.
+        // Check after inserting anchors, which can supply an ASCII prefix.
+        if !dumper.output.as_ref().as_bytes()[0].is_ascii() {
+            dumper.nodes.try_charge(1).ok_or_else(node_limit)?;
+            dumper.output.check('\u{feff}'.len_utf8())?;
+            let mut text = dumper.output.finish()?;
+            text.insert(0, '\u{feff}');
+            return Ok(text);
         }
-        anchored.push_str(&dumper.output.as_ref()[start..])?;
-        anchored.finish()
+        dumper.output.finish()
     }
 
     fn enter(&self, depth: usize) -> PyResult<()> {
@@ -195,7 +203,7 @@ impl<'py> Dumper<'py> {
             self.mapping(dict, position)
         } else {
             position.start(&mut self.output, None)?;
-            if self.scalar(value)? {
+            if self.scalar(value, false)? {
                 return Ok(());
             }
             Err(PyTypeError::new_err(format!(
@@ -206,13 +214,17 @@ impl<'py> Dumper<'py> {
     }
 
     #[inline(never)]
-    fn scalar(&mut self, value: &Bound<'_, PyAny>) -> PyResult<bool> {
+    fn scalar(&mut self, value: &Bound<'_, PyAny>, block_key: bool) -> PyResult<bool> {
         if let Some(text) = as_builtin::<PyString>(value) {
             // CPython may allocate a UTF-8 copy on the first conversion.
             self.output
                 .check(text.code_point_len()?.saturating_add(2))?;
             let text = crate::unicode_text(text)?;
-            self.output.quote(text)?;
+            if block_key && plain_block_string_key(text) {
+                self.output.push_str(text)?;
+            } else {
+                self.output.quote(text)?;
+            }
         } else if value.is_none() {
             self.output.push_str("null")?;
         } else if let Some(boolean) = as_builtin::<PyBool>(value) {
@@ -356,7 +368,7 @@ impl<'py> Dumper<'py> {
     ) -> PyResult<()> {
         self.enter(position.depth() + 1)?;
         let start = self.output.as_ref().len();
-        if !self.scalar(key)? {
+        if !self.scalar(key, self.style == CollectionStyle::Block)? {
             return Err(PyTypeError::new_err(
                 "mapping keys must be built-in strings, numbers, booleans, or None",
             ));

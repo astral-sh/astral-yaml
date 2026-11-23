@@ -70,7 +70,7 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
     +timeout: 60 # seconds
     +servers: [primary, backup, "tertiary"]
      extra: 'retained'
-    +"enabled": true
+    +enabled: true
     "#);
     let pointer = config.source().as_ptr();
     let yaml = config.into_yaml();
@@ -266,7 +266,7 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
     -first: 'old' # keep
     +first: 'it''s new' # keep
      last: true
-    +"added": ["one", "two" # added
+    +added: ["one", "two" # added
     +  ]
     "#);
 }
@@ -490,7 +490,7 @@ fn stored_mapping_views_support_sibling_edits_and_nested_defaults() {
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
     @@ -1 +1 @@
     -services: {db: {healthcheck: {retries: 3, interval: '30s'}}}
-    +services: {db: {healthcheck: {retries: 5, interval: '5s', "timeout": "10s", "options": {"enabled": false}}}}
+    +services: {db: {healthcheck: {retries: 5, interval: '5s', timeout: "10s", options: {enabled: false}}}}
     "#);
 }
 
@@ -753,10 +753,10 @@ fn collection_defaults_reuse_existing_children_and_leave_scalars_alone() {
             Ok(())
         })
         .unwrap();
-    insta::assert_snapshot!(document.source(), @r#"
+    insta::assert_snapshot!(document.source(), @"
     enabled: true # retained
-    "services": {"web": 80, "ports": [443, 8443]}
-    "#);
+    services: {web: 80, ports: [443, 8443]}
+    ");
 }
 
 #[test]
@@ -785,4 +785,80 @@ fn a_commit_error_at_a_complex_key_identifies_the_mapping_entry() {
         .unwrap_err();
     assert_eq!(error.path.as_deref(), Some("$.value_at(0)"));
     assert_eq!(document.source(), source);
+}
+
+// https://yaml.org/spec/1.2.2/#733-plain-style
+#[test]
+fn inserted_keys_keep_their_string_type_and_respect_explicit_styles() {
+    let document = edit::<Value>("'old': 0\n", |root| {
+        let mut fields = root.into_mapping()?;
+        fields.set("old", 1)?;
+        fields.set("foo", "yes")?;
+        fields.set("true", 2)?;
+        fields.set("yes", 3)?;
+        fields.set("x,y", 4)?;
+        fields.set("", 5)?;
+        fields.set("null", 6)?;
+        fields.set("42", 7)?;
+        fields.set("quoted", 8)?;
+        fields.set("--- marker", 9)?;
+        fields
+            .key_at(8)?
+            .set_scalar_style(ScalarStyle::DoubleQuoted)
+    });
+    insta::assert_snapshot!(document.source(), @r#"
+    'old': 1
+    foo: "yes"
+    "true": 2
+    yes: 3
+    x,y: 4
+    "": 5
+    "null": 6
+    "42": 7
+    "quoted": 8
+    "--- marker": 9
+    "#);
+}
+
+#[test]
+fn inserted_keys_follow_the_final_ancestor_style() {
+    let document = edit::<Value>("outer:\n  a: 1\n", |mut root| {
+        let mut inner = root.reborrow().field("outer")?.into_mapping()?;
+        inner.set("foo", 2)?;
+        inner.set("x,y", 3)?;
+        inner.set("true", 4)?;
+        root.into_mapping()?
+            .set_collection_style(CollectionStyle::Flow)
+    });
+    insta::assert_snapshot!(document.source(), @r#"{outer: {a: 1, foo: 2, "x,y": 3, "true": 4}}"#);
+}
+
+#[test]
+fn inserted_keys_can_become_plain_when_a_flow_mapping_becomes_block() {
+    let document = edit::<Value>("{}\n", |root| {
+        let mut fields = root.into_mapping()?;
+        fields.set("x,y", 1)?;
+        fields.set_collection_style(CollectionStyle::Block)
+    });
+    insta::assert_snapshot!(document.source(), @"x,y: 1");
+}
+
+// https://yaml.org/spec/1.2.2/#822-block-mappings
+#[test_case(1024, "z", false; "implicit")]
+#[test_case(1024, ":", false; "implicit with final colon")]
+#[test_case(1025, "z", true; "explicit")]
+#[test_case(1025, ":", true; "explicit with final colon")]
+fn inserted_plain_keys_use_their_character_length(length: usize, last: &str, explicit: bool) {
+    let key = "é".repeat(length - 1) + last;
+    let document = edit::<Value>("a: 0\n", |root| {
+        root.into_mapping()?.set(&key, 1).map(|_| ())
+    });
+    let expected = if explicit && last == ":" {
+        format!("a: 0\n? \"{key}\"\n: 1\n")
+    } else if explicit {
+        format!("a: 0\n? {key}\n: 1\n")
+    } else {
+        format!("a: 0\n{key}: 1\n")
+    };
+    assert_eq!(document.source(), expected);
 }

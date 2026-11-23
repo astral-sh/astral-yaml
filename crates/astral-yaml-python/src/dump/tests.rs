@@ -62,7 +62,7 @@ fn limits(
 
 #[test_matrix(
     [CollectionStyle::Block, CollectionStyle::Flow],
-    [c"[[]] * 2", c"[[0]] * 2", c"{'ports': [80, 443]}", c"[[[[[[[[[[1, 2]]]]]]]]]]"]
+    [c"[[]] * 2", c"[[0]] * 2", c"{'ports': [80, 443]}", c"{chr(233): 0}", c"[[[[[[[[[[1, 2]]]]]]]]]]"]
 )]
 fn byte_limit_counts_complete_output(style: CollectionStyle, expression: &CStr) {
     Python::initialize();

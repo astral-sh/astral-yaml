@@ -37,6 +37,49 @@ pub fn requires_double_quotes(c: char) -> bool {
     non_printable(c) || c == '\u{feff}'
 }
 
+/// Whether a single-line block mapping key can be written plain and still
+/// resolve to the same string under the YAML 1.2 core schema.
+///
+/// Flow mappings impose additional restrictions on punctuation.
+#[must_use]
+pub fn plain_block_string_key(value: &str) -> bool {
+    use crate::parser::{is_space, plain_start};
+    use crate::schema::{ScalarType, classify};
+
+    let bytes = value.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    // In an implicit key even a lone '-', '?' or ':' is followed by ':'.
+    if !plain_start(first, bytes.get(1).copied().is_some_and(is_space))
+        || first == b'#'
+        || is_space(first)
+        || is_space(bytes[bytes.len() - 1])
+        || classify(value) != ScalarType::String
+    {
+        return false;
+    }
+    if (value.starts_with("---") || value.starts_with("..."))
+        && bytes.get(3).copied().is_some_and(is_space)
+    {
+        return false;
+    }
+    // An explicit key ends at a line break instead of the mapping separator.
+    if value.ends_with(':') && exceeds_implicit_key_limit(value) {
+        return false;
+    }
+    !value
+        .chars()
+        .any(|c| matches!(c, '\n' | '\r') || requires_double_quotes(c))
+        && !bytes.windows(2).any(|pair| {
+            (pair[0] == b':' && is_space(pair[1])) || (is_space(pair[0]) && pair[1] == b'#')
+        })
+}
+
+fn exceeds_implicit_key_limit(spelling: &str) -> bool {
+    spelling.len() > 1024 && spelling.chars().count() > 1024
+}
+
 /// Write a double-quoted scalar, escaping characters that cannot appear literally.
 ///
 /// ```

@@ -89,12 +89,16 @@ fn main() -> Result<(), astral_yaml_serde::Error> {
 ```yaml
 image: 'api:v2' # release
 ports: [80, 443]
-"retries": 3
+retries: 3
 ```
 
 `#[serde(default)]` lets `Service` read a file with no `retries` field.
 `or_insert(3)` writes the default into the YAML only when the key is missing.
 To set the retry count even when one exists, use `fields.set("retries", 3)?`.
+
+New string keys use plain style when their spelling and type are unambiguous.
+For example, `"true"` needs quotes in either style, while `x,y` needs quotes
+only in a flow mapping.
 
 The example edits individual fields, so the YAML keeps `image` even though
 `Service` omits it. If you replace a whole mapping, include every field you
