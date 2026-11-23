@@ -211,8 +211,7 @@ impl<'plan> Scopes<'plan> {
             (NodeKind::Sequence { .. }, NodeKind::Sequence { .. })
                 | (NodeKind::Mapping { .. }, NodeKind::Mapping { .. })
         );
-        let compact =
-            self.layout.dash_spacing(id).is_some() && emit::block_collection(&old.kind, false);
+        let compact = self.layout.compact(id) && emit::block_collection(&old.kind, false);
         if slot.body.start() < old.span.start()
             || (same_collection && slot.outer_comments)
             || (!slot.own_line && !compact && self.layout.multiline(id, &new.kind))
@@ -268,7 +267,7 @@ impl<'plan> Scopes<'plan> {
     }
 
     fn indent(&self, id: NodeId, line: Line, start: usize) -> usize {
-        if self.layout.dash_spacing(id).is_some() {
+        if self.layout.compact(id) {
             return line.column(start);
         }
 

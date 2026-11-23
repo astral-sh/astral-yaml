@@ -854,6 +854,7 @@ fn prepending_to_a_compact_sequence_keeps_the_inner_dash_column() {
 }
 
 #[test_case("-\n  a: 1\n", 0 => "-\n  - new\n-\n  a: 1\n"; "prepend expanded")]
+#[test_case("  -\n      a: 1\n", 1 => "  -\n      a: 1\n  -\n      - new\n"; "expanded indent relative to dash")]
 #[test_case("-   a: 1\n    b: 2\n", 1 => "-   a: 1\n    b: 2\n-   - new\n"; "append with wider spacing")]
 #[test_case("- [flow]\n- scalar\n", 1 => "- [flow]\n- - new\n- scalar\n"; "default compact")]
 fn inserted_block_items_borrow_the_nearest_layout(source: &str, index: usize) -> String {
@@ -947,4 +948,23 @@ fn flow_continuations_clear_the_innermost_block_dash() {
     +       b]]
          - untouched :  x
     ");
+}
+
+#[test_case("- a: 1\n-\n    {b: 2}\n", "- a: 1\n-\n    b: 2\n", "- c: 3\n"; "expanded mapping")]
+#[test_case("-\n  a: 1\n-   [b]\n", "-\n  a: 1\n-   - b\n", "-\n  c: 3\n"; "compact sequence")]
+fn converted_items_keep_their_placement_without_setting_the_style_of_new_items(
+    source: &str,
+    converted: &str,
+    appended: &str,
+) {
+    let convert = |editor: &mut Editor<'_>| {
+        let item = editor.sequence_items(editor.root())?[1];
+        editor.set_collection_style(item, CollectionStyle::Block)
+    };
+    assert_eq!(edited(source, convert).source(), converted);
+    let combined = edited(source, |editor| {
+        convert(editor)?;
+        editor.insert_item(editor.root(), 2, "c: 3").map(|_| ())
+    });
+    assert_eq!(combined.source(), format!("{converted}{appended}"));
 }

@@ -1,4 +1,4 @@
-use super::layout::Layout;
+use super::layout::{ItemLayout, Layout};
 use super::view::Syntax;
 use super::{Comment, CommentPosition, DocumentSyntax, NodeKind};
 use astral_yaml::comments::CommentPlacement;
@@ -857,16 +857,20 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         } else {
             indent
         };
-        if block
-            && !leading
-            && !comments.next_is(CommentPlacement::Inline)
-            && let Some(spaces) = self.layout.dash_spacing(id)
-        {
+        let item = if block && !leading && !comments.next_is(CommentPlacement::Inline) {
+            self.layout.item(id)
+        } else {
+            None
+        };
+        if let Some(ItemLayout::Compact(spaces)) = item {
             for _ in 0..spaces {
                 self.push(" ")?;
             }
             value_indent = indent + 1 + spaces;
         } else if block || leading {
+            if let Some(ItemLayout::Expanded(offset)) = item {
+                value_indent = indent + offset;
+            }
             self.inline(&mut comments)?;
             self.line(value_indent)?;
         } else {

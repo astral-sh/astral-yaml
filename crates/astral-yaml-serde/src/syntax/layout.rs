@@ -1,11 +1,11 @@
 //! Choose headers and separators needed to preserve comments during rendering.
 
+use super::lines::LineIndex;
 use super::source::Source;
 use super::view::Syntax;
 use super::{CommentPosition, NodeKind, emit};
 use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, Span};
-use std::num::NonZeroUsize;
 
 #[derive(Clone, Copy)]
 enum Tail {
@@ -22,26 +22,33 @@ enum Presentation {
 }
 
 #[derive(Clone, Copy)]
-enum ItemLayout {
+pub(super) enum ItemLayout {
+    /// Spaces between the dash and the first entry.
     Compact(usize),
-    Expanded,
+    /// Indentation of the entries relative to the dash.
+    Expanded(usize),
 }
 
 impl ItemLayout {
-    fn original(source: &Source, item: NodeId) -> Option<Self> {
-        let node = source.nodes.get(item.index())?;
-        if !emit::block_collection(&node.kind, false) {
-            return None;
-        }
-        // A compact collection starts immediately after its dash and spaces.
-        // Skip properties so a header on the dash line stays expanded.
+    fn original(source: &Source, item: NodeId, dash_column: usize) -> Self {
         let start = source.contents[item.index()].start();
-        let prefix = source.text[..start].trim_end_matches(' ');
-        Some(if prefix.ends_with('-') {
-            Self::Compact(start - prefix.len())
+        let prefix = source.text[..start].trim_end_matches([' ', '\t']);
+        let spaces = start - prefix.len();
+        if prefix.ends_with('-') {
+            Self::Compact(spaces)
         } else {
-            Self::Expanded
-        })
+            Self::Expanded(spaces.saturating_sub(dash_column).max(1))
+        }
+    }
+}
+
+fn block_items(kind: &NodeKind) -> Option<&[NodeId]> {
+    match kind {
+        NodeKind::Sequence {
+            items,
+            style: CollectionStyle::Block,
+        } => Some(items),
+        _ => None,
     }
 }
 
@@ -52,11 +59,7 @@ fn first_block_slot(kind: &NodeKind) -> Option<NodeId> {
             entries,
             style: CollectionStyle::Block,
         } => entries.first().map(|&(_, value)| value),
-        NodeKind::Sequence {
-            items,
-            style: CollectionStyle::Block,
-        } => items.first().copied(),
-        _ => None,
+        _ => block_items(kind)?.first().copied(),
     }
 }
 
@@ -68,7 +71,7 @@ fn first_block_slot(kind: &NodeKind) -> Option<NodeId> {
 pub(super) struct Layout {
     tails: Vec<Tail>,
     presentation: Vec<Presentation>,
-    dash_spacing: Vec<Option<NonZeroUsize>>,
+    items: Vec<Option<ItemLayout>>,
 }
 
 impl Layout {
@@ -79,7 +82,7 @@ impl Layout {
         let mut order = Vec::new();
         let mut pending = vec![(document.root, false)];
         let mut layout = Self {
-            dash_spacing: Vec::new(),
+            items: Vec::new(),
             tails: vec![Tail::Closed; document.nodes.len()],
             presentation: vec![Presentation::Unchanged; document.nodes.len()],
         };
@@ -169,15 +172,18 @@ impl Layout {
     /// Keep each block item's layout. Items without a source layout borrow
     /// the nearest surviving example, preferring the preceding one on ties.
     pub(super) fn preserve_items(&mut self, source: &Source, syntax: Syntax<'_, Option<Span>>) {
-        let mut spacing = vec![None; syntax.nodes.len()];
-        for node in syntax.nodes {
-            let NodeKind::Sequence {
-                items,
-                style: CollectionStyle::Block,
-            } = &node.kind
-            else {
+        let mut layouts = vec![None; syntax.nodes.len()];
+        let mut lines = LineIndex::new(&source.text);
+        for (id, node) in syntax.nodes.iter().enumerate() {
+            let Some(items) = block_items(&node.kind) else {
                 continue;
             };
+            // A sequence converted from flow style has no source dashes.
+            let dash_column = source.nodes.get(id).and_then(|old| {
+                block_items(&old.kind)?;
+                let start = source.contents[id].start();
+                Some(lines.at(start).column(start))
+            });
             let blocks = items.iter().enumerate().filter_map(|(index, &item)| {
                 let first = first_block_slot(&syntax.nodes[item.index()].kind)?;
                 (!self.flow(item)).then_some((index, item, first))
@@ -185,40 +191,55 @@ impl Layout {
             let mut examples = blocks
                 .clone()
                 .filter_map(|(index, item, _)| {
-                    ItemLayout::original(source, item).map(|layout| (index, layout))
+                    let column = dash_column?;
+                    let old = source.nodes.get(item.index())?;
+                    emit::block_collection(&old.kind, false)
+                        .then(|| (index, ItemLayout::original(source, item, column)))
                 })
                 .peekable();
             let mut previous = None;
             for (index, item, first) in blocks {
-                if let Some(example) = examples.next_if(|&(i, _)| i == index) {
+                let layout = if let Some(example) = examples.next_if(|&(i, _)| i == index) {
                     previous = Some(example);
-                }
-                let layout = match (previous, examples.peek().copied()) {
-                    (Some((left, layout)), Some((right, _))) if index - left <= right - index => {
-                        layout
-                    }
-                    (_, Some((_, layout))) | (Some((_, layout)), None) => layout,
-                    (None, None) => ItemLayout::Compact(1),
+                    example.1
+                } else if let Some(column) = dash_column
+                    && let Some(old) = source.nodes.get(item.index())
+                    && matches!(
+                        old.kind,
+                        NodeKind::Sequence { .. } | NodeKind::Mapping { .. }
+                    )
+                {
+                    // A converted flow collection keeps its own placement.
+                    ItemLayout::original(source, item, column)
+                } else {
+                    [previous, examples.peek().copied()]
+                        .into_iter()
+                        .flatten()
+                        .min_by_key(|(i, _)| index.abs_diff(*i))
+                        .map_or(ItemLayout::Compact(1), |(_, layout)| layout)
                 };
 
                 // A leading comment here would become an inline comment on
                 // the dash. Properties also need a separate collection header.
                 let node = &syntax.nodes[item.index()];
                 let prefix = syntax.nodes[first.index()].comments.first();
-                if let ItemLayout::Compact(spaces) = layout
-                    && node.anchor.is_none()
+                if node.anchor.is_none()
                     && node.tag.is_none()
                     && !prefix.is_some_and(|comment| comment.placement == CommentPlacement::Leading)
                 {
-                    spacing[item.index()] = NonZeroUsize::new(spaces);
+                    layouts[item.index()] = Some(layout);
                 }
             }
         }
-        self.dash_spacing = spacing;
+        self.items = layouts;
     }
 
-    pub(super) fn dash_spacing(&self, id: NodeId) -> Option<usize> {
-        self.dash_spacing.get(id.index())?.map(NonZeroUsize::get)
+    pub(super) fn item(&self, id: NodeId) -> Option<ItemLayout> {
+        self.items.get(id.index()).copied().flatten()
+    }
+
+    pub(super) fn compact(&self, id: NodeId) -> bool {
+        matches!(self.item(id), Some(ItemLayout::Compact(_)))
     }
 
     /// Return whether the content style needs multiline indentation.
