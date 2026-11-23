@@ -123,7 +123,7 @@ pub trait FlowWrite<E = fmt::Error>: AsRef<str> + Write + Sized {
     #[inline]
     fn mark_explicit_key(&mut self, start: usize) -> Result<bool, E> {
         let key = &self.as_ref()[start..];
-        if key.len() > 1024 && key.chars().count() > 1024 {
+        if super::exceeds_implicit_key_limit(key) {
             self.insert_explicit_key(start)?;
             return Ok(true);
         }

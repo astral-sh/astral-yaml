@@ -50,12 +50,12 @@ fn string_key_updates_leave_application_tagged_entries_intact() {
     @@ -1 +1,2 @@
     -!custom name: tagged
     +!<!custom> name: tagged
-    +"name": "new"
+    +name: "new"
 
     remove_field
     @@ -1,2 +1 @@
      !<!custom> name: tagged
-    -"name": "new"
+    -name: "new"
 
     set_entry
     @@ -1,2 +1,2 @@

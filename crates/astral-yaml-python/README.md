@@ -36,11 +36,13 @@ For example, `{true: first, 1: second}` raises `yaml.YAMLError` because
 `dumps` returns YAML as a string, and `dump` writes it to a text stream.
 Both use block style by default, with two spaces per indentation level.
 Pass `style="flow"` for collections written with brackets and braces.
+Block mappings use plain string keys when their spelling and type are unambiguous.
+String values and flow-style string keys use double quotes.
 Empty collections use `[]` or `{}` in either style.
 
 ```python
 config["ports"].append(8080)
-assert yaml.dumps(config) == '"ports":\n  - 80\n  - 443\n  - 8080\n"mode": "on"\n'
+assert yaml.dumps(config) == 'ports:\n  - 80\n  - 443\n  - 8080\nmode: "on"\n'
 assert yaml.dumps(config, style="flow") == '{"ports": [80, 443, 8080], "mode": "on"}\n'
 
 with open("config.yaml", "w", encoding="utf-8") as file:

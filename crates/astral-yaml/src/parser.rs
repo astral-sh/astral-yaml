@@ -1552,9 +1552,7 @@ impl<'source> Parser<'source> {
         };
         let is_separator =
             |next: Option<u8>| next.is_none_or(|byte| is_space(byte) || is_flow_indicator(byte));
-        if b"@`|>!&*%{}[],\"'".contains(&first)
-            || (b"-?:".contains(&first) && is_separator(self.next_byte()))
-        {
+        if !plain_start(first, is_separator(self.next_byte())) {
             return Err(self.error("invalid plain scalar start"));
         }
 
@@ -1939,7 +1937,12 @@ impl<'source> Parser<'source> {
     }
 }
 
-fn is_space(b: u8) -> bool {
+#[inline]
+pub(crate) fn plain_start(first: u8, followed_by_separator: bool) -> bool {
+    !(b"@`|>!&*%{}[],\"'".contains(&first) || (b"-?:".contains(&first) && followed_by_separator))
+}
+
+pub(crate) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n')
 }
 

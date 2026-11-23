@@ -371,6 +371,16 @@ impl Draft {
         Ok(())
     }
 
+    /// Prefer plain spelling for a generated string key. The emitter may still
+    /// need quotes in a flow mapping, so this is not an explicit style request.
+    pub(super) fn prefer_plain_key(&mut self, key: NodeId) {
+        if let NodeKind::Scalar { value, style } = &mut self.slots[key.index()].node.kind
+            && astral_yaml::emit::plain_block_string_key(value)
+        {
+            *style = ScalarStyle::Plain;
+        }
+    }
+
     pub(super) fn set_scalar_style(&mut self, id: NodeId, style: ScalarStyle) -> Result<(), Error> {
         let node = &mut self.slots[id.index()].node;
         let NodeKind::Scalar {

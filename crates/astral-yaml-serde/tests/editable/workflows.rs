@@ -120,7 +120,7 @@ fn repeated_healthcheck_updates_preserve_unmodeled_service_fields() {
     +      interval: 5s
            retries: 5
            start_period: 30s
-    +      "timeout": "5s"
+    +      timeout: "5s"
          secrets:
            - db-password
          volumes:

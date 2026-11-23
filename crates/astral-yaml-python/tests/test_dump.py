@@ -10,9 +10,9 @@ _NESTED_COLLECTION = {"items": [{"name": "café", "flags": []}, [1, 2], {}]}
 
 def test_block_style() -> None:
     assert yaml.dumps(_NESTED_COLLECTION, style="block") == snapshot("""\
-"items":
-  - "name": "café"
-    "flags": []
+items:
+  - name: "café"
+    flags: []
   - - 1
     - 2
   - {}
@@ -61,8 +61,8 @@ def test_style_is_keyword_only() -> None:
 @pytest.mark.parametrize(
     ("style", "length", "template"),
     [
-        ("block", 1022, '"%s":\n  - 1\n'),
-        ("block", 1023, '? "%s"\n:\n  - 1\n'),
+        ("block", 1024, "\ufeff%s:\n  - 1\n"),
+        ("block", 1025, "? %s\n:\n  - 1\n"),
         ("flow", 1022, '{"%s": [1]}\n'),
         ("flow", 1023, '{? "%s": [1]}\n'),
     ],
@@ -104,3 +104,45 @@ def test_short_write() -> None:
 
     with pytest.raises(OSError, match="short write"):
         yaml.dump("αβγ", ShortWriter())
+
+
+# https://yaml.org/spec/1.2.2/#733-plain-style
+@pytest.mark.parametrize(
+    ("key", "spelling"),
+    [
+        ("foo", "foo"),
+        ("x,y", "x,y"),
+        ("yes", "yes"),
+        ("true", '"true"'),
+        ("null", '"null"'),
+        ("0x10", '"0x10"'),
+        ("1e2", '"1e2"'),
+        ("", '""'),
+        (" lead", '" lead"'),
+        ("trail ", '"trail "'),
+        ("a: b", '"a: b"'),
+        ("a #b", '"a #b"'),
+        ("a#b", "a#b"),
+        ("a:b", "a:b"),
+        ("-", "-"),
+        ("?", "?"),
+        (":", ":"),
+        ("--- x", '"--- x"'),
+        ("... x", '"... x"'),
+        ("a\nb", '"a\\nb"'),
+        ("café", "café"),
+        ("é", "\ufeffé"),
+    ],
+)
+def test_block_string_key(key: str, spelling: str) -> None:
+    data = {key: "yes"}
+    document = yaml.dumps(data)
+    assert document == f'{spelling}: "yes"\n'
+    assert yaml.loads(document.encode()) == data
+
+
+def test_explicit_block_key_ending_in_a_colon() -> None:
+    key = "a" * 1024 + ":"
+    document = yaml.dumps({key: 1})
+    assert document == f'? "{key}"\n: 1\n'
+    assert yaml.loads(document) == {key: 1}

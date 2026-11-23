@@ -239,10 +239,10 @@ fn an_empty_complex_key_keeps_its_exterior_trailing_comment() {
     document
         .edit(|root| root.into_mapping()?.set("other", true).map(|_| ()))
         .unwrap();
-    insta::assert_snapshot!(document.source(), @r#"
+    insta::assert_snapshot!(document.source(), @"
     ? []
     # q
     : value
-    "other": true
-    "#);
+    other: true
+    ");
 }

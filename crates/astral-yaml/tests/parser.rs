@@ -1614,3 +1614,46 @@ fn large_block_scalars_with_leading_empty_lines(style: &str, separator: &str) {
     assert_eq!(scalar.value, expected);
     assert_eq!(scalar.span.slice(&source), Some(source.as_str()));
 }
+
+// https://yaml.org/spec/1.2.2/#733-plain-style
+#[test]
+fn generated_plain_block_keys_agree_with_the_parser() {
+    use astral_yaml::emit::plain_block_string_key;
+    use astral_yaml::schema::{ScalarType, classify};
+
+    fn parses_as_string_key(key: &str) -> bool {
+        let yaml = format!("{key}: value");
+        let Ok(stream) = parse(&yaml) else {
+            return false;
+        };
+        let [doc] = stream.documents() else {
+            return false;
+        };
+        let NodeKind::Mapping { entries, .. } = &stream.node(doc.root).unwrap().kind else {
+            return false;
+        };
+        let [entry] = entries.as_slice() else {
+            return false;
+        };
+        let node = stream.node(entry.key).unwrap();
+        matches!(&node.kind, NodeKind::Scalar(scalar)
+            if scalar.style == ScalarStyle::Plain && scalar.value == key)
+            && classify(key) == ScalarType::String
+    }
+
+    let alphabet = "a0-?:# \t,[]{}&*!|>'\"%@\x60.é";
+    let mut key = String::new();
+    for a in alphabet.chars() {
+        for b in alphabet.chars() {
+            for c in alphabet.chars() {
+                key.clear();
+                key.extend([a, b, c]);
+                assert_eq!(
+                    plain_block_string_key(&key),
+                    parses_as_string_key(&key),
+                    "{key:?}"
+                );
+            }
+        }
+    }
+}
