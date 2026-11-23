@@ -4,31 +4,76 @@ from unittest.mock import Mock
 
 import astral_yaml as yaml
 import pytest
+from inline_snapshot import snapshot
 
 
 def test_python_scalar_construction() -> None:
     assert yaml.loads("[! 1, 010, 0x10]") == ["1", 10, 16]
 
 
-@pytest.mark.parametrize(
-    ("data", "message"),
-    [
-        ("---\nfirst\n---\nsecond\n", "expected one YAML document"),
-        ("{true: first, 1: second}", "duplicate mapping key"),
-        ("{.nan: a, .NaN: b}", "duplicate mapping key"),
-        ("{[1]: a}", "collection keys cannot be used in a Python dict"),
-        ("!custom text", "unsupported YAML tag"),
-        ("!!int []", "tag does not match node kind"),
-        ("1e10000", "float out of range"),
-        ("[", "at bytes"),
-        (b"\xff", "invalid UTF-8"),
-        ("!!bool x".encode("utf-16-le"), r"at bytes 14\.\.16"),
-        ("\ud800", "surrogates"),
-    ],
-)
-def test_load_diagnostics(data: str | bytes, message: str) -> None:
-    with pytest.raises(yaml.YAMLError, match=message):
+def _loads_error(data: str | bytes) -> str:
+    with pytest.raises(yaml.YAMLError) as exc:
         yaml.loads(data)
+    return str(exc.value)
+
+
+def test_loads_rejects_multiple_documents() -> None:
+    assert _loads_error("---\nfirst\n---\nsecond\n") == snapshot(
+        "expected one YAML document at bytes 10..20"
+    )
+
+
+def test_loads_rejects_equal_bool_and_int_keys() -> None:
+    assert _loads_error("{true: first, 1: second}") == snapshot(
+        "duplicate mapping key at bytes 14..15"
+    )
+
+
+def test_loads_rejects_duplicate_nan_keys() -> None:
+    assert _loads_error("{.nan: a, .NaN: b}") == snapshot(
+        "duplicate mapping key at bytes 10..14"
+    )
+
+
+def test_loads_rejects_sequence_key() -> None:
+    assert _loads_error("{[1]: a}") == snapshot(
+        "collection keys cannot be used in a Python dict at bytes 1..4"
+    )
+
+
+def test_loads_rejects_custom_tag() -> None:
+    assert _loads_error("!custom text") == snapshot(
+        "unsupported YAML tag !custom at bytes 0..12"
+    )
+
+
+def test_loads_rejects_int_tag_on_sequence() -> None:
+    assert _loads_error("!!int []") == snapshot(
+        "tag does not match node kind at bytes 0..8"
+    )
+
+
+def test_loads_rejects_float_overflow() -> None:
+    assert _loads_error("1e10000") == snapshot("float out of range at bytes 0..7")
+
+
+def test_loads_reports_unterminated_flow_sequence() -> None:
+    assert _loads_error("[") == snapshot("unterminated flow sequence at bytes 1..1")
+
+
+def test_loads_rejects_invalid_utf8() -> None:
+    assert _loads_error(b"\xff") == snapshot("invalid UTF-8 at bytes 0..1")
+
+
+def test_loads_reports_byte_offsets_in_utf16() -> None:
+    assert _loads_error("!!bool x".encode("utf-16-le")) == snapshot(
+        "scalar does not match its tag at bytes 14..16"
+    )
+
+
+def test_unpaired_surrogate() -> None:
+    with pytest.raises(yaml.YAMLError, match="surrogates"):
+        yaml.loads("\ud800")
 
 
 @pytest.mark.parametrize("load", [yaml.loads, yaml.load, yaml.loads_all, yaml.load_all])
@@ -87,15 +132,31 @@ def test_load_all_alias_identity() -> None:
     assert first[0] is not second[0]
 
 
-@pytest.mark.parametrize(
-    ("data", "message"),
-    [
-        ("--- 0\n--- [\n", "at bytes"),
-        ("--- &items []\n--- *items\n", "unknown alias"),
-        ("--- 0\n--- !custom text\n", "unsupported YAML tag"),
-        ("--- 0\n--- !!bool x\n".encode("utf-16-le"), r"at bytes 34\.\.36"),
-    ],
-)
-def test_load_all_later_document_errors(data: str | bytes, message: str) -> None:
-    with pytest.raises(yaml.YAMLError, match=message):
+def _loads_all_error(data: str | bytes) -> str:
+    with pytest.raises(yaml.YAMLError) as exc:
         yaml.loads_all(data)
+    return str(exc.value)
+
+
+def test_loads_all_reports_syntax_error_in_second_document() -> None:
+    assert _loads_all_error("--- 0\n--- [\n") == snapshot(
+        "unterminated flow sequence at bytes 12..12"
+    )
+
+
+def test_loads_all_rejects_alias_to_previous_document() -> None:
+    assert _loads_all_error("--- &items []\n--- *items\n") == snapshot(
+        "unknown alias at bytes 24..25"
+    )
+
+
+def test_loads_all_rejects_custom_tag_in_second_document() -> None:
+    assert _loads_all_error("--- 0\n--- !custom text\n") == snapshot(
+        "unsupported YAML tag !custom at bytes 10..22"
+    )
+
+
+def test_loads_all_reports_byte_offsets_in_second_utf16_document() -> None:
+    assert _loads_all_error("--- 0\n--- !!bool x\n".encode("utf-16-le")) == snapshot(
+        "scalar does not match its tag at bytes 34..36"
+    )

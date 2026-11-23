@@ -6,6 +6,7 @@ from typing import Literal
 
 import astral_yaml as yaml
 import pytest
+from inline_snapshot import snapshot
 
 
 @pytest.mark.parametrize("filename", ["__init__.pyi", "py.typed"])
@@ -23,7 +24,11 @@ def test_round_trip() -> None:
 
 
 def test_tuple_as_sequence() -> None:
-    assert yaml.dumps((True, "true", None)) == '- true\n- "true"\n- null\n'
+    assert yaml.dumps((True, "true", None)) == snapshot("""\
+- true
+- "true"
+- null
+""")
 
 
 def test_numeric_types() -> None:
