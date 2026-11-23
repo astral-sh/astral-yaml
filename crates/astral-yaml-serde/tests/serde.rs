@@ -534,21 +534,68 @@ fn error_display_includes_the_path_and_utf8_byte_offsets() {
     insta::assert_snapshot!(error, @r#"$["café"]: expected an integer at bytes 7..11"#);
 }
 
+// A YAML stream can contain zero documents.
+// https://yaml.org/spec/1.2.2/#92-streams
+#[test_case(""; "empty")]
+#[test_case(" \t\r\n"; "whitespace")]
+#[test_case("# comment\n\n# another comment"; "comments")]
+fn zero_document_stream_deserializes_as_null(source: &str) {
+    assert_eq!(from_str::<Option<String>>(source).unwrap(), None);
+
+    let stream = astral_yaml::parse(source).unwrap();
+    assert_eq!(from_stream::<Value>(&stream).unwrap(), Value::Null);
+    let error = astral_yaml_serde::from_document::<Value>(&stream, 0).unwrap_err();
+    assert_eq!(error.message, "document index out of bounds");
+}
+
+#[test]
+fn zero_document_streams_share_the_work_budget() {
+    let budget = Budget::new(1);
+    let policy = DeserializationPolicy {
+        work_budget: Some(&budget),
+    };
+    assert_eq!(
+        from_str_with_policy::<Value>("", policy).unwrap(),
+        Value::Null
+    );
+
+    let error = from_str_with_policy::<Value>("# comment", policy).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded at bytes 0..9");
+}
+
+#[test]
+fn zero_document_stream_requires_a_null_compatible_type() {
+    let source = "# comment";
+    let error = from_str::<BTreeMap<String, String>>(source).unwrap_err();
+    insta::assert_snapshot!(diagnostic_snapshot(source, error), @r"
+      |
+    1 | # comment
+      | ^^^^^^^^^ expected a mapping
+    ");
+}
+
+// An explicit start marker creates a document even without any content.
+// https://yaml.org/spec/1.2.2/#914-explicit-documents
+#[test]
+fn explicit_empty_document_can_be_deserialized_by_index() {
+    let stream = astral_yaml::parse("---\n# comment").unwrap();
+    assert_eq!(
+        astral_yaml_serde::from_document::<Value>(&stream, 0).unwrap(),
+        Value::Null
+    );
+}
+
 #[test]
 fn located_failures_and_document_count() {
-    let errors = ["", "---\n---\n", "[", "256"].map(|source| {
+    let errors = ["---\n---\n", "[", "256"].map(|source| {
         let error = from_str::<u8>(source).unwrap_err();
         diagnostic_snapshot(source, error)
     });
     insta::assert_snapshot!(errors.join("\n\n"), @"
       |
-    1 |
-      | ^ expected exactly one document
-
-      |
     1 | / ---
     2 | | ---
-      | |____^ expected exactly one document
+      | |____^ expected at most one document
 
       |
     1 | [

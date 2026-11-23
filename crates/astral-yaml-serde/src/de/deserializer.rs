@@ -48,6 +48,9 @@ pub struct DeserializationPolicy<'budget> {
 
 /// Deserialize `source` as a YAML 1.2 document using the core schema.
 ///
+/// A stream with no documents, such as an empty or comment-only input,
+/// deserializes as null.
+///
 /// Plain and quoted scalars can borrow from the source when they need no escape
 /// decoding or line folding. Alias expansion is bounded by depth and work limits,
 /// including for cyclic aliases.
@@ -59,13 +62,14 @@ pub struct DeserializationPolicy<'budget> {
 /// accept untagged scalar text, but require a string tag when explicitly tagged.
 ///
 /// # Errors
-/// Returns an error if `source` is invalid YAML, does not contain exactly one
+/// Returns an error if `source` is invalid YAML, contains more than one
 /// document, cannot be deserialized as `T`, or exceeds a resource limit.
 pub fn from_str<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T> {
     from_str_with_policy(source, DeserializationPolicy::default())
 }
 
 /// Deserialize a YAML 1.2 document using the supplied policy.
+/// A stream with no documents deserializes as null.
 /// Syntax parsing uses the default limits from [`astral_yaml::parse`].
 ///
 /// # Errors
@@ -78,10 +82,11 @@ pub fn from_str_with_policy<'de, T: Deserialize<'de>>(
     from_stream_with_policy(&stream, policy)
 }
 
-/// Deserialize a parsed stream containing exactly one document.
+/// Deserialize a single value from a parsed stream.
+/// A stream with no documents deserializes as null.
 ///
 /// # Errors
-/// Returns an error if the stream does not contain exactly one document,
+/// Returns an error if the stream contains more than one document,
 /// the value cannot be deserialized as `T`, or a resource limit is exceeded.
 pub fn from_stream<'de, T: Deserialize<'de>>(stream: &Stream<'de>) -> Result<T> {
     from_stream_with_policy(stream, DeserializationPolicy::default())
@@ -91,11 +96,16 @@ fn from_stream_with_policy<'de, T: Deserialize<'de>>(
     stream: &Stream<'de>,
     policy: DeserializationPolicy<'_>,
 ) -> Result<T> {
-    if stream.documents().len() != 1 {
-        return Err(Error::at("expected exactly one document", stream.span()));
+    match stream.documents() {
+        [] => {
+            let default_budget = Budget::new(DEFAULT_WORK_LIMIT);
+            let budget = policy.work_budget.unwrap_or(&default_budget);
+            T::deserialize(value::Value::Null.deserializer(Some(budget)))
+                .map_err(|error| error.located(stream.span()))
+        }
+        [_] => from_document_with_policy(stream, 0, policy),
+        _ => Err(Error::at("expected at most one document", stream.span())),
     }
-
-    from_document_with_policy(stream, 0, policy)
 }
 
 /// Deserialize the document at zero-based `index` in `stream`.
