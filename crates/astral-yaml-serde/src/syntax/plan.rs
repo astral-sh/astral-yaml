@@ -176,7 +176,7 @@ impl Plan<'_> {
                     let line = lines.at(span.start());
                     Rewrite {
                         id,
-                        context: scopes.context(id, line.indent(span.start())),
+                        context: scopes.context(id, line, span.start()),
                         boundary: Boundary::new(
                             &self.original.text,
                             span,

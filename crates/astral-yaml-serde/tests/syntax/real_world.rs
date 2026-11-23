@@ -32,15 +32,11 @@ fn openapi_server_insertion_preserves_surrounding_sections() {
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
-    @@ -12,7 +12,10 @@
-         name: Apache 2.0
+    @@ -13,6 +13,7 @@
          url: https://www.apache.org/licenses/LICENSE-2.0.html
      servers:
-    -  - url: https://petstore.swagger.io/v2
-    +  -
-    +    url: https://petstore.swagger.io/v2
-    +  -
-    +    url: https://staging.example.com/v2
+       - url: https://petstore.swagger.io/v2
+    +  - url: https://staging.example.com/v2
      paths:
        /pets:
          get:

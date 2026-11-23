@@ -857,7 +857,16 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         } else {
             indent
         };
-        if block || leading {
+        if block
+            && !leading
+            && !comments.next_is(CommentPlacement::Inline)
+            && let Some(spaces) = self.layout.dash_spacing(id)
+        {
+            for _ in 0..spaces {
+                self.push(" ")?;
+            }
+            value_indent = indent + 1 + spaces;
+        } else if block || leading {
             self.inline(&mut comments)?;
             self.line(value_indent)?;
         } else {

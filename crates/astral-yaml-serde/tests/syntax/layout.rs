@@ -129,11 +129,10 @@ fn descendant_edits_preserve_enclosing_comment_boundaries() {
      ⏎
      # detached
 
-    @@ -1,3 +1,4 @@
+    @@ -1,3 +1,3 @@
     -- - old
     -
-    +-
-    +  - "new\n\n"
+    +- - "new\n\n"
     +  ⏎
        # detached
     "#);
@@ -789,10 +788,9 @@ fn block_rewrites_keep_indented_suffixes_at_their_root_owner() {
     -   # root
     +# root
 
-    @@ -1,3 +1,4 @@
+    @@ -1,3 +1,3 @@
     -[{key: old}]
-    +-
-    +  key: old
+    +- key: old
      ⏎
     -   # root
     +# root
@@ -973,11 +971,10 @@ fn retained_trailing_comments_stay_adjacent_when_replacing_a_tail() {
     +...
      # tail
 
-    @@ -1,3 +1,6 @@
+    @@ -1,3 +1,5 @@
     -- - old
     -# remove
-    +-
-    +  - |+
+    +- - |+
     +    new
     +    ⏎
     +...
