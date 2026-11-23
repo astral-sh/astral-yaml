@@ -16,8 +16,11 @@ const DEFAULT_WORK_LIMIT: usize = 1_000_000;
 
 /// Policy for deserializing YAML documents.
 ///
-/// The parser limits, deserialization depth, and expanded scalar byte limit
-/// apply independently of this policy.
+/// Deserialization is limited to 64 levels, counting the root. Newtypes and
+/// non-null options can add levels even when they wrap a scalar.
+///
+/// The depth limit, parser limits, and expanded scalar byte limit apply
+/// independently of the work budget.
 ///
 /// ```
 /// use astral_yaml::Budget;
@@ -226,12 +229,8 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
     #[inline]
     fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
-        if self.depth >= 64 || self.context.budget.try_charge(1).is_none() {
-            return Err(Error::at(
-                "deserialization resource limit exceeded",
-                node.span(),
-            ));
-        }
+        super::charge_visit(self.depth, Some(self.context.budget))
+            .map_err(|error| error.located(node.span()))?;
 
         if let NodeKind::Scalar(scalar) = node.kind() {
             self.context
