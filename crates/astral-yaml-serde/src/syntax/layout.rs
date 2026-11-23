@@ -188,29 +188,25 @@ impl Layout {
                 let first = first_block_slot(&syntax.nodes[item.index()].kind)?;
                 (!self.flow(item)).then_some((index, item, first))
             });
+            let original = |item: NodeId, style| {
+                let column = dash_column?;
+                let old = source.nodes.get(item.index())?;
+                (emit::collection_style(&old.kind, false)? == style)
+                    .then(|| ItemLayout::original(source, item, column))
+            };
             let mut examples = blocks
                 .clone()
                 .filter_map(|(index, item, _)| {
-                    let column = dash_column?;
-                    let old = source.nodes.get(item.index())?;
-                    emit::block_collection(&old.kind, false)
-                        .then(|| (index, ItemLayout::original(source, item, column)))
+                    Some((index, original(item, CollectionStyle::Block)?))
                 })
                 .peekable();
             let mut previous = None;
             for (index, item, first) in blocks {
-                let layout = if let Some(example) = examples.next_if(|&(i, _)| i == index) {
-                    previous = Some(example);
-                    example.1
-                } else if let Some(column) = dash_column
-                    && let Some(old) = source.nodes.get(item.index())
-                    && matches!(
-                        old.kind,
-                        NodeKind::Sequence { .. } | NodeKind::Mapping { .. }
-                    )
-                {
-                    // A converted flow collection keeps its own placement.
-                    ItemLayout::original(source, item, column)
+                let layout = if let Some((_, layout)) = examples.next_if(|&(i, _)| i == index) {
+                    previous = Some((index, layout));
+                    layout
+                } else if let Some(layout) = original(item, CollectionStyle::Flow) {
+                    layout
                 } else {
                     [previous, examples.peek().copied()]
                         .into_iter()

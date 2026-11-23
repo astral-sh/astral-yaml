@@ -852,30 +852,28 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         let block = block_collection(&node.kind, flow || self.layout.flow(id));
         let properties = usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
         let leading = comments.needs_value_line(properties);
-        let mut value_indent = if block || flow || leading {
-            indent + 2
-        } else {
-            indent
-        };
-        let item = if block && !leading && !comments.next_is(CommentPlacement::Inline) {
-            self.layout.item(id)
-        } else {
-            None
-        };
-        if let Some(ItemLayout::Compact(spaces)) = item {
-            for _ in 0..spaces {
-                self.push(" ")?;
+        let mut value_indent = if block || leading {
+            let item = self
+                .layout
+                .item(id)
+                .filter(|_| !leading && !comments.next_is(CommentPlacement::Inline));
+            match item.unwrap_or(ItemLayout::Expanded(2)) {
+                ItemLayout::Compact(spaces) => {
+                    for _ in 0..spaces {
+                        self.push(" ")?;
+                    }
+                    indent + 1 + spaces
+                }
+                ItemLayout::Expanded(offset) => {
+                    self.inline(&mut comments)?;
+                    self.line(indent + offset)?;
+                    indent + offset
+                }
             }
-            value_indent = indent + 1 + spaces;
-        } else if block || leading {
-            if let Some(ItemLayout::Expanded(offset)) = item {
-                value_indent = indent + offset;
-            }
-            self.inline(&mut comments)?;
-            self.line(value_indent)?;
         } else {
             self.push(" ")?;
-        }
+            if flow { indent + 2 } else { indent }
+        };
         if block && properties == 0 && comments.next_is(CommentPlacement::Leading) {
             // With no delimiter or property header, indentation is the opening
             // boundary. Put the collection's prefix outside its child slots.
@@ -969,7 +967,7 @@ pub(super) fn block_collection(kind: &NodeKind, flow: bool) -> bool {
     collection_style(kind, flow) == Some(CollectionStyle::Block)
 }
 
-fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
+pub(super) fn collection_style(kind: &NodeKind, flow: bool) -> Option<CollectionStyle> {
     let (empty, style) = match kind {
         NodeKind::Sequence { items, style } => (items.is_empty(), *style),
         NodeKind::Mapping { entries, style } => (entries.is_empty(), *style),
