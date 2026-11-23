@@ -3,25 +3,35 @@ from typing import Literal
 
 import astral_yaml as yaml
 import pytest
+from inline_snapshot import snapshot
+
+_NESTED_COLLECTION = {"items": [{"name": "café", "flags": []}, [1, 2], {}]}
 
 
-@pytest.mark.parametrize(
-    ("style", "expected"),
-    [
-        (
-            "block",
-            '"items":\n  - "name": "café"\n    "flags": []\n  - - 1\n    - 2\n  - {}\n',
-        ),
-        ("flow", '{"items": [{"name": "café", "flags": []}, [1, 2], {}]}\n'),
-    ],
-)
-def test_collection_styles(style: Literal["block", "flow"], expected: str) -> None:
-    data = {"items": [{"name": "café", "flags": []}, [1, 2], {}]}
-    assert yaml.dumps(data, style=style) == expected
+def test_block_style() -> None:
+    assert yaml.dumps(_NESTED_COLLECTION, style="block") == snapshot("""\
+"items":
+  - "name": "café"
+    "flags": []
+  - - 1
+    - 2
+  - {}
+""")
+
+
+def test_flow_style() -> None:
+    assert yaml.dumps(_NESTED_COLLECTION, style="flow") == snapshot(
+        '{"items": [{"name": "café", "flags": []}, [1, 2], {}]}\n'
+    )
+
+
+@pytest.mark.parametrize("style", ["block", "flow"])
+def test_collection_style_round_trip(style: Literal["block", "flow"]) -> None:
     output = io.StringIO()
-    yaml.dump(data, output, style=style)
-    assert output.getvalue() == expected
-    assert yaml.loads(expected) == data
+    yaml.dump(_NESTED_COLLECTION, output, style=style)
+    document = output.getvalue()
+    assert document == yaml.dumps(_NESTED_COLLECTION, style=style)
+    assert yaml.loads(document) == _NESTED_COLLECTION
 
 
 @pytest.mark.parametrize(
