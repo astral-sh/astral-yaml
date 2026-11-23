@@ -15,6 +15,9 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 /// spellings and source metadata. Ordinary enums use string names and
 /// single-entry mappings. Mapping entries are passed to the destination in
 /// order, including duplicates in manually built values.
+/// Deserializing from `&Value` limits nesting to 64 levels and allows
+/// 1,000,000 value visits per call. Newtypes and non-null options each add
+/// a level when they deserialize their contents.
 ///
 /// Explicit core tags resolve through the YAML 1.2 core schema. Application
 /// tags retain their expanded name and decoded scalar text, so `!Port 080`

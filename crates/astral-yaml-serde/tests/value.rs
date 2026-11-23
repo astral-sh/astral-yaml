@@ -108,6 +108,51 @@ fn alias_expansion_obeys_the_work_budget() {
 }
 
 #[test]
+fn newtypes_share_the_value_depth_limit() {
+    use serde::Deserializer;
+    use serde::de::{IntoDeserializer, Visitor};
+    use std::fmt;
+
+    // Stop at a unit value even if the deserializer fails to limit recursion.
+    struct Layers(usize);
+
+    impl<'de> Visitor<'de> for Layers {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a newtype")
+        }
+
+        fn visit_newtype_struct<D: Deserializer<'de>>(self, de: D) -> Result<(), D::Error> {
+            if self.0 == 1 {
+                <()>::deserialize(de)
+            } else {
+                de.deserialize_newtype_struct("Layer", Layers(self.0 - 1))
+            }
+        }
+    }
+
+    let de = (&Value::Null).into_deserializer();
+    de.deserialize_newtype_struct("Layer", Layers(63)).unwrap();
+    let error = de
+        .deserialize_newtype_struct("Layer", Layers(64))
+        .unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
+#[test]
+fn non_null_options_and_sequence_items_share_the_depth_limit() {
+    let mut value = Value::Null;
+    for _ in 0..63 {
+        value = Value::Sequence(vec![value]);
+    }
+
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
+    let error = Option::<Value>::deserialize(&value).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
+#[test]
 fn accessors_check_the_value_type_and_integer_range() {
     let mut null = Value::default();
     assert_eq!(null, Value::Null);
