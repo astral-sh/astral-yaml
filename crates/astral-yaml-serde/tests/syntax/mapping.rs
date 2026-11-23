@@ -360,20 +360,18 @@ fn indentless_sequences_can_become_empty_or_flow_values() {
     +  other: kept
      outside : untouched
 
-    @@ -1,3 +1,3 @@
+    @@ -1,3 +1,2 @@
     -- items:
     -  - x
     -  other : kept
-    +-
-    +  items: []
+    +- items: []
     +  other: kept
 
-    @@ -1,3 +1,3 @@
+    @@ -1,3 +1,2 @@
     -- items:
     -  - x
     -  other : kept
-    +-
-    +  items: [x]
+    +- items: [x]
     +  other: kept
 
     @@ -1,4 +1,3 @@
@@ -994,10 +992,9 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
         }));
     }
     insta::assert_snapshot!(diffs.join("\n"), @r#"
-    @@ -1 +1,5 @@
+    @@ -1 +1,4 @@
     -- key: 'old'
-    +-
-    +  key: 'new
+    +- key: 'new
     +
     +
     +    '
@@ -1007,7 +1004,7 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +- key: ['new
     +
     +
-    +    ']
+    +      ']
 
     @@ -1,3 +1,6 @@
      outer:
@@ -1015,14 +1012,12 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +  - key: [['new
     +
     +
-    +      ']]
+    +        ']]
      untouched : value
 
-    @@ -1 +1,6 @@
+    @@ -1 +1,4 @@
     -- - key: 'old'
-    +-
-    +  -
-    +    key: 'new
+    +- - key: 'new
     +
     +
     +      '
@@ -1032,6 +1027,6 @@ fn multiline_scalar_rewrites_use_enclosing_syntax_context() {
     +- key: ['new
     +
     +
-    +    ']
+    +      ']
     "#);
 }

@@ -4,7 +4,7 @@
 
 use super::emit::{self, Context, KeyForm};
 use super::layout::Layout;
-use super::lines::LineIndex;
+use super::lines::{Line, LineIndex};
 use super::source::Source;
 use super::view::Syntax;
 use super::{Comment, CommentPosition, Node, NodeKind};
@@ -211,9 +211,10 @@ impl<'plan> Scopes<'plan> {
             (NodeKind::Sequence { .. }, NodeKind::Sequence { .. })
                 | (NodeKind::Mapping { .. }, NodeKind::Mapping { .. })
         );
+        let compact = self.layout.compact(id) && emit::block_collection(&old.kind, false);
         if slot.body.start() < old.span.start()
             || (same_collection && slot.outer_comments)
-            || (!slot.own_line && self.layout.multiline(id, &new.kind))
+            || (!slot.own_line && !compact && self.layout.multiline(id, &new.kind))
         {
             return false;
         }
@@ -265,8 +266,31 @@ impl<'plan> Scopes<'plan> {
         }
     }
 
-    pub(super) fn context(&self, id: NodeId, indent: usize) -> Context {
+    fn indent(&self, id: NodeId, line: Line, start: usize) -> usize {
+        if self.layout.compact(id) {
+            return line.column(start);
+        }
+
+        // A flow fragment can share its opening line with several block
+        // indicators. Its continuations must clear the innermost one.
+        let indent = line.indent(start);
+        let mut owner = self.slots[id.index()].role.owner();
+        while let Some(parent) = owner {
+            let column = line.column(self.original.contents[parent.index()].start());
+            if column <= indent {
+                break;
+            }
+            if emit::block_collection(&self.original.nodes[parent.index()].kind, false) {
+                return column;
+            }
+            owner = self.slots[parent.index()].role.owner();
+        }
+        indent
+    }
+
+    pub(super) fn context(&self, id: NodeId, line: Line, start: usize) -> Context {
         let slot = self.slots[id.index()];
+        let indent = self.indent(id, line, start);
         match slot.role {
             Role::Key { length_limited, .. } if length_limited || slot.flow => {
                 Context::key(indent, slot.flow)

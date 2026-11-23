@@ -335,10 +335,8 @@ fn local_collection_edits_leave_siblings_untouched() {
         e.insert_entry(item, 2, "c", "3").map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
-    @@ -1,2 +1,4 @@
-    -- a: 1
-    +-
-    +  a: 1
+    @@ -1,2 +1,3 @@
+     - a: 1
        b: 2
     +  c: 3
     ");
@@ -816,4 +814,157 @@ fn canceled_edits_do_not_expand_the_final_rewrite() {
     +edited: new
      untouched:   [x,y]
     "#);
+}
+
+// A block sequence entry can contain a compact mapping or sequence.
+// https://yaml.org/spec/1.2.2/#821-block-sequences
+#[test]
+fn removing_the_first_compact_entry_keeps_the_item_column_and_siblings() {
+    let source = "-   a: 1\n    b: 2\n    c: 3\n- untouched :  4\n";
+    let diff = edit(source, |editor| {
+        let item = editor.sequence_items(editor.root())?[0];
+        editor.remove_entry(item, 0)
+    });
+    insta::assert_snapshot!(diff, @"
+    @@ -1,4 +1,3 @@
+    --   a: 1
+    -    b: 2
+    +-   b: 2
+         c: 3
+     - untouched :  4
+    ");
+}
+
+#[test]
+fn prepending_to_a_compact_sequence_keeps_the_inner_dash_column() {
+    let source = "- -   - b\n      - c\n  - untouched :  4\n";
+    let diff = edit(source, |editor| {
+        let outer = editor.sequence_items(editor.root())?[0];
+        let inner = editor.sequence_items(outer)?[0];
+        editor.insert_item(inner, 0, "a").map(|_| ())
+    });
+    insta::assert_snapshot!(diff, @"
+    @@ -1,3 +1,4 @@
+    -- -   - b
+    +- -   - a
+    +      - b
+           - c
+       - untouched :  4
+    ");
+}
+
+#[test_case("-\n  a: 1\n", 0 => "-\n  - new\n-\n  a: 1\n"; "prepend expanded")]
+#[test_case("  -\n      a: 1\n", 1 => "  -\n      a: 1\n  -\n      - new\n"; "expanded indent relative to dash")]
+#[test_case("-   a: 1\n    b: 2\n", 1 => "-   a: 1\n    b: 2\n-   - new\n"; "append with wider spacing")]
+#[test_case("- [flow]\n- scalar\n", 1 => "- [flow]\n- - new\n- scalar\n"; "default compact")]
+fn inserted_block_items_borrow_the_nearest_layout(source: &str, index: usize) -> String {
+    edited(source, |editor| {
+        editor
+            .insert_item(editor.root(), index, "- new")
+            .map(|_| ())
+    })
+    .into_yaml()
+}
+
+#[test]
+fn mixed_item_layouts_use_distances_in_the_final_sequence() {
+    let source = "-\n  a: 1\n- gone: 2\n-   - b\n";
+    let document = edited(source, |editor| {
+        let root = editor.root();
+        editor.remove_item(root, 1)?;
+        editor.insert_item(root, 1, "left: 1")?;
+        editor.insert_item(root, 2, "tie: 2")?;
+        editor.insert_item(root, 3, "right: 3")?;
+        Ok(())
+    });
+    insta::assert_snapshot!(document.source(), @"
+    -
+      a: 1
+    -
+      left: 1
+    -
+      tie: 2
+    -   right: 3
+    -   - b
+    ");
+}
+
+#[test]
+fn compact_item_comments_and_properties_keep_their_owners() {
+    let source = "- a: 1\n- &map\n  b: 2\n- *map\n";
+    let document = edited(source, |editor| {
+        let root = editor.root();
+        let item = editor.sequence_items(root)?[0];
+        editor.insert_comment(item, 0, " header", CommentPlacement::Inline)?;
+        editor.insert_item(root, 0, "!local\nc: 3")?;
+        Ok(())
+    });
+    insta::assert_snapshot!(edit_diff(source, document.source()), @"
+    @@ -1,4 +1,9 @@
+    -- a: 1
+    -- &map
+    +-
+    +  !<!local> ⏎
+    +  c: 3
+    +- # header
+    +  a: 1
+    +-
+    +  &map ⏎
+       b: 2
+     - *map
+    ");
+}
+
+#[test]
+fn first_compact_field_can_gain_a_leading_comment() {
+    let source = "- a: 1\n  b: 2\n";
+    let document = edited(source, |editor| {
+        let item = editor.sequence_items(editor.root())?[0];
+        let value = editor.mapping_entries(item)?[0].1;
+        editor.insert_comment(value, 0, " field", CommentPlacement::Leading)
+    });
+    insta::assert_snapshot!(document.source(), @"
+    -
+      # field
+      a: 1
+      b: 2
+    ");
+}
+
+#[test]
+fn flow_continuations_clear_the_innermost_block_dash() {
+    let source = "-   - [[a, b]]\n    - untouched :  x\n";
+    let diff = edit(source, |editor| {
+        let inner = editor.sequence_items(editor.root())?[0];
+        let flow = editor.sequence_items(inner)?[0];
+        let pair = editor.sequence_items(flow)?[0];
+        let first = editor.sequence_items(pair)?[0];
+        editor.insert_comment(first, 0, " first", CommentPlacement::Inline)
+    });
+    insta::assert_snapshot!(diff, @"
+    @@ -1,2 +1,3 @@
+    --   - [[a, b]]
+    +-   - [[a, # first
+    +       b]]
+         - untouched :  x
+    ");
+}
+
+#[test_case("- a: 1\n-\n    {b: 2}\n", "- a: 1\n-\n    b: 2\n", "- c: 3\n"; "expanded mapping")]
+#[test_case("-\n  a: 1\n-   [b]\n", "-\n  a: 1\n-   - b\n", "-\n  c: 3\n"; "compact sequence")]
+fn converted_items_keep_their_placement_without_setting_the_style_of_new_items(
+    source: &str,
+    converted: &str,
+    appended: &str,
+) {
+    let convert = |editor: &mut Editor<'_>| {
+        let item = editor.sequence_items(editor.root())?[1];
+        editor.set_collection_style(item, CollectionStyle::Block)
+    };
+    assert_eq!(edited(source, convert).source(), converted);
+    let combined = edited(source, |editor| {
+        convert(editor)?;
+        editor.insert_item(editor.root(), 2, "c: 3").map(|_| ())
+    });
+    assert_eq!(combined.source(), format!("{converted}{appended}"));
 }

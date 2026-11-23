@@ -247,7 +247,7 @@ impl<'doc> Editor<'doc> {
         rewrites: impl IntoIterator<Item = NodeId>,
     ) -> Result<DocumentSyntax, Error> {
         let mut candidate = self.draft.freeze()?;
-        let syntax = Layout::new(&candidate);
+        let mut syntax = Layout::new(&candidate);
         let original = &self.original.source;
         let mut changes = Changes::between(original, &candidate, &syntax);
         changes.roots.extend(rewrites);
@@ -255,6 +255,7 @@ impl<'doc> Editor<'doc> {
             return candidate.commit(&original.text);
         }
 
+        syntax.preserve_items(original, (&candidate).into());
         candidate.restore_comment_spans(&original.nodes);
         let framed = super::framing::prepare(original, (&candidate).into(), &syntax);
         let (source, planned) = framed.as_ref().map_or_else(
