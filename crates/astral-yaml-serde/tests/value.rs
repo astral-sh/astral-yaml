@@ -108,6 +108,79 @@ fn alias_expansion_obeys_the_work_budget() {
 }
 
 #[test]
+fn reading_a_value_does_not_impose_a_work_budget() {
+    // The sequence and two visits per item exceed the default document budget.
+    let value = Value::Sequence(vec![Value::Unsigned(1); 500_000]);
+    let items = Vec::<Option<u8>>::deserialize(&value).unwrap();
+    assert_eq!(items.len(), 500_000);
+}
+
+#[test]
+fn newtypes_share_the_value_depth_limit() {
+    use serde::Deserializer;
+    use serde::de::{IntoDeserializer, Visitor};
+    use std::fmt;
+
+    // Stop at a unit value even if the deserializer fails to limit recursion.
+    struct Layers(usize);
+
+    impl<'de> Visitor<'de> for Layers {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a newtype")
+        }
+
+        fn visit_newtype_struct<D: Deserializer<'de>>(self, de: D) -> Result<(), D::Error> {
+            if self.0 == 1 {
+                <()>::deserialize(de)
+            } else {
+                de.deserialize_newtype_struct("Layer", Layers(self.0 - 1))
+            }
+        }
+    }
+
+    let de = (&Value::Null).into_deserializer();
+    de.deserialize_newtype_struct("Layer", Layers(63)).unwrap();
+    let error = de
+        .deserialize_newtype_struct("Layer", Layers(64))
+        .unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
+#[test]
+fn non_null_options_and_sequence_items_share_the_depth_limit() {
+    let mut value = Value::Null;
+    for _ in 0..63 {
+        value = Value::Sequence(vec![value]);
+    }
+
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
+    let error = Option::<Value>::deserialize(&value).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
+// A tag is a property of the node.
+// https://yaml.org/spec/1.2.2/#691-node-tags
+#[test]
+fn tagged_nodes_keep_their_depth_when_read_from_a_value() {
+    let source = format!("{}!Leaf x{}", "!Seq [".repeat(63), "]".repeat(63));
+    let value = from_str::<Value>(&source).unwrap();
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
+}
+
+#[test]
+fn manually_nested_tags_obey_the_depth_limit() {
+    let mut value = Value::String("x".into());
+    for _ in 0..65 {
+        value = tagged("!Tag", value);
+    }
+
+    let error = Value::deserialize(&value).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
+#[test]
 fn accessors_check_the_value_type_and_integer_range() {
     let mut null = Value::default();
     assert_eq!(null, Value::Null);

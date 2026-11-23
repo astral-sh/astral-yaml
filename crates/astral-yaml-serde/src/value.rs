@@ -16,6 +16,9 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 /// single-entry mappings. Mapping entries are passed to the destination in
 /// order, including duplicates in manually built values.
 ///
+/// Deserializing from `&Value` enforces the document deserializer's
+/// [depth limit](crate::DeserializationPolicy) without imposing a work budget.
+///
 /// Explicit core tags resolve through the YAML 1.2 core schema. Application
 /// tags retain their expanded name and decoded scalar text, so `!Port 080`
 /// contains `"080"`. Use [`Tagged<T>`] for a specific Rust payload type.
