@@ -108,6 +108,14 @@ fn alias_expansion_obeys_the_work_budget() {
 }
 
 #[test]
+fn reading_a_value_does_not_impose_a_work_budget() {
+    // The sequence and two visits per item exceed the default document budget.
+    let value = Value::Sequence(vec![Value::Unsigned(1); 500_000]);
+    let items = Vec::<Option<u8>>::deserialize(&value).unwrap();
+    assert_eq!(items.len(), 500_000);
+}
+
+#[test]
 fn newtypes_share_the_value_depth_limit() {
     use serde::Deserializer;
     use serde::de::{IntoDeserializer, Visitor};

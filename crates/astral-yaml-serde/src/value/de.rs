@@ -19,14 +19,14 @@ impl<'de> IntoDeserializer<'de, Error> for &'de Value {
 #[derive(Clone, Copy)]
 pub(crate) struct ValueDeserializer<'budget, 'de> {
     value: &'de Value,
-    budget: &'budget Budget,
+    budget: Option<&'budget Budget>,
     depth: usize,
 }
 
 impl Value {
     pub(crate) fn deserializer<'budget, 'de>(
         &'de self,
-        budget: &'budget Budget,
+        budget: Option<&'budget Budget>,
     ) -> ValueDeserializer<'budget, 'de> {
         ValueDeserializer {
             value: self,
@@ -44,8 +44,7 @@ impl<'de> IntoDeserializer<'de, Error> for ValueDeserializer<'_, 'de> {
     }
 }
 
-// Start a budget for a bare value and charge once per Serde call, including
-// when a wrapper asks to deserialize the same value again.
+// Check depth and charge any supplied budget once per Serde call.
 macro_rules! deserialize {
     (
         $de:ident, $visitor:ident;
@@ -57,8 +56,7 @@ macro_rules! deserialize {
 
             $(
                 fn $method<V: Visitor<'de>>(self, $($arg: $ty,)* visitor: V) -> Result<V::Value, Error> {
-                    let budget = Budget::new(de::DEFAULT_WORK_LIMIT);
-                    self.deserializer(&budget).$method($($arg,)* visitor)
+                    self.deserializer(None).$method($($arg,)* visitor)
                 }
             )+
 
@@ -264,7 +262,7 @@ mod tests {
     fn each_value_in_a_tagged_mapping_costs_one_visit() {
         let value = from_str::<Value>("{key: !Tag [one, two]}").unwrap();
         let budget = Budget::new(6);
-        Value::deserialize(value.deserializer(&budget)).unwrap();
+        Value::deserialize(value.deserializer(Some(&budget))).unwrap();
         assert_eq!(budget.remaining(), 0);
     }
 
@@ -277,7 +275,7 @@ mod tests {
 
         let value = from_str::<Value>("{Unit: null}").unwrap();
         let budget = Budget::new(1);
-        let error = Choice::deserialize(value.deserializer(&budget)).unwrap_err();
+        let error = Choice::deserialize(value.deserializer(Some(&budget))).unwrap_err();
         insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
     }
 }

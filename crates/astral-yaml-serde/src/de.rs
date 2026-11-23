@@ -1,6 +1,9 @@
 mod deserializer;
 mod input;
 
+use crate::Error;
+use astral_yaml::Budget;
+
 pub(crate) use deserializer::canonical_key;
 #[cfg(feature = "editable")]
 pub(crate) use deserializer::check_document_keys;
@@ -9,12 +12,10 @@ pub use deserializer::{
     from_str_with_policy, from_stream,
 };
 
-pub(crate) const DEFAULT_WORK_LIMIT: usize = 1_000_000;
-
 #[inline]
-pub(crate) fn charge_visit(depth: usize, budget: &astral_yaml::Budget) -> Result<(), crate::Error> {
-    if depth >= 64 || budget.try_charge(1).is_none() {
-        return Err(crate::Error::new("deserialization resource limit exceeded"));
+pub(crate) fn charge_visit(depth: usize, budget: Option<&Budget>) -> Result<(), Error> {
+    if depth >= 64 || budget.is_some_and(|budget| budget.try_charge(1).is_none()) {
+        return Err(Error::new("deserialization resource limit exceeded"));
     }
     Ok(())
 }

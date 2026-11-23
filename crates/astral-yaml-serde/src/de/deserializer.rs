@@ -1,4 +1,3 @@
-use super::DEFAULT_WORK_LIMIT;
 use super::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarOf};
 use crate::tagged::is_core_tag;
 use crate::with::yaml_tag;
@@ -12,6 +11,8 @@ use serde::de::{
 use std::collections::HashSet;
 
 type Result<T> = std::result::Result<T, Error>;
+
+const DEFAULT_WORK_LIMIT: usize = 1_000_000;
 
 /// Policy for deserializing YAML documents.
 ///
@@ -228,7 +229,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
     #[inline]
     fn raw_node(self) -> Result<I::Node<'input>> {
         let node = self.context.input.node(self.id)?;
-        super::charge_visit(self.depth, self.context.budget)
+        super::charge_visit(self.depth, Some(self.context.budget))
             .map_err(|error| error.located(node.span()))?;
 
         if let NodeKind::Scalar(scalar) = node.kind() {
