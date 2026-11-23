@@ -42,24 +42,26 @@ impl ItemLayout {
     }
 }
 
-fn block_items(kind: &NodeKind) -> Option<&[NodeId]> {
-    match kind {
-        NodeKind::Sequence {
-            items,
-            style: CollectionStyle::Block,
-        } => Some(items),
-        _ => None,
+impl NodeKind {
+    fn block_items(&self) -> Option<&[NodeId]> {
+        match self {
+            Self::Sequence {
+                items,
+                style: CollectionStyle::Block,
+            } => Some(items),
+            _ => None,
+        }
     }
-}
 
-/// The node whose leading comments precede the first field or item.
-fn first_block_slot(kind: &NodeKind) -> Option<NodeId> {
-    match kind {
-        NodeKind::Mapping {
-            entries,
-            style: CollectionStyle::Block,
-        } => entries.first().map(|&(_, value)| value),
-        _ => block_items(kind)?.first().copied(),
+    /// The node whose leading comments precede the first field or item.
+    fn first_block_slot(&self) -> Option<NodeId> {
+        match self {
+            Self::Mapping {
+                entries,
+                style: CollectionStyle::Block,
+            } => entries.first().map(|&(_, value)| value),
+            _ => self.block_items()?.first().copied(),
+        }
     }
 }
 
@@ -175,17 +177,17 @@ impl Layout {
         let mut layouts = vec![None; syntax.nodes.len()];
         let mut lines = LineIndex::new(&source.text);
         for (id, node) in syntax.nodes.iter().enumerate() {
-            let Some(items) = block_items(&node.kind) else {
+            let Some(items) = node.kind.block_items() else {
                 continue;
             };
             // A sequence converted from flow style has no source dashes.
             let dash_column = source.nodes.get(id).and_then(|old| {
-                block_items(&old.kind)?;
+                old.kind.block_items()?;
                 let start = source.contents[id].start();
                 Some(lines.at(start).column(start))
             });
             let blocks = items.iter().enumerate().filter_map(|(index, &item)| {
-                let first = first_block_slot(&syntax.nodes[item.index()].kind)?;
+                let first = syntax.nodes[item.index()].kind.first_block_slot()?;
                 (!self.flow(item)).then_some((index, item, first))
             });
             let original = |item: NodeId, style| {
