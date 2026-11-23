@@ -549,6 +549,21 @@ fn zero_document_stream_deserializes_as_null(source: &str) {
 }
 
 #[test]
+fn zero_document_streams_share_the_work_budget() {
+    let budget = Budget::new(1);
+    let policy = DeserializationPolicy {
+        work_budget: Some(&budget),
+    };
+    assert_eq!(
+        from_str_with_policy::<Value>("", policy).unwrap(),
+        Value::Null
+    );
+
+    let error = from_str_with_policy::<Value>("# comment", policy).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded at bytes 0..9");
+}
+
+#[test]
 fn zero_document_stream_requires_a_null_compatible_type() {
     let source = "# comment";
     let error = from_str::<BTreeMap<String, String>>(source).unwrap_err();

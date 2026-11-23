@@ -97,7 +97,12 @@ fn from_stream_with_policy<'de, T: Deserialize<'de>>(
     policy: DeserializationPolicy<'_>,
 ) -> Result<T> {
     match stream.documents() {
-        [] => T::deserialize(&value::Value::Null).map_err(|error| error.located(stream.span())),
+        [] => {
+            let default_budget = Budget::new(DEFAULT_WORK_LIMIT);
+            let budget = policy.work_budget.unwrap_or(&default_budget);
+            T::deserialize(value::Value::Null.deserializer(Some(budget)))
+                .map_err(|error| error.located(stream.span()))
+        }
         [_] => from_document_with_policy(stream, 0, policy),
         _ => Err(Error::at("expected at most one document", stream.span())),
     }
