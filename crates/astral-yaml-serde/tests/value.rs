@@ -152,6 +152,26 @@ fn non_null_options_and_sequence_items_share_the_depth_limit() {
     insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
 }
 
+// A tag is a property of the node.
+// https://yaml.org/spec/1.2.2/#691-node-tags
+#[test]
+fn tagged_nodes_keep_their_depth_when_read_from_a_value() {
+    let source = format!("{}!Leaf x{}", "!Seq [".repeat(63), "]".repeat(63));
+    let value = from_str::<Value>(&source).unwrap();
+    assert_eq!(Value::deserialize(&value).unwrap(), value);
+}
+
+#[test]
+fn manually_nested_tags_obey_the_depth_limit() {
+    let mut value = Value::String("x".into());
+    for _ in 0..65 {
+        value = tagged("!Tag", value);
+    }
+
+    let error = Value::deserialize(&value).unwrap_err();
+    insta::assert_snapshot!(error, @"deserialization resource limit exceeded");
+}
+
 #[test]
 fn accessors_check_the_value_type_and_integer_range() {
     let mut null = Value::default();

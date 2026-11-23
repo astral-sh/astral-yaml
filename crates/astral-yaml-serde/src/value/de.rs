@@ -143,7 +143,15 @@ impl<'de> ValueDeserializer<'_, 'de> {
                 MapDeserializer::new(entries).deserialize_any(visitor)
             }
             Value::Tagged(tagged) => {
-                visitor.visit_enum(variant(&tagged.tag, self.child(&tagged.value)))
+                // A tag and its payload belong to the same YAML node. In a
+                // manually built tree, each additional tag adds a level.
+                let value = &tagged.value;
+                let payload = if matches!(value, Value::Tagged(_)) {
+                    self.child(value)
+                } else {
+                    Self { value, ..self }
+                };
+                visitor.visit_enum(variant(&tagged.tag, payload))
             }
         }
     }
