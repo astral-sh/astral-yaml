@@ -15,8 +15,11 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// Policy for deserializing YAML documents.
 ///
-/// The parser limits, deserialization depth, and expanded scalar byte limit
-/// apply independently of this policy.
+/// Deserialization is limited to 64 levels, counting the root. Newtypes and
+/// non-null options can add levels even when they wrap a scalar.
+///
+/// The depth limit, parser limits, and expanded scalar byte limit apply
+/// independently of the work budget.
 ///
 /// ```
 /// use astral_yaml::Budget;
