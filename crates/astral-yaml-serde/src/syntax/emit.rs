@@ -860,10 +860,7 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
     fn at_document_boundary(&self) -> bool {
         // Document markers are recognized only at column zero. Include the
         // retained source prefix when emission has not started a new line.
-        if let Some(index) = self.output.rfind('\n') {
-            return self.output[index + 1..].is_empty();
-        }
-        self.at_column_zero && self.output.is_empty()
+        self.output.ends_with('\n') || (self.output.is_empty() && self.at_column_zero)
     }
 
     fn value(
