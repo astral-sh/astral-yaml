@@ -21,7 +21,8 @@ pub(crate) const NAME: &str = "$astral_yaml::Value";
 ///
 /// Explicit core tags resolve through the YAML 1.2 core schema. Application
 /// tags retain their expanded name and decoded scalar text, so `!Port 080`
-/// contains `"080"`. Use [`Tagged<T>`] for a specific Rust payload type.
+/// contains `"080"`. Deserializing [`Tagged<T>`] from either the source or
+/// `&Value` interprets this text using the requested payload type.
 ///
 /// Serde's `flatten` and untagged-enum buffers cannot capture application tags.
 /// Alias expansion is bounded by the deserializer's depth and resource limits.

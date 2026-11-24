@@ -13,6 +13,24 @@ and `Tagged` need direct access to the YAML deserializer. To capture a span or
 comments around an untagged enum, wrap the whole enum in `Spanned` or
 `Commented`. The same applies to a struct with flattened fields.
 
+With `with::yaml_tag`, an enum that mixes tagged and untagged variants
+buffers each local tag as a singleton mapping. Write `!Text "null"` to
+give a string to the `Text` variant. Without quotes, the buffer receives
+null before Serde chooses a variant.
+
+## Optional payloads under application tags
+
+With `Tagged<Option<String>>`, both `!Text null` and `!Text "null"`
+read as `None`. Quoting does not change the meaning of a directly typed
+scalar with an application tag. The serializer rejects `Some("null")`
+under that tag because it would read back as `None`.
+
+If the whole tagged value is optional, use `Option<Tagged<String>>`.
+Then `null` means `None` and `!Text "null"` carries the string `"null"`.
+If the tag must always be present, put the optional field in a mapping.
+For example, `!Text {value: null}` and `!Text {value: "null"}` give the
+field different values.
+
 ## Mapping keys
 
 `astral-yaml-serde` checks for duplicate YAML keys before deserializing a

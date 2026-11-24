@@ -21,6 +21,7 @@ pub(crate) struct ValueDeserializer<'budget, 'de> {
     value: &'de Value,
     budget: Option<&'budget Budget>,
     depth: usize,
+    application_scalar: bool,
 }
 
 impl Value {
@@ -32,6 +33,7 @@ impl Value {
             value: self,
             budget,
             depth: 0,
+            application_scalar: false,
         }
     }
 }
@@ -80,19 +82,25 @@ macro_rules! deserialize {
 
 deserialize! {
     self, visitor;
-    any: bool char str string unit unit_struct seq tuple tuple_struct identifier;
+    any: char str string seq tuple tuple_struct identifier;
 
     deserialize_any() => self.visit_any(visitor),
-    deserialize_i8() => visitor.visit_i8(integer(self.value)?),
-    deserialize_i16() => visitor.visit_i16(integer(self.value)?),
-    deserialize_i32() => visitor.visit_i32(integer(self.value)?),
-    deserialize_i64() => visitor.visit_i64(integer(self.value)?),
-    deserialize_i128() => visitor.visit_i128(integer(self.value)?),
-    deserialize_u8() => visitor.visit_u8(integer(self.value)?),
-    deserialize_u16() => visitor.visit_u16(integer(self.value)?),
-    deserialize_u32() => visitor.visit_u32(integer(self.value)?),
-    deserialize_u64() => visitor.visit_u64(integer(self.value)?),
-    deserialize_u128() => visitor.visit_u128(integer(self.value)?),
+    deserialize_bool() => match self.application_scalar() {
+        Some(scalar) => visitor.visit_bool(scalar.boolean()?),
+        None => self.visit_any(visitor),
+    },
+    deserialize_unit() => self.visit_unit(visitor),
+    deserialize_unit_struct(_name: &'static str) => self.visit_unit(visitor),
+    deserialize_i8() => visitor.visit_i8(self.integer(i8::from_str_radix)?),
+    deserialize_i16() => visitor.visit_i16(self.integer(i16::from_str_radix)?),
+    deserialize_i32() => visitor.visit_i32(self.integer(i32::from_str_radix)?),
+    deserialize_i64() => visitor.visit_i64(self.integer(i64::from_str_radix)?),
+    deserialize_i128() => visitor.visit_i128(self.integer(i128::from_str_radix)?),
+    deserialize_u8() => visitor.visit_u8(self.integer(u8::from_str_radix)?),
+    deserialize_u16() => visitor.visit_u16(self.integer(u16::from_str_radix)?),
+    deserialize_u32() => visitor.visit_u32(self.integer(u32::from_str_radix)?),
+    deserialize_u64() => visitor.visit_u64(self.integer(u64::from_str_radix)?),
+    deserialize_u128() => visitor.visit_u128(self.integer(u128::from_str_radix)?),
     deserialize_f32() => self.visit_f32(visitor),
     deserialize_f64() => self.visit_f64(visitor),
     deserialize_bytes() => self.visit_bytes(visitor),
@@ -114,6 +122,40 @@ impl<'de> ValueDeserializer<'_, 'de> {
             depth: self.depth + 1,
             ..self
         }
+    }
+
+    fn application_scalar(self) -> Option<de::ResolvedScalar<'de>> {
+        match self.value {
+            Value::String(text) if self.application_scalar => {
+                Some(de::ResolvedScalar::application(text))
+            }
+            _ => None,
+        }
+    }
+
+    fn integer<T: TryFrom<i128> + TryFrom<u128>>(
+        self,
+        parse: impl FnOnce(&str, u32) -> Result<T, std::num::ParseIntError>,
+    ) -> Result<T, Error> {
+        if let Some(scalar) = self.application_scalar() {
+            return scalar.integer(parse);
+        }
+
+        let converted = match self.value {
+            Value::Integer(value) => T::try_from(*value).ok(),
+            Value::Unsigned(value) => T::try_from(*value).ok(),
+            _ => return Err(Error::new("expected an integer")),
+        };
+        converted.ok_or_else(|| Error::new("integer out of range"))
+    }
+
+    fn visit_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Some(scalar) = self.application_scalar() {
+            scalar.unit()?;
+            return visitor.visit_unit();
+        }
+
+        self.visit_any(visitor)
     }
 
     fn visit_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -147,7 +189,12 @@ impl<'de> ValueDeserializer<'_, 'de> {
                 let payload = if matches!(value, Value::Tagged(_)) {
                     self.child(value)
                 } else {
-                    Self { value, ..self }
+                    Self {
+                        value,
+                        application_scalar: matches!(value, Value::String(_))
+                            && !tagged::is_core_tag(&tagged.tag),
+                        ..self
+                    }
                 };
                 visitor.visit_enum(variant(&tagged.tag, payload))
             }
@@ -156,6 +203,10 @@ impl<'de> ValueDeserializer<'_, 'de> {
 
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     fn visit_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Some(scalar) = self.application_scalar() {
+            return visitor.visit_f32(scalar.float32()?);
+        }
+
         let number = match self.value {
             Value::Integer(value) => *value as f32,
             Value::Unsigned(value) => *value as f32,
@@ -170,6 +221,10 @@ impl<'de> ValueDeserializer<'_, 'de> {
 
     #[allow(clippy::cast_precision_loss)]
     fn visit_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Some(scalar) = self.application_scalar() {
+            return visitor.visit_f64(scalar.float64()?);
+        }
+
         let number = match self.value {
             Value::Integer(value) => *value as f64,
             Value::Unsigned(value) => *value as f64,
@@ -187,9 +242,14 @@ impl<'de> ValueDeserializer<'_, 'de> {
     }
 
     fn visit_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        match self.value {
-            Value::Null => visitor.visit_none(),
-            _ => visitor.visit_some(self.child(self.value)),
+        if matches!(self.value, Value::Null)
+            || self
+                .application_scalar()
+                .is_some_and(de::ResolvedScalar::is_null)
+        {
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self.child(self.value))
         }
     }
 
@@ -233,15 +293,6 @@ impl<'de> ValueDeserializer<'_, 'de> {
             "expected an enum name or a single-entry mapping",
         ))
     }
-}
-
-fn integer<T: TryFrom<i128> + TryFrom<u128>>(value: &Value) -> Result<T, Error> {
-    let converted = match value {
-        Value::Integer(value) => T::try_from(*value).ok(),
-        Value::Unsigned(value) => T::try_from(*value).ok(),
-        _ => return Err(Error::new("expected an integer")),
-    };
-    converted.ok_or_else(|| Error::new("integer out of range"))
 }
 
 fn variant<'de>(

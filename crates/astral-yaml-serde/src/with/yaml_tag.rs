@@ -31,9 +31,14 @@
 //! other global tags are rejected. Use [`crate::Tagged`] to capture a tag as data.
 //!
 //! The adapter works through options and newtype wrappers. Nested fields and
-//! collection elements need their own opt-in. Mixed tagged/untagged enums buffer
-//! local tags as singleton mappings, which means [`crate::Spanned`] and
-//! [`crate::Tagged`] cannot recover metadata inside that buffer.
+//! collection elements need their own opt-in. Directly typed scalar payloads
+//! follow the same rules as [`crate::Tagged`].
+//!
+//! Mixed tagged/untagged enums buffer local tags as singleton mappings
+//! before the variant's payload type is known. In this buffer a scalar
+//! resolves as if it were untagged. Quote `!Text "null"` to pass a string.
+//! [`crate::Spanned`] and [`crate::Tagged`] cannot recover metadata inside
+//! the buffer.
 //!
 //! Emitting tags requires this crate's serializer. The adapter interprets local
 //! tags when decoding YAML source. When decoding from a [`crate::Value`], use

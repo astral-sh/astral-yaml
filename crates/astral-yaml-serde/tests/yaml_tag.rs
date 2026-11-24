@@ -270,6 +270,7 @@ fn adapter_roundtrips_every_variant_shape() {
         Message::Text("hello".into())
     );
     assert_eq!(from_tag::<Message>("!Ready null").unwrap(), Message::Ready);
+    assert_eq!(from_tag::<Message>("!Ready ''").unwrap(), Message::Ready);
     assert_eq!(
         from_tag::<Message>("{Text: hello}").unwrap(),
         Message::Text("hello".into())
@@ -277,7 +278,6 @@ fn adapter_roundtrips_every_variant_shape() {
     for yaml in [
         "!Ready value",
         "!Ready []",
-        "!Ready ''",
         "!Unknown x",
         "!<tag:example.org,2026:Ready>",
     ] {
@@ -331,6 +331,8 @@ fn mixed_enums_buffer_tags_only_when_opted_in() {
         ("!Ready", Mixed::Ready),
         ("!Ready null", Mixed::Ready),
         ("!Text hello", Mixed::Text("hello".into())),
+        ("!Text 'null'", Mixed::Text("null".into())),
+        ("!Text '42'", Mixed::Text("42".into())),
         ("!Pair [1, true]", Mixed::Pair(1, true)),
         ("!Config {enabled: true}", Mixed::Config { enabled: true }),
         (

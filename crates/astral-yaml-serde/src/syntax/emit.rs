@@ -1294,7 +1294,7 @@ fn detached_position(kind: &NodeKind, position: CommentPosition) -> CommentPosit
     first.map_or(CommentPosition::Before, CommentPosition::BeforeChild)
 }
 
-/// Only a change to or from plain style can affect implicit scalar resolution.
+/// Only untagged scalars can change type when switching to or from plain style.
 pub(super) fn same_scalar_type(
     value: &str,
     tag: Option<&str>,
@@ -1303,17 +1303,8 @@ pub(super) fn same_scalar_type(
 ) -> bool {
     use ScalarStyle::Plain;
     use astral_yaml::schema::{self, ScalarType};
-    if before == after || (before != Plain && after != Plain) {
-        return true;
-    }
-    matches!(
-        tag,
-        Some(
-            "!" | "tag:yaml.org,2002:str"
-                | "tag:yaml.org,2002:null"
-                | "tag:yaml.org,2002:bool"
-                | "tag:yaml.org,2002:int"
-                | "tag:yaml.org,2002:float"
-        )
-    ) || schema::classify(value) == ScalarType::String
+
+    tag.is_some()
+        || (before == Plain) == (after == Plain)
+        || schema::classify(value) == ScalarType::String
 }

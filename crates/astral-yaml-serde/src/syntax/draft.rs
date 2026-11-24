@@ -291,14 +291,24 @@ impl Draft {
         if membership.is_key {
             prefer_plain_key(&mut replacement.kind);
         }
-        match (&self.node(id).kind, &mut replacement.kind) {
+        let old = self.node(id);
+        match (&old.kind, &mut replacement.kind) {
             (
                 NodeKind::Scalar {
-                    style: previous, ..
+                    value: old_value,
+                    style: previous,
                 },
                 NodeKind::Scalar { value, style },
             ) => {
-                if !emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) {
+                let tag = replacement.tag.as_deref();
+                // Mixed enums buffer local tag payloads as untagged values. For a
+                // changed payload, keep the serialized type in that buffer unless
+                // the caller explicitly requested a style.
+                let preserve_buffered_type = !membership.requested_style
+                    && tag.is_some_and(|tag| tag.starts_with('!') && tag != "!")
+                    && (tag != old.tag() || value != old_value);
+                let resolution_tag = if preserve_buffered_type { None } else { tag };
+                if !emit::same_scalar_type(value, resolution_tag, *previous, *style) {
                     if membership.requested_style {
                         return Err(self.error("requested style changes the scalar type"));
                     }

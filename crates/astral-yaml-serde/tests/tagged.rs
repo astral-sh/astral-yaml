@@ -16,6 +16,45 @@ where
     assert_eq!(&from_str::<Tagged<T>>(&yaml).unwrap(), value, "{yaml}");
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+struct Port(u16);
+
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+#[test_case("!T 080", 80_u16; "plain integer")]
+#[test_case("!T '080'", Some(Port(80)); "quoted integer in wrappers")]
+#[test_case("!T '080'", "080".to_owned(); "original spelling")]
+#[test_case("!T 080", Value::String("080".into()); "dynamic payload")]
+#[test_case("!T \"0x10\"", 16.0_f32; "hexadecimal to float")]
+#[test_case("!T |-\n  1.25", 1.25_f64; "literal float")]
+#[test_case("!T >-\n  TRUE", true; "folded boolean")]
+#[test_case("!T null", None::<String>; "plain null")]
+#[test_case("!T 'null'", None::<String>; "quoted null")]
+#[test_case("!T 'null'", "null".to_owned(); "null as text")]
+#[test_case("!T '~'", (); "quoted unit")]
+#[test_case("!T \"\\u004eull\"", None::<String>; "escaped null")]
+#[test_case("!T ''", None::<String>; "empty string")]
+#[test_case("!T ['null', null]", vec![Some("null".to_owned()), None]; "untagged children")]
+fn typed_application_payloads_agree_across_readers<T: DeserializeOwned + PartialEq + Debug>(
+    source: &str,
+    expected: T,
+) {
+    let direct = from_str::<Tagged<T>>(source).unwrap();
+    assert_eq!(
+        direct,
+        Tagged {
+            tag: "!T".to_owned(),
+            value: expected
+        }
+    );
+
+    let value = from_str::<Value>(source).unwrap();
+    assert_eq!(Tagged::<T>::deserialize(&value).unwrap(), direct);
+    assert_eq!(
+        from_str::<Tagged<T>>(&to_string(&value).unwrap()).unwrap(),
+        direct
+    );
+}
+
 #[test]
 fn owned_and_borrowed_payloads() {
     let mut value = from_str::<Tagged<String>>("!Text hello").unwrap();

@@ -3,9 +3,9 @@ use test_case::test_case;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-use astral_yaml_serde::{from_str, to_string};
-use serde::Serialize;
+use astral_yaml_serde::{Tagged, from_str, to_string};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 fn roundtrip<T>(value: &T)
 where
@@ -13,6 +13,62 @@ where
 {
     let yaml = to_string(value).unwrap();
     assert_eq!(&from_str::<T>(&yaml).unwrap(), value, "{yaml:?}");
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+struct Text(String);
+
+// https://yaml.org/spec/1.2.2/#1032-tag-resolution
+#[test_case(""; "empty")]
+#[test_case("null"; "lowercase")]
+#[test_case("Null"; "title case")]
+#[test_case("NULL"; "uppercase")]
+#[test_case('~'; "tilde")]
+#[test_case((); "unit")]
+#[test_case(None::<u8>; "nested option")]
+#[test_case(Text("null".into()); "newtype")]
+fn application_tag_rejects_some_that_would_read_as_none<T: Serialize>(payload: T) {
+    let value = Tagged {
+        tag: "!Maybe".into(),
+        value: Some(payload),
+    };
+    assert_eq!(
+        to_string(&value).unwrap_err().message,
+        "Some payload would resolve to null under its YAML tag"
+    );
+}
+
+#[test_case("!", Some("null".to_owned()); "non-specific tag")]
+#[test_case("tag:yaml.org,2002:str", Some("null".to_owned()); "string tag")]
+#[test_case("!Text", Text("null".into()); "newtype without option")]
+#[test_case("!Maybe", None::<String>; "absent")]
+#[test_case("!Maybe", Some("NuLl".to_owned()); "present")]
+#[test_case("!Maybe", Some(vec![Some("null".to_owned())]); "untagged child")]
+fn tagged_options_roundtrip<T: Serialize + DeserializeOwned + PartialEq + Debug>(
+    tag: &str,
+    value: T,
+) {
+    roundtrip(&Some(Tagged {
+        tag: tag.to_owned(),
+        value,
+    }));
+}
+
+#[test]
+fn tagged_enum_newtypes_distinguish_strings_from_options() {
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    enum Message {
+        Text(String),
+        Maybe(Option<String>),
+    }
+
+    #[derive(Debug, PartialEq, Deserialize, Serialize)]
+    struct Envelope(#[serde(with = "astral_yaml_serde::with::yaml_tag")] Message);
+
+    roundtrip(&Envelope(Message::Text("null".into())));
+    roundtrip(&Envelope(Message::Maybe(None)));
+    let value = Envelope(Message::Maybe(Some("null".into())));
+    assert!(to_string(&value).is_err());
 }
 
 // https://yaml.org/spec/1.2.2/#51-character-set

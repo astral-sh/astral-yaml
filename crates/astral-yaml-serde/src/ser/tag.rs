@@ -4,8 +4,10 @@ use astral_yaml::schema::CoreType;
 use serde::{Serialize, ser};
 use std::fmt;
 
+#[derive(Clone, Copy)]
 pub(super) enum Constraint {
-    Any,
+    NonSpecific,
+    Application { non_null: bool },
     Core(CoreType),
 }
 
@@ -46,9 +48,16 @@ impl Tag {
             if compact { tag.to_owned() } else { spelling }
         };
 
+        let constraint = match tag {
+            "!" => Constraint::NonSpecific,
+            _ => CoreType::from_tag(tag).map_or(
+                Constraint::Application { non_null: false },
+                Constraint::Core,
+            ),
+        };
         Ok(Self {
             spelling,
-            constraint: CoreType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
+            constraint,
         })
     }
 

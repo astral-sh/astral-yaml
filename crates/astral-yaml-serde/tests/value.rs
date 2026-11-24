@@ -79,9 +79,15 @@ fn tagged_value_in_a_serde_option() {
         .unwrap()
         .unwrap();
     insta::assert_snapshot!(format!("{} {:?}", payload.tag, payload.value), @r#"!Port "080""#);
-    insta::assert_snapshot!(Tagged::<u8>::deserialize(&value).unwrap_err(), @"expected an integer");
+    assert_eq!(Tagged::<u8>::deserialize(&value).unwrap().value, 80);
     insta::assert_snapshot!(Tagged::<&str>::deserialize(&Value::Null).unwrap_err(), @"expected an explicit YAML tag");
     insta::assert_snapshot!(Spanned::<Value>::deserialize(&value).unwrap_err(), @"a YAML value has no source metadata");
+}
+
+#[test]
+fn untagged_strings_do_not_coerce_to_integers() {
+    let value = from_str::<Value>("'080'").unwrap();
+    insta::assert_snapshot!(u8::deserialize(&value).unwrap_err(), @"expected an integer");
 }
 
 #[test]

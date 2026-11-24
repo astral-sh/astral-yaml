@@ -3,8 +3,72 @@ use test_case::{test_case, test_matrix};
 use super::support::edit;
 use astral_yaml_dev::{edit_diff, indoc};
 use astral_yaml_serde::edit::{CollectionStyle, CommentPlacement, PathSegment, ScalarStyle};
-use astral_yaml_serde::{Editable, Tagged};
+use astral_yaml_serde::{Editable, Tagged, Value};
 use serde::Deserialize;
+
+#[test]
+fn updating_a_tagged_null_through_value_keeps_its_spelling_and_typed_value() {
+    let source = "!T null\n";
+    let document =
+        edit::<Tagged<Option<String>>>(source, |mut root| root.update(|value: Value| value));
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value().value, None);
+}
+
+#[test]
+fn updating_a_quoted_tagged_number_keeps_its_quotes() {
+    let source = "!Port '42'\n";
+    let document = edit::<Tagged<u16>>(source, |mut root| root.update(|port: Tagged<u16>| port));
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value().value, 42);
+}
+
+// https://yaml.org/spec/1.2.2/#73-flow-scalar-styles
+#[test]
+fn quoting_a_tagged_number_preserves_its_text_and_numeric_value() {
+    let document = edit::<Tagged<u16>>("!Port 080\n", |mut root| {
+        root.set_scalar_style(ScalarStyle::SingleQuoted)?;
+        assert_eq!(root.read::<Tagged<String>>()?.value, "080");
+        Ok(())
+    });
+    assert_eq!(document.value().value, 80);
+    insta::assert_snapshot!(document.source(), @"!<!Port> '080'");
+}
+
+#[test]
+fn replacing_a_buffered_enum_payload_keeps_its_string_type() {
+    #[derive(Debug, Deserialize, PartialEq, serde::Serialize)]
+    enum Message {
+        Text(String),
+        #[serde(untagged)]
+        Number(u16),
+    }
+
+    #[derive(Deserialize, serde::Serialize)]
+    struct Local(#[serde(with = "astral_yaml_serde::with::yaml_tag")] Message);
+
+    let document = edit::<Local>("!Text hi\n", |mut root| {
+        root.set(Local(Message::Text("null".into())))
+    });
+    assert_eq!(document.value().0, Message::Text("null".into()));
+    insta::assert_snapshot!(document.source(), @r#"!<!Text> "null""#);
+}
+
+#[test]
+fn a_collection_tag_does_not_override_child_scalar_resolution() {
+    let source = "!Ports [80]\n";
+    let mut document = Editable::<Tagged<Vec<u16>>>::parse(source).unwrap();
+    let error = document
+        .edit(|root| {
+            let mut ports = root.into_sequence()?;
+            ports.push(443)?;
+            ports.item(0)?.set_scalar_style(ScalarStyle::SingleQuoted)
+        })
+        .unwrap_err();
+    assert_eq!(error.message, "requested style changes the scalar type");
+    assert_eq!(document.source(), source);
+    assert_eq!(document.value().value, [80]);
+}
 
 #[test]
 fn unrelated_edits_preserve_empty_strings_and_tagged_payloads() {
