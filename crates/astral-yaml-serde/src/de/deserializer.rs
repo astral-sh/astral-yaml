@@ -409,8 +409,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
     fn enum_tag(self, node: I::Node<'input>) -> Option<&'input str> {
         node.tag()
             .filter(|_| self.yaml_tag && self.tag_state == TagState::Unconsumed)
-            .and_then(|tag| tag.strip_prefix('!'))
-            .filter(|name| !name.is_empty())
+            .and_then(yaml_tag::local_name)
     }
 
     fn variant_name(self, name: &'input str) -> Result<de::value::StrDeserializer<'input, Error>> {

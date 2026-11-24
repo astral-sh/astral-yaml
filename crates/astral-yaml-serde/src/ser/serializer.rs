@@ -8,7 +8,7 @@ use astral_yaml::Span;
 #[cfg(feature = "editable")]
 use astral_yaml::emit::LimitedWriter;
 use astral_yaml::emit::{FlowWrite, non_finite_float};
-use astral_yaml::schema::{self, CoreType, ScalarType};
+use astral_yaml::schema::CoreType;
 use serde::Serialize;
 use serde::ser::{self, SerializeMap, SerializeSeq};
 use std::fmt;
@@ -197,7 +197,7 @@ impl<O: FlowWrite<Error>> Serializer<O> {
     #[inline]
     fn check_scalar_tag(&mut self, value: &str) -> Result<()> {
         if let Some(tag) = self.take_tag() {
-            Self::check_tagged_scalar(tag, value)?;
+            tag.check_scalar(value)?;
         }
 
         Ok(())
@@ -206,27 +206,10 @@ impl<O: FlowWrite<Error>> Serializer<O> {
     #[inline]
     fn check_written_scalar_tag(&mut self, start: usize) -> Result<()> {
         if let Some(tag) = self.take_tag() {
-            Self::check_tagged_scalar(tag, &self.output.as_ref()[start..])?;
+            tag.check_scalar(&self.output.as_ref()[start..])?;
         }
 
         Ok(())
-    }
-
-    #[cold]
-    fn check_tagged_scalar(tag: tag::Constraint, value: &str) -> Result<()> {
-        match tag {
-            tag::Constraint::Core(kind) if !kind.matches_scalar(value) => {
-                Err(Error::new("serialized value does not match its YAML tag"))
-            }
-            tag::Constraint::Application { non_null: true }
-                if schema::classify(value) == ScalarType::Null =>
-            {
-                Err(Error::new(
-                    "Some payload would resolve to null under its YAML tag",
-                ))
-            }
-            _ => Ok(()),
-        }
     }
 
     fn check_collection_tag(tag: Option<CoreType>, kind: Collection) -> Result<()> {
@@ -323,7 +306,7 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
     fn serialize_str(self, value: &str) -> Result<()> {
         if let Some(tag) = self.take_tag() {
             self.output.check(value.len().saturating_add(2))?;
-            Serializer::<O>::check_tagged_scalar(tag, value)?;
+            tag.check_scalar(value)?;
         }
         self.output.quote(value)
     }
@@ -350,8 +333,8 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
 
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
         // Quoting cannot distinguish Some("null") from None inside an application tag.
-        if let Some(tag::Constraint::Application { non_null }) = &mut self.pending_tag {
-            *non_null = true;
+        if let Some(tag::Constraint::Application) = self.pending_tag {
+            self.pending_tag = Some(tag::Constraint::NonNull);
         }
         self.wrapped(value)
     }

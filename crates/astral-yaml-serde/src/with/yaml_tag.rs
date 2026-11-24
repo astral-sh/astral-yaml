@@ -51,6 +51,10 @@ use std::marker::PhantomData;
 
 pub(crate) const NAME: &str = "$astral_yaml::with::yaml_tag";
 
+pub(crate) fn local_name(tag: &str) -> Option<&str> {
+    tag.strip_prefix('!').filter(|name| !name.is_empty())
+}
+
 /// Serialize the annotated value, using YAML tags for enum variants.
 ///
 /// # Errors

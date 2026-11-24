@@ -300,14 +300,13 @@ impl Draft {
                 },
                 NodeKind::Scalar { value, style },
             ) => {
-                let tag = replacement.tag.as_deref();
-                // Mixed enums buffer local tag payloads as untagged values. For a
-                // changed payload, keep the serialized type in that buffer unless
-                // the caller explicitly requested a style.
-                let preserve_buffered_type = !membership.requested_style
-                    && tag.is_some_and(|tag| tag.starts_with('!') && tag != "!")
-                    && (tag != old.tag() || value != old_value);
-                let resolution_tag = if preserve_buffered_type { None } else { tag };
+                // Serde can buffer a local enum variant as an untagged value.
+                // For a new payload, preserve its implicit type by default.
+                let resolution_tag = replacement.tag.as_deref().filter(|&tag| {
+                    membership.requested_style
+                        || crate::with::yaml_tag::local_name(tag).is_none()
+                        || (old.tag() == Some(tag) && old_value == value)
+                });
                 if !emit::same_scalar_type(value, resolution_tag, *previous, *style) {
                     if membership.requested_style {
                         return Err(self.error("requested style changes the scalar type"));
