@@ -1,4 +1,11 @@
 //! Edit YAML using Rust values inside an [`Editable`](crate::Editable) transaction.
+//!
+//! Nonempty collections keep their style where possible, including when replaced
+//! with the same kind of collection. New collections and empty ones gaining
+//! their first entry follow the parent's final style, or use block style at
+//! the root. Use [`Cursor::set_collection_style`] to override the default.
+//! New string keys use plain style wherever their spelling and type allow it,
+//! including in mappings nested inside serialized values.
 
 use crate::Error;
 use crate::syntax::{self, Collection, Mapping, Sequence};
@@ -231,9 +238,11 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
     ///
     /// Keep its anchor, outer comments, and compatible style. Strings are serialized
     /// as strings, so `set("false")` and `set(false)` produce different YAML values.
+    /// An explicit style request still applies when the node keeps its kind.
     ///
     /// # Errors
-    /// Returns an error if serialization fails or an editing limit is exceeded.
+    /// Returns an error if serialization fails, a requested scalar style changes
+    /// the replacement's YAML type, or an editing limit is exceeded.
     pub fn set(&mut self, value: impl Serialize) -> Result<(), Error> {
         self.context
             .mutate(|| self.editor.replace_value(self.id, &value))
@@ -243,6 +252,7 @@ impl<'edit, 'doc> Cursor<'edit, 'doc> {
     ///
     /// # Errors
     /// Returns an error if the node is not a scalar or the style changes its YAML type.
+    /// The edit fails at commit if the requested style cannot represent the final value.
     pub fn set_scalar_style(&mut self, style: ScalarStyle) -> Result<(), Error> {
         self.context
             .mutate(|| self.editor.set_scalar_style(self.id, style))
@@ -552,6 +562,8 @@ impl<State> Cursor<'_, '_, State> {
 
     /// Return the selected node, including pending edits.
     /// Spans refer to the original source. Inserted nodes have no source span.
+    /// A collection's style is a preference until the edit commits. For example,
+    /// a new collection prefers block style but uses flow inside a flow collection.
     ///
     /// # Errors
     /// Returns an error if an editing limit is exceeded.
@@ -559,10 +571,15 @@ impl<State> Cursor<'_, '_, State> {
         self.context.with_path(self.editor.node(self.id))
     }
 
-    /// Request block or flow style for this collection. Empty collections use flow style.
+    /// Request block or flow style for this collection.
+    ///
+    /// An empty collection uses flow delimiters. The request applies if the
+    /// collection gains an entry during this edit.
     ///
     /// # Errors
     /// Returns an error if the node is not a collection or an editing limit is exceeded.
+    /// The edit fails at commit if the requested style cannot be represented,
+    /// for example when a nonempty block collection is inside a flow collection.
     pub fn set_collection_style(&mut self, style: CollectionStyle) -> Result<(), Error> {
         self.context
             .mutate(|| self.editor.set_collection_style(self.id, style))

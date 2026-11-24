@@ -14,6 +14,7 @@ mod tests;
 #[derive(Clone, Debug)]
 struct Membership {
     parent: Option<NodeId>,
+    is_key: bool,
     requested_style: bool,
 }
 
@@ -31,6 +32,7 @@ impl Slot {
             node,
             membership: Some(Membership {
                 parent,
+                is_key: false,
                 requested_style: false,
             }),
         }
@@ -73,7 +75,14 @@ impl From<&DocumentSyntax> for Draft {
                 .nodes
                 .iter()
                 .cloned()
-                .map(|node| Slot::live(node.map_locations(Some), None))
+                .map(|mut node| {
+                    // Empty delimiters tell us nothing about the style to use
+                    // if this collection grows during the transaction.
+                    if let Some(style) = empty_collection_style(&mut node.kind) {
+                        *style = CollectionStyle::Block;
+                    }
+                    Slot::live(node.map_locations(Some), None)
+                })
                 .collect(),
             root: document.root,
             options: document.options,
@@ -82,7 +91,7 @@ impl From<&DocumentSyntax> for Draft {
             inserted_bytes: Budget::new(document.options.max_input_bytes),
         };
         for index in 0..draft.slots.len() {
-            draft.link_children(NodeId::from_index(index));
+            draft.link_children(NodeId::from_index(index), false);
         }
         draft
     }
@@ -93,6 +102,12 @@ pub(super) enum ReplacementStyle {
     Preserve,
     #[cfg(test)]
     FromValue,
+}
+
+#[derive(Clone, Copy)]
+enum Destination {
+    Insert(NodeId),
+    Replace(NodeId, ReplacementStyle),
 }
 
 impl Draft {
@@ -181,11 +196,29 @@ impl Draft {
         self.options.max_nodes.saturating_sub(self.slots.len())
     }
 
-    fn link_children(&mut self, id: NodeId) {
-        let mut children = Vec::new();
-        self.node(id).kind.append_children_to(&mut children);
-        for child in children {
-            self.membership_mut(child).parent = Some(id);
+    fn link_children(&mut self, id: NodeId, generated: bool) {
+        match &self.node(id).kind {
+            NodeKind::Mapping { entries, .. } => {
+                for (key, value) in entries.clone() {
+                    self.link_key(key, id, generated);
+                    self.membership_mut(value).parent = Some(id);
+                }
+            }
+            NodeKind::Sequence { items, .. } => {
+                for child in items.clone() {
+                    self.membership_mut(child).parent = Some(id);
+                }
+            }
+            NodeKind::Scalar { .. } | NodeKind::Alias { .. } => {}
+        }
+    }
+
+    fn link_key(&mut self, key: NodeId, parent: NodeId, generated: bool) {
+        let membership = self.membership_mut(key);
+        membership.parent = Some(parent);
+        membership.is_key = true;
+        if generated {
+            prefer_plain_key(&mut self.slots[key.index()].node.kind);
         }
     }
 
@@ -193,45 +226,103 @@ impl Draft {
     fn attach(
         &mut self,
         value: SerializedValue<'_>,
-        parent: Option<NodeId>,
-        replacement: Option<(NodeId, ReplacementStyle)>,
-    ) -> NodeId {
+        destination: Destination,
+    ) -> Result<NodeId, Error> {
         let SerializedValue {
             root: value_root,
             mut nodes,
         } = value;
-        let root = replacement.map_or(NodeId::from_index(self.slots.len()), |(id, _)| id);
-        let offset = self.slots.len() + usize::from(replacement.is_none());
+        let next = self.slots.len();
+        let (root, offset, generated) = match destination {
+            Destination::Insert(_) => (NodeId::from_index(next), next + 1, true),
+            Destination::Replace(id, style) => (id, next, style == ReplacementStyle::Preserve),
+        };
         // Child IDs skip the root, which has its own slot.
         let map = |id: NodeId| {
             NodeId::from_index(offset + id.index() - usize::from(id.index() > value_root.index()))
         };
-        let mut node = Node::from_parsed(nodes.remove(value_root.index())).map_locations(|_| None);
-        node.kind.remap_children(map);
-        if let Some((id, style)) = replacement {
-            let slot = &mut self.slots[id.index()];
-            let old = &mut slot.node;
-            node.anchor = old.anchor.take();
-            if style == ReplacementStyle::Preserve {
-                preserve_style(old, &mut node);
+        let relocate = |parsed| {
+            let mut node = Node::from_parsed(parsed).map_locations(|_| None);
+            node.kind.remap_children(map);
+            // Serde serializes every collection in flow style. Prefer block for each
+            // new collection and let the final enclosing flow context override it.
+            if generated
+                && let NodeKind::Sequence { style, .. } | NodeKind::Mapping { style, .. } =
+                    &mut node.kind
+            {
+                *style = CollectionStyle::Block;
             }
+            node
+        };
+        let mut node = relocate(nodes.remove(value_root.index()));
+        if let Destination::Insert(parent) = destination {
+            self.slots.push(Slot::live(node, Some(parent)));
+        } else {
+            let requested = if generated {
+                self.preserve_style(root, &mut node)?
+            } else {
+                false
+            };
+            self.membership_mut(root).requested_style = requested;
+            let old = &mut self.slots[root.index()].node;
+            node.anchor = old.anchor.take();
             node.comments = std::mem::take(&mut old.comments);
             remap_comment_positions(&mut node.comments, &old.kind, &node.kind);
             node.span = old.span;
-            *slot = Slot::live(node, parent);
-        } else {
-            self.slots.push(Slot::live(node, parent));
+            *old = node;
         }
         for node in nodes {
-            let mut node = Node::from_parsed(node).map_locations(|_| None);
-            node.kind.remap_children(map);
-            self.slots.push(Slot::live(node, None));
+            self.slots.push(Slot::live(relocate(node), None));
         }
-        self.link_children(root);
+        self.link_children(root, generated);
         for index in offset..self.slots.len() {
-            self.link_children(NodeId::from_index(index));
+            self.link_children(NodeId::from_index(index), generated);
         }
-        root
+        Ok(root)
+    }
+
+    /// Retain compatible styles and report whether the request still applies.
+    fn preserve_style(
+        &self,
+        id: NodeId,
+        replacement: &mut Node<Option<Span>>,
+    ) -> Result<bool, Error> {
+        let membership = self.membership(id);
+        if membership.is_key {
+            prefer_plain_key(&mut replacement.kind);
+        }
+        match (&self.node(id).kind, &mut replacement.kind) {
+            (
+                NodeKind::Scalar {
+                    style: previous, ..
+                },
+                NodeKind::Scalar { value, style },
+            ) => {
+                if !emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) {
+                    if membership.requested_style {
+                        return Err(self.error("requested style changes the scalar type"));
+                    }
+                    return Ok(false);
+                }
+                *style = *previous;
+            }
+            (
+                NodeKind::Sequence {
+                    style: previous, ..
+                },
+                NodeKind::Sequence { style, .. },
+            )
+            | (
+                NodeKind::Mapping {
+                    style: previous, ..
+                },
+                NodeKind::Mapping { style, .. },
+            ) => {
+                *style = *previous;
+            }
+            _ => return Ok(false),
+        }
+        Ok(membership.requested_style)
     }
 
     /// Collect all nodes to remove before retiring any of them.
@@ -261,11 +352,12 @@ impl Draft {
     ) -> Result<(), Error> {
         let parent = self.parent(id);
         let document = self.parse_value(yaml, parent, self.available() + 1)?;
-        let removed = self.removal([id])?;
-        // Retired slots keep their syntax. Attaching reuses the root's ID and
-        // restores its membership, but leaves its former descendants retired.
+        self.charge(1)?;
+        let mut children = Vec::new();
+        self.node(id).kind.append_children_to(&mut children);
+        let removed = self.removal(children)?;
+        self.attach(document, Destination::Replace(id, style))?;
         self.retire(removed);
-        self.attach(document, parent, Some((id, style)));
         Ok(())
     }
 
@@ -303,7 +395,7 @@ impl Draft {
         self.charge(shifted)?;
 
         let document = self.parse_value(yaml, Some(id), self.available())?;
-        let child = self.attach(document, Some(id), None);
+        let child = self.attach(document, Destination::Insert(id))?;
         self.sequence_items_mut(id)?.insert(index, child);
         Ok(child)
     }
@@ -348,8 +440,9 @@ impl Draft {
             Some(id),
             self.available().saturating_sub(key.nodes.len()),
         )?;
-        let key = self.attach(key, Some(id), None);
-        let value = self.attach(value, Some(id), None);
+        let key = self.attach(key, Destination::Insert(id))?;
+        self.link_key(key, id, true);
+        let value = self.attach(value, Destination::Insert(id))?;
         self.mapping_entries_mut(id)?.insert(index, (key, value));
         Ok((key, value))
     }
@@ -369,16 +462,6 @@ impl Draft {
             .retarget_child_comments(key, following);
         self.retire(removed);
         Ok(())
-    }
-
-    /// Prefer plain spelling for a generated string key. The emitter may still
-    /// need quotes in a flow mapping, so this is not an explicit style request.
-    pub(super) fn prefer_plain_key(&mut self, key: NodeId) {
-        if let NodeKind::Scalar { value, style } = &mut self.slots[key.index()].node.kind
-            && astral_yaml::emit::plain_block_string_key(value)
-        {
-            *style = ScalarStyle::Plain;
-        }
     }
 
     pub(super) fn set_scalar_style(&mut self, id: NodeId, style: ScalarStyle) -> Result<(), Error> {
@@ -492,7 +575,10 @@ impl Draft {
         let mut nodes = Vec::with_capacity(self.slots.len());
         let mut parents = Vec::with_capacity(self.slots.len());
         let mut requested_styles = Vec::new();
-        for (index, slot) in self.slots.into_iter().enumerate() {
+        for (index, mut slot) in self.slots.into_iter().enumerate() {
+            if let Some(style) = empty_collection_style(&mut slot.node.kind) {
+                *style = CollectionStyle::Flow;
+            }
             nodes.push(slot.node);
             let parent = if let Some(membership) = slot.membership {
                 if membership.requested_style {
@@ -595,31 +681,22 @@ fn restore_matching_comments<'a>(
     matched
 }
 
-fn preserve_style(old: &Node<Option<Span>>, replacement: &mut Node<Option<Span>>) {
-    match (&old.kind, &mut replacement.kind) {
-        (
-            NodeKind::Scalar {
-                style: previous, ..
-            },
-            NodeKind::Scalar { value, style },
-        ) if emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) => {
-            *style = *previous;
-        }
-        (
-            NodeKind::Sequence {
-                style: previous, ..
-            },
-            NodeKind::Sequence { style, .. },
-        )
-        | (
-            NodeKind::Mapping {
-                style: previous, ..
-            },
-            NodeKind::Mapping { style, .. },
-        ) => {
-            *style = *previous;
-        }
-        _ => {}
+/// Prefer plain spelling for generated string keys. The emitter may still
+/// need to quote them in the final flow context.
+fn prefer_plain_key(kind: &mut NodeKind) {
+    if let NodeKind::Scalar { value, style } = kind
+        && *style == ScalarStyle::DoubleQuoted
+        && astral_yaml::emit::plain_block_string_key(value)
+    {
+        *style = ScalarStyle::Plain;
+    }
+}
+
+fn empty_collection_style(kind: &mut NodeKind) -> Option<&mut CollectionStyle> {
+    match kind {
+        NodeKind::Sequence { items, style } if items.is_empty() => Some(style),
+        NodeKind::Mapping { entries, style } if entries.is_empty() => Some(style),
+        _ => None,
     }
 }
 
@@ -653,18 +730,5 @@ fn remap_comment_positions(comments: &mut [Comment<Option<Span>>], old: &NodeKin
                     .map_or(CommentPosition::After, CommentPosition::BeforeChild);
             }
         }
-    }
-}
-
-pub(super) fn same_style(left: &NodeKind, right: &NodeKind) -> bool {
-    match (left, right) {
-        (NodeKind::Scalar { style: a, .. }, NodeKind::Scalar { style: b, .. }) => a == b,
-        (NodeKind::Sequence { items, style: a }, NodeKind::Sequence { style: b, .. }) => {
-            items.is_empty() || a == b
-        }
-        (NodeKind::Mapping { entries, style: a }, NodeKind::Mapping { style: b, .. }) => {
-            entries.is_empty() || a == b
-        }
-        _ => false,
     }
 }

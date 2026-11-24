@@ -126,13 +126,16 @@ fn structural_edits_preserve_comments_and_accept_complex_keys() {
             .map(|_| ())
     });
     insta::assert_snapshot!(diff, @"
-    @@ -1,3 +1,3 @@
+    @@ -1,3 +1,6 @@
     -# config
     -a: 1 # remove
     -b: [2, 3] # keep
     +b: [3, 4] # keep
-    +? [x, y]
-    +: {enabled: true}
+    +?
+    +  - x
+    +  - y
+    +:
+    +  enabled: true
     ");
 }
 
@@ -356,10 +359,11 @@ fn inserted_nodes_can_be_edited() {
         })
         .unwrap();
     insta::assert_snapshot!(edit_diff("[]", document.source()), @r"
-    @@ -1 +1 @@
+    @@ -1 +1,2 @@
     -[]
     \ No newline at end of file
-    +[{a: 3, b: 2}]
+    +- a: 3
+    +  b: 2
     \ No newline at end of file
     ");
 }

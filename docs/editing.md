@@ -97,13 +97,65 @@ retries: 3
 To set the retry count even when one exists, use `fields.set("retries", 3)?`.
 
 New string keys use plain style when their spelling and type are unambiguous.
-For example, `"true"` needs quotes in either style, while `x,y` needs quotes
-only in a flow mapping.
+This applies both to individual fields and to mappings anywhere in a serialized
+value. For example, `"true"` needs quotes in either style, while `x,y` needs
+quotes only in a flow mapping.
 
 The example edits individual fields, so the YAML keeps `image` even though
 `Service` omits it. If you replace a whole mapping, include every field you
 want to keep. `Editable<T>` requires `T` to implement `DeserializeOwned`.
 `Service` needs neither `Serialize` nor `Clone`.
+
+## Choose block or flow style
+
+Editing a nonempty sequence or mapping preserves its style where possible.
+Replacing it with the same kind of collection preserves the outer style.
+New collections, including those nested in a replacement, follow their
+parent's final style. At the document root they default to block style.
+The editor can adjust indentation or use flow delimiters to keep comments
+attached to the same nodes.
+
+Empty collections always use `[]` or `{}`. When you add the first entry,
+the editor chooses a style as it would for a new collection. For example,
+adding a port to `ports: []` in a block mapping produces a block sequence.
+Adding one to `ports: [80]` keeps the sequence inline.
+
+To override the default, call `set_collection_style()` on the cursor returned
+by the insertion.
+
+```rust
+use astral_yaml_serde::EditableYaml;
+use astral_yaml_serde::edit::CollectionStyle;
+
+fn main() -> Result<(), astral_yaml_serde::Error> {
+    let mut service = EditableYaml::parse("ports: []\n")?;
+    service.edit(|root| {
+        let mut fields = root.into_mapping()?;
+        fields.ensure_sequence("ports")?.push(80)?;
+        fields.set("retries", [1, 2, 4])?
+            .set_collection_style(CollectionStyle::Flow)
+    })?;
+    print!("{}", service.source());
+    Ok(())
+}
+```
+
+```yaml
+ports:
+  - 80
+retries: [1, 2, 4]
+```
+
+You can also request a style before filling an empty collection in the same
+edit. If it stays empty, the YAML records no style preference for the next
+edit. A nonempty block collection cannot appear inside a flow collection.
+Requesting that combination fails the edit.
+
+An explicit scalar or collection style request survives replacement of the
+same kind of node during the edit. For example, requesting single quotes and
+then setting a string containing a NUL fails because the escape requires
+double quotes. Replacing a sequence with a mapping drops the sequence's
+style request.
 
 ## Failed edits
 

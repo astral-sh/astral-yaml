@@ -49,6 +49,16 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    /// Compare stored styles for nodes of the same kind. Aliases have no style.
+    pub(super) fn same_style(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Scalar { style: a, .. }, Self::Scalar { style: b, .. }) => a == b,
+            (Self::Sequence { style: a, .. }, Self::Sequence { style: b, .. })
+            | (Self::Mapping { style: a, .. }, Self::Mapping { style: b, .. }) => a == b,
+            _ => false,
+        }
+    }
+
     /// Append structural child IDs in source order.
     pub(super) fn append_children_to(&self, children: &mut Vec<NodeId>) {
         match self {
