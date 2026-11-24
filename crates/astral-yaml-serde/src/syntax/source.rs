@@ -103,11 +103,11 @@ impl Source {
 }
 
 /// An insertion and the offset change it causes.
-/// `move_empty_root` determines which side of the insertion an empty root belongs to.
+/// Empty nodes move past a new prefix and stay before a new suffix.
 struct Insertion {
     at: usize,
     length: usize,
-    move_empty_root: bool,
+    before_body: bool,
 }
 
 #[derive(Default)]
@@ -116,17 +116,14 @@ struct Locations {
 }
 
 impl Locations {
-    fn span(&self, span: Span, root: bool) -> Span {
-        self.after(span, 0, root)
+    fn span(&self, span: Span) -> Span {
+        self.after(span, 0)
     }
 
-    fn after(&self, mut span: Span, generation: usize, root: bool) -> Span {
+    fn after(&self, mut span: Span, generation: usize) -> Span {
         for insertion in &self.insertions[generation..] {
             if span.end() > insertion.at
-                || (root
-                    && insertion.move_empty_root
-                    && span.is_empty()
-                    && span.start() == insertion.at)
+                || (insertion.before_body && span.is_empty() && span.start() == insertion.at)
             {
                 let start = if span.start() >= insertion.at {
                     span.start() + insertion.length
@@ -194,12 +191,12 @@ impl<'source> Frame<'source> {
         }
     }
 
-    fn insert(&mut self, at: usize, text: &str, move_empty_root: bool) {
+    fn insert(&mut self, at: usize, text: &str, before_body: bool) {
         self.text.insert_str(at, text);
         self.locations.insertions.push(Insertion {
             at,
             length: text.len(),
-            move_empty_root,
+            before_body,
         });
     }
 
@@ -234,7 +231,7 @@ impl<'source> Frame<'source> {
     }
 
     pub(super) fn start_marker(&mut self, at: usize) {
-        self.insert(at, "---\n", false);
+        self.insert(at, "---\n", true);
         self.start = Some(Marker {
             span: super::span(at, at + 3),
             generation: self.locations.insertions.len(),
@@ -242,34 +239,24 @@ impl<'source> Frame<'source> {
     }
 
     pub(super) fn finish(self, syntax: Syntax<'_, Option<Span>>) -> Prepared {
-        let mut source_nodes: Vec<_> = self
+        let source_nodes = self
             .original
             .nodes
             .iter()
             .cloned()
-            .map(|node| node.map_locations(|span| self.locations.span(span, false)))
+            .map(|node| node.map_locations(|span| self.locations.span(span)))
             .collect();
         let root = self.original.root;
-        source_nodes[root.index()].span = self
-            .locations
-            .span(self.original.nodes[root.index()].span, true);
-
-        let mut nodes: Vec<_> = syntax
+        let nodes = syntax
             .nodes
             .iter()
             .cloned()
-            .map(|node| {
-                node.map_locations(|span| span.map(|span| self.locations.span(span, false)))
-            })
+            .map(|node| node.map_locations(|span| span.map(|span| self.locations.span(span))))
             .collect();
-        nodes[syntax.root.index()].span = syntax.nodes[syntax.root.index()]
-            .span
-            .map(|span| self.locations.span(span, true));
-
         let mut ends: Vec<_> = self
             .ends
             .into_iter()
-            .map(|marker| self.locations.after(marker.span, marker.generation, false))
+            .map(|marker| self.locations.after(marker.span, marker.generation))
             .collect();
         ends.sort_unstable_by_key(|span| span.start());
         let source = Source {
@@ -279,8 +266,7 @@ impl<'source> Frame<'source> {
                 .original
                 .contents
                 .iter()
-                .enumerate()
-                .map(|(index, &span)| self.locations.span(span, index == root.index()))
+                .map(|&span| self.locations.span(span))
                 .collect(),
             root,
             options: self.original.options,
@@ -288,15 +274,15 @@ impl<'source> Frame<'source> {
                 .original
                 .byte_order_marks
                 .iter()
-                .map(|&mark| self.locations.span(mark, false))
+                .map(|&mark| self.locations.span(mark))
                 .collect(),
             preceding_end_marker: self
                 .original
                 .preceding_end_marker
-                .map(|marker| self.locations.span(marker, false)),
+                .map(|marker| self.locations.span(marker)),
             start_marker: self
                 .start
-                .map(|marker| self.locations.after(marker.span, marker.generation, false)),
+                .map(|marker| self.locations.after(marker.span, marker.generation)),
             end_marker: ends.first().copied(),
             extra_end_markers: ends.into_iter().skip(1).collect(),
         };
@@ -347,9 +333,9 @@ mod tests {
             insertions: vec![Insertion {
                 at: 3,
                 length: 2,
-                move_empty_root: false,
+                before_body: false,
             }],
         };
-        assert_eq!(locations.span(span(1, 5), false), span(1, 7));
+        assert_eq!(locations.span(span(1, 5)), span(1, 7));
     }
 }

@@ -46,6 +46,12 @@ pub(super) fn indent(source: &str, at: usize) -> usize {
     Line::at(source, at).indent(at)
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Start {
+    Node(Context),
+    AfterIndicator(usize),
+}
+
 pub(super) enum Separator {
     None,
     Space,
@@ -55,7 +61,7 @@ pub(super) enum Separator {
 /// Formatting needed to join a rendered node to the surrounding source.
 pub(super) struct Placement<'comments, Location> {
     pub(super) comments: &'comments [Comment<Location>],
-    pub(super) context: Context,
+    pub(super) start: Start,
     pub(super) before: Separator,
     pub(super) at_column_zero: bool,
     pub(super) comment_follows: bool,
@@ -122,7 +128,7 @@ impl<'source> Boundary<'source> {
 
     fn placement<'comments, Location: Copy + Into<Option<Span>>>(
         &self,
-        context: Context,
+        start: Start,
         comments: &'comments [Comment<Location>],
         all_comments: &[Comment<Location>],
         own_line: bool,
@@ -135,7 +141,9 @@ impl<'source> Boundary<'source> {
                     span.start() >= line_start && span.end() <= self.body.start()
                 })
             });
-        let before = if terminated || (own_line && !self.line.own_line(at)) {
+        let before = if let Start::Node(context) = start
+            && (terminated || (own_line && !self.line.own_line(at)))
+        {
             Separator::Line(context.indent)
         } else if self.body.is_empty()
             && matches!(
@@ -149,7 +157,7 @@ impl<'source> Boundary<'source> {
         };
         Placement {
             comments,
-            context,
+            start,
             before,
             at_column_zero: self.line.column(at) == 0,
             comment_follows: self.body.is_empty()
@@ -294,7 +302,7 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         document,
         id,
         &boundary,
-        Context::block(indent, if root { 0 } else { indent }),
+        Start::Node(Context::block(indent, if root { 0 } else { indent })),
         &node.comments,
         &layout,
     )
@@ -337,7 +345,7 @@ pub(super) fn render_with_comments<'syntax, Location: Copy + Into<Option<Span>> 
     Emission { syntax, source }: Emission<'syntax, Location>,
     id: NodeId,
     boundary: &Boundary<'_>,
-    context: Context,
+    start: Start,
     root_comments: &'syntax [Comment<Location>],
     layout: &Layout,
 ) -> Result<Replacement, Error> {
@@ -353,11 +361,11 @@ pub(super) fn render_with_comments<'syntax, Location: Copy + Into<Option<Span>> 
         .cloned()
         .collect();
     let own_line = id == syntax.root
-        && (emit::block_collection(&syntax.nodes[id.index()].kind, context.in_flow())
+        && (emit::block_collection(&syntax.nodes[id.index()].kind, layout.flow(id))
             || visible
                 .iter()
                 .any(|comment| comment.placement == CommentPlacement::Leading));
-    let placement = boundary.placement(context, &visible, root_comments, own_line);
+    let placement = boundary.placement(start, &visible, root_comments, own_line);
     let fragment = emit::render(syntax, source.options, id, &placement, layout)?;
     boundary.complete(fragment, source.options.max_input_bytes)
 }

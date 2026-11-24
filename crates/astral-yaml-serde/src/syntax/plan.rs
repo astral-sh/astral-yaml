@@ -9,7 +9,6 @@ use super::source::Source;
 use super::splice::{self, Boundary};
 use super::view::Syntax;
 use super::{Comment, Node, NodeKind, emit};
-use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{Budget, Error, NodeId, Span};
 use std::collections::HashSet;
 
@@ -25,7 +24,7 @@ pub(super) struct Plan<'plan> {
 pub(super) struct Rewrite<'source> {
     pub(super) id: NodeId,
     pub(super) boundary: Boundary<'source>,
-    context: emit::Context,
+    start: splice::Start,
 }
 
 /// Changes between the original and final syntax, excluding canceled edits.
@@ -118,29 +117,6 @@ impl Plan<'_> {
         std::iter::successors(Some(id), |id| self.parents[id.index()])
     }
 
-    fn body_region(&self, id: NodeId, layout: &RootLayout, scopes: &Scopes<'_>) -> Span {
-        let mut region = scopes.body(id);
-        if id != self.candidate.root {
-            return region;
-        }
-        if emit::has_inline_header(&self.candidate.nodes[id.index()], false) {
-            // A root's inline comment must move with its content
-            // when the emitted layout puts it on a header. Framing
-            // comments on other lines remain outside the rewrite.
-            for comment in &self.original.nodes[id.index()].comments {
-                if comment.placement == CommentPlacement::Inline
-                    && comment.span.start() >= region.end()
-                    && self.original.text[region.end()..comment.span.start()]
-                        .bytes()
-                        .all(|byte| matches!(byte, b' ' | b'\t'))
-                {
-                    region = super::span(region.start(), comment.span.end());
-                }
-            }
-        }
-        layout.rewrite_region(self.original, region)
-    }
-
     pub(super) fn rewrite_regions(
         &self,
         layout: &RootLayout,
@@ -172,11 +148,14 @@ impl Plan<'_> {
             let mut rewrites: Vec<_> = ids
                 .iter()
                 .map(|&id| {
-                    let span = self.body_region(id, layout, &scopes);
+                    let mut span = scopes.body(id);
+                    if id == self.candidate.root {
+                        span = layout.rewrite_region(self.original, span);
+                    }
                     let line = lines.at(span.start());
                     Rewrite {
                         id,
-                        context: scopes.context(id, line, span.start()),
+                        start: scopes.start(id, line, span.start()),
                         boundary: Boundary::new(
                             &self.original.text,
                             span,
@@ -257,7 +236,7 @@ impl Plan<'_> {
                 emission,
                 id,
                 &rewrite.boundary,
-                rewrite.context,
+                rewrite.start,
                 comments,
                 syntax,
             )?;

@@ -35,7 +35,13 @@ pub(super) fn render<'syntax, Location: Copy + Into<Option<Span>> + 'syntax>(
         super::splice::Separator::Space => emitter.push(" ")?,
         super::splice::Separator::Line(indent) => emitter.line(indent)?,
     }
-    emitter.node(id, placement.context, "", 0)?;
+    match placement.start {
+        super::splice::Start::Node(context) => emitter.node(id, context, "", 0)?,
+        super::splice::Start::AfterIndicator(indent) => {
+            let comments = emitter.node_comments(id);
+            emitter.value(id, Context::block(indent, indent), "", 0, comments)?;
+        }
+    }
     if placement.comment_follows {
         emitter.push(" ")?;
     }
@@ -64,14 +70,14 @@ pub(super) struct Fragment {
     pub(super) last_block_child_indent: Option<usize>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct Context {
     /// Indentation for continuation lines and comments.
     pub(super) indent: usize,
     position: Position,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Position {
     // A block scalar's indentation is relative to its parent, even when its
     // header is moved onto a continuation line by properties or comments.
@@ -223,6 +229,19 @@ impl<'comments, Location> Comments<'comments, Location> {
                 .count()
                 > 1
     }
+}
+
+/// Leading comments on both sides of an inline comment need the field
+/// or dash between them when the value has no property header of its own.
+pub(super) fn needs_slot_prefix<Location>(node: &super::Node<Location>) -> bool {
+    let mut comments = Comments {
+        remaining: &node.comments,
+    };
+    if node.has_properties() || !comments.next_is(CommentPlacement::Leading) {
+        return false;
+    }
+    while comments.take(CommentPlacement::Leading).is_some() {}
+    comments.take(CommentPlacement::Inline).is_some() && comments.next_is(CommentPlacement::Leading)
 }
 
 /// Return whether a block collection has enough headers for its inline comments.
@@ -461,7 +480,7 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         context: Context,
     ) -> Result<(), Error> {
         let parent = &self.document.nodes[collection.index()];
-        if first && !context.in_flow() && (parent.anchor.is_some() || parent.tag.is_some()) {
+        if first && !context.in_flow() && parent.has_properties() {
             return Ok(());
         }
         self.before(
@@ -573,25 +592,32 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
     fn node_with_comments(
         &mut self,
         id: NodeId,
-        context: Context,
+        mut context: Context,
         suffix: &str,
         depth: usize,
         mut comments: Comments<'_, Location>,
     ) -> Result<(), Error> {
-        let context = if self.layout.flow(id) {
-            Context::flow(context.indent)
-        } else {
-            context
-        };
-        let indent = context.indent;
-        let flow = context.in_flow();
         if depth >= self.options.max_depth || self.work.try_charge(1).is_none() {
             return Err(self.error("emission resource limit exceeded"));
         }
-
-        self.prefix(&mut comments, indent)?;
-        self.properties(id, indent, flow, &mut comments)?;
         let node = &self.document.nodes[id.index()];
+        let collection = collection_style(&node.kind, context.in_flow() || self.layout.flow(id));
+        if collection == Some(CollectionStyle::Block)
+            && !node.has_properties()
+            && comments.next_is(CommentPlacement::Leading)
+        {
+            // Indentation keeps the collection's prefix outside its first child.
+            self.before(&mut comments, context.indent)?;
+            context.indent += 2;
+            self.line(context.indent)?;
+        }
+        let indent = context.indent;
+        if depth == 1 {
+            self.last_block_child_indent =
+                (collection == Some(CollectionStyle::Block)).then_some(indent);
+        }
+        self.prefix(&mut comments, indent)?;
+        self.properties(id, context, collection, &mut comments)?;
         match &node.kind {
             NodeKind::Scalar { value, style } => {
                 self.scalar(
@@ -610,14 +636,17 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
                 self.push("*")?;
                 self.push(name)?;
             }
-            NodeKind::Sequence { items, style } => {
-                self.sequence(items, *style, id, context, depth, &mut comments)?;
+            NodeKind::Sequence { items, .. } => {
+                if collection == Some(CollectionStyle::Flow) {
+                    context = Context::flow(indent);
+                }
+                self.sequence(items, id, context, depth, &mut comments)?;
             }
-            NodeKind::Mapping { entries, style } => {
-                let is_flow = flow || *style == CollectionStyle::Flow || entries.is_empty();
+            NodeKind::Mapping { entries, .. } => {
+                let is_flow = collection == Some(CollectionStyle::Flow);
                 if is_flow {
                     self.flow_start("{", id, &mut comments, indent + 2)?;
-                } else if node.anchor.is_some() || node.tag.is_some() {
+                } else if node.has_properties() {
                     self.line(indent)?;
                 }
                 for (index, &(key, value)) in entries.iter().enumerate() {
@@ -670,15 +699,14 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
     fn sequence(
         &mut self,
         items: &[NodeId],
-        style: CollectionStyle,
         id: NodeId,
         context: Context,
         depth: usize,
         comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
         let indent = context.indent;
-        let is_flow = context.in_flow() || style == CollectionStyle::Flow || items.is_empty();
-        if is_flow {
+        let node = &self.document.nodes[id.index()];
+        if context.in_flow() {
             self.flow_start("[", id, comments, indent + 2)?;
             for (index, &item) in items.iter().enumerate() {
                 if index != 0 {
@@ -694,8 +722,7 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
             }
             self.flow_end("]", id, comments, indent + 2, !items.is_empty())?;
         } else {
-            let node = &self.document.nodes[id.index()];
-            if node.anchor.is_some() || node.tag.is_some() {
+            if node.has_properties() {
                 self.line(indent)?;
             }
             for (index, &item) in items.iter().enumerate() {
@@ -745,13 +772,14 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
     fn properties(
         &mut self,
         id: NodeId,
-        indent: usize,
-        flow: bool,
+        context: Context,
+        collection: Option<CollectionStyle>,
         comments: &mut Comments<'_, Location>,
     ) -> Result<(), Error> {
         let node = &self.document.nodes[id.index()];
-        let collection = collection_style(&node.kind, flow);
-        let continuation_indent = if flow || collection == Some(CollectionStyle::Block) {
+        let indent = context.indent;
+        let continuation_indent = if context.in_flow() || collection == Some(CollectionStyle::Block)
+        {
             indent
         } else {
             indent + 2
@@ -852,7 +880,7 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
         let block = block_collection(&node.kind, flow || self.layout.flow(id));
         let properties = usize::from(node.tag.is_some()) + usize::from(node.anchor.is_some());
         let leading = comments.needs_value_line(properties);
-        let mut value_indent = if block || leading {
+        let value_indent = if block || leading {
             let item = self
                 .layout
                 .item(id)
@@ -874,16 +902,6 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
             self.push(" ")?;
             if flow { indent + 2 } else { indent }
         };
-        if block && properties == 0 && comments.next_is(CommentPlacement::Leading) {
-            // With no delimiter or property header, indentation is the opening
-            // boundary. Put the collection's prefix outside its child slots.
-            self.before(&mut comments, value_indent)?;
-            value_indent += 2;
-            self.line(value_indent)?;
-        }
-        if depth == 1 {
-            self.last_block_child_indent = block.then_some(value_indent);
-        }
         let context = Context::value(value_indent, flow, indent);
         self.node_with_comments(id, context, suffix, depth, comments)
     }
@@ -891,8 +909,7 @@ impl<'syntax, Location: Copy + Into<Option<Span>>> Emitter<'syntax, '_, Location
 
 /// Return whether the node is an empty plain scalar with no tag or anchor.
 pub(super) fn omitted<Location>(node: &super::Node<Location>) -> bool {
-    node.anchor.is_none()
-        && node.tag.is_none()
+    !node.has_properties()
         && matches!(&node.kind, NodeKind::Scalar { value, style: ScalarStyle::Plain } if value.is_empty())
 }
 
@@ -950,20 +967,6 @@ pub(super) fn key_form<Location>(
     } else {
         KeyForm::Implicit
     }
-}
-
-/// Return whether a block collection or scalar provides an inline-comment header.
-/// Collections need a tag or anchor. Block scalars use their indicator.
-pub(super) fn has_inline_header<Location>(node: &super::Node<Location>, flow: bool) -> bool {
-    !flow
-        && (matches!(
-            node.kind,
-            NodeKind::Scalar {
-                style: ScalarStyle::Literal | ScalarStyle::Folded,
-                ..
-            }
-        ) || (block_collection(&node.kind, flow)
-            && (node.tag.is_some() || node.anchor.is_some())))
 }
 
 pub(super) fn block_collection(kind: &NodeKind, flow: bool) -> bool {

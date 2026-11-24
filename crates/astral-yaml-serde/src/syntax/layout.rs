@@ -12,6 +12,7 @@ enum Tail {
     Closed,
     Scalar(NodeId),
     Detached(NodeId),
+    Trailing,
 }
 
 #[derive(Clone, Copy)]
@@ -91,13 +92,21 @@ impl Layout {
         while let Some((id, prefix_before_slot)) = pending.pop() {
             let node = &document.nodes[id.index()];
             order.push(id);
-            if id != document.root
-                && emit::block_collection(&node.kind, false)
-                && !emit::block_headers_cover_comments(node, prefix_before_slot)
+            let header = node.has_properties();
+            // A property header takes the first child's prefix before the
+            // slot. Flow delimiters let the child use both sides of its slot.
+            let needs_prefix = header
+                && node
+                    .kind
+                    .first_block_slot()
+                    .is_some_and(|child| emit::needs_slot_prefix(&document.nodes[child.index()]));
+            if emit::block_collection(&node.kind, false)
+                && (needs_prefix
+                    || (id != document.root
+                        && !emit::block_headers_cover_comments(node, prefix_before_slot)))
             {
                 layout.presentation[id.index()] = Presentation::FlowCollection;
             }
-            let header = node.anchor.is_some() || node.tag.is_some();
             match &node.kind {
                 NodeKind::Sequence { items, .. } => {
                     pending.extend(
@@ -115,10 +124,16 @@ impl Layout {
                 _ => {}
             }
         }
+        layout.resolve_tails(&document, order);
+        layout
+    }
+
+    /// Resolve each suffix after the presentation of its children is known.
+    fn resolve_tails<Location>(&mut self, document: &Syntax<'_, Location>, order: Vec<NodeId>) {
         for id in order.into_iter().rev() {
             let node = &document.nodes[id.index()];
             let mut tail = match &node.kind {
-                _ if layout.flow(id) => Tail::Closed,
+                _ if self.flow(id) => Tail::Closed,
                 NodeKind::Scalar {
                     style: ScalarStyle::Literal | ScalarStyle::Folded,
                     ..
@@ -128,15 +143,16 @@ impl Layout {
                     style: CollectionStyle::Block,
                 } => items
                     .last()
-                    .map_or(Tail::Closed, |child| layout.tails[child.index()]),
+                    .map_or(Tail::Closed, |child| self.tails[child.index()]),
                 NodeKind::Mapping {
                     entries,
                     style: CollectionStyle::Block,
                 } => entries
                     .last()
-                    .map_or(Tail::Closed, |(_, child)| layout.tails[child.index()]),
+                    .map_or(Tail::Closed, |(_, child)| self.tails[child.index()]),
                 _ => Tail::Closed,
             };
+            let mut detached_root = false;
             for comment in node.comments.iter().filter(|comment| {
                 comment.position == CommentPosition::After
                     && comment.placement != CommentPlacement::Inline
@@ -146,29 +162,36 @@ impl Layout {
                 if comment.placement == CommentPlacement::Trailing
                     && let Tail::Detached(owner) = tail
                 {
-                    layout.presentation[owner.index()] = Presentation::FlowCollection;
+                    self.presentation[owner.index()] = Presentation::FlowCollection;
                     tail = Tail::Closed;
                 }
                 // Root suffixes have a separate document-marker plan.
                 if id == document.root {
+                    if comment.placement == CommentPlacement::Detached {
+                        detached_root = true;
+                    } else if detached_root && emit::block_collection(&node.kind, self.flow(id)) {
+                        self.presentation[id.index()] = Presentation::FlowCollection;
+                        tail = Tail::Closed;
+                    }
                     continue;
                 }
                 if comment.placement == CommentPlacement::Detached {
                     if let Tail::Scalar(scalar) = tail {
-                        layout.presentation[scalar.index()] = Presentation::QuotedScalar;
+                        self.presentation[scalar.index()] = Presentation::QuotedScalar;
                     }
-                    tail = if emit::block_collection(&node.kind, layout.flow(id)) {
+                    tail = if emit::block_collection(&node.kind, self.flow(id)) {
                         Tail::Detached(id)
                     } else {
                         Tail::Closed
                     };
+                } else if emit::block_collection(&node.kind, self.flow(id)) {
+                    tail = Tail::Trailing;
                 } else {
                     tail = Tail::Closed;
                 }
             }
-            layout.tails[id.index()] = tail;
+            self.tails[id.index()] = tail;
         }
-        layout
     }
 
     /// Keep each block item's layout. Items without a source layout borrow
@@ -221,8 +244,7 @@ impl Layout {
                 // the dash. Properties also need a separate collection header.
                 let node = &syntax.nodes[item.index()];
                 let prefix = syntax.nodes[first.index()].comments.first();
-                if node.anchor.is_none()
-                    && node.tag.is_none()
+                if !node.has_properties()
                     && !prefix.is_some_and(|comment| comment.placement == CommentPlacement::Leading)
                 {
                     layouts[item.index()] = Some(layout);
@@ -241,15 +263,19 @@ impl Layout {
     }
 
     /// Return whether the content style needs multiline indentation.
-    pub(super) fn multiline(&self, id: NodeId, kind: &NodeKind) -> bool {
+    pub(super) fn multiline(&self, id: NodeId, kind: &NodeKind, flow: bool) -> bool {
         match kind {
             NodeKind::Scalar { value, style } => match self.scalar_style(id, *style) {
                 ScalarStyle::Literal | ScalarStyle::Folded => true,
                 ScalarStyle::Plain | ScalarStyle::SingleQuoted => value.contains('\n'),
                 ScalarStyle::DoubleQuoted => false,
             },
-            _ => emit::block_collection(kind, self.flow(id)),
+            _ => emit::block_collection(kind, flow || self.flow(id)),
         }
+    }
+
+    pub(super) fn has_suffix(&self, id: NodeId) -> bool {
+        matches!(self.tails[id.index()], Tail::Detached(_) | Tail::Trailing)
     }
 
     pub(super) fn tail(&self, id: NodeId) -> Option<NodeId> {
