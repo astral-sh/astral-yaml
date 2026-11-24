@@ -102,6 +102,7 @@ fn alias_expansion_obeys_the_work_budget() {
     let budget = Budget::new(2);
     let policy = DeserializationPolicy {
         work_budget: Some(&budget),
+        ..DeserializationPolicy::default()
     };
     let error = from_str_with_policy::<Value>("[&port !Port 080, *port]", policy).unwrap_err();
     insta::assert_snapshot!(error, @"$[1]: deserialization resource limit exceeded at bytes 18..23");
