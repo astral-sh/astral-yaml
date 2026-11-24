@@ -149,16 +149,6 @@ mod editable {
         });
     }
 
-    #[divan::bench]
-    fn normalize_flow_sequence_with_marker_spellings(bencher: Bencher) {
-        let source = format!("[{}]", "---, ..., ".repeat(4096));
-        let document = Editable::<Value>::parse(&source).unwrap();
-
-        bencher.bench_local(|| {
-            black_box(document.syntax().normalized_yaml().unwrap());
-        });
-    }
-
     // Include construction: each transaction starts from the same source.
     #[divan::bench]
     fn replace_scalar(bencher: Bencher) {
