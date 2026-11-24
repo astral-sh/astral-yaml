@@ -1,6 +1,6 @@
 use test_case::test_case;
 
-use crate::syntax::draft::{Candidate, same_style};
+use crate::syntax::draft::Candidate;
 use crate::syntax::framing::RootLayout;
 use crate::syntax::plan::{Changes, Plan};
 use crate::syntax::source::Source;
@@ -194,26 +194,19 @@ fn rewriting_only_an_outer_comment_obeys_the_work_limit() {
 #[test_case("one", "one", true)]
 #[test_case("one", "'one'", false)]
 #[test_case("one", "[one]", false)]
-#[test_case("[]", "[]", true)]
+#[test_case("[]", "[one]", true)]
+#[test_case("[]", "{}", false)]
 #[test_case("[one]", "- one", false)]
 #[test_case("{}", "{}", true)]
 #[test_case("{one: two}", "one: two", false)]
-fn requested_style_comparison_checks_kind_and_collection_contents(
-    left: &str,
-    right: &str,
-    expected: bool,
-) {
+fn style_comparison_checks_kind_and_ignores_contents(left: &str, right: &str, expected: bool) {
     // Scalar and collection styles distinguish presentations of the same content.
     // https://yaml.org/spec/1.2.2/#3231-node-styles
     let left = DocumentSyntax::parse(left).unwrap();
     let right = DocumentSyntax::parse(right).unwrap();
-    assert_eq!(
-        same_style(
-            &left.source.nodes[left.source.root.index()].kind,
-            &right.source.nodes[right.source.root.index()].kind
-        ),
-        expected
-    );
+    let left = left.node(left.root()).unwrap().kind();
+    let right = right.node(right.root()).unwrap().kind();
+    assert_eq!(left.same_style(right), expected);
 }
 
 #[test]

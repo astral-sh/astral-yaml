@@ -121,8 +121,8 @@ fn kind_changes_create_boundaries_for_outer_comments(replacement: &str, marker: 
     let expected = from_str::<Shape>(replacement).unwrap();
     let document = edit::<Spanned<Shape>>("# attached\n1\n", |mut root| {
         root.set(&expected)?;
-        if !marker.is_empty() {
-            root.set_collection_style(CollectionStyle::Block)?;
+        if marker.is_empty() {
+            root.set_collection_style(CollectionStyle::Flow)?;
         }
         Ok(())
     });
@@ -130,9 +130,6 @@ fn kind_changes_create_boundaries_for_outer_comments(replacement: &str, marker: 
     assert_shape(document.value(), syntax, syntax.root(), &expected);
     assert_eq!(
         document.source(),
-        format!(
-            "# attached\n{marker}{}\n",
-            replacement.replace("two:", "\"two\":")
-        )
+        format!("# attached\n{marker}{replacement}\n")
     );
 }

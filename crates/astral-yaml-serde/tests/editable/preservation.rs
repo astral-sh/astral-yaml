@@ -246,8 +246,8 @@ fn typed_setters_preserve_comments_interleaved_with_properties() {
 }
 
 #[test_case(&serde_json::json!("new"), "new"; "scalar")]
-#[test_case(&serde_json::json!(["new"]), r#"["new"]"#; "sequence")]
-#[test_case(&serde_json::json!({"key": "new"}), r#"{"key": "new"}"#; "mapping")]
+#[test_case(&serde_json::json!(["new"]), r#"- "new""#; "sequence")]
+#[test_case(&serde_json::json!({"key": "new"}), r#"key: "new""#; "mapping")]
 fn typed_setters_terminate_an_empty_roots_header_comment(value: &serde_json::Value, yaml: &str) {
     // The comment on the marker line ends before the new content begins.
     // https://yaml.org/spec/1.2.2/#66-comments
@@ -274,8 +274,8 @@ fn an_empty_document_keeps_its_header_comments_before_the_replacement() {
 }
 
 #[test_case(&serde_json::json!("new"), "new"; "scalar")]
-#[test_case(&serde_json::json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
-#[test_case(&serde_json::json!({"a": "b"}), r#"{"a": "b"}"#; "mapping")]
+#[test_case(&serde_json::json!(["a", "b"]), "- \"a\"\n- \"b\""; "sequence")]
+#[test_case(&serde_json::json!({"a": "b"}), r#"a: "b""#; "mapping")]
 fn typed_setters_fill_empty_documents_without_consuming_markers(
     value: &serde_json::Value,
     yaml: &str,
@@ -570,18 +570,26 @@ fn escaping_a_reader_only_character_can_require_an_explicit_key() {
     );
 }
 
-#[test]
-fn an_explicit_single_quoted_style_cannot_publish_a_non_printable_character() {
+#[test_case(ScalarStyle::SingleQuoted, "a\u{80}b"; "requires an escape")]
+#[test_case(ScalarStyle::Plain, "true"; "would resolve to a boolean")]
+fn incompatible_scalar_requests_fail_in_either_order(style: ScalarStyle, value: &str) {
     // Backslash escapes for non-printable characters require double quotes.
     // https://yaml.org/spec/1.2.2/#57-escaped-characters
     // https://yaml.org/spec/1.2.2/#732-single-quoted-style
     let mut document = Editable::<String>::parse("'old'").unwrap();
-    let error = document
+    let before = document
         .edit(|mut root| {
-            root.set("a\u{80}b")?;
-            root.set_scalar_style(ScalarStyle::SingleQuoted)
+            root.set_scalar_style(style)?;
+            root.set(value)
         })
         .unwrap_err();
-    assert!(error.message.contains("requested style"));
+    let after = document
+        .edit(|mut root| {
+            root.set(value)?;
+            root.set_scalar_style(style)
+        })
+        .unwrap_err();
+    assert!(before.message.contains("requested style"));
+    assert_eq!(before.message, after.message);
     assert_eq!(document.source(), "'old'");
 }

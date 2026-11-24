@@ -1175,9 +1175,8 @@ pub(super) fn parse_rendered<Location: Copy>(
 
     for &id in requested_styles {
         let kind = &expected.nodes[id.index()].kind;
-        let preserved = matched[id.index()].is_some_and(|target| {
-            super::draft::same_style(kind, &parsed.source.nodes[target.index()].kind)
-        });
+        let preserved = matched[id.index()]
+            .is_some_and(|target| kind.same_style(&parsed.source.nodes[target.index()].kind));
         if !preserved {
             return Err(error(
                 "requested style is not representable in this context",

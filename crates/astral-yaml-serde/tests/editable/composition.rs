@@ -343,7 +343,8 @@ fn typed_comment_insertions_share_the_root_header_plan() {
     let document = edit::<Value>(source, |mut root| {
         root.append_comment(" second", CommentPlacement::Inline)?;
         root.append_comment(" third", CommentPlacement::Inline)?;
-        root.set(["new"])
+        root.set(["new"])?;
+        root.set_collection_style(CollectionStyle::Flow)
     });
     assert_eq!(document.value(), &json!(["new"]));
     let diff = edit_diff(source, document.source());

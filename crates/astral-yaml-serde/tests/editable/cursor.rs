@@ -79,8 +79,8 @@ fn fluent_configuration_edits_keep_order_comments_and_unknown_fields() {
 
 #[test_case(&json!("false"), r#""false""#; "string")]
 #[test_case(&json!(false), "false"; "boolean")]
-#[test_case(&json!(["a", "b"]), r#"["a", "b"]"#; "sequence")]
-#[test_case(&json!({"a": 1}), r#"{"a": 1}"#; "mapping")]
+#[test_case(&json!(["a", "b"]), "- \"a\"\n- \"b\""; "sequence")]
+#[test_case(&json!({"a": 1}), "a: 1"; "mapping")]
 #[test_case(&Value::Null, "null"; "null")]
 #[test_case(&json!("[a, b] # still a string"), r#""[a, b] # still a string""#; "YAML-looking string")]
 #[test_case(&json!(""), r#""""#; "empty string")]
@@ -240,7 +240,7 @@ fn insertion_returns_a_cursor_and_parents_remain_available() {
     -items: [old]
     +items:
     +  - 'first'
-    +  - {"value": "new"}
+    +  - value: "new"
     "#);
 }
 
@@ -262,12 +262,13 @@ fn upserts_preserve_existing_positions_and_allow_further_edits() {
         Ok(())
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    @@ -1,2 +1,4 @@
+    @@ -1,2 +1,5 @@
     -first: 'old' # keep
     +first: 'it''s new' # keep
      last: true
-    +added: ["one", "two" # added
-    +  ]
+    +added:
+    +  - "one"
+    +  - "two" # added
     "#);
 }
 
@@ -516,9 +517,11 @@ fn sequence_views_track_lengths_and_return_borrowed_children() {
         items.into_cursor().item(1)?.field("value")?.set("last")
     });
     insta::assert_snapshot!(edit_diff(source, document.source()), @r#"
-    @@ -1 +1 @@
+    @@ -1 +1,3 @@
     -items: []
-    +items: [false, {"value": "last"}]
+    +items:
+    +  - false
+    +  - value: "last"
     "#);
 }
 
@@ -755,7 +758,11 @@ fn collection_defaults_reuse_existing_children_and_leave_scalars_alone() {
         .unwrap();
     insta::assert_snapshot!(document.source(), @"
     enabled: true # retained
-    services: {web: 80, ports: [443, 8443]}
+    services:
+      web: 80
+      ports:
+        - 443
+        - 8443
     ");
 }
 
@@ -831,6 +838,64 @@ fn inserted_keys_follow_the_final_ancestor_style() {
             .set_collection_style(CollectionStyle::Flow)
     });
     insta::assert_snapshot!(document.source(), @r#"{outer: {a: 1, foo: 2, "x,y": 3, "true": 4}}"#);
+}
+
+// https://yaml.org/spec/1.2.2/#733-plain-style
+#[test_case(CollectionStyle::Block; "block")]
+#[test_case(CollectionStyle::Flow; "flow")]
+fn whole_maps_and_individual_fields_use_the_same_key_styles(style: CollectionStyle) {
+    let entries = std::collections::BTreeMap::from([
+        ("port", "http"),
+        ("true", "false"),
+        ("x,y", "a,b"),
+        ("", "empty"),
+    ]);
+    let whole = edit::<Value>("{}\n", |mut root| {
+        root.set(&entries)?;
+        root.set_collection_style(style)
+    });
+    let individual = edit::<Value>("{}\n", |root| {
+        let mut fields = root.into_mapping()?;
+        for (key, value) in entries {
+            fields.set(key, value)?;
+        }
+        fields.set_collection_style(style)
+    });
+    assert_eq!(whole.source(), individual.source());
+}
+
+#[test]
+fn keys_inside_serialized_variants_follow_the_final_mapping_style() {
+    #[derive(Serialize)]
+    enum Action {
+        Listen {
+            port: u16,
+            #[serde(rename = "x,y")]
+            address: &'static str,
+        },
+    }
+
+    let document = edit::<Value>("[]\n", |root| {
+        root.into_sequence()?
+            .push(Action::Listen {
+                port: 80,
+                address: "local",
+            })?
+            .field("Listen")?
+            .set_collection_style(CollectionStyle::Flow)
+    });
+    insta::assert_snapshot!(document.source(), @r#"- Listen: {port: 80, "x,y": "local"}"#);
+}
+
+#[test]
+fn replacing_keys_preserves_compatible_quotes_and_defaults_new_scalars_to_plain() {
+    let document = edit::<IgnoredAny>("{[1]: a, 'old': b, 2: c}\n", |root| {
+        let mut fields = root.into_mapping()?;
+        fields.key_at(0)?.set("port")?;
+        fields.key_at(1)?.set("name")?;
+        fields.key_at(2)?.set("true")
+    });
+    insta::assert_snapshot!(document.source(), @r#"{port: a, 'name': b, "true": c}"#);
 }
 
 #[test]

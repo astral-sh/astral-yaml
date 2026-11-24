@@ -147,8 +147,7 @@ impl<'doc> Editor<'doc> {
         let (remaining, span) = self.draft.byte_budget();
         let key = ser::quote_with_limit(name, remaining, span)?;
         let yaml = serialize(remaining - key.len(), span)?;
-        let (key, value) = self.insert_entry(id, *len, &key, yaml.as_ref())?;
-        self.draft.prefer_plain_key(key);
+        let (_, value) = self.insert_entry(id, *len, &key, yaml.as_ref())?;
         *len += 1;
         Ok(value)
     }

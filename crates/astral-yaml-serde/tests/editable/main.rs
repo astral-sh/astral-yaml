@@ -1,6 +1,7 @@
 #![cfg(feature = "editable")]
 
 mod block_rewrites;
+mod collection_style;
 mod composition;
 mod cursor;
 mod document;
