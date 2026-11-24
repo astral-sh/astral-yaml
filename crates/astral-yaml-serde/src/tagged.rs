@@ -20,6 +20,17 @@ pub(crate) fn is_core_tag(tag: &str) -> bool {
 /// Untagged input is an error. Capturing a core tag does not disable its type
 /// check on the value.
 ///
+/// For an application tag, the requested scalar type determines how to read
+/// the decoded text, regardless of quoting. Both `!Port 080` and `!Port "080"`
+/// give `Tagged<u16>` the number 80 and `Tagged<String>` the text `"080"`.
+/// A dynamic payload such as [`crate::Value`] retains the text.
+///
+/// With `Tagged<Option<T>>`, an application-tagged scalar containing a core
+/// null spelling (empty text, `~`, `null`, `Null`, or `NULL`) reads as `None`.
+/// Serializing `Some` of such a scalar is an error. Use `Option<Tagged<String>>`
+/// if the tag may be absent, or put the optional field in a tagged mapping.
+/// In `!T {value: "null"}` the field is an ordinary quoted string.
+///
 /// This crate's serializer emits the tag and value together. Core tags must match the
 /// emitted YAML. For example, `!!int` allows a string value of `"42"`, but `!!map`
 /// requires a mapping. Use `Tagged<Option<T>>` to capture a `!!null` tag before

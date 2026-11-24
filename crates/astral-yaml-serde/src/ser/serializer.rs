@@ -23,6 +23,10 @@ const EXPLICIT_KEY: &str = "? ";
 /// Strings are quoted to preserve their type. Unit enum variants use their name,
 /// and variants with data use a mapping with the variant name as its key.
 ///
+/// Inside an application tag, a null spelling such as `"null"` reads as `None`
+/// for an optional payload even when quoted. Serialization rejects `Some` of
+/// such a value.
+///
 /// The default reader has separate limits on input bytes, syntax elements, and
 /// deserialization work. Large serialized documents can exceed those limits.
 ///
@@ -98,6 +102,13 @@ impl<O: FlowWrite<Error>> Serializer<O> {
         Ok(())
     }
 
+    fn wrapped<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<()> {
+        self.enter()?;
+        value.serialize(&mut *self)?;
+        self.depth -= 1;
+        Ok(())
+    }
+
     #[inline]
     fn compound(&mut self, kind: Collection) -> Result<Compound<'_, O>> {
         // Nested collections without a core tag only need a depth increment.
@@ -168,20 +179,25 @@ impl<O: FlowWrite<Error>> Serializer<O> {
         self.check_written_scalar_tag(start)
     }
 
-    /// Consume the current node's tag state and return any core type constraint.
+    /// Consume the tag before visiting any children of this node.
+    #[inline]
+    fn take_tag(&mut self) -> Option<tag::Constraint> {
+        self.yaml_tag = false;
+        self.pending_tag.take()
+    }
+
     #[inline]
     fn take_core_tag(&mut self) -> Option<CoreType> {
-        self.yaml_tag = false;
-        match self.pending_tag.take() {
+        match self.take_tag() {
             Some(tag::Constraint::Core(kind)) => Some(kind),
-            Some(tag::Constraint::Any) | None => None,
+            _ => None,
         }
     }
 
     #[inline]
     fn check_scalar_tag(&mut self, value: &str) -> Result<()> {
-        if let Some(tag) = self.take_core_tag() {
-            Self::check_tagged_scalar(tag, value)?;
+        if let Some(tag) = self.take_tag() {
+            tag.check_scalar(value)?;
         }
 
         Ok(())
@@ -189,17 +205,8 @@ impl<O: FlowWrite<Error>> Serializer<O> {
 
     #[inline]
     fn check_written_scalar_tag(&mut self, start: usize) -> Result<()> {
-        if let Some(tag) = self.take_core_tag() {
-            Self::check_tagged_scalar(tag, &self.output.as_ref()[start..])?;
-        }
-
-        Ok(())
-    }
-
-    #[cold]
-    fn check_tagged_scalar(tag: CoreType, value: &str) -> Result<()> {
-        if !tag.matches_scalar(value) {
-            return Err(Error::new("serialized value does not match its YAML tag"));
+        if let Some(tag) = self.take_tag() {
+            tag.check_scalar(&self.output.as_ref()[start..])?;
         }
 
         Ok(())
@@ -297,9 +304,9 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
     }
 
     fn serialize_str(self, value: &str) -> Result<()> {
-        if let Some(tag) = self.take_core_tag() {
+        if let Some(tag) = self.take_tag() {
             self.output.check(value.len().saturating_add(2))?;
-            Serializer::<O>::check_tagged_scalar(tag, value)?;
+            tag.check_scalar(value)?;
         }
         self.output.quote(value)
     }
@@ -325,10 +332,11 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
     }
 
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
-        self.enter()?;
-        value.serialize(&mut *self)?;
-        self.depth -= 1;
-        Ok(())
+        // Quoting cannot distinguish Some("null") from None inside an application tag.
+        if let Some(tag::Constraint::Application) = self.pending_tag {
+            self.pending_tag = Some(tag::Constraint::NonNull);
+        }
+        self.wrapped(value)
     }
 
     fn serialize_unit(self) -> Result<()> {
@@ -363,7 +371,7 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
     ) -> Result<()> {
         let previous = self.yaml_tag;
         self.yaml_tag |= name == yaml_tag::NAME;
-        let result = self.serialize_some(value);
+        let result = self.wrapped(value);
         self.yaml_tag = previous;
         result
     }
@@ -378,7 +386,7 @@ impl<'ser, O: FlowWrite<Error>> ser::Serializer for &'ser mut Serializer<O> {
         if std::mem::take(&mut self.yaml_tag) {
             self.enum_tag(variant)?;
             self.output.push_str(" ")?;
-            return self.serialize_some(value);
+            return self.wrapped(value);
         }
 
         let mut map = self.compound(Collection::Mapping)?;

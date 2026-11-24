@@ -1,12 +1,29 @@
 use crate::Error;
 use astral_yaml::emit::FlowWrite;
-use astral_yaml::schema::CoreType;
+use astral_yaml::schema::{self, CoreType, ScalarType};
 use serde::{Serialize, ser};
 use std::fmt;
 
 pub(super) enum Constraint {
-    Any,
+    NonSpecific,
+    Application,
+    NonNull,
     Core(CoreType),
+}
+
+impl Constraint {
+    #[cold]
+    pub(super) fn check_scalar(self, value: &str) -> Result<(), Error> {
+        match self {
+            Self::Core(kind) if !kind.matches_scalar(value) => {
+                Err(Error::new("serialized value does not match its YAML tag"))
+            }
+            Self::NonNull if schema::classify(value) == ScalarType::Null => Err(Error::new(
+                "Some payload would resolve to null under its YAML tag",
+            )),
+            _ => Ok(()),
+        }
+    }
 }
 
 pub(super) struct Tag {
@@ -46,9 +63,13 @@ impl Tag {
             if compact { tag.to_owned() } else { spelling }
         };
 
+        let constraint = match tag {
+            "!" => Constraint::NonSpecific,
+            _ => CoreType::from_tag(tag).map_or(Constraint::Application, Constraint::Core),
+        };
         Ok(Self {
             spelling,
-            constraint: CoreType::from_tag(tag).map_or(Constraint::Any, Constraint::Core),
+            constraint,
         })
     }
 

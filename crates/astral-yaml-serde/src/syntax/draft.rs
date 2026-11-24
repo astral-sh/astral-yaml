@@ -291,14 +291,23 @@ impl Draft {
         if membership.is_key {
             prefer_plain_key(&mut replacement.kind);
         }
-        match (&self.node(id).kind, &mut replacement.kind) {
+        let old = self.node(id);
+        match (&old.kind, &mut replacement.kind) {
             (
                 NodeKind::Scalar {
-                    style: previous, ..
+                    value: old_value,
+                    style: previous,
                 },
                 NodeKind::Scalar { value, style },
             ) => {
-                if !emit::same_scalar_type(value, replacement.tag.as_deref(), *previous, *style) {
+                // Serde can buffer a local enum variant as an untagged value.
+                // For a new payload, preserve its implicit type by default.
+                let resolution_tag = replacement.tag.as_deref().filter(|&tag| {
+                    membership.requested_style
+                        || crate::with::yaml_tag::local_name(tag).is_none()
+                        || (old.tag() == Some(tag) && old_value == value)
+                });
+                if !emit::same_scalar_type(value, resolution_tag, *previous, *style) {
                     if membership.requested_style {
                         return Err(self.error("requested style changes the scalar type"));
                     }

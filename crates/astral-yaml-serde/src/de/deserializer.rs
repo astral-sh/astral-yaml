@@ -1,3 +1,4 @@
+use super::ResolvedScalar;
 use super::input::{Entry, Input, Kind as NodeKind, Node, Parsed, Scalar, ScalarOf};
 use crate::tagged::is_core_tag;
 use crate::with::yaml_tag;
@@ -221,8 +222,10 @@ enum TagState {
     Unconsumed,
     // Core tags still determine the payload's type after capture.
     ConsumedCore,
-    // Application tags are metadata. Resolve the payload without its tag.
+    // An explicit application tag gives the scalar its type regardless of style.
     ConsumedApplication,
+    // Serde buffers a local enum tag as a mapping with an implicitly typed payload.
+    BufferedVariant,
 }
 
 #[derive(Clone, Copy)]
@@ -329,10 +332,11 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         // Serde's untagged-enum buffer accepts maps but rejects enum input.
         // Keep this conversion confined to the explicitly opted-in node.
         let mut map = TagMapping {
-            enumeration: Enumeration {
-                de: self,
-                variant,
-                value: VariantValue::Tagged,
+            variant,
+            payload: Self {
+                tag_state: TagState::BufferedVariant,
+                yaml_tag: false,
+                ..self
             },
             state: TagMappingState::Key,
         };
@@ -372,9 +376,10 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
     fn scalar(self, expected: ScalarType) -> Result<(ScalarOf<'input, 'de, I>, ScalarType)> {
         let node = self.node()?;
 
-        // Text destinations accept every untagged scalar spelling, so they do
-        // not need implicit boolean or numeric classification.
-        if expected == ScalarType::String && node.tag().is_none() {
+        // Text destinations only need type checks for explicit core tags.
+        if expected == ScalarType::String
+            && (node.tag().is_none() || self.tag_state == TagState::ConsumedApplication)
+        {
             let NodeKind::Scalar(scalar) = node.kind() else {
                 return Err(Error::at("expected a scalar", node.span()));
             };
@@ -404,8 +409,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
     fn enum_tag(self, node: I::Node<'input>) -> Option<&'input str> {
         node.tag()
             .filter(|_| self.yaml_tag && self.tag_state == TagState::Unconsumed)
-            .and_then(|tag| tag.strip_prefix('!'))
-            .filter(|name| !name.is_empty())
+            .and_then(yaml_tag::local_name)
     }
 
     fn variant_name(self, name: &'input str) -> Result<de::value::StrDeserializer<'input, Error>> {
@@ -426,10 +430,10 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
             return Err(Error::at("expected a scalar", node.span()));
         };
 
-        let tag = if self.tag_state == TagState::ConsumedApplication {
-            None
-        } else {
-            node.tag()
+        let tag = match self.tag_state {
+            TagState::ConsumedApplication => return Ok((s, schema::classify(s.value()))),
+            TagState::BufferedVariant => None,
+            TagState::Unconsumed | TagState::ConsumedCore => node.tag(),
         };
 
         let kind = match tag {
@@ -467,124 +471,9 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         }
     }
 
-    fn integer(self) -> Result<(&'input str, u32, Option<Span>)> {
-        let (scalar, kind) = self.scalar(ScalarType::Int)?;
-        Self::integer_value(scalar, kind)
-    }
-
-    fn integer_value(
-        s: ScalarOf<'input, 'de, I>,
-        kind: ScalarType,
-    ) -> Result<(&'input str, u32, Option<Span>)> {
-        if kind != ScalarType::Int {
-            return Err(Error::at("expected an integer", s.span()));
-        }
-
-        let value = s.value();
-        let (value, radix) = schema::radix_digits(value).unwrap_or((value, 10));
-
-        Ok((value, radix, s.span()))
-    }
-
-    fn float(self) -> Result<f64> {
-        let (scalar, kind) = self.scalar(ScalarType::Float)?;
-        Self::float_value(scalar, kind)
-    }
-
-    fn radix_integer_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<Option<u128>> {
-        if kind != ScalarType::Int {
-            return Ok(None);
-        }
-        let Some((value, radix)) = schema::radix_digits(s.value()) else {
-            return Ok(None);
-        };
-        u128::from_str_radix(value, radix)
-            .map(Some)
-            .map_err(|_| Error::at("integer out of range", s.span()))
-    }
-
-    fn wide_radix_float(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
-        let (digits, radix, span) = Self::integer_value(s, kind)?;
-        let digit_bits = if radix == 16 { 4 } else { 3 };
-        let mut significand = 0_u64;
-        let mut significant_bits = 0;
-        let mut discarded_bits = 0;
-        let mut guard = false;
-        let mut sticky = false;
-
-        for digit in digits.bytes() {
-            let digit = char::from(digit)
-                .to_digit(radix)
-                .expect("classified integer has valid digits");
-
-            for position in (0..digit_bits).rev() {
-                let bit = (digit >> position) & 1;
-                if significant_bits == 0 && bit == 0 {
-                    continue;
-                }
-
-                if significant_bits < f64::MANTISSA_DIGITS {
-                    significand = (significand << 1) | u64::from(bit);
-                    significant_bits += 1;
-                } else {
-                    if discarded_bits == 0 {
-                        guard = bit != 0;
-                    } else {
-                        sticky |= bit != 0;
-                    }
-
-                    discarded_bits += 1;
-                    let mantissa_bits = i32::try_from(f64::MANTISSA_DIGITS)
-                        .expect("f64 mantissa width fits in i32");
-                    if discarded_bits > f64::MAX_EXP - mantissa_bits {
-                        return Err(Error::at("float out of range", span));
-                    }
-                }
-            }
-        }
-
-        // Round to nearest, ties to even, before scaling by a power of two.
-        if guard && (sticky || significand & 1 != 0) {
-            significand += 1;
-        }
-
-        #[allow(clippy::cast_precision_loss)]
-        let value = (significand as f64) * 2_f64.powi(discarded_bits);
-        if !value.is_finite() {
-            return Err(Error::at("float out of range", span));
-        }
-
-        Ok(value)
-    }
-
-    fn float_value(s: ScalarOf<'input, 'de, I>, kind: ScalarType) -> Result<f64> {
-        if !matches!(kind, ScalarType::Float | ScalarType::Int) {
-            return Err(Error::at("expected a number", s.span()));
-        }
-
-        if let Some(value) = schema::special_float(s.value()) {
-            return Ok(value);
-        }
-
-        match Self::radix_integer_value(s, kind) {
-            Ok(Some(value)) => {
-                // YAML integer-to-float conversion rounds when the mantissa cannot hold every bit.
-                #[allow(clippy::cast_precision_loss)]
-                return Ok(value as f64);
-            }
-            Err(_) => return Self::wide_radix_float(s, kind),
-            Ok(None) => {}
-        }
-
-        let value: f64 = s
-            .value()
-            .parse()
-            .map_err(|_| Error::at("invalid float", s.span()))?;
-        if !value.is_finite() {
-            return Err(Error::at("float out of range", s.span()));
-        }
-
-        Ok(value)
+    fn resolved(self, expected: ScalarType) -> Result<ResolvedScalar<'input>> {
+        let (scalar, kind) = self.scalar(expected)?;
+        Ok(ResolvedScalar::new(scalar.value(), kind, scalar.span()))
     }
 
     fn check_core_tag(self, node: I::Node<'input>, expected: CoreType) -> Result<()> {
@@ -638,6 +527,7 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         match node.kind() {
             NodeKind::Scalar(_) => {
                 let (scalar, kind) = self.scalar_value(node)?;
+                let resolved = ResolvedScalar::new(scalar.value(), kind, scalar.span());
                 Ok(match kind {
                     ScalarType::Null => Key::Null,
                     ScalarType::Bool => {
@@ -645,14 +535,14 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
                     }
                     ScalarType::String => Key::String(scalar.value()),
                     ScalarType::Int => {
-                        let (value, radix, span) = Self::integer_value(scalar, kind)?;
+                        let (value, radix, span) = resolved.integer_parts()?;
                         let magnitude =
                             u128::from_str_radix(value.trim_start_matches(['+', '-']), radix)
                                 .map_err(|_| Error::at("integer key out of range", span))?;
                         Key::Integer(value.starts_with('-') && magnitude != 0, magnitude)
                     }
                     ScalarType::Float => {
-                        let value = Self::float_value(scalar, kind)?;
+                        let value = resolved.float64()?;
                         let bits = value.to_bits();
                         Key::Float(if value.is_nan() {
                             f64::NAN.to_bits()
@@ -840,11 +730,12 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         kind: ScalarType,
         visitor: V,
     ) -> Result<V::Value> {
+        let resolved = ResolvedScalar::new(s.value(), kind, s.span());
         if kind == ScalarType::Float {
-            return visitor.visit_f64(Self::float_value(s, kind)?);
+            return visitor.visit_f64(resolved.float64()?);
         }
 
-        let (value, radix, span) = Self::integer_value(s, kind)?;
+        let (value, radix, span) = resolved.integer_parts()?;
         if value.starts_with('-') {
             let n = i128::from_str_radix(value, radix)
                 .map_err(|_| Error::at("integer out of range", span))?;
@@ -895,6 +786,10 @@ impl<'input, 'de: 'input, I: Input<'de>> Deserializer<&'input Context<'input, I>
         match node.kind() {
             NodeKind::Sequence { .. } => self.seq_node(node, visitor),
             NodeKind::Mapping { .. } => self.map_node(node, visitor),
+            NodeKind::Scalar(s) if self.tag_state == TagState::ConsumedApplication => {
+                // Without a requested type, preserve the application's decoded text.
+                Self::visit_text(s, visitor)
+            }
             NodeKind::Scalar(_) => {
                 let (s, kind) = self.scalar_value(node)?;
 
@@ -972,14 +867,7 @@ macro_rules! integer_methods {
     ($($method:ident => $visit:ident : $ty:ty),* $(,)?) => {
         $(
             fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-                let (value, radix, span) = self.integer()?;
-                let value = value
-                    .strip_prefix('-')
-                    .filter(|digits| digits.bytes().all(|digit| digit == b'0'))
-                    .unwrap_or(value);
-                let number = <$ty>::from_str_radix(value, radix)
-                    .map_err(|_| Error::at("integer out of range", span))?;
-
+                let number = self.resolved(ScalarType::Int)?.integer(<$ty>::from_str_radix)?;
                 visitor.$visit(number)
             }
         )*
@@ -1009,40 +897,15 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     }
 
     fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (scalar, kind) = self.scalar(ScalarType::Float)?;
-
-        // Convert decimal text and radix integers directly to f32 to avoid
-        // double rounding through f64. Rust cannot parse YAML's .inf/.nan.
-        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-        let (value, finite_input) = if let Some(integer) = Self::radix_integer_value(scalar, kind)?
-        {
-            (integer as f32, true)
-        } else {
-            let wide = Self::float_value(scalar, kind)?;
-            (
-                scalar.value().parse::<f32>().unwrap_or(wide as f32),
-                wide.is_finite(),
-            )
-        };
-
-        if finite_input && !value.is_finite() {
-            return Err(Error::at("float out of range", scalar.span()));
-        }
-
-        visitor.visit_f32(value)
+        visitor.visit_f32(self.resolved(ScalarType::Float)?.float32()?)
     }
 
     fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        visitor.visit_f64(self.float()?)
+        visitor.visit_f64(self.resolved(ScalarType::Float)?.float64()?)
     }
 
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, kind) = self.scalar(ScalarType::Bool)?;
-        if kind != ScalarType::Bool {
-            return Err(Error::at("expected a boolean", s.span()));
-        }
-
-        visitor.visit_bool(matches!(s.value(), "true" | "True" | "TRUE"))
+        visitor.visit_bool(self.resolved(ScalarType::Bool)?.boolean()?)
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -1100,10 +963,7 @@ impl<'input, 'de: 'input, I: Input<'de>> de::Deserializer<'de>
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let (s, kind) = self.scalar(ScalarType::Null)?;
-        if kind != ScalarType::Null {
-            return Err(Error::at("expected null", s.span()));
-        }
+        self.resolved(ScalarType::Null)?.unit()?;
 
         visitor.visit_unit()
     }
@@ -1427,7 +1287,8 @@ impl<'input, 'de: 'input, I: Input<'de, Entry = E>, E: Entry + 'input> MapAccess
 }
 
 struct TagMapping<'input, I> {
-    enumeration: Enumeration<'input, I>,
+    variant: &'input str,
+    payload: Deserializer<&'input Context<'input, I>>,
     state: TagMappingState,
 }
 
@@ -1444,7 +1305,7 @@ impl<'input, 'de: 'input, I: Input<'de>> MapAccess<'de> for TagMapping<'input, I
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
         match self.state {
             TagMappingState::Key => {
-                let name = self.enumeration.de.variant_name(self.enumeration.variant)?;
+                let name = self.payload.variant_name(self.variant)?;
                 let key = seed.deserialize(name)?;
                 self.state = TagMappingState::Value;
                 Ok(Some(key))
@@ -1460,7 +1321,7 @@ impl<'input, 'de: 'input, I: Input<'de>> MapAccess<'de> for TagMapping<'input, I
         }
 
         self.state = TagMappingState::End;
-        seed.deserialize(self.enumeration.payload()?)
+        seed.deserialize(self.payload)
     }
 
     fn size_hint(&self) -> Option<usize> {

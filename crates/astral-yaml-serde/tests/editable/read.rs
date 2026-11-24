@@ -142,7 +142,7 @@ fn reads_apply_tag_resolution() {
             root.set(value)
         })
         .unwrap();
-    insta::assert_snapshot!(document.source(), @r#"!<!label> "9""#);
+    insta::assert_snapshot!(document.source(), @"!<!label> 9");
 }
 
 #[test]

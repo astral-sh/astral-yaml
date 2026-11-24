@@ -1,5 +1,6 @@
 mod deserializer;
 mod input;
+mod scalar;
 
 use crate::Error;
 use astral_yaml::Budget;
@@ -11,6 +12,8 @@ pub use deserializer::{
     DeserializationPolicy, from_document, from_document_with_policy, from_str,
     from_str_with_policy, from_stream,
 };
+
+pub(crate) use scalar::ResolvedScalar;
 
 #[inline]
 pub(crate) fn charge_visit(depth: usize, budget: Option<&Budget>) -> Result<(), Error> {
