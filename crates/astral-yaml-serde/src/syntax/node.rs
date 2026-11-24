@@ -186,6 +186,10 @@ impl Node {
 }
 
 impl<Location> Node<Location> {
+    pub(super) fn has_properties(&self) -> bool {
+        self.tag.is_some() || self.anchor.is_some()
+    }
+
     /// Map node and comment locations without changing the syntax or node IDs.
     pub(super) fn map_locations<Target>(self, map: impl Fn(Location) -> Target) -> Node<Target> {
         Node {

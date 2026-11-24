@@ -356,62 +356,20 @@ fn nested_scalar_suffixes_expand_the_rewrite_to_its_boundary() {
     );
 }
 
-#[test]
-fn enclosing_trailing_comments_require_a_nested_closing_boundary() {
-    let mut results = Vec::new();
-    for source in [
-        indoc! {r"
-            outer:
-              value: old
-            # trailing
-        "},
-        indoc! {r"
-            outer:
-              value: |-
-                old
-            # trailing
-        "},
-    ] {
-        let document = DocumentSyntax::parse(source).unwrap();
-        let mut editor = Editor::new(&document);
-        let inner = editor.mapping_entries(editor.root()).unwrap()[0].1;
-        let value = editor.mapping_entries(inner).unwrap()[0].1;
-        let multiline_before =
-            Layout::new(&document.source).multiline(value, editor.node(value).unwrap().kind());
-        editor
-            .insert_comment(inner, 0, " detached", CommentPlacement::Detached)
-            .unwrap();
-        let candidate = editor.draft.clone().freeze().unwrap();
-        let layout = Layout::new(&candidate);
-        let multiline_after = layout.multiline(value, editor.node(value).unwrap().kind());
-        let edited = editor.finish().unwrap();
-        results.push(format!(
-            "Scalar multiline: {multiline_before} -> {multiline_after}\n{}",
-            edit_diff(source, edited.source())
-        ));
-    }
-    insta::assert_snapshot!(results.join("\n"), @r#"
-    Scalar multiline: false -> false
-    @@ -1,3 +1,5 @@
-    -outer:
-    -  value: old
-    +outer: {value: old,
-    +  ⏎
-    +  # detached
-    +  }
-     # trailing
-
-    Scalar multiline: true -> false
-    @@ -1,4 +1,5 @@
-    -outer:
-    -  value: |-
-    -    old
-    +outer: {value: "old",
-    +  ⏎
-    +  # detached
-    +  }
-     # trailing
-    "#);
+#[test_case("old", "old"; "plain")]
+#[test_case("|-\n    old", r#""old""#; "literal")]
+fn enclosing_trailing_comments_require_a_nested_closing_boundary(value: &str, rendered: &str) {
+    let source = format!("outer:\n  value: {value}\n# trailing\n");
+    let document = DocumentSyntax::parse(&source).unwrap();
+    let mut editor = Editor::new(&document);
+    let inner = editor.mapping_entries(editor.root()).unwrap()[0].1;
+    editor
+        .insert_comment(inner, 0, " detached", CommentPlacement::Detached)
+        .unwrap();
+    assert_eq!(
+        editor.finish().unwrap().source(),
+        format!("outer: {{value: {rendered},\n  \n  # detached\n  }}\n# trailing\n")
+    );
 }
 
 #[test]

@@ -6,8 +6,10 @@ use super::emit::{self, Context, KeyForm};
 use super::layout::Layout;
 use super::lines::{Line, LineIndex};
 use super::source::Source;
+use super::splice::Start;
 use super::view::Syntax;
 use super::{Comment, CommentPosition, Node, NodeKind};
+use astral_yaml::comments::CommentPlacement;
 use astral_yaml::{CollectionStyle, NodeId, ScalarStyle, Span};
 
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +44,18 @@ enum Role {
 }
 
 impl Role {
+    /// A suffix of an indentless sequence or its last block child would
+    /// attach to the mapping. Indent the sequence to establish ownership.
+    fn reindent(self, id: NodeId, layout: &Layout) -> bool {
+        matches!(
+            self,
+            Self::Value {
+                header: ValueHeader::IndentlessSequence,
+                ..
+            }
+        ) && layout.has_suffix(id)
+    }
+
     fn owner(self) -> Option<NodeId> {
         match self {
             Self::Document => None,
@@ -54,12 +68,93 @@ impl Role {
 #[derive(Clone, Copy, Debug)]
 struct Slot {
     role: Role,
-    /// Descendant edits can change an enclosing key's notation or length.
-    enclosing_key: Option<NodeId>,
+    /// An enclosing key or indentless sequence that must move with this edit.
+    enclosing: Option<NodeId>,
     flow: bool,
     own_line: bool,
     body: Span,
     outer_comments: bool,
+    block_start: Option<Start>,
+}
+
+impl Slot {
+    /// A block can start after a retained field or dash if the value emitter
+    /// can place all its comments without moving the enclosing indicator.
+    fn expand_block(
+        &mut self,
+        original: &Source,
+        id: NodeId,
+        new: &Node<Option<Span>>,
+        owned: Span,
+        lines: &mut LineIndex<'_>,
+    ) {
+        let (parent, indicator) = match self.role {
+            Role::Value { mapping, .. } => (mapping, ':'),
+            Role::Item { sequence } => (sequence, '-'),
+            _ => return,
+        };
+        let at = original.contents[parent.index()].start();
+        let indent = lines.at(at).column(at);
+        let rest = original.text[owned.end()..].trim_start_matches([' ', '\t', '\n']);
+        if rest.starts_with('#') {
+            let next = original.text.len() - rest.len();
+            if lines.at(next).column(next) > indent {
+                // An indented comment beyond the old closing token can become
+                // a suffix of the new block. Its owner must supply the boundary.
+                self.enclosing = self.enclosing.or(Some(parent));
+                return;
+            }
+        }
+        let old = &original.nodes[id.index()];
+        if self.body.is_empty()
+            || self.body.start() < old.span.start()
+            || matches!(
+                old.kind,
+                NodeKind::Scalar {
+                    style: ScalarStyle::Literal | ScalarStyle::Folded,
+                    ..
+                }
+            )
+        {
+            return;
+        }
+        // Comments before the value can stay in the source if their
+        // attachments are unchanged. New leading comments need the field.
+        let mut comments = new.comments.iter();
+        let mut retained_end = 0;
+        for old in old
+            .comments
+            .iter()
+            .take_while(|c| c.span.end() <= self.body.start())
+        {
+            retained_end = old.span.end();
+            // A leading comment above a continuation line could attach
+            // to the first block child at the same indentation.
+            if (self.own_line && old.placement == CommentPlacement::Leading)
+                || !comments.next().is_some_and(|new| same_attachment(old, new))
+            {
+                return;
+            }
+        }
+        let first = comments.next();
+        if first.is_some_and(|c| c.placement == CommentPlacement::Leading) {
+            return;
+        }
+        let at = self.body.start();
+        if self.own_line
+            && first.is_none()
+            && emit::collection_style(&old.kind, false) == Some(CollectionStyle::Flow)
+        {
+            self.block_start = Some(Start::Node(Context::block(lines.at(at).column(at), indent)));
+            self.body = super::span(at, owned.end());
+            return;
+        }
+        let prefix = original.text[..at].trim_end_matches([' ', '\t', '\n']);
+        if prefix.len() > retained_end && prefix.ends_with(indicator) {
+            self.block_start = Some(Start::AfterIndicator(indent));
+            self.body = super::span(prefix.len(), owned.end());
+        }
+    }
 }
 
 pub(super) struct Scopes<'plan> {
@@ -79,42 +174,36 @@ impl<'plan> Scopes<'plan> {
         let mut slots = vec![None; original.nodes.len()];
         let mut order = Vec::new();
         let mut pending = vec![(original.root, Role::Document, None, false)];
-        while let Some((id, role, enclosing_key, flow)) = pending.pop() {
+        while let Some((id, role, enclosing, flow)) = pending.pop() {
             let node = &original.nodes[id.index()];
             let body = original.body_span(id);
             slots[id.index()] = Some(Slot {
                 role,
-                enclosing_key,
+                enclosing,
                 flow,
                 own_line: lines.at(body.start()).own_line(body.start()),
                 body,
+                block_start: None,
                 outer_comments: node.comments.iter().any(|comment| {
                     comment.span.start() < body.start() || comment.span.end() > body.end()
                 }),
             });
             order.push(id);
-            let enclosing_key = enclosing_key.or(match role {
+            let enclosing = enclosing.or(match role {
                 Role::Key { mapping, .. } => Some(mapping),
+                _ if role.reindent(id, layout) => Some(id),
                 _ => None,
             });
             let flow = flow
                 || layout.flow(id)
-                || matches!(
-                    candidate.nodes[id.index()].kind,
-                    NodeKind::Sequence {
-                        style: CollectionStyle::Flow,
-                        ..
-                    } | NodeKind::Mapping {
-                        style: CollectionStyle::Flow,
-                        ..
-                    }
-                );
+                || emit::collection_style(&candidate.nodes[id.index()].kind, false)
+                    == Some(CollectionStyle::Flow);
             match &node.kind {
                 NodeKind::Sequence { items, .. } => {
                     pending.extend(
                         items
                             .iter()
-                            .map(|&item| (item, Role::Item { sequence: id }, enclosing_key, flow)),
+                            .map(|&item| (item, Role::Item { sequence: id }, enclosing, flow)),
                     );
                 }
                 NodeKind::Mapping { entries, .. } => {
@@ -135,7 +224,7 @@ impl<'plan> Scopes<'plan> {
                                 separator,
                                 length_limited,
                             },
-                            enclosing_key,
+                            enclosing,
                             flow,
                         ));
                         pending.push((
@@ -144,7 +233,7 @@ impl<'plan> Scopes<'plan> {
                                 mapping: id,
                                 header,
                             },
-                            enclosing_key,
+                            enclosing,
                             flow,
                         ));
                     }
@@ -169,6 +258,14 @@ impl<'plan> Scopes<'plan> {
                     owned.end().max(comment.span.end()),
                 );
             }
+            let slot = &mut slots[id.index()];
+            let new = &candidate.nodes[id.index()];
+            if emit::block_collection(&new.kind, slot.flow || layout.flow(id))
+                && (!emit::block_collection(&original.nodes[id.index()].kind, false)
+                    || slot.role.reindent(id, layout))
+            {
+                slot.expand_block(original, id, new, owned, lines);
+            }
             let body = &mut slots[parent.index()].body;
             *body = super::span(body.start().min(owned.start()), body.end().max(owned.end()));
         }
@@ -189,14 +286,14 @@ impl<'plan> Scopes<'plan> {
     pub(super) fn select(&self, mut id: NodeId) -> NodeId {
         loop {
             let slot = self.slots[id.index()];
-            if let Some(mapping) = slot.enclosing_key {
-                id = mapping;
+            if let Some(enclosing) = slot.enclosing {
+                id = enclosing;
                 continue;
             }
             let Some(owner) = slot.role.owner() else {
                 return id;
             };
-            if self.accepts(id, slot) {
+            if slot.block_start.is_some() || self.accepts(id, slot) {
                 return id;
             }
             id = owner;
@@ -214,7 +311,7 @@ impl<'plan> Scopes<'plan> {
         let compact = self.layout.compact(id) && emit::block_collection(&old.kind, false);
         if slot.body.start() < old.span.start()
             || (same_collection && slot.outer_comments)
-            || (!slot.own_line && !compact && self.layout.multiline(id, &new.kind))
+            || (!slot.own_line && !compact && self.layout.multiline(id, &new.kind, slot.flow))
         {
             return false;
         }
@@ -260,7 +357,8 @@ impl<'plan> Scopes<'plan> {
             } => {
                 // Only a block sequence may occupy this mapping-level slot.
                 // Empty or flow output needs the mapping to place it after ':'.
-                emit::block_collection(&new.kind, slot.flow || self.layout.flow(id))
+                !self.layout.has_suffix(id)
+                    && emit::block_collection(&new.kind, slot.flow || self.layout.flow(id))
             }
             _ => true,
         }
@@ -288,16 +386,19 @@ impl<'plan> Scopes<'plan> {
         indent
     }
 
-    pub(super) fn context(&self, id: NodeId, line: Line, start: usize) -> Context {
+    pub(super) fn start(&self, id: NodeId, line: Line, start: usize) -> Start {
         let slot = self.slots[id.index()];
+        if let Some(start) = slot.block_start {
+            return start;
+        }
         let indent = self.indent(id, line, start);
-        match slot.role {
+        Start::Node(match slot.role {
             Role::Key { length_limited, .. } if length_limited || slot.flow => {
                 Context::key(indent, slot.flow)
             }
             Role::Document => Context::value(indent, slot.flow, 0),
             _ => Context::value(indent, slot.flow, indent),
-        }
+        })
     }
 }
 

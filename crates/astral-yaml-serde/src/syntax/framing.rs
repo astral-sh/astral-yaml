@@ -710,9 +710,9 @@ impl RootLayout {
                     ..
                 } => RootKind::BlockScalar,
                 super::NodeKind::Sequence { .. } | super::NodeKind::Mapping { .. } => {
-                    if emit::block_collection(&root.kind, false) {
+                    if emit::block_collection(&root.kind, syntax.flow(candidate.root)) {
                         RootKind::BlockCollection {
-                            header: emit::has_inline_header(root, false),
+                            header: root.has_properties(),
                             scalar_tail: syntax.tail(candidate.root).is_some(),
                         }
                     } else {
@@ -860,12 +860,31 @@ impl RootLayout {
 
     /// Include root comments and separators that must move with the body.
     pub(super) fn rewrite_region(&self, original: &Source, mut region: Span) -> Span {
+        let header = matches!(
+            self.kind,
+            RootKind::BlockScalar | RootKind::BlockCollection { header: true, .. }
+        );
         for comment in &original.nodes[original.root.index()].comments {
-            if self.fixed(comment).is_none() {
+            // An adjacent inline comment moves with the emitted header.
+            let adjacent = header
+                && comment.placement == CommentPlacement::Inline
+                && comment.span.start() >= region.end()
+                && original.text[region.end()..comment.span.start()]
+                    .bytes()
+                    .all(|byte| matches!(byte, b' ' | b'\t'));
+            if adjacent || self.fixed(comment).is_none() {
                 region = super::span(
                     region.start().min(comment.span.start()),
                     region.end().max(comment.span.end()),
                 );
+            }
+        }
+        if matches!(self.kind, RootKind::BlockCollection { .. }) {
+            // Tabs can precede a flow token but cannot indent a block.
+            let prefix = &original.text[..region.start()];
+            let start = prefix.trim_end_matches([' ', '\t']).len();
+            if prefix[start..].contains('\t') {
+                region = super::span(start, region.end());
             }
         }
         if let Some(marker) = self.suffix_boundary {
